@@ -1,0 +1,16 @@
+{{define "edit-content"}}
+    <article class="page">
+        <h2>{{if .Page}}Edit{{else}}Create{{end}}: {{.Title}}</h2>
+        
+        <form method="POST" action="/{{.Path}}?action=save" class="edit-form">
+            <div class="form-group">
+                <textarea name="content" class="edit-textarea" required>{{if .Page}}{{.Page.Content}}{{end}}</textarea>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="save-button">Save</button>
+                <a href="/{{.Path}}" class="cancel-button">Cancel</a>
+            </div>
+        </form>
+    </article>
+{{end}}

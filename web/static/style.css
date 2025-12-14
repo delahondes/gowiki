@@ -1,0 +1,154 @@
+/* Base styles */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f8f9fa;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+h1 a {
+    color: #2c3e50;
+    text-decoration: none;
+}
+
+nav a {
+    margin-left: 15px;
+    color: #3498db;
+    text-decoration: none;
+}
+
+nav a:hover {
+    text-decoration: underline;
+}
+
+/* Page styles */
+.page {
+    background: white;
+    padding: 25px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.page h2 {
+    margin-top: 0;
+    color: #2c3e50;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+.page-actions {
+    margin: 15px 0;
+}
+
+.edit-link {
+    display: inline-block;
+    padding: 5px 10px;
+    background: #3498db;
+    color: white;
+    text-decoration: none;
+    border-radius: 3px;
+}
+
+.edit-link:hover {
+    background: #2980b9;
+}
+
+.page-content {
+    line-height: 1.8;
+}
+
+.page-content pre {
+    white-space: pre-wrap;
+    font-family: inherit;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+/* Edit form */
+.edit-form {
+    margin-top: 20px;
+}
+
+.edit-textarea {
+    width: 100%;
+    min-height: 300px;
+    padding: 10px;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    resize: vertical;
+}
+
+.edit-textarea:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.form-actions {
+    margin-top: 15px;
+}
+
+.save-button {
+    padding: 8px 15px;
+    background: #2ecc71;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.save-button:hover {
+    background: #27ae60;
+}
+
+.cancel-button {
+    margin-left: 10px;
+    padding: 8px 15px;
+    background: #e74c3c;
+    color: white;
+    text-decoration: none;
+    border-radius: 3px;
+    font-size: 14px;
+}
+
+.cancel-button:hover {
+    background: #c0392b;
+}
+
+/* Footer */
+footer {
+    margin-top: 50px;
+    padding-top: 20px;
+    border-top: 1px solid #e9ecef;
+    color: #7f8c8d;
+    font-size: 14px;
+}

@@ -1,0 +1,3 @@
+# Welcome to GoWiki
+
+This is the start page.

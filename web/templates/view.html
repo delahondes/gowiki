@@ -1,0 +1,13 @@
+{{define "view-content"}}
+    <article class="page">
+        <h2>{{.Title}}</h2>
+        
+        <div class="page-actions">
+            <a href="/{{.Path}}?action=edit" class="edit-link">Edit</a>
+        </div>
+        
+        <div class="page-content">
+            {{if .RenderedContent}}{{.RenderedContent}}{{else}}<p>No content available.</p>{{end}}
+        </div>
+    </article>
+{{end}}
