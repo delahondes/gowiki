@@ -314,7 +314,7 @@ Our development follows a phased approach, building from core functionality to a
 
 - [x] Page storage and retrieval system
 - [ ] Attic-style version control implementation
-- [x] Basic markdown rendering with Goldmark
+- [x] Basic markdown rendering with Goldmark (including tables via GFM)
 - [x] Simple web interface (view/edit pages)
 - [x] Query-parameter based routing with Chi
 - [x] File system storage backend

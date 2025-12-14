@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 var (
@@ -21,8 +22,10 @@ var (
 )
 
 func main() {
-	// Initialize markdown renderer
-	markdownRenderer = goldmark.New()
+	// Initialize markdown renderer with extensions
+	markdownRenderer = goldmark.New(
+		goldmark.WithExtensions(extension.GFM),
+	)
 
 	// Initialize storage
 	storageInstance = storage.NewFileStorage("./wiki")
