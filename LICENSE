@@ -19,3 +19,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Third-Party Components
+
+This project includes the following third-party components under their respective licenses:
+
+### SimpleMDE (MIT License)
+- Version: 1.11.2
+- Source: https://github.com/sparksuite/simplemde-markdown-editor
+- Location: web/static/js/simplemde.min.js, web/static/css/simplemde.min.css
+- Copyright: (c) 2015-2017 Sparksuite, Inc.
+
+### CodeMirror (MIT License)
+- Version: 5.65.2
+- Source: https://github.com/codemirror/CodeMirror
+- Location: web/static/js/codemirror.min.js, web/static/css/codemirror.min.css
+- Copyright: (c) 2023 Marijn Haverbeke and others
+
+The full text of the MIT License applies to these components as well.

@@ -298,6 +298,33 @@ go build -o gowiki ./cmd/gowiki
 ./gowiki
 ```
 
+### SimpleMDE Integration
+
+The enhanced markdown editor is now fully integrated!
+
+**Features included**:
+- Live preview with side-by-side editing
+- Toolbar with common markdown actions (bold, italic, headings, lists, etc.)
+- Table editing support with visual interface
+- Fullscreen mode for distraction-free writing
+- Syntax highlighting for code blocks
+- Automatic link detection
+
+**Files included**:
+- SimpleMDE 1.11.2 (MIT License)
+- CodeMirror 5.65.2 (MIT License)
+
+The editor will automatically load on edit pages. If for any reason it fails to load, it gracefully falls back to a basic textarea.
+
+**Features included**:
+- Live preview
+- Toolbar with common markdown actions
+- Table editing support
+- Fullscreen mode
+- Syntax highlighting for code blocks
+
+**Fallback**: If SimpleMDE fails to load, the editor gracefully falls back to a basic textarea.
+
 ### Configuration
 Edit `config/wiki.json` to customize:
 - Port and binding
@@ -316,6 +343,7 @@ Our development follows a phased approach, building from core functionality to a
 - [ ] Attic-style version control implementation
 - [x] Basic markdown rendering with Goldmark (including tables via GFM)
 - [x] Simple web interface (view/edit pages)
+- [x] SimpleMDE markdown editor integration (basic)
 - [x] Query-parameter based routing with Chi
 - [x] File system storage backend
 - [ ] Basic configuration system
