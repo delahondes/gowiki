@@ -1,3 +1,4 @@
+import "prosemirror-view/style/prosemirror.css";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { schema } from "prosemirror-schema-basic";

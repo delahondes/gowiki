@@ -17,7 +17,7 @@ build: build-go build-frontend
 # Go backend
 .PHONY: build-go
 build-go:
-	$(GO) build ./...
+	$(GO) build -o gowiki ./cmd/gowiki
 
 # Frontend (ProseMirror)
 .PHONY: build-frontend
