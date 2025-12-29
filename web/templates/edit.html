@@ -4,7 +4,8 @@
         
         <form method="POST" action="/{{.Path}}?action=save" class="edit-form">
             <div class="form-group">
-                <textarea name="content" id="editor" class="edit-textarea" required>{{if .Page}}{{.Page.Content}}{{end}}</textarea>
+                <div id="pm-editor" class="edit-prosemirror"></div>
+                <textarea name="content" id="editor-source" hidden>{{if .Page}}{{.Page.Content}}{{end}}</textarea>
             </div>
             
             <div class="form-actions">
@@ -14,38 +15,22 @@
         </form>
     </article>
 
-    <!-- SimpleMDE JavaScript -->
-    <link rel="stylesheet" href="/static/css/codemirror.min.css">
-    <link rel="stylesheet" href="/static/css/simplemde.min.css">
-    <script src="/static/js/codemirror.min.js"></script>
-    <script src="/static/js/simplemde.min.js"></script>
+    <script src="/static/editor/prosemirror.bundle.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Check if SimpleMDE is loaded (not just our placeholder)
-            if (typeof SimpleMDE !== 'undefined') {
-                var editor = new SimpleMDE({
-                    element: document.getElementById("editor"),
-                    spellChecker: false,
-                    autofocus: true,
-                    placeholder: "Type your markdown content here...",
-                    renderingConfig: {
-                        singleLineBreaks: false,
-                        codeSyntaxHighlighting: true
-                    },
-                    toolbar: [
-                        "bold", "italic", "heading", "|",
-                        "quote", "code", "table", "|",
-                        "unordered-list", "ordered-list", "|",
-                        "link", "image", "|",
-                        "preview", "side-by-side", "fullscreen", "|",
-                        "guide"
-                    ]
-                });
-            } else {
-                console.log("SimpleMDE not loaded. Using basic textarea.");
-                // Fallback: just make the textarea larger
-                document.getElementById("editor").style.height = "300px";
+    document.addEventListener("DOMContentLoaded", function () {
+        if (window.initProseMirrorEditor) {
+            window.initProseMirrorEditor(
+                document.getElementById("pm-editor"),
+                document.getElementById("editor-source")
+            );
+        }
+
+        const form = document.querySelector(".edit-form");
+        form.addEventListener("submit", function () {
+            if (window.getMarkdown) {
+                document.getElementById("editor-source").value = window.getMarkdown();
             }
         });
+    });
     </script>
 {{end}}
