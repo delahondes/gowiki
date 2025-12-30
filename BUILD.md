@@ -18,7 +18,7 @@ npm init -y
 npm install prosemirror-state prosemirror-view prosemirror-model \
             prosemirror-schema-basic prosemirror-schema-list \
             prosemirror-history prosemirror-keymap prosemirror-commands \
-            prosemirror-markdown
+            prosemirror-markdown prosemirror-menu
 npm install --save-dev esbuild
 ```
 

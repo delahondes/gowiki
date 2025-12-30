@@ -1,0 +1,27 @@
+.ProseMirror-menubar {
+  border-bottom: 1px solid #ddd;
+  background: #f7f7f7;
+  padding: 4px;
+}
+
+.ProseMirror-menuitem {
+  margin-right: 4px;
+}
+
+.ProseMirror-menuitem > div {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.ProseMirror-menuitem > div:hover {
+  background: #eee;
+}
+
+.ProseMirror-menuitem-active > div {
+  background: #ddd;
+  font-weight: bold;
+}
