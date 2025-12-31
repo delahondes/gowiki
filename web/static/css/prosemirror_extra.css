@@ -21,7 +21,7 @@
   background: #eee;
 }
 
-.ProseMirror-menuitem-active > div {
-  background: #ddd;
-  font-weight: bold;
+.ProseMirror-menu-active > div {
+  background: #ddd !important;
+  font-weight: bold !important;
 }

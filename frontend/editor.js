@@ -88,7 +88,6 @@ function buildToolbar(schema) {
       label: "B",
       title: "Bold",
       active: state => markActive(state, type),
-      select: state => toggleMarkProperly(type)(state),
       run: toggleMarkProperly(type)
     }));
   }
@@ -99,7 +98,6 @@ function buildToolbar(schema) {
       label: "I",
       title: "Italic",
       active: state => markActive(state, type),
-      select: state => toggleMarkProperly(type)(state),
       run: toggleMarkProperly(type)
     }));
   }
