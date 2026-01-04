@@ -13,9 +13,9 @@ This document captures the _intended big-picture steps_ for implementing the Gow
 - **Single-writer semantics by default** (lock-based editing, not real-time collaboration)
 
 
-## 1. EditorIR (canonical document model)
+## 1. docmodel (canonical document model)
 
-Status: **IN PROGRESS**
+Status: **MINIMAL VERSION COMPLETE**
 
 
 ### Goals
@@ -27,67 +27,83 @@ Status: **IN PROGRESS**
 
 ### Current state
 
-- Block nodes: paragraph, heading, lists, code blocks, block quotes, HR
-- Inline nodes: text, emphasis, strong, code, link, image, hard break
+- Minimal, extensible docmodel exists
+- Explicit Node interface defined
+- Core block and inline nodes implemented
+- Registration-based extensibility (plugins register behavior)
 
 
 ### Next steps
 
-- Add comments to EditorIR types (semantic meaning)
-- Decide how much normalization EditorIR enforces
-- Consider explicit attributes for future extensions
+- Refinements to normalization policy
+- Add richer attributes for extensibility
+- Improve ergonomics and developer experience
     
 
-## 2. Markdown → EditorIR (Goldmark front-end)
+## 2. Markdown → docmodel (Goldmark front-end)
 
-Status: **IN PROGRESS**
+Status: **COMPLETE (core features)**
 
   
 ### Goals
 
-- Parse Markdown into EditorIR reliably
+- Parse Markdown into docmodel reliably
 - Avoid lossy or ambiguous conversions
   
 
 ### Current state
 
-- Goldmark AST traversal implemented
-- Inline breaks handled via ast.Text flags
+- Full Markdown → docmodel pipeline implemented
+- Goldmark AST traversal with explicit source propagation
+- Inline, block, and nested structures handled correctly
+- Text nodes correctly extracted from source segments
+- Strict failure on unknown or unsupported AST nodes
   
 
 ### Next steps
 
-- Add more tests (headings, lists, nesting)
-- Decide policy for soft breaks (space vs newline)
-- Prepare hooks for Goldmark extensions
+- Extend coverage (headings, code blocks, links)
+- Integrate Goldmark extensions via plugins
+- Add more golden tests for complex nesting
     
 
-## 3. EditorIR → Markdown (serializer)
+## 3. docmodel → Markdown (serializer)
 
-Status: **TODO**
+Status: **COMPLETE**
 
-  
 ### Goals
 
-- Serialize EditorIR back to Markdown
+- Serialize docmodel back to Markdown
 - Produce clean, deterministic Markdown
+- Enforce docmodel-driven normalization
+
+### Current state
+
+- Markdown emission implemented for all core nodes
+- Emission is deterministic and stable
+- No plugin-specific logic is hardcoded in the core
+- Document node handled explicitly in docmodel (not a plugin concern)
+
+### Validation strategy
+
+- Round-trip equality is enforced via reparsing:
   
+  ```
+  md → docmodel → md → docmodel
+  ```
+  
+- Equality is defined structurally at the docmodel level
+- Markdown differences are acceptable only if they normalize to the same docmodel
 
 ### Notes
 
-- This mirrors prosemirror-markdown/to_markdown.ts
-- EditorIR controls formatting decisions
-    
+- This mirrors the philosophy of `prosemirror-markdown/to_markdown.ts`
+- Markdown is treated as a serialization format, not a semantic source
 
 ### Next steps
 
-- Implement Markdown serializer
-- Add round-trip tests:
-    
-
-```
-md → IR → md
-```
+- Extend serializer coverage as new plugins are added
+- Add more round-trip tests for complex structures
 
   
 ## 4. EditorIR ↔ ProseMirror (WYSIWYM editor)
