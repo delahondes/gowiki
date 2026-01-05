@@ -8,7 +8,7 @@
 // - registration side-effects only
 
 import { NodeSpec, NodeType } from "prosemirror-model"
-import { Transaction } from "prosemirror-state"
+import { wrapInList } from "prosemirror-schema-list"
 
 import {
   registerNodeSpec,
@@ -46,18 +46,8 @@ const listItemSpec: NodeSpec = {
  * Conversion: docmodel → ProseMirror
  * ------------------------------------------------------------------ */
 
-function toPMBulletList(nodeType: NodeType, tr: Transaction) {
-  const { $from, $to } = tr.selection
-  const range = $from.blockRange($to)
-  if (!range) return
-  tr.wrap(range, [{ type: nodeType }])
-}
-
-function toPMListItem(nodeType: NodeType, tr: Transaction) {
-  const { $from, $to } = tr.selection
-  const range = $from.blockRange($to)
-  if (!range) return
-  tr.wrap(range, [{ type: nodeType }])
+function toPMBulletList(nodeType: NodeType, tr: any) {
+  wrapInList(nodeType)(tr.state, tr.dispatch)
 }
 
 /* ------------------------------------------------------------------
@@ -88,7 +78,6 @@ registerNodeSpec(KindBulletList, bulletListSpec)
 registerNodeSpec(KindListItem, listItemSpec)
 
 registerNodeToPM(KindBulletList, toPMBulletList)
-registerNodeToPM(KindListItem, toPMListItem)
 
 registerNodeFromPM(KindBulletList, fromPMBulletList)
 registerNodeFromPM(KindListItem, fromPMListItem)

@@ -6,27 +6,19 @@ import (
 	"net/http"
 	"os"
 
-	"bytes"
-
+	_ "github.com/delahondes/gowiki/core"
+	"github.com/delahondes/gowiki/docmodel"
 	"github.com/delahondes/gowiki/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/yuin/goldmark"
-	"github.com/yuin/goldmark/extension"
 )
 
 var (
-	storageInstance  *storage.FileStorage
-	templates        *template.Template
-	markdownRenderer goldmark.Markdown
+	storageInstance *storage.FileStorage
+	templates       *template.Template
 )
 
 func main() {
-	// Initialize markdown renderer with extensions
-	markdownRenderer = goldmark.New(
-		goldmark.WithExtensions(extension.GFM),
-	)
-
 	// Initialize storage
 	storageInstance = storage.NewFileStorage("./wiki")
 
@@ -63,11 +55,11 @@ func loadTemplates() {
 }
 
 func renderMarkdown(content string) (string, error) {
-	var buf bytes.Buffer
-	if err := markdownRenderer.Convert([]byte(content), &buf); err != nil {
+	doc, err := docmodel.ParseMarkdown([]byte(content))
+	if err != nil {
 		return "", err
 	}
-	return buf.String(), nil
+	return docmodel.RenderHTML(doc)
 }
 
 func handlePageRequest(w http.ResponseWriter, r *http.Request) {
