@@ -106,7 +106,7 @@ Status: **COMPLETE**
 - Add more round-trip tests for complex structures
 
   
-## 4. EditorIR ↔ ProseMirror (WYSIWYM editor)
+## 4. docmodel ↔ ProseMirror (WYSIWYM editor)
 
 Status: **TODO**
 
