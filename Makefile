@@ -5,6 +5,7 @@ NPM     := npm
 # Paths
 FRONTEND_DIR := frontend
 EDITOR_BUNDLE := web/static/editor/prosemirror.bundle.js
+NODE_SPEC_GEN := frontend/nodespec.gen.ts
 
 # Default target
 .PHONY: all
@@ -19,9 +20,13 @@ build: build-go build-frontend
 build-go:
 	$(GO) build -o gowiki ./cmd/gowiki
 
+.PHONY: gen-nodespec
+gen-nodespec:
+	$(GO) run ./cmd/gen-nodespec > $(NODE_SPEC_GEN)
+
 # Frontend (ProseMirror)
 .PHONY: build-frontend
-build-frontend:
+build-frontend: gen-nodespec
 	cd $(FRONTEND_DIR) && $(NPM) install
 	cd $(FRONTEND_DIR) && $(NPM) run build
 

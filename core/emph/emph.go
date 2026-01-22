@@ -18,6 +18,11 @@ func (n Emph) Kind() docmodel.Kind       { return KindEmph }
 func (n Emph) Children() []docmodel.Node { return n.Content }
 
 func init() {
+	docmodel.RegisterNodeSpec(docmodel.NodeSpec{
+		Kind:         KindEmph,
+		Flow:         docmodel.FlowInline,
+		ChildrenFlow: docmodel.Ptr(docmodel.FlowInline),
+	})
 	// Goldmark -> docmodel
 	docmodel.RegisterGoldmarkImporter(ast.KindEmphasis,
 		func(

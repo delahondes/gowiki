@@ -6,6 +6,8 @@
             <div class="form-group">
                 <div id="pm-editor" class="edit-prosemirror"></div>
                 <textarea name="content" id="editor-source" hidden>{{if .Page}}{{.Page.Content}}{{end}}</textarea>
+                <input type="hidden" name="docmodel" id="docmodel-json">
+                <script id="docmodel-source" type="application/json">{{.DocModelJSON}}</script>
             </div>
             
             <div class="form-actions">
@@ -18,19 +20,17 @@
     <script src="/static/editor/prosemirror.bundle.js"></script>
     <script>
     document.addEventListener("DOMContentLoaded", function () {
-        if (window.initProseMirrorEditor) {
-            window.initProseMirrorEditor(
-                document.getElementById("pm-editor"),
-                document.getElementById("editor-source")
-            );
-        }
+        if (!window.initProseMirrorEditor) return;
 
-        const form = document.querySelector(".edit-form");
-        form.addEventListener("submit", function () {
-            if (window.getMarkdown) {
-                document.getElementById("editor-source").value = window.getMarkdown();
-            }
-        });
+        const container = document.getElementById("pm-editor");
+        const data = document.getElementById("docmodel-source");
+
+        console.log("Initializing ProseMirror editor", container, data);
+
+        if (!container || !data) { console.log("Missing container or data", container, data); return; }
+
+        const doc = JSON.parse(data.textContent);
+        window.initProseMirrorEditor(container, doc);
     });
     </script>
 {{end}}

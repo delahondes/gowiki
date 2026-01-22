@@ -2,16 +2,27 @@
 //
 // TypeScript mirror of the Go docmodel.
 // This file is intentionally minimal and structural only.
-// It exists to type WYSIWYM plugins and editor integration.
+// It exists to type WYSI
+
+// docmodel.ts (or docmodel/nodespec.ts)
+import { NODE_SPECS, type NodeSpec } from "./nodespec.gen"
+
+const nodeSpecMap = new Map<string, NodeSpec>(
+  NODE_SPECS.map(s => [s.kind, s])
+)
+
+export function getNodeSpec(kind: string): NodeSpec | undefined {
+  return nodeSpecMap.get(kind)
+}
 
 export type DocNode = {
-  kind: string
-  payload: any
-  children?: DocNode[]
+  Kind: string
+  Payload: any
+  Children?: DocNode[]
 }
 
 export function childrenOf(node: DocNode): readonly DocNode[] {
-  return node.children ?? []
+  return node.Children ?? []
 }
 
 /* ------------------------------------------------------------------
@@ -21,18 +32,18 @@ export function childrenOf(node: DocNode): readonly DocNode[] {
 // Document is kernel-level (not a plugin)
 export function newDocument(children: DocNode[]): DocNode {
   return {
-    kind: "document",
-    payload: null,
-    children,
+    Kind: "document",
+    Payload: null,
+    Children: children,
   }
 }
 
 // Fragment is kernel-level glue (paragraphs, inline containers, etc.)
 export function newFragment(children: DocNode[]): DocNode {
   return {
-    kind: "fragment",
-    payload: null,
-    children,
+    Kind: "fragment",
+    Payload: null,
+    Children:children,
   }
 }
 
@@ -42,8 +53,8 @@ export function newFragment(children: DocNode[]): DocNode {
 // the text plugin’s factory.
 export function newText(text: string): DocNode {
   return {
-    kind: "text",
-    payload: text,
-    children: [],
+    Kind: "text",
+    Payload: text,
+    Children: [],
   }
 }

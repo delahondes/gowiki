@@ -7,8 +7,7 @@
 // - docmodel ↔ ProseMirror conversion
 // - registration side-effects only
 
-import { NodeSpec, NodeType } from "prosemirror-model"
-import { wrapInList } from "prosemirror-schema-list"
+import { NodeSpec } from "prosemirror-model"
 
 import {
   registerNodeSpec,
@@ -20,6 +19,9 @@ import { DocNode } from "../../frontend/docmodel"
 
 const KindBulletList = "bullet_list"
 const KindListItem = "list_item"
+
+console.log("Defining WYSIWYM for kind:", KindListItem)
+console.log("Defining WYSIWYM for kind:", KindBulletList)
 
 /* ------------------------------------------------------------------
  * ProseMirror schema
@@ -46,8 +48,20 @@ const listItemSpec: NodeSpec = {
  * Conversion: docmodel → ProseMirror
  * ------------------------------------------------------------------ */
 
-function toPMBulletList(nodeType: NodeType, tr: any) {
-  wrapInList(nodeType)(tr.state, tr.dispatch)
+function toPMBulletList(
+  schema: any,
+  node: DocNode,
+  children: any[]
+) {
+  return schema.nodes.bullet_list.create(null, children)
+}
+
+function toPMListItem(
+  schema: any,
+  node: DocNode,
+  children: any[]
+) {
+  return schema.nodes.list_item.create(null, children)
 }
 
 /* ------------------------------------------------------------------
@@ -56,17 +70,17 @@ function toPMBulletList(nodeType: NodeType, tr: any) {
 
 function fromPMBulletList(children: DocNode[]): DocNode {
   return {
-    kind: KindBulletList,
-    payload: null,
-    children,
+    Kind: KindBulletList,
+    Payload: null,
+    Children: children,
   }
 }
 
 function fromPMListItem(children: DocNode[]): DocNode {
   return {
-    kind: KindListItem,
-    payload: null,
-    children,
+    Kind: KindListItem,
+    Payload: null,
+    Children: children,
   }
 }
 
@@ -78,6 +92,7 @@ registerNodeSpec(KindBulletList, bulletListSpec)
 registerNodeSpec(KindListItem, listItemSpec)
 
 registerNodeToPM(KindBulletList, toPMBulletList)
+registerNodeToPM(KindListItem, toPMListItem)
 
 registerNodeFromPM(KindBulletList, fromPMBulletList)
 registerNodeFromPM(KindListItem, fromPMListItem)

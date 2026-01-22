@@ -56,3 +56,37 @@ export function getNodeToPM(kind: string): Function | undefined {
 export function getNodeFromPM(pmType: string): Function | undefined {
   return nodeFromPM.get(pmType)
 }
+
+// ------------------------------------------------------------------
+// Schema construction (kernel-level)
+// ------------------------------------------------------------------
+
+/**
+ * Build a ProseMirror Schema from all registered node and mark specs.
+ * Core/kernel nodes (doc, text) are defined here.
+ * Plugin nodes and marks are injected via the registries above.
+ */
+export function buildSchema(): Schema {
+  // Kernel nodes
+  const nodes: Record<string, NodeSpec> = {
+    doc: {
+      content: "block+",
+    },
+    text: {
+      group: "inline",
+    },
+  }
+
+  // Plugin-provided nodes
+  for (const [kind, spec] of nodeSpecs.entries()) {
+    nodes[kind] = spec
+  }
+
+  // Plugin-provided marks
+  const marks: Record<string, MarkSpec> = {}
+  for (const [kind, spec] of markSpecs.entries()) {
+    marks[kind] = spec
+  }
+
+  return new Schema({ nodes, marks })
+}

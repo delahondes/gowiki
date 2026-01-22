@@ -4,10 +4,12 @@
 // This is editor-kernel code, NOT plugin code.
 
 import { Schema, Node as PMNode, Mark } from "prosemirror-model"
-import { EditorState } from "prosemirror-state"
+import { EditorState, TextSelection } from "prosemirror-state"
 
 import { DocNode,childrenOf } from "../docmodel"
-import { getMarkSpec, getMarkToPM } from "../registry"
+import { getNodeToPM, getMarkSpec, getMarkToPM } from "../registry"
+import { getNodeSpec  } from "../docmodel"
+import { FLOW_INLINE, FLOW_BLOCK } from "../nodespec.gen"
 
 /* ------------------------------------------------------------------
  * Entry point
@@ -15,10 +17,26 @@ import { getMarkSpec, getMarkToPM } from "../registry"
 
 export function docModelToEditorState(
   schema: Schema,
-  doc: DocNode
+  doc: DocNode,
+  plugins: any[]
 ): EditorState {
   const pmDoc = buildPMDocument(schema, doc)
-  return EditorState.create({ doc: pmDoc })
+
+
+  if (!pmDoc) {
+    throw new Error("PM document is undefined")
+  }
+
+  try {
+    pmDoc.check()
+  } catch (e) {
+    console.error("Invalid PM document", pmDoc.toJSON())
+    throw e
+  }
+
+  const selection = TextSelection.atStart(pmDoc);
+  console.log("PM DOC JSON:", pmDoc.toJSON())
+  return EditorState.create({ doc: pmDoc, schema, plugins, selection })
 }
 
 /* ------------------------------------------------------------------
@@ -28,6 +46,7 @@ export function docModelToEditorState(
 // Block handling is intentionally minimal and paragraph-only for now.
 function buildPMDocument(schema: Schema, doc: DocNode): PMNode {
   const blocks: PMNode[] = []
+  console.log("Building PM document from docmodel:", doc)
 
   for (const child of childrenOf(doc)) {
     buildBlock(schema, child, blocks)
@@ -41,13 +60,53 @@ function buildBlock(
   node: DocNode,
   out: PMNode[]
 ) {
-  // Block nodes must be handled by plugins
-  const toPM = (schema as any)._blockToPM?.get(node.kind)
-  if (!toPM) {
-    throw new Error(`No PM block mapping for docmodel kind "${node.kind}"`)
+
+  console.log("Starting building block for node:", node.Kind)
+  // fragment is transparent
+  if (node.Kind === "fragment") {
+    for (const child of childrenOf(node)) {
+      buildBlock(schema, child, out)
+    }
+    return
   }
 
-  const pmNode = toPM(schema, node, buildInline)
+  // 1. build children first
+  const pmChildren: PMNode[] = []
+  const spec = getNodeSpec(node.Kind)
+  console.log("Node spec for", node.Kind, "is", spec)
+
+  if (spec?.childrenFlow === FLOW_INLINE) {
+    for (const child of childrenOf(node)) {
+      buildInline(schema, child, pmChildren)
+    }
+  } else if (spec?.childrenFlow === FLOW_BLOCK) {
+    for (const child of childrenOf(node)) {
+      buildBlock(schema, child, pmChildren)
+    }
+  } else {
+    throw new Error(
+      `Cannot build block node "${node.Kind}": ` +
+      `unknown or unsupported childrenFlow "${spec?.childrenFlow}"`
+    )
+  }
+  if (pmChildren.length === 0) {
+    throw new Error(
+      `Block node "${node.Kind}" produced no PM children`
+    )
+  }
+
+  // 2. delegate node construction to plugin
+  console.log("Building block node:", node.Kind)
+  const toPM = getNodeToPM(node.Kind)
+  if (!toPM) {
+    throw new Error(`No PM block mapping for docmodel kind "${node.Kind}"`)
+  }
+
+  const pmNode = toPM(schema, node, pmChildren)
+  if (!pmNode) {
+    throw new Error(`PM builder for "${node.Kind}" returned nothing`)
+  }
+
   out.push(pmNode)
 }
 
@@ -61,36 +120,77 @@ function buildInline(
   out: PMNode[],
   activeMarks: Mark[] = []
 ) {
-  switch (node.kind) {
-    case "text": {
-      const text = schema.text(node.payload)
-      if (activeMarks.length > 0) {
-        out.push(text.mark(activeMarks))
+  console.log("Starting building inline for node:", node.Kind)
+  const startLen = out.length
+
+  // TEXT: terminal emission
+  if (node.Kind === "text") {
+    const text = schema.text(node.Payload)
+    out.push(
+      activeMarks.length > 0 ? text.mark(activeMarks) : text
+    )
+    console.log("Built PM text node:", text)
+    return
+  }
+
+  const markSpec = getMarkSpec(node.Kind)
+  const toPMMark = getMarkToPM(node.Kind)
+  console.log("Mark spec for", node.Kind, "is", markSpec)
+  console.log("toPMMark for", node.Kind, "is", toPMMark)
+
+  // Mark consistency check
+  if ((markSpec && !toPMMark) || (!markSpec && toPMMark)) {
+    throw new Error(
+      `Inconsistent inline registration for kind "${node.Kind}": ` +
+      `markSpec=${!!markSpec}, toPMMark=${!!toPMMark}`
+    )
+  }
+
+  // MARK node: enrich context only
+  if (markSpec && toPMMark) {
+    const mark = toPMMark(schema, node)
+    if (!mark) {
+      throw new Error(`PM mark builder for "${node.Kind}" returned nothing`)
+    }
+
+    const nextMarks = [...activeMarks, mark]
+    var outLenBefore = out.length
+    for (const child of childrenOf(node)) {
+      buildInline(schema, child, out, nextMarks)
+      if (out.length === outLenBefore) {
+        throw new Error(
+          `Marked inline node "${node.Kind}" produced no PM output`
+        )
       } else {
-        out.push(text)
-      }
-      return
-    }
-
-    default: {
-      // Try mark plugin
-      const _markSpec = getMarkSpec(node.kind)
-      const toPM = getMarkToPM(node.kind)
-
-      if (!_markSpec || !toPM) {
-        throw new Error(`No PM mapping for docmodel kind "${node.kind}"`)
-      }
-
-      const markType = schema.marks[node.kind]
-      if (!markType) {
-        throw new Error(`Schema missing mark "${node.kind}"`)
-      }
-
-      const newMarks = [...activeMarks, markType.create()]
-
-      for (const child of childrenOf(node)) {
-        buildInline(schema, child, out, newMarks)
+        outLenBefore = out.length
       }
     }
+    return
+  }
+
+  const toPMNode = getNodeToPM(node.Kind)
+  if (!toPMNode) {
+    throw new Error(`No PM inline mapping for docmodel kind "${node.Kind}"`)
+  }
+
+  const pmChildren: PMNode[] = []
+  for (const child of childrenOf(node)) {
+    buildInline(schema, child, pmChildren, activeMarks)
+  }
+
+  const pmNode = toPMNode(schema, node, pmChildren)
+  if (!pmNode) {
+    throw new Error(`PM builder for "${node.Kind}" returned nothing`)
+  } else {
+    console.log(`Built PM node for inline "${node.Kind}" :`, pmNode)
+  }
+
+  out.push(pmNode)
+
+  // Fail early if this inline produced nothing
+  if (out.length === startLen) {
+    throw new Error(
+      `Inline node "${node.Kind}" produced no PM output`
+    )
   }
 }

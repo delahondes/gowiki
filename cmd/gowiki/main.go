@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"html/template"
 	"log"
 	"net/http"
@@ -128,11 +129,28 @@ func handleEdit(w http.ResponseWriter, r *http.Request, pagePath string) {
 	// Try to get existing page
 	var page *storage.Page
 	var err error
+
+	var docJSON string
+
 	if storageInstance.PageExists(pagePath) {
 		page, err = storageInstance.GetPage(pagePath)
 		if err != nil {
 			http.Error(w, "Failed to load page", http.StatusInternalServerError)
 			return
+		}
+
+		// Parse Markdown → DocModel
+		doc, err := docmodel.ParseMarkdown([]byte(page.Content))
+		if err != nil {
+			log.Printf("Error parsing markdown: %v", err)
+		} else {
+			// Serialize DocModel → JSON
+			buf, err := json.Marshal(doc)
+			if err != nil {
+				log.Printf("Error serializing docmodel: %v", err)
+			} else {
+				docJSON = string(buf)
+			}
 		}
 	}
 
@@ -141,11 +159,13 @@ func handleEdit(w http.ResponseWriter, r *http.Request, pagePath string) {
 		Title        string
 		Path         string
 		Page         *storage.Page
+		DocModelJSON template.JS
 		TemplateName string
 	}{
 		Title:        "Edit: " + pagePath + " - GoWiki",
 		Path:         pagePath,
 		Page:         page,
+		DocModelJSON: template.JS(docJSON),
 		TemplateName: "edit",
 	}
 
@@ -153,26 +173,35 @@ func handleEdit(w http.ResponseWriter, r *http.Request, pagePath string) {
 }
 
 func handleSave(w http.ResponseWriter, r *http.Request, pagePath string) {
-	// Parse form
 	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
-	content := r.FormValue("content")
-	if content == "" {
-		http.Error(w, "Content cannot be empty", http.StatusBadRequest)
+	raw := r.FormValue("docmodel")
+	if raw == "" {
+		http.Error(w, "Missing docmodel", http.StatusBadRequest)
 		return
 	}
 
-	// Save page
-	err = storageInstance.SavePage(pagePath, content)
+	var doc docmodel.Node
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		http.Error(w, "Invalid docmodel JSON", http.StatusBadRequest)
+		return
+	}
+
+	md, err := docmodel.EmitMarkdown(doc)
 	if err != nil {
-		http.Error(w, "Failed to save page: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to serialize markdown", http.StatusInternalServerError)
 		return
 	}
 
-	// Redirect to view
+	err = storageInstance.SavePage(pagePath, md)
+	if err != nil {
+		http.Error(w, "Failed to save page", http.StatusInternalServerError)
+		return
+	}
+
 	http.Redirect(w, r, "/"+pagePath, http.StatusFound)
 }

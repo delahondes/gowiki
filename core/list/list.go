@@ -10,7 +10,7 @@ import (
 
 const (
 	KindList     docmodel.Kind = "bullet_list"
-	KindListItem docmodel.Kind = "bullet_list_item"
+	KindListItem docmodel.Kind = "list_item"
 )
 
 func renderChildrenHTML(children []docmodel.Node) (string, error) {
@@ -98,6 +98,33 @@ func renderListMarkdown(list docmodel.Node, indent string) (string, error) {
 }
 
 func init() {
+
+	docmodel.RegisterNodeSpec(docmodel.NodeSpec{
+		Kind:         KindList,
+		Flow:         docmodel.FlowBlock,
+		ChildrenFlow: docmodel.Ptr(docmodel.FlowBlock),
+		AllowedChildren: []docmodel.Kind{
+			KindListItem,
+		},
+	})
+	docmodel.RegisterNodeSpec(docmodel.NodeSpec{
+		Kind:         KindListItem,
+		Flow:         docmodel.FlowBlock,
+		ChildrenFlow: docmodel.Ptr(docmodel.FlowBlock),
+		CoerceChildren: func(parent docmodel.Node, children []docmodel.Node) ([]docmodel.Node, error) {
+			return docmodel.WrapInlines(
+				children,
+				func(n docmodel.Node) bool {
+					spec, ok := docmodel.GetNodeSpec(n.Kind)
+					return ok && spec.Flow == docmodel.FlowInline
+				},
+				func(inlines []docmodel.Node) docmodel.Node {
+					return docmodel.NewPseudoParagraph(inlines...)
+				},
+			)
+		},
+	})
+
 	// Goldmark -> docmodel
 	docmodel.RegisterGoldmarkImporter(ast.KindList,
 		func(
@@ -140,6 +167,7 @@ func init() {
 		},
 	)
 
+	// never called, should probably be removed
 	docmodel.RegisterMarkdown(
 		KindListItem,
 		func() any { return struct{}{} },

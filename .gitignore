@@ -33,3 +33,4 @@ go.work.sum
 wiki/pages
 gowiki
 node_modules
+frontend/nodespec.gen.ts

@@ -13,14 +13,20 @@ import {
 import { DocNode } from "../../frontend/docmodel"
 
 const KindText = "text"
+console.log("Defining WYSIWYM for kind:", KindText)
 
 /* ------------------------------------------------------------------
  * Conversion: docmodel → ProseMirror
  * ------------------------------------------------------------------ */
 
-function toPMText(node: DocNode, schema: any) {
+// not used
+function toPMText(
+  schema: any,
+  node: DocNode,
+  children: PMNode[]
+): PMNode {
   // Create a ProseMirror text node with the payload string.
-  return schema.text(node.payload || "")
+  return schema.text(node.Payload || "")
 }
 
 /* ------------------------------------------------------------------
@@ -29,8 +35,8 @@ function toPMText(node: DocNode, schema: any) {
 
 function fromPMText(node: PMNode): DocNode {
   return {
-    kind: KindText,
-    payload: node.text || "",
+    Kind: KindText,
+    Payload: node.text || "",
   }
 }
 

@@ -32,18 +32,24 @@ func ImportGoldmark(root ast.Node, source []byte) (Node, error) {
 func importNode(n ast.Node, source []byte) (Node, error) {
 	// 1. If a plugin registered an importer, use it
 	if fn, ok := goldmarkImporters[n.Kind()]; ok {
-		return fn(
+		node, err := fn(
 			n,
 			source,
 			func(node ast.Node, src []byte) ([]Node, error) {
 				return importChildren(node, src), nil
 			},
 		)
+		if err != nil {
+			return Node{}, err
+		}
+		// Validate and normalize with NodeSpec if available
+		return NormalizeNode(node)
 	}
 
 	// 2. Default behavior: recurse into children without flattening
 	children := importChildren(n, source)
 	if len(children) > 0 {
+		// Otherwise, fallback to fragment
 		return NewFragment(children...), nil
 	}
 

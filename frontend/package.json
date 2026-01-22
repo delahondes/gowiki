@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "esbuild editor.js --bundle --minify --outfile=../web/static/editor/prosemirror.bundle.js"
+    "build": "esbuild editor.ts --bundle --minify --loader:.css=text --outfile=../web/static/editor/prosemirror.bundle.js"
   },
   "keywords": [],
   "author": "",

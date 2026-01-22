@@ -31,7 +31,32 @@ func renderHTML(n Node) (string, error) {
 	return b.String(), nil
 }
 
+func CoerceDocumentChildren(doc Node, children []Node) ([]Node, error) {
+	return WrapInlines(
+		children,
+		func(n Node) bool {
+			spec, _ := GetNodeSpec(n.Kind)
+			return spec.Flow == FlowInline
+		},
+		func(inlines []Node) Node {
+			return NewPseudoParagraph(inlines...)
+		},
+	)
+}
+
 func init() {
+	RegisterNodeSpec(NodeSpec{
+		Kind:           KindDocument,
+		Flow:           FlowBlock,
+		ChildrenFlow:   Ptr(FlowBlock),
+		CoerceChildren: CoerceDocumentChildren,
+	})
+	RegisterNodeSpec(NodeSpec{
+		Kind:           KindFragment,
+		Flow:           FlowBlock,
+		ChildrenFlow:   Ptr(FlowBlock),
+		CoerceChildren: CoerceDocumentChildren,
+	})
 	// Markdown emitter
 	RegisterMarkdown(KindDocument, func() any { return struct{}{} }, nil, toMarkdown)
 	RegisterMarkdown(KindFragment, func() any { return struct{}{} }, nil, toMarkdown)

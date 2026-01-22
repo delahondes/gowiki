@@ -15,6 +15,11 @@ type Payload struct {
 }
 
 func init() {
+	docmodel.RegisterNodeSpec(docmodel.NodeSpec{
+		Kind:         KindText,
+		Flow:         docmodel.FlowInline,
+		ChildrenFlow: nil, // leaf
+	})
 	docmodel.RegisterMarkdown(
 		KindText,
 		func() any { return Payload{} },

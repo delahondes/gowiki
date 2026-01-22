@@ -63,3 +63,19 @@ func (n Node) Equal(other Node) bool {
 	}
 	return true
 }
+
+func FlowOf(n Node) Flow {
+	spec, ok := GetNodeSpec(n.Kind)
+	if !ok {
+		panic("no NodeSpec for kind " + string(n.Kind))
+	}
+	return spec.Flow
+}
+
+func ChildrenFlowOf(n Node) *Flow {
+	spec, ok := GetNodeSpec(n.Kind)
+	if !ok {
+		panic("no NodeSpec for kind " + string(n.Kind))
+	}
+	return spec.ChildrenFlow
+}
