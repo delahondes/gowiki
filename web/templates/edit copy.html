@@ -19,9 +19,18 @@
 
     <script src="/static/editor/prosemirror.bundle.js"></script>
     <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            const container = document.getElementById("pm-editor");
-            if (container && window.initPMPlayground) window.initPMPlayground(container);
-        });
+    document.addEventListener("DOMContentLoaded", function () {
+        if (!window.initProseMirrorEditor) return;
+
+        const container = document.getElementById("pm-editor");
+        const data = document.getElementById("docmodel-source");
+
+        console.log("Initializing ProseMirror editor", container, data);
+
+        if (!container || !data) { console.log("Missing container or data", container, data); return; }
+
+        const doc = JSON.parse(data.textContent);
+        window.initProseMirrorEditor(container, doc);
+    });
     </script>
 {{end}}
