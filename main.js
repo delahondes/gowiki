@@ -7,8 +7,9 @@ import { keymap } from "prosemirror-keymap"
 import { baseKeymap } from "prosemirror-commands"
 import { history } from "prosemirror-history"
 import { DOMParser } from "prosemirror-model"
-import { menuBar } from "prosemirror-menu"
+import { menuBar,MenuItem } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
+import { splitListItem } from "prosemirror-schema-list"
 
 const schema = new Schema({
   nodes: addListNodes(
@@ -30,14 +31,38 @@ content.innerHTML = `
   </ul>
 `
 
+function dumpDocCommand() {
+  return (state) => {
+    console.log("=== ProseMirror doc ===")
+    console.log(state.doc)
+    console.log("=== as JSON ===")
+    console.log(JSON.stringify(state.doc.toJSON(), null, 2))
+    return true
+  }
+}
+
+const dumpDocMenuItem = new MenuItem({
+  label: "Dump",
+  title: "Dump ProseMirror document to console",
+  run: dumpDocCommand()
+})
+
+const menu = buildMenuItems(schema)
+menu.fullMenu.push([dumpDocMenuItem])
+
+const listKeymap = keymap({
+  Enter: splitListItem(schema.nodes.list_item)
+})
+
 const state = EditorState.create({
   doc: DOMParser.fromSchema(schema).parse(content),
   schema,
   plugins: [
+    listKeymap,
     history(),
     keymap(baseKeymap),
     menuBar({
-      content: buildMenuItems(schema).fullMenu
+      content: menu.fullMenu
     })
   ]
 })
