@@ -10,6 +10,7 @@ import { DOMParser } from "prosemirror-model"
 import { menuBar,MenuItem } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
+import { markdownToPM } from "./markdown_to_pm.ts"
 
 const schema = new Schema({
   nodes: addListNodes(
@@ -20,15 +21,13 @@ const schema = new Schema({
   marks: basicSchema.spec.marks
 })
 
+const markdown = `
+## ProseMirror
 
-const content = document.createElement("div")
-content.innerHTML = `
-  <h2>ProseMirror</h2>
-  <p>This is editable text.</p>
-  <ul>
-    <li>One</li>
-    <li>Two</li>
-  </ul>
+This is editable text.
+
+- One
+- Two
 `
 
 function dumpDocCommand() {
@@ -55,7 +54,7 @@ const listKeymap = keymap({
 })
 
 const state = EditorState.create({
-  doc: DOMParser.fromSchema(schema).parse(content),
+  doc: markdownToPM(markdown, schema),
   schema,
   plugins: [
     listKeymap,
