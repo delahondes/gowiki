@@ -10,7 +10,10 @@ import { DOMParser } from "prosemirror-model"
 import { menuBar,MenuItem } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
-import { markdownToPM } from "./markdown_to_pm.ts"
+import { markdownToPM } from "./compiler/markdown_to_pm.ts"
+import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
+import { Registry } from "./compiler/registry.ts"
+import { registerCoreNodes } from "./compiler/core_nodes.ts"
 
 const schema = new Schema({
   nodes: addListNodes(
@@ -30,6 +33,12 @@ This is editable text.
 - Two
 `
 
+function makeRegistry(schema) {
+  const reg = new Registry(schema)
+  registerCoreNodes(reg)
+  return reg
+}
+
 function dumpDocCommand() {
   return (state) => {
     console.log("=== ProseMirror doc ===")
@@ -46,8 +55,24 @@ const dumpDocMenuItem = new MenuItem({
   run: dumpDocCommand()
 })
 
+function dumpMDCommand() {
+  return (state) => {
+    const reg = makeRegistry(state.schema)
+    const md = pmToMarkdown(state.doc, reg)
+    console.log("=== Markdown ===")
+    console.log(md)
+    return true
+  }
+}
+
+const dumpMDMenuItem = new MenuItem({
+  label: "DumpMD",
+  title: "Dump document as Markdown",
+  run: dumpMDCommand()
+})
+
 const menu = buildMenuItems(schema)
-menu.fullMenu.push([dumpDocMenuItem])
+menu.fullMenu.push([dumpDocMenuItem, dumpMDMenuItem])
 
 const listKeymap = keymap({
   Enter: splitListItem(schema.nodes.list_item)

@@ -11,6 +11,7 @@ export function registerCoreNodes(reg: Registry) {
   registerEmphasis(reg)
   registerHeading(reg)
   registerLists(reg)
+  registerMarkdownPrinters(reg)
 }
 
 /* --------------------------------------------------
@@ -140,4 +141,76 @@ function registerLists(reg: Registry) {
       ctx.close()
     },
   })
+}
+/* --------------------------------------------------
+ * PM → Markdown printers
+ * -------------------------------------------------- */
+
+function registerMarkdownPrinters(reg: Registry) {
+  // Text
+  reg.registerPMNode("text", {
+    print(node) {
+      return node.text ?? ""
+    },
+  })
+
+  // Paragraph
+  reg.registerPMNode("paragraph", {
+    print(node, ctx, recurse) {
+      let out = ""
+      node.content.forEach((child) => {
+        out += recurse(child)
+      })
+      return out + "\n\n"
+    },
+  })
+
+  // Heading
+  reg.registerPMNode("heading", {
+    print(node, ctx, recurse) {
+      const level = node.attrs.level
+      let out = ""
+      node.content.forEach((child) => {
+        out += recurse(child)
+      })
+      return "#".repeat(level) + " " + out + "\n\n"
+    },
+  })
+
+  // Lists
+  reg.registerPMNode("bullet_list", {
+    print(node, ctx, recurse) {
+      let out = ""
+      node.content.forEach((child) => {
+        out += recurse(child)
+      })
+      return out + "\n"
+    },
+  })
+
+  reg.registerPMNode("ordered_list", {
+    print(node, ctx, recurse) {
+      let index = node.attrs.order ?? 1
+      let out = ""
+      node.content.forEach((child) => {
+        out += `${index++}. ${recurse(child).trimEnd()}\n`
+      })
+      return out + "\n"
+    },
+  })
+
+  reg.registerPMNode("list_item", {
+    print(node, ctx, recurse) {
+      let out = ""
+      node.content.forEach((child) => {
+        out += recurse(child)
+      })
+      return "- " + out.trimEnd() + "\n"
+    },
+  })
+
+  // Marks
+  reg.registerPMMark("em", { open: "*", close: "*" })
+  reg.registerPMMark("strong", { open: "**", close: "**" })
+  reg.registerPMMark("code", { open: "`", close: "`" })
 }
