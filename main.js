@@ -12,8 +12,7 @@ import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
-import { Registry } from "./compiler/registry.ts"
-import { registerCoreNodes } from "./compiler/core_nodes.ts"
+import { buildRegistry } from "./compiler/build_registry.ts"
 
 const schema = new Schema({
   nodes: addListNodes(
@@ -24,6 +23,8 @@ const schema = new Schema({
   marks: basicSchema.spec.marks
 })
 
+const registry = buildRegistry(schema)
+
 const markdown = `
 ## ProseMirror
 
@@ -33,11 +34,6 @@ This is editable text.
 - Two
 `
 
-function makeRegistry(schema) {
-  const reg = new Registry(schema)
-  registerCoreNodes(reg)
-  return reg
-}
 
 function dumpDocCommand() {
   return (state) => {
@@ -57,8 +53,7 @@ const dumpDocMenuItem = new MenuItem({
 
 function dumpMDCommand() {
   return (state) => {
-    const reg = makeRegistry(state.schema)
-    const md = pmToMarkdown(state.doc, reg)
+    const md = pmToMarkdown(state.doc, registry)
     console.log("=== Markdown ===")
     console.log(md)
     return true
@@ -79,7 +74,7 @@ const listKeymap = keymap({
 })
 
 const state = EditorState.create({
-  doc: markdownToPM(markdown, schema),
+  doc: markdownToPM(markdown, registry),
   schema,
   plugins: [
     listKeymap,

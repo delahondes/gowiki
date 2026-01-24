@@ -1,9 +1,9 @@
 import MarkdownIt from "markdown-it"
-import { Schema, Node as PMNode } from "prosemirror-model"
+import { Node } from "prosemirror-model"
 
 import { CompileContext, run } from "./kernel"
 import { Registry } from "./registry"
-import { registerCoreNodes } from "./core_nodes"
+
 
 /**
  * Convert Markdown text to a ProseMirror document.
@@ -14,8 +14,9 @@ import { registerCoreNodes } from "./core_nodes"
  */
 export function markdownToPM(
   markdown: string,
-  schema: Schema
-): PMNode {
+  registry: Registry
+): Node {
+  const schema = registry.schema
   // 1. Parse Markdown
   const md = new MarkdownIt("commonmark", {
     html: false,
@@ -25,9 +26,7 @@ export function markdownToPM(
 
   const tokens = md.parse(markdown, {})
 
-  // 2. Setup registry and register semantics
-  const registry = new Registry(schema)
-  registerCoreNodes(registry)
+
 
   // 3. Run kernel
   const ctx = new CompileContext(schema)

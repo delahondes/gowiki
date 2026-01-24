@@ -120,3 +120,7 @@ export class Registry {
     }
   }
 }
+
+export type Plugin = {
+  register(reg: Registry): void
+}
