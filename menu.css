@@ -17,8 +17,15 @@
   min-height: auto !important;
 }
 
+/* Ensure menu bar stays above the editor */
+.ProseMirror-menubar {
+  order: 0;
+  flex-shrink: 0;
+}
 
 .ProseMirror-menubar-wrapper {
+  display: flex;
+  flex-direction: column;
   position: relative;
 }
 
@@ -35,10 +42,21 @@
   padding: 0 6px;
 
   border-radius: 3px;
-  cursor: pointer;
 
   font-size: 14px;
   line-height: 1;
+}
+
+/* Make inner content the real click target */
+.ProseMirror-menuitem > * {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  height: 100%;
+  padding: 0 6px;
+
+  cursor: pointer;
 }
 
 /* Hover / active */
@@ -59,4 +77,40 @@
 /* Kill focus-induced layout shifts */
 .ProseMirror-menubar :focus {
   outline: none;
+}
+
+/* ---- Dropdown support ---- */
+/* Correct positioning context for dropdowns */
+.ProseMirror-menu-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.ProseMirror-menu-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+
+  z-index: 50;
+
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+
+  padding: 2px 0;
+  min-width: 140px;
+}
+
+.ProseMirror-menu-dropdown-item {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.ProseMirror-menu-dropdown-item:hover {
+  background: #eee;
+}
+
+/* Editor content should come after the menu */
+.ProseMirror-menubar-wrapper .ProseMirror {
+  order: 1;
 }
