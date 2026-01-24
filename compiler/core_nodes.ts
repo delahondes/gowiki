@@ -148,11 +148,9 @@ function registerLists(reg: Registry) {
 
 function registerMarkdownPrinters(reg: Registry) {
   // Text
-  reg.registerPMNode("text", {
-    print(node) {
-      return node.text ?? ""
-    },
-  })
+  // NOTE: We do NOT register a PM→Markdown printer for "text" nodes here.
+  // Text rendering is hardcoded in pm_to_markdown.ts for efficiency and correctness,
+  // since text nodes require special handling for escaping, mark boundaries, etc.
 
   // Paragraph
   reg.registerPMNode("paragraph", {

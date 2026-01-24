@@ -15,6 +15,10 @@ export class PrintContext {
 import { Node as PMNode } from "prosemirror-model"
 import { Registry } from "./registry"
 
+function escapeMarkdownText(text: string): string {
+  return text.replace(/[\\*_`]/g, ch => "\\" + ch)
+}
+
 /**
  * Convert a ProseMirror document to Markdown.
  */
@@ -27,7 +31,7 @@ export function pmToMarkdown(
   function printNode(node: PMNode): string {
     // Text node
     if (node.isText) {
-      let text = node.text ?? ""
+      let text = escapeMarkdownText(node.text ?? "")
       for (const mark of node.marks) {
         const printer = registry.getPMMark(mark.type.name)
         if (!printer) {
