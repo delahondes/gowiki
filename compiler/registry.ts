@@ -1,6 +1,8 @@
+import type { Command } from "prosemirror-state"
 import { Schema, Node as PMNode, Mark } from "prosemirror-model"
 import type { CompileContext } from "./kernel"
 import type { PrintContext } from "./pm_to_markdown"
+import { listen } from "node:quic"
 
 /* -----------------------------
  * Markdown → PM handler interfaces
@@ -41,6 +43,20 @@ export interface MarkPrinter {
  * Unified Registry
  * ----------------------------- */
 
+export type CommandListener = (
+  namespace: string,
+  name: string,
+  cmd: Command
+) => void
+
+export type SchemaNodesSpec = { [name: string]: any }
+export type SchemaMarksSpec = { [name: string]: any }
+
+export type SchemaContributor = {
+  nodes?: SchemaNodesSpec
+  marks?: SchemaMarksSpec
+}
+
 export class Registry {
   /* Markdown → PM */
   private mdNodes = new Map<string, NodeHandler>()
@@ -51,7 +67,38 @@ export class Registry {
   private pmNodes = new Map<string, NodePrinter>()
   private pmMarks = new Map<string, MarkPrinter>()
 
+  /* Menu commands */
+  private commands = new Map<string, Command>() // key is "namespace.name"
+  private commandListeners: CommandListener[] = []
+
+  /* Schema contributions */
+  private schemaNodes: SchemaNodesSpec = {}
+  private schemaMarks: SchemaMarksSpec = {}
+
   constructor(public readonly schema: Schema) {}
+  registerSchema(contrib: SchemaContributor) {
+    if (contrib.nodes) {
+      for (const k of Object.keys(contrib.nodes)) {
+        this.assertFree(
+          new Map(Object.keys(this.schemaNodes).map(k => [k, true])),
+          k,
+          "schema node"
+        )
+        this.schemaNodes[k] = contrib.nodes[k]
+      }
+    }
+
+    if (contrib.marks) {
+      for (const k of Object.keys(contrib.marks)) {
+        this.assertFree(
+          new Map(Object.keys(this.schemaMarks).map(k => [k, true])),
+          k,
+          "schema mark"
+        )
+        this.schemaMarks[k] = contrib.marks[k]
+      }
+    }
+  }
 
   /* ---- registration (Markdown → PM) ---- */
 
@@ -118,6 +165,49 @@ export class Registry {
         `Duplicate ${kind} registration for "${key}"`
       )
     }
+  }
+
+  /* ---- menu commands ---- */
+
+  onCommand(listener: CommandListener) {
+    this.commandListeners.push(listener)
+
+    // Replay already-registered commands for late subscribers.
+    for (const [fullName, cmd] of this.commands.entries()) {
+      const dot = fullName.indexOf(".")
+      if (dot < 0) continue
+      const namespace = fullName.slice(0, dot)
+      const name = fullName.slice(dot + 1)
+      console.log("Replaying command for listener", fullName, listener)
+      listener(namespace, name, cmd)
+    }
+  }
+
+  registerCommand(
+    namespace: string,
+    name: string,
+    cmd: Command
+  ) {
+    const fullName = `${namespace}.${name}`
+    this.assertFree(this.commands, fullName, "command")
+    this.commands.set(fullName, cmd)
+
+    for (const l of this.commandListeners) {
+      console.log("Registering command to listener", fullName, l)
+      l(namespace, name, cmd)
+    }
+  }
+
+  buildSchema(): Schema {
+    return new Schema({
+      nodes: this.schemaNodes,
+      marks: this.schemaMarks,
+    })
+  }
+
+  bindSchema(schema: Schema) {
+    // Replace the temporary schema reference with the final one.
+    ;(this as any).schema = schema
   }
 }
 

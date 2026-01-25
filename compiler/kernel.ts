@@ -2,6 +2,17 @@ import { Fragment, Mark, Node as PMNode, Schema } from "prosemirror-model"
 import type { Registry } from "./registry"
 
 /**
+ * Minimal token interface for markdown-it tokens.
+ */
+export type MarkdownToken = {
+  type: string
+  tag?: string
+  content?: string
+  children?: MarkdownToken[]
+  attrGet?(name: string): string | null
+}
+
+/**
  * Generic compilation context used by all handlers.
  *
  * Owns:
@@ -16,6 +27,8 @@ import type { Registry } from "./registry"
  */
 export class CompileContext {
   public readonly schema: Schema
+
+  public token!: MarkdownToken
 
   private readonly stack: Array<{ node: PMNode; children: PMNode[] }> = []
   public readonly output: PMNode[] = []
@@ -86,14 +99,15 @@ export type RunOptions = {
  * - token.type: string
  * - token.children?: token[]   (for container tokens like markdown-it "inline")
  */
-export function run(tokens: any[], registry: Registry, ctx: CompileContext, opts: RunOptions = {}) {
+export function run(tokens: MarkdownToken[], registry: Registry, ctx: CompileContext, opts: RunOptions = {}) {
   const strict = opts.strict ?? true
   for (const tok of tokens) {
+    ctx.token = tok
     handleToken(tok, registry, ctx, strict)
   }
 }
 
-function handleToken(tok: any, registry: Registry, ctx: CompileContext, strict: boolean) {
+function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext, strict: boolean) {
   if (!tok || typeof tok.type !== "string") {
     if (strict) throw new Error(`Invalid token: ${String(tok)}`)
     return

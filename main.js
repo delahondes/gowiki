@@ -14,16 +14,24 @@ import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
 
-const schema = new Schema({
-  nodes: addListNodes(
-    basicSchema.spec.nodes,
-    "paragraph block*",
-    "block"
-  ),
-  marks: basicSchema.spec.marks
-})
+const registry = buildRegistry()
+const schema = registry.buildSchema()
+registry.bindSchema(schema)
 
-const registry = buildRegistry(schema)
+const menu = buildMenuItems(schema)
+
+registry.onCommand((namespace, name, cmd) => {
+  const label = `${namespace}:${name}`
+
+  const item = new MenuItem({
+    label,
+    title: label,
+    run: cmd,
+    enable: state => cmd(state)
+  })
+
+  menu.fullMenu.push([item])
+})
 
 const markdown = `
 ## ProseMirror
@@ -66,7 +74,6 @@ const dumpMDMenuItem = new MenuItem({
   run: dumpMDCommand()
 })
 
-const menu = buildMenuItems(schema)
 menu.fullMenu.push([dumpDocMenuItem, dumpMDMenuItem])
 
 const listKeymap = keymap({
