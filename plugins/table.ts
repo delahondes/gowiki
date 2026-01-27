@@ -1,12 +1,43 @@
 import { Plugin } from "../compiler/registry"
-import { tableNodes } from "prosemirror-tables"
+import { tableNodes, tableEditing, goToNextCell } from "prosemirror-tables"
 import { Node } from "prosemirror-model"
+import { keymap } from "prosemirror-keymap"
 import {
   addColumnAfter,
   addRowAfter,
   deleteColumn,
   deleteRow,
 } from "prosemirror-tables"
+
+const tableStyles = `
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid #ccc;
+  padding: 0.25em 0.5em;
+  vertical-align: top;
+}
+
+.ProseMirror th {
+  background: #f7f7f7;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ProseMirror td > p,
+.ProseMirror th > p {
+  margin: 0;
+}
+
+.ProseMirror .selectedCell {
+  background: #cce5ff;
+}
+`
 
 
 export function makeTable(
@@ -148,6 +179,25 @@ export const tablePlugin: Plugin = {
         return out + "\n"
       },
     })
+
+    /* ----------------------------
+     * Editor integration
+     * ---------------------------- */
+
+    reg.registerEditorPlugin(() =>
+      keymap({
+        Tab: goToNextCell(1),
+        "Shift-Tab": goToNextCell(-1),
+      })
+    )
+
+    reg.registerEditorPlugin(() => tableEditing())
+
+    /* ----------------------------
+     * Styles
+     * ---------------------------- */
+
+    reg.registerStyle("table", tableStyles)
 
     /* ----------------------------
      * Commands (exported via registry extras)

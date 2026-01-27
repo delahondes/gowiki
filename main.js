@@ -1,6 +1,5 @@
 import { EditorState } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
-import { Schema } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import { keymap } from "prosemirror-keymap"
@@ -14,9 +13,22 @@ import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
 
-const registry = buildRegistry()
+const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
 registry.bindSchema(schema)
+
+function applyStyles(styles) {
+  for (const { id, css } of styles) {
+    const styleId = `wikidown-style-${id}`
+    if (document.getElementById(styleId)) continue
+    const style = document.createElement("style")
+    style.id = styleId
+    style.textContent = css
+    document.head.appendChild(style)
+  }
+}
+
+applyStyles(registry.getStyles())
 
 const menu = buildMenuItems(schema)
 
@@ -87,6 +99,7 @@ const state = EditorState.create({
     listKeymap,
     history(),
     keymap(baseKeymap),
+    ...registry.getEditorPlugins(),
     menuBar({
       content: menu.fullMenu
     })

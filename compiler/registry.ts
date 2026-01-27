@@ -1,8 +1,7 @@
-import type { Command } from "prosemirror-state"
+import type { Command, Plugin as PMPlugin } from "prosemirror-state"
 import { Schema, Node as PMNode, Mark } from "prosemirror-model"
 import type { CompileContext } from "./kernel"
 import type { PrintContext } from "./pm_to_markdown"
-import { listen } from "node:quic"
 
 /* -----------------------------
  * Markdown → PM handler interfaces
@@ -57,6 +56,13 @@ export type SchemaContributor = {
   marks?: SchemaMarksSpec
 }
 
+export type EditorPluginFactory = (schema: Schema) => PMPlugin
+
+export type StyleContribution = {
+  id: string
+  css: string
+}
+
 export class Registry {
   /* Markdown → PM */
   private mdNodes = new Map<string, NodeHandler>()
@@ -70,6 +76,12 @@ export class Registry {
   /* Menu commands */
   private commands = new Map<string, Command>() // key is "namespace.name"
   private commandListeners: CommandListener[] = []
+
+  /* Editor plugins */
+  private editorPlugins: EditorPluginFactory[] = []
+
+  /* Styles */
+  private styles = new Map<string, string>()
 
   /* Schema contributions */
   private schemaNodes: SchemaNodesSpec = {}
@@ -196,6 +208,30 @@ export class Registry {
       console.log("Registering command to listener", fullName, l)
       l(namespace, name, cmd)
     }
+  }
+
+  /* ---- editor plugins ---- */
+
+  registerEditorPlugin(factory: EditorPluginFactory) {
+    this.editorPlugins.push(factory)
+  }
+
+  getEditorPlugins(): PMPlugin[] {
+    return this.editorPlugins.map(factory => factory(this.schema))
+  }
+
+  /* ---- styles ---- */
+
+  registerStyle(id: string, css: string) {
+    this.assertFree(this.styles as Map<string, unknown>, id, "style")
+    this.styles.set(id, css)
+  }
+
+  getStyles(): StyleContribution[] {
+    return Array.from(this.styles.entries()).map(([id, css]) => ({
+      id,
+      css,
+    }))
   }
 
   buildSchema(): Schema {
