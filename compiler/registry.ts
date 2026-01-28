@@ -63,6 +63,20 @@ export type StyleContribution = {
   css: string
 }
 
+export type NodePropertySpec = {
+  name: string
+  label: string
+  default?: string | null
+  parse?: (raw: string) => string | null
+  serialize?: (value: string | null) => string
+}
+
+export type DirectiveSpec = {
+  appliesTo: string[]
+  nodeType: string
+  properties: NodePropertySpec[]
+}
+
 export class Registry {
   /* Markdown → PM */
   private mdNodes = new Map<string, NodeHandler>()
@@ -82,6 +96,10 @@ export class Registry {
 
   /* Styles */
   private styles = new Map<string, string>()
+
+  /* Directives + node properties */
+  private directives = new Map<string, DirectiveSpec>()
+  private nodeProperties = new Map<string, NodePropertySpec[]>()
 
   /* Schema contributions */
   private schemaNodes: SchemaNodesSpec = {}
@@ -232,6 +250,38 @@ export class Registry {
       id,
       css,
     }))
+  }
+
+  /* ---- directives + properties ---- */
+
+  registerDirective(name: string, spec: DirectiveSpec) {
+    this.assertFree(this.directives as Map<string, unknown>, name, "directive")
+    this.directives.set(name, spec)
+    this.registerNodeProperties(spec.nodeType, spec.properties)
+  }
+
+  getDirective(name: string): DirectiveSpec | undefined {
+    return this.directives.get(name)
+  }
+
+  getNodeProperties(nodeType: string): NodePropertySpec[] {
+    return this.nodeProperties.get(nodeType) ?? []
+  }
+
+  private registerNodeProperties(
+    nodeType: string,
+    properties: NodePropertySpec[]
+  ) {
+    const existing = this.nodeProperties.get(nodeType) ?? []
+    for (const prop of properties) {
+      if (existing.some(p => p.name === prop.name)) {
+        throw new Error(
+          `Duplicate property "${prop.name}" for node "${nodeType}"`
+        )
+      }
+      existing.push(prop)
+    }
+    this.nodeProperties.set(nodeType, existing)
   }
 
   buildSchema(): Schema {

@@ -10,6 +10,7 @@ export type MarkdownToken = {
   content?: string
   children?: MarkdownToken[]
   attrGet?(name: string): string | null
+  meta?: any
 }
 
 /**

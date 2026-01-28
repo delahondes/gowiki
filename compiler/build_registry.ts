@@ -1,6 +1,7 @@
 import { Schema } from "prosemirror-model"
 import { Registry } from "./registry"
 import { registerCoreNodes } from "./core_nodes"
+import { registerCoreUI } from "./core_ui"
 import { plugins } from "../plugins"
 
 /**
@@ -11,6 +12,7 @@ export function buildRegistry(schema: Schema): Registry {
 
   // core language
   registerCoreNodes(reg)
+  registerCoreUI(reg)
 
   // plugins (uniform, no explicit calls)
   for (const plugin of plugins) {

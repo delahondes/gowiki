@@ -39,6 +39,34 @@ const tableStyles = `
 }
 `
 
+const tableProperties = [
+  {
+    name: "width",
+    label: "Width",
+    default: null,
+    parse: (raw: string) => raw,
+    serialize: (value: string | null) => String(value ?? ""),
+  },
+]
+
+function addWidthToDOM(spec: any, width: string | null) {
+  if (!width) return spec
+  if (!Array.isArray(spec)) return spec
+  const [tag, maybeAttrs, ...rest] = spec
+  const hasAttrs =
+    maybeAttrs &&
+    typeof maybeAttrs === "object" &&
+    !Array.isArray(maybeAttrs)
+  const attrs = hasAttrs ? maybeAttrs : {}
+  const existing = attrs.style ? String(attrs.style) : ""
+  const style = existing
+    ? `${existing}${existing.trim().endsWith(";") ? " " : "; "}width: ${width};`
+    : `width: ${width};`
+  const newAttrs = { ...attrs, style }
+  const children = hasAttrs ? rest : [maybeAttrs, ...rest]
+  return [tag, newAttrs, ...children]
+}
+
 
 export function makeTable(
   schema: any,
@@ -73,12 +101,32 @@ export function makeTable(
  */
 export const tablePlugin: Plugin = {
   register(reg) {
+    const nodes = tableNodes({
+      tableGroup: "block",
+      cellContent: "block+",
+      cellAttributes: {},
+    })
+
+    const baseTable = nodes.table
+    nodes.table = {
+      ...baseTable,
+      attrs: { ...baseTable.attrs, width: { default: null } },
+      toDOM(node) {
+        const domSpec = baseTable.toDOM
+          ? baseTable.toDOM(node)
+          : ["table", ["tbody", 0]]
+        return addWidthToDOM(domSpec, node.attrs.width ?? null)
+      },
+    }
+
     reg.registerSchema({
-      nodes: tableNodes({
-        tableGroup: "block",
-        cellContent: "block+",
-        cellAttributes: {},
-      }),
+      nodes,
+    })
+
+    reg.registerDirective("table", {
+      nodeType: "table",
+      appliesTo: ["table_open"],
+      properties: tableProperties,
     })
 
     /* ----------------------------
@@ -89,7 +137,9 @@ export const tablePlugin: Plugin = {
 
     reg.registerNode("table_open", {
       open(ctx) {
-        ctx.open(reg.schema.nodes.table.create())
+        const attrs =
+          ctx.token?.meta?.directives?.table ?? null
+        ctx.open(reg.schema.nodes.table.create(attrs))
       },
     })
 
@@ -171,6 +221,14 @@ export const tablePlugin: Plugin = {
         const body = rows.slice(1)
 
         let out = ""
+        const width = node.attrs.width ?? null
+        const widthProp = tableProperties.find(p => p.name === "width")
+        if (widthProp && width && width !== widthProp.default) {
+          const rendered = widthProp.serialize
+            ? widthProp.serialize(width)
+            : String(width)
+          out += `{table width=${rendered}}\n`
+        }
         out += "| " + header.join(" | ") + " |\n"
         out += "| " + header.map(() => "---").join(" | ") + " |\n"
         for (const row of body) {
