@@ -17,7 +17,7 @@ const panelStyles = `
   margin: 0 0 6px 0;
   padding: 4px 6px;
   border: 1px solid #ddd;
-  background: #f6f6f6;
+  background: #fff6cf;
   border-radius: 4px;
   font-size: 0.85em;
 }

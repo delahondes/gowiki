@@ -13,7 +13,6 @@ const tableStyles = `
 .ProseMirror table {
   border-collapse: collapse;
   margin: 0.5em 0;
-  width: 100%;
 }
 
 .ProseMirror th,
