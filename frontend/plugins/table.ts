@@ -2,6 +2,7 @@ import { Plugin } from "../compiler/registry"
 import { tableNodes, tableEditing, goToNextCell } from "prosemirror-tables"
 import { Node } from "prosemirror-model"
 import { keymap } from "prosemirror-keymap"
+import markdownItMultiMdTable from "markdown-it-multimd-table"
 import {
   addColumnAfter,
   addRowAfter,
@@ -100,6 +101,13 @@ export function makeTable(
  */
 export const tablePlugin: Plugin = {
   register(reg) {
+    reg.registerMarkdownItPlugin(md => {
+      md.use(markdownItMultiMdTable, {
+        multiline: false,
+        rowspan: false,
+        headerless: false,
+      })
+    })
     const nodes = tableNodes({
       tableGroup: "block",
       cellContent: "block+",
@@ -154,8 +162,16 @@ export const tablePlugin: Plugin = {
       },
     })
 
+    reg.registerNode("thead_close", {
+      close(ctx) {},
+    })
+
     reg.registerNode("tbody_open", {
       open(ctx) {},
+    })
+
+    reg.registerNode("tbody_close", {
+      close(ctx) {},
     })
 
     reg.registerNode("tr_open", {
@@ -173,11 +189,13 @@ export const tablePlugin: Plugin = {
     reg.registerNode("th_open", {
       open(ctx) {
         ctx.open(reg.schema.nodes.table_header.create())
+        ctx.open(reg.schema.nodes.paragraph.create())
       },
     })
 
     reg.registerNode("th_close", {
       close(ctx) {
+        ctx.close()
         ctx.close()
       },
     })
@@ -185,11 +203,13 @@ export const tablePlugin: Plugin = {
     reg.registerNode("td_open", {
       open(ctx) {
         ctx.open(reg.schema.nodes.table_cell.create())
+        ctx.open(reg.schema.nodes.paragraph.create())
       },
     })
 
     reg.registerNode("td_close", {
       close(ctx) {
+        ctx.close()
         ctx.close()
       },
     })

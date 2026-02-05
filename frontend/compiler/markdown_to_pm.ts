@@ -138,12 +138,15 @@ export function markdownToPM(
 ): Node {
   const schema = registry.schema
   // 1. Parse Markdown
-  const md = new MarkdownIt("commonmark", {
+  const md = new MarkdownIt({
     html: false,
     linkify: false,
     typographer: false,
   })
 
+  for (const plugin of registry.getMarkdownItPlugins()) {
+    plugin(md)
+  }
   md.use(directivePlugin)
   const tokens = applyDirectives(md.parse(markdown, {}), registry, true)
 

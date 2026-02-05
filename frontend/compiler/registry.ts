@@ -63,6 +63,8 @@ export type StyleContribution = {
   css: string
 }
 
+export type MarkdownItPlugin = (md: any) => void
+
 export type NodePropertySpec = {
   name: string
   label: string
@@ -96,6 +98,9 @@ export class Registry {
 
   /* Styles */
   private styles = new Map<string, string>()
+
+  /* Markdown-it plugins */
+  private mdPlugins: MarkdownItPlugin[] = []
 
   /* Directives + node properties */
   private directives = new Map<string, DirectiveSpec>()
@@ -250,6 +255,16 @@ export class Registry {
       id,
       css,
     }))
+  }
+
+  /* ---- Markdown-it plugins ---- */
+
+  registerMarkdownItPlugin(plugin: MarkdownItPlugin) {
+    this.mdPlugins.push(plugin)
+  }
+
+  getMarkdownItPlugins(): MarkdownItPlugin[] {
+    return [...this.mdPlugins]
   }
 
   /* ---- directives + properties ---- */

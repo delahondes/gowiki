@@ -14,6 +14,7 @@
   "type": "module",
   "dependencies": {
     "markdown-it": "^14.1.0",
+    "markdown-it-multimd-table": "^4.2.2",
     "prosemirror-commands": "^1.7.1",
     "prosemirror-example-setup": "^1.2.3",
     "prosemirror-history": "^1.5.0",

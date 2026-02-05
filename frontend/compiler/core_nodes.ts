@@ -61,6 +61,18 @@ function registerParagraph(reg: Registry) {
       ctx.text(tok.content ?? "")
     },
   })
+
+  reg.registerText("softbreak", {
+    run(ctx) {
+      ctx.text(" ")
+    },
+  })
+
+  reg.registerText("hardbreak", {
+    run(ctx) {
+      ctx.push(ctx.schema.nodes.hard_break.create())
+    },
+  })
 }
 
 /* --------------------------------------------------

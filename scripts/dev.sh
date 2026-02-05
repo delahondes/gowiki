@@ -9,7 +9,10 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-go run ./backend/cmd/server -addr :8080 -data-dir ./backend/data/pages &
+(
+  cd backend
+  go run ./cmd/server -addr :8080 -data-dir ./data/pages
+) &
 BACKEND_PID=$!
 
 npm --prefix frontend run dev
