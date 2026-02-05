@@ -13,3 +13,6 @@ pnpm-debug.log*
 # OS junk
 .DS_Store
 .vscode
+
+# data
+data/

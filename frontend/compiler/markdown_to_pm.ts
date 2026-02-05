@@ -17,8 +17,8 @@ function parseDirective(line: string): DirectiveToken | null {
   if (!inner) throw new Error("Empty directive")
 
   const parts = inner.split(/\s+/)
-  const name = parts[0]
-  if (!/^[a-zA-Z][\\w-]*$/.test(name)) {
+  const name = parts[0].replace(/\r/g, "")
+  if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
     throw new Error(`Invalid directive name: ${name}`)
   }
 
