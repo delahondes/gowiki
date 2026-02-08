@@ -1,30 +1,38 @@
 #app {
   box-sizing: border-box;
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  max-width: 1100px;
-  margin: 12px auto;
-  padding: 0 12px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 220px;
+  column-gap: 16px;
+  row-gap: 0;
+  width: 100%;
+  margin: 12px 0;
+  padding: 0 8px;
 }
 
 #content {
-  flex: 1;
+  width: 100%;
   min-width: 0;
+  padding: 0;
 }
 
 #actions {
-  width: 180px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   position: sticky;
   top: 10px;
+  padding-left: 0;
+}
+
+#left {
+  min-height: 1px;
+  padding-right: 0;
 }
 
 .gowiki-action-btn {
-  display: block;
-  width: 100%;
+  display: inline-block;
+  width: auto;
+  max-width: 170px;
   padding: 8px 10px;
   border: 1px solid #c9c9c9;
   border-radius: 4px;
@@ -50,11 +58,35 @@
 }
 
 .ProseMirror {
-  border: 1px solid #aaa;
   padding: 6px;
   min-height: 120px;
 }
 
 .gowiki-view .ProseMirror {
+  border: 1px solid #b6b6b6;
   min-height: 0;
+}
+
+#gowiki-editor .ProseMirror {
+  border: 3px solid #1e3f72;
+}
+
+@media (max-width: 900px) {
+  #app {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  #left {
+    display: none;
+  }
+
+  #content {
+    padding: 0;
+  }
+
+  #actions {
+    position: static;
+    padding-left: 0;
+  }
 }
