@@ -1,4 +1,4 @@
-# Wikidown
+# Gowiki
 
 ## Repository layout
 

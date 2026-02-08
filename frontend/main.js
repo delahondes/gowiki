@@ -19,7 +19,7 @@ registry.bindSchema(schema)
 const pagePath =
   new URLSearchParams(window.location.search).get("page") ?? "home"
 const defaultMarkdown = `
-## ProseMirror
+## Gowiki
 
 This is editable text.
 
@@ -50,7 +50,7 @@ registry.onCommand((namespace, name, cmd) => {
 
 function applyStyles(styles) {
   for (const { id, css } of styles) {
-    const styleId = `wikidown-style-${id}`
+    const styleId = `gowiki-style-${id}`
     if (document.getElementById(styleId)) continue
     const style = document.createElement("style")
     style.id = styleId
@@ -114,7 +114,7 @@ function clearContent() {
 function renderView() {
   clearContent()
   const wrapper = document.createElement("div")
-  wrapper.className = "wikidown-view"
+  wrapper.className = "gowiki-view"
   const root = document.createElement("div")
   root.className = "ProseMirror"
   const serializer = DOMSerializer.fromSchema(schema)
@@ -126,7 +126,7 @@ function renderView() {
 function renderEdit() {
   clearContent()
   const editorEl = document.createElement("div")
-  editorEl.id = "editor"
+  editorEl.id = "gowiki-editor"
   contentRoot.appendChild(editorEl)
 
   const listKeymap = keymap({
@@ -153,7 +153,7 @@ function renderEdit() {
 function makeActionButton(label, onClick) {
   const btn = document.createElement("button")
   btn.type = "button"
-  btn.className = "wikidown-action-btn"
+  btn.className = "gowiki-action-btn"
   btn.textContent = label
   btn.addEventListener("click", onClick)
   return btn
@@ -163,7 +163,7 @@ function renderActions() {
   actionsRoot.innerHTML = ""
 
   const pageLabel = document.createElement("div")
-  pageLabel.className = "wikidown-status"
+  pageLabel.className = "gowiki-status"
   pageLabel.textContent = `Page: /${pagePath}`
   actionsRoot.appendChild(pageLabel)
 
@@ -187,7 +187,7 @@ function renderActions() {
   }
 
   const status = document.createElement("div")
-  status.className = "wikidown-status"
+  status.className = "gowiki-status"
   status.textContent = statusText
   actionsRoot.appendChild(status)
 }

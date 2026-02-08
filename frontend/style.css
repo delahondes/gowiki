@@ -22,7 +22,7 @@
   top: 10px;
 }
 
-.wikidown-action-btn {
+.gowiki-action-btn {
   display: block;
   width: 100%;
   padding: 8px 10px;
@@ -34,16 +34,16 @@
   cursor: pointer;
 }
 
-.wikidown-action-btn:hover {
+.gowiki-action-btn:hover {
   background: #ececec;
 }
 
-.wikidown-action-btn:disabled {
+.gowiki-action-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.wikidown-status {
+.gowiki-status {
   min-height: 1.2em;
   color: #666;
   font-size: 0.9em;
@@ -55,6 +55,6 @@
   min-height: 120px;
 }
 
-.wikidown-view .ProseMirror {
+.gowiki-view .ProseMirror {
   min-height: 0;
 }

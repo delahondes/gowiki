@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"wikidown/backend/internal/api"
-	"wikidown/backend/internal/storage"
+	"gowiki/backend/internal/api"
+	"gowiki/backend/internal/storage"
 )
 
 func main() {
@@ -25,7 +25,7 @@ func main() {
 	}
 
 	router := api.NewRouter(store, *serveWeb, filepath.Clean(*webDir))
-	log.Printf("wikidown backend listening on %s", *addr)
+	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)
 	}

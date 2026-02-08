@@ -7,10 +7,10 @@ type PanelState = {
   enabled: boolean
 }
 
-const panelKey = new PluginKey<PanelState>("nodePropertiesPanel")
+const panelKey = new PluginKey<PanelState>("gowiki.nodePropertiesPanel")
 
 const panelStyles = `
-.wikidown-props-panel {
+.gowiki-props-panel {
   display: inline-flex;
   gap: 8px;
   align-items: center;
@@ -22,12 +22,12 @@ const panelStyles = `
   font-size: 0.85em;
 }
 
-.wikidown-props-panel input {
+.gowiki-props-panel input {
   width: 8em;
   font-size: 0.95em;
 }
 
-.wikidown-props-label {
+.gowiki-props-label {
   color: #444;
 }
 `
@@ -39,11 +39,11 @@ function buildPanel(
   properties: NodePropertySpec[]
 ) {
   const wrap = document.createElement("div")
-  wrap.className = "wikidown-props-panel"
+  wrap.className = "gowiki-props-panel"
 
   for (const prop of properties) {
     const label = document.createElement("span")
-    label.className = "wikidown-props-label"
+    label.className = "gowiki-props-label"
     label.textContent = prop.label
 
     const input = document.createElement("input")
@@ -116,7 +116,7 @@ function propertiesPlugin(registry: Registry) {
           view => buildPanel(view, target.node, target.pos, target.props),
           {
             side: -1,
-            key: "wikidown-props-panel",
+            key: "gowiki-props-panel",
             stopEvent: () => true,
           }
         )

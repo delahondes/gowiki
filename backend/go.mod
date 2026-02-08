@@ -1,4 +1,4 @@
-module wikidown/backend
+module gowiki/backend
 
 go 1.22
 
