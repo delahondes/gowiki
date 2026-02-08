@@ -34,6 +34,7 @@ let mode = "view"
 let editMode = "visual"
 let currentMarkdown = defaultMarkdown
 let currentDoc = markdownToPM(defaultMarkdown, registry)
+let editBaselineMarkdown = defaultMarkdown
 let editorView = null
 let rawEditor = null
 let statusText = ""
@@ -96,6 +97,14 @@ function setStatus(text) {
 }
 
 function setMode(nextMode) {
+  if (mode !== "edit" && nextMode === "edit") {
+    editBaselineMarkdown = currentMarkdown
+  }
+
+  if (mode === "edit" && nextMode !== "edit") {
+    editBaselineMarkdown = currentMarkdown
+  }
+
   mode = nextMode
   if (mode === "edit") {
     renderEdit(editMode)
@@ -210,6 +219,11 @@ function renderActions() {
   actionsRoot.appendChild(pageLabel)
 
   if (mode === "edit") {
+    const editModeLabel = document.createElement("div")
+    editModeLabel.className = "gowiki-status"
+    editModeLabel.textContent = `Edit mode: ${editMode}`
+    actionsRoot.appendChild(editModeLabel)
+
     if (editMode === "visual") {
       actionsRoot.appendChild(
         makeActionButton("Switch to raw", () => {
@@ -234,6 +248,11 @@ function renderActions() {
         void saveAndMaybeSwitch(true)
       })
     )
+    actionsRoot.appendChild(
+      makeActionButton("Cancel", () => {
+        cancelEdit()
+      })
+    )
   } else {
     actionsRoot.appendChild(
       makeActionButton("Edit", () => {
@@ -246,6 +265,20 @@ function renderActions() {
   status.className = "gowiki-status"
   status.textContent = statusText
   actionsRoot.appendChild(status)
+}
+
+function cancelEdit() {
+  if (mode !== "edit") return
+  currentMarkdown = editBaselineMarkdown
+  try {
+    currentDoc = markdownToPM(currentMarkdown, registry)
+  } catch (err) {
+    console.error("Cancel failed while rebuilding document", err)
+    setStatus("Cancel failed")
+    return
+  }
+  setStatus("Edit cancelled")
+  setMode("view")
 }
 
 async function saveAndMaybeSwitch(toView) {
@@ -264,6 +297,7 @@ async function saveAndMaybeSwitch(toView) {
     await savePage(pagePath, markdown)
     currentMarkdown = markdown
     currentDoc = markdownToPM(markdown, registry)
+    editBaselineMarkdown = markdown
     setStatus(`Saved ${new Date().toLocaleTimeString()}`)
     if (toView) {
       setMode("view")
