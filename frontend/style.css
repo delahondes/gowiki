@@ -1,5 +1,60 @@
+#app {
+  box-sizing: border-box;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  max-width: 1100px;
+  margin: 12px auto;
+  padding: 0 12px;
+}
+
+#content {
+  flex: 1;
+  min-width: 0;
+}
+
+#actions {
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 10px;
+}
+
+.wikidown-action-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  background: #f7f7f7;
+  color: #222;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wikidown-action-btn:hover {
+  background: #ececec;
+}
+
+.wikidown-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wikidown-status {
+  min-height: 1.2em;
+  color: #666;
+  font-size: 0.9em;
+}
+
 .ProseMirror {
   border: 1px solid #aaa;
   padding: 6px;
   min-height: 120px;
+}
+
+.wikidown-view .ProseMirror {
+  min-height: 0;
 }

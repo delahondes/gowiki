@@ -7,7 +7,7 @@ dev:
 	./scripts/dev.sh
 
 dev-backend:
-	go run ./backend/cmd/server -addr :8080 -data-dir ./backend/data/pages
+	cd backend && go run ./cmd/server -addr :8080 -data-dir ./data/pages
 
 dev-frontend:
 	npm --prefix frontend run dev
@@ -16,4 +16,4 @@ build-frontend:
 	npm --prefix frontend run build
 
 run-prod:
-	go run ./backend/cmd/server -addr :8080 -data-dir ./backend/data/pages -serve-web -web-dir ./frontend/dist
+	cd backend && go run ./cmd/server -addr :8080 -data-dir ./data/pages -serve-web -web-dir ../frontend/dist

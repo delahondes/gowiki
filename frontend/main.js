@@ -1,10 +1,11 @@
 import { EditorState } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
+import { DOMSerializer } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
 import { baseKeymap } from "prosemirror-commands"
 import { history } from "prosemirror-history"
-import { menuBar,MenuItem } from "prosemirror-menu"
+import { menuBar, MenuItem } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
@@ -14,8 +15,49 @@ import { buildRegistry } from "./compiler/build_registry.ts"
 const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
 registry.bindSchema(schema)
+
 const pagePath =
   new URLSearchParams(window.location.search).get("page") ?? "home"
+const defaultMarkdown = `
+## ProseMirror
+
+This is editable text.
+
+- One
+- Two
+`
+
+const contentRoot = document.querySelector("#content")
+const actionsRoot = document.querySelector("#actions")
+
+let mode = "view"
+let currentMarkdown = defaultMarkdown
+let currentDoc = markdownToPM(defaultMarkdown, registry)
+let editorView = null
+let statusText = ""
+
+const menu = buildMenuItems(schema)
+registry.onCommand((namespace, name, cmd) => {
+  const label = `${namespace}:${name}`
+  const item = new MenuItem({
+    label,
+    title: label,
+    run: cmd,
+    enable: state => cmd(state),
+  })
+  menu.fullMenu.push([item])
+})
+
+function applyStyles(styles) {
+  for (const { id, css } of styles) {
+    const styleId = `wikidown-style-${id}`
+    if (document.getElementById(styleId)) continue
+    const style = document.createElement("style")
+    style.id = styleId
+    style.textContent = css
+    document.head.appendChild(style)
+  }
+}
 
 function encodePagePath(path) {
   return path
@@ -46,132 +88,53 @@ async function savePage(path, markdown) {
   return await resp.json()
 }
 
-function applyStyles(styles) {
-  for (const { id, css } of styles) {
-    const styleId = `wikidown-style-${id}`
-    if (document.getElementById(styleId)) continue
-    const style = document.createElement("style")
-    style.id = styleId
-    style.textContent = css
-    document.head.appendChild(style)
-  }
+function setStatus(text) {
+  statusText = text
+  renderActions()
 }
 
-applyStyles(registry.getStyles())
+function setMode(nextMode) {
+  mode = nextMode
+  if (mode === "edit") {
+    renderEdit()
+  } else {
+    renderView()
+  }
+  renderActions()
+}
 
-const menu = buildMenuItems(schema)
-const defaultMarkdown = `
-## ProseMirror
+function clearContent() {
+  if (editorView) {
+    editorView.destroy()
+    editorView = null
+  }
+  contentRoot.innerHTML = ""
+}
 
-This is editable text.
+function renderView() {
+  clearContent()
+  const wrapper = document.createElement("div")
+  wrapper.className = "wikidown-view"
+  const root = document.createElement("div")
+  root.className = "ProseMirror"
+  const serializer = DOMSerializer.fromSchema(schema)
+  root.appendChild(serializer.serializeFragment(currentDoc.content))
+  wrapper.appendChild(root)
+  contentRoot.appendChild(wrapper)
+}
 
-- One
-- Two
-`
+function renderEdit() {
+  clearContent()
+  const editorEl = document.createElement("div")
+  editorEl.id = "editor"
+  contentRoot.appendChild(editorEl)
 
-registry.onCommand((namespace, name, cmd) => {
-  const label = `${namespace}:${name}`
-
-  const item = new MenuItem({
-    label,
-    title: label,
-    run: cmd,
-    enable: state => cmd(state)
+  const listKeymap = keymap({
+    Enter: splitListItem(schema.nodes.list_item),
   })
 
-  menu.fullMenu.push([item])
-})
-
-function dumpDocCommand() {
-  return (state) => {
-    console.log("=== ProseMirror doc ===")
-    console.log(state.doc)
-    console.log("=== as JSON ===")
-    console.log(JSON.stringify(state.doc.toJSON(), null, 2))
-    return true
-  }
-}
-
-const dumpDocMenuItem = new MenuItem({
-  label: "Dump",
-  title: "Dump ProseMirror document to console",
-  run: dumpDocCommand()
-})
-
-function dumpMDCommand() {
-  return (state) => {
-    const md = pmToMarkdown(state.doc, registry)
-    console.log("=== Markdown ===")
-    console.log(md)
-    return true
-  }
-}
-
-const dumpMDMenuItem = new MenuItem({
-  label: "DumpMD",
-  title: "Dump document as Markdown",
-  run: dumpMDCommand()
-})
-
-let view = null
-
-function saveCommand() {
-  return state => {
-    const markdown = pmToMarkdown(state.doc, registry)
-    void savePage(pagePath, markdown)
-      .then(() => {
-        console.log(`Saved /${pagePath}`)
-      })
-      .catch(err => {
-        console.error("Save failed", err)
-      })
-    return true
-  }
-}
-
-function reloadCommand() {
-  return () => {
-    void fetchPage(pagePath)
-      .then(page => {
-        const markdown = page?.markdown ?? defaultMarkdown
-        const nextState = EditorState.create({
-          doc: markdownToPM(markdown, registry),
-          schema,
-          plugins: view.state.plugins,
-        })
-        view.updateState(nextState)
-        console.log(`Reloaded /${pagePath}`)
-      })
-      .catch(err => {
-        console.error("Reload failed", err)
-      })
-    return true
-  }
-}
-
-const saveMenuItem = new MenuItem({
-  label: "Save",
-  title: `Save /${pagePath}`,
-  run: saveCommand(),
-})
-
-const reloadMenuItem = new MenuItem({
-  label: "Reload",
-  title: `Reload /${pagePath}`,
-  run: reloadCommand(),
-})
-
-menu.fullMenu.push([dumpDocMenuItem, dumpMDMenuItem, saveMenuItem, reloadMenuItem])
-
-const listKeymap = keymap({
-  Enter: splitListItem(schema.nodes.list_item)
-})
-
-async function bootstrap() {
-  const page = await fetchPage(pagePath)
-  const markdown = page?.markdown ?? defaultMarkdown
   const state = EditorState.create({
-    doc: markdownToPM(markdown, registry),
+    doc: currentDoc,
     schema,
     plugins: [
       listKeymap,
@@ -179,16 +142,83 @@ async function bootstrap() {
       keymap(baseKeymap),
       ...registry.getEditorPlugins(),
       menuBar({
-        content: menu.fullMenu
-      })
-    ]
+        content: menu.fullMenu,
+      }),
+    ],
   })
 
-  view = new EditorView(document.querySelector("#editor"), {
-    state
-  })
+  editorView = new EditorView(editorEl, { state })
+}
+
+function makeActionButton(label, onClick) {
+  const btn = document.createElement("button")
+  btn.type = "button"
+  btn.className = "wikidown-action-btn"
+  btn.textContent = label
+  btn.addEventListener("click", onClick)
+  return btn
+}
+
+function renderActions() {
+  actionsRoot.innerHTML = ""
+
+  const pageLabel = document.createElement("div")
+  pageLabel.className = "wikidown-status"
+  pageLabel.textContent = `Page: /${pagePath}`
+  actionsRoot.appendChild(pageLabel)
+
+  if (mode === "edit") {
+    actionsRoot.appendChild(
+      makeActionButton("Save & continue", () => {
+        void saveAndMaybeSwitch(false)
+      })
+    )
+    actionsRoot.appendChild(
+      makeActionButton("Save", () => {
+        void saveAndMaybeSwitch(true)
+      })
+    )
+  } else {
+    actionsRoot.appendChild(
+      makeActionButton("Edit", () => {
+        setMode("edit")
+      })
+    )
+  }
+
+  const status = document.createElement("div")
+  status.className = "wikidown-status"
+  status.textContent = statusText
+  actionsRoot.appendChild(status)
+}
+
+async function saveAndMaybeSwitch(toView) {
+  if (mode !== "edit" || !editorView) return
+  try {
+    const markdown = pmToMarkdown(editorView.state.doc, registry)
+    await savePage(pagePath, markdown)
+    currentMarkdown = markdown
+    currentDoc = markdownToPM(markdown, registry)
+    setStatus(`Saved ${new Date().toLocaleTimeString()}`)
+    if (toView) {
+      setMode("view")
+    }
+  } catch (err) {
+    console.error("Save failed", err)
+    setStatus("Save failed")
+  }
+}
+
+async function bootstrap() {
+  applyStyles(registry.getStyles())
+  renderActions()
+  const page = await fetchPage(pagePath)
+  currentMarkdown = page?.markdown ?? defaultMarkdown
+  currentDoc = markdownToPM(currentMarkdown, registry)
+  setMode("view")
 }
 
 bootstrap().catch(err => {
-  console.error("Failed to start editor", err)
+  console.error("Failed to start frontend", err)
+  setStatus("Startup failed")
 })
