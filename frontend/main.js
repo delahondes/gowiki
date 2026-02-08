@@ -31,9 +31,11 @@ const contentRoot = document.querySelector("#content")
 const actionsRoot = document.querySelector("#actions")
 
 let mode = "view"
+let editMode = "visual"
 let currentMarkdown = defaultMarkdown
 let currentDoc = markdownToPM(defaultMarkdown, registry)
 let editorView = null
+let rawEditor = null
 let statusText = ""
 
 const menu = buildMenuItems(schema)
@@ -96,10 +98,35 @@ function setStatus(text) {
 function setMode(nextMode) {
   mode = nextMode
   if (mode === "edit") {
-    renderEdit()
+    renderEdit(editMode)
   } else {
     renderView()
   }
+  renderActions()
+}
+
+function setEditMode(nextEditMode) {
+  if (mode !== "edit") return
+  if (nextEditMode === editMode) return
+
+  if (editMode === "visual" && editorView) {
+    currentMarkdown = pmToMarkdown(editorView.state.doc, registry)
+  } else if (editMode === "raw" && rawEditor) {
+    currentMarkdown = rawEditor.value
+  }
+
+  if (nextEditMode === "visual") {
+    try {
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    } catch (err) {
+      console.error("Switch to visual failed", err)
+      setStatus("Invalid Markdown for visual mode")
+      return
+    }
+  }
+
+  editMode = nextEditMode
+  renderEdit(editMode)
   renderActions()
 }
 
@@ -108,6 +135,7 @@ function clearContent() {
     editorView.destroy()
     editorView = null
   }
+  rawEditor = null
   contentRoot.innerHTML = ""
 }
 
@@ -123,8 +151,22 @@ function renderView() {
   contentRoot.appendChild(wrapper)
 }
 
-function renderEdit() {
+function renderRawEdit() {
+  const editorEl = document.createElement("textarea")
+  editorEl.id = "gowiki-raw-editor"
+  editorEl.className = "gowiki-raw-editor"
+  editorEl.value = currentMarkdown
+  contentRoot.appendChild(editorEl)
+  rawEditor = editorEl
+}
+
+function renderEdit(nextEditMode) {
   clearContent()
+  if (nextEditMode === "raw") {
+    renderRawEdit()
+    return
+  }
+
   const editorEl = document.createElement("div")
   editorEl.id = "gowiki-editor"
   contentRoot.appendChild(editorEl)
@@ -168,6 +210,20 @@ function renderActions() {
   actionsRoot.appendChild(pageLabel)
 
   if (mode === "edit") {
+    if (editMode === "visual") {
+      actionsRoot.appendChild(
+        makeActionButton("Switch to raw", () => {
+          setEditMode("raw")
+        })
+      )
+    } else {
+      actionsRoot.appendChild(
+        makeActionButton("Switch to visual", () => {
+          setEditMode("visual")
+        })
+      )
+    }
+
     actionsRoot.appendChild(
       makeActionButton("Save & continue", () => {
         void saveAndMaybeSwitch(false)
@@ -193,9 +249,18 @@ function renderActions() {
 }
 
 async function saveAndMaybeSwitch(toView) {
-  if (mode !== "edit" || !editorView) return
+  if (mode !== "edit") return
   try {
-    const markdown = pmToMarkdown(editorView.state.doc, registry)
+    let markdown = currentMarkdown
+
+    if (editMode === "visual") {
+      if (!editorView) return
+      markdown = pmToMarkdown(editorView.state.doc, registry)
+    } else {
+      if (!rawEditor) return
+      markdown = rawEditor.value
+    }
+
     await savePage(pagePath, markdown)
     currentMarkdown = markdown
     currentDoc = markdownToPM(markdown, registry)

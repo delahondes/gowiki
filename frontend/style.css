@@ -71,6 +71,18 @@
   border: 3px solid #1e3f72;
 }
 
+.gowiki-raw-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 360px;
+  padding: 10px;
+  border: 3px solid #1e3f72;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 @media (max-width: 900px) {
   #app {
     grid-template-columns: 1fr;
