@@ -1,4 +1,5 @@
 import { Registry } from "./registry"
+import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import type { NodeSpec, MarkSpec } from "prosemirror-model"
@@ -44,6 +45,18 @@ export function registerCoreNodes(reg: Registry) {
  * -------------------------------------------------- */
 
 function registerParagraph(reg: Registry) {
+  function writeTextWithExplicitBreaks(ctx: CompileContext, content: string) {
+    const chunks = content.split("\\n")
+    for (let i = 0; i < chunks.length; i++) {
+      if (chunks[i].length > 0) {
+        ctx.text(chunks[i])
+      }
+      if (i < chunks.length - 1) {
+        ctx.push(ctx.schema.nodes.hard_break.create())
+      }
+    }
+  }
+
   reg.registerNode("paragraph_open", {
     open(ctx) {
       ctx.open(ctx.schema.nodes.paragraph.create())
@@ -58,12 +71,17 @@ function registerParagraph(reg: Registry) {
 
   reg.registerText("text", {
     run(ctx, tok) {
-      ctx.text(tok.content ?? "")
+      writeTextWithExplicitBreaks(ctx, tok.content ?? "")
     },
   })
 
   reg.registerText("softbreak", {
     run(ctx) {
+      // Single newline becomes a hard break only in top-level paragraphs.
+      if (ctx.currentNodeName() === "paragraph" && ctx.openDepth() === 1) {
+        ctx.push(ctx.schema.nodes.hard_break.create())
+        return
+      }
       ctx.text(" ")
     },
   })
@@ -243,4 +261,9 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("em", { open: "*", close: "*" })
   reg.registerPMMark("strong", { open: "**", close: "**" })
   reg.registerPMMark("code", { open: "`", close: "`" })
+  reg.registerPMNode("hard_break", {
+    print() {
+      return "\\n"
+    },
+  })
 }

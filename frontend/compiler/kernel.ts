@@ -48,6 +48,15 @@ export class CompileContext {
     this.stack.push({ node, children: [] })
   }
 
+  openDepth(): number {
+    return this.stack.length
+  }
+
+  currentNodeName(): string | null {
+    const top = this.stack[this.stack.length - 1]
+    return top ? top.node.type.name : null
+  }
+
   close() {
     const frame = this.stack.pop()
     if (!frame) throw new Error("close(): unbalanced close")

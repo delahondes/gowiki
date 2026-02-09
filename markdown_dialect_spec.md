@@ -173,3 +173,30 @@ Rendering rules:
 - hard line break → `<br>`
 
 Round-trip between raw, edit, and view modes must be lossless.
+
+## Dialect Compliance Matrix
+
+Status legend:
+- `implemented`: behavior is present in current frontend pipeline.
+- `partial`: behavior exists but with known gaps or ambiguity.
+- `planned`: not implemented yet.
+
+| Area | Rule | Status | Notes |
+| -- | -- | -- | -- |
+| Inline emphasis | `*italic*`, `**bold**`, `` `code` `` | `implemented` | Implemented via current mark handlers and printers. |
+| Strike-through | `~~text~~` | `planned` | Not currently wired in core marks. |
+| Underline | `_text_` means underline (not italic) | `planned` | Conflicts with CommonMark emphasis; requires explicit dialect parser/printer rules. |
+| Headings | ATX headings (`#` .. `######`) | `implemented` | Setext headings are not implemented by custom handlers. |
+| Lists (unordered) | `- item` | `implemented` | Core list handlers support this form. |
+| Lists (ordered) | `. item` custom syntax | `planned` | Current parser expects standard ordered-list tokens, not this custom notation. |
+| Numbered headings | `## . Heading` | `planned` | Not implemented yet. |
+| Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
+| Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
+| Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
+| Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |
+| HTML entities | not interpreted specially | `partial` | Not explicitly transformed by custom logic; current behavior follows markdown-it defaults. |
+| Line breaks in top-level paragraphs | single newline -> hard break | `implemented` | Implemented with context-aware `softbreak` handling. |
+| Literal `\\n` escape | hard break in text contexts | `implemented` | Implemented in text token handler and serialized back from PM `hard_break`. |
+| Two-spaces line break rule | disabled semantically | `partial` | Current behavior approximates target but remains dependent on markdown-it tokenization details. |
+| Structured blocks newline semantics | unchanged for lists/tables/quotes/code | `implemented` | Softbreak re-interpretation is limited to top-level paragraphs. |
+| Deterministic round-trip | raw <-> visual/view equivalence | `partial` | Core paths are stable; edge cases still exist for unsupported syntax and future dialect extensions. |
