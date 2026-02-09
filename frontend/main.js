@@ -148,6 +148,20 @@ function clearContent() {
   contentRoot.innerHTML = ""
 }
 
+function insertHardBreakCommand() {
+  return (state, dispatch) => {
+    const hardBreak = state.schema.nodes.hard_break
+    if (!hardBreak) return false
+    if (!dispatch) return true
+    dispatch(
+      state.tr
+        .replaceSelectionWith(hardBreak.create())
+        .scrollIntoView()
+    )
+    return true
+  }
+}
+
 function renderView() {
   clearContent()
   const wrapper = document.createElement("div")
@@ -182,6 +196,7 @@ function renderEdit(nextEditMode) {
 
   const listKeymap = keymap({
     Enter: splitListItem(schema.nodes.list_item),
+    "Alt-Enter": insertHardBreakCommand(),
   })
 
   const state = EditorState.create({
