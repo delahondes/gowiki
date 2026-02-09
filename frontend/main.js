@@ -84,6 +84,38 @@ function findLinkMarkInMarks(marks, linkType) {
   return marks.find(mark => mark.type === linkType) ?? null
 }
 
+function findLinkRangeAtPosition(doc, linkType, pos) {
+  const $from = doc.resolve(pos)
+  const parent = $from.parent
+  const parentStart = $from.start()
+
+  let childInfo = parent.childAfter($from.parentOffset)
+  if (!childInfo.node && $from.parentOffset > 0) {
+    childInfo = parent.childBefore($from.parentOffset)
+  }
+  if (!childInfo.node) return null
+
+  const link = findLinkMarkInMarks(childInfo.node.marks, linkType)
+  if (!link) return null
+
+  let from = parentStart + childInfo.offset
+  let to = from + childInfo.node.nodeSize
+
+  for (let i = childInfo.index - 1; i >= 0; i--) {
+    const prev = parent.child(i)
+    if (!findLinkMarkInMarks(prev.marks, linkType)) break
+    from -= prev.nodeSize
+  }
+
+  for (let i = childInfo.index + 1; i < parent.childCount; i++) {
+    const next = parent.child(i)
+    if (!findLinkMarkInMarks(next.marks, linkType)) break
+    to += next.nodeSize
+  }
+
+  return { from, to, mark: link }
+}
+
 function classifyLinkTarget(rawTarget) {
   const target = (rawTarget ?? "").trim()
   if (target.length === 0) {
@@ -220,36 +252,69 @@ function findLinkRangeAtCursor(state) {
   const linkType = state.schema.marks.link
   if (!linkType) return null
   if (!state.selection.empty) return null
+  return findLinkRangeAtPosition(state.doc, linkType, state.selection.from)
+}
 
-  const $from = state.selection.$from
-  const parent = $from.parent
-  const parentStart = $from.start()
+function isSameLinkMark(a, b) {
+  if (!a || !b) return false
+  return a.type === b.type && (a.attrs?.href ?? "") === (b.attrs?.href ?? "")
+}
 
-  let childInfo = parent.childAfter($from.parentOffset)
-  if (!childInfo.node && $from.parentOffset > 0) {
-    childInfo = parent.childBefore($from.parentOffset)
-  }
-  if (!childInfo.node) return null
+function findLinkRangeForSelection(state) {
+  const linkType = state.schema.marks.link
+  if (!linkType) return null
+  if (state.selection.empty) return findLinkRangeAtCursor(state)
 
-  const link = findLinkMarkInMarks(childInfo.node.marks, linkType)
-  if (!link) return null
+  const { from, to } = state.selection
+  let selectedMark = null
+  let hasNonWhitespace = false
+  let invalid = false
 
-  let from = parentStart + childInfo.offset
-  let to = from + childInfo.node.nodeSize
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isText || invalid) return
+    const start = Math.max(from, pos)
+    const end = Math.min(to, pos + node.nodeSize)
+    if (end <= start) return
 
-  for (let i = childInfo.index - 1; i >= 0; i--) {
-    const prev = parent.child(i)
-    if (!findLinkMarkInMarks(prev.marks, linkType)) break
-    from -= prev.nodeSize
-  }
+    const chunk = (node.text ?? "").slice(start - pos, end - pos)
+    if (chunk.trim().length === 0) return
+    hasNonWhitespace = true
 
-  for (let i = childInfo.index + 1; i < parent.childCount; i++) {
-    const next = parent.child(i)
-    if (!findLinkMarkInMarks(next.marks, linkType)) break
-    to += next.nodeSize
-  }
+    const mark = findLinkMarkInMarks(node.marks, linkType)
+    if (!mark) {
+      invalid = true
+      return
+    }
+    if (!selectedMark) {
+      selectedMark = mark
+      return
+    }
+    if (!isSameLinkMark(selectedMark, mark)) {
+      invalid = true
+    }
+  })
 
-  return { from, to, mark: link }
+  if (invalid || !hasNonWhitespace || !selectedMark) return null
+
+  let anchor = null
+  state.doc.nodesBetween(from, to, (node, pos) => {
+    if (!node.isText || anchor !== null) return
+    const start = Math.max(from, pos)
+    const end = Math.min(to, pos + node.nodeSize)
+    if (end <= start) return
+
+    const chunk = (node.text ?? "").slice(start - pos, end - pos)
+    if (chunk.trim().length === 0) return
+    const mark = findLinkMarkInMarks(node.marks, linkType)
+    if (mark && isSameLinkMark(selectedMark, mark)) {
+      anchor = start
+    }
+  })
+  if (anchor === null) return null
+
+  const linkAtAnchor = findLinkRangeAtPosition(state.doc, linkType, anchor)
+  if (!linkAtAnchor || !isSameLinkMark(selectedMark, linkAtAnchor.mark)) return null
+  return linkAtAnchor
 }
 
 function findWordRangeAtCursor(state) {
@@ -302,13 +367,13 @@ function setExternalLinkCommand() {
     let currentHref = ""
     let currentText = ""
 
-    const linkAtCursor = findLinkRangeAtCursor(state)
-    if (linkAtCursor) {
-      target = { from: linkAtCursor.from, to: linkAtCursor.to }
-      currentHref = linkAtCursor.mark.attrs.href ?? ""
+    const linkForSelection = findLinkRangeForSelection(state)
+    if (linkForSelection) {
+      target = { from: linkForSelection.from, to: linkForSelection.to }
+      currentHref = linkForSelection.mark.attrs.href ?? ""
       currentText = state.doc.textBetween(
-        linkAtCursor.from,
-        linkAtCursor.to,
+        linkForSelection.from,
+        linkForSelection.to,
         ""
       )
     } else if (!state.selection.empty) {
@@ -331,11 +396,11 @@ function setExternalLinkCommand() {
       if (!activeLinkType) return
 
       let activeTarget = null
-      const activeLinkAtCursor = findLinkRangeAtCursor(activeState)
-      if (activeLinkAtCursor) {
+      const activeLinkForSelection = findLinkRangeForSelection(activeState)
+      if (activeLinkForSelection) {
         activeTarget = {
-          from: activeLinkAtCursor.from,
-          to: activeLinkAtCursor.to,
+          from: activeLinkForSelection.from,
+          to: activeLinkForSelection.to,
         }
       } else if (!activeState.selection.empty) {
         activeTarget = {
