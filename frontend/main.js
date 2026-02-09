@@ -428,6 +428,34 @@ async function savePage(path, markdown) {
   return await resp.json()
 }
 
+function normalizeMarkdownForStorage(markdown) {
+  const doc = markdownToPM(markdown, registry)
+  const normalizedMarkdown = pmToMarkdown(doc, registry)
+  return {
+    markdown: normalizedMarkdown,
+    doc,
+    changed: normalizedMarkdown !== markdown,
+  }
+}
+
+function applyNormalizedEditState(normalized, refreshVisual = false) {
+  currentMarkdown = normalized.markdown
+  currentDoc = normalized.doc
+
+  if (mode !== "edit") return
+
+  if (editMode === "raw" && rawEditor) {
+    if (rawEditor.value !== normalized.markdown) {
+      rawEditor.value = normalized.markdown
+    }
+    return
+  }
+
+  if (editMode === "visual" && editorView && refreshVisual && normalized.changed) {
+    renderEdit("visual")
+  }
+}
+
 function setStatus(text) {
   statusText = text
   renderActions()
@@ -455,20 +483,21 @@ function setEditMode(nextEditMode) {
   if (mode !== "edit") return
   if (nextEditMode === editMode) return
 
+  let markdown = currentMarkdown
   if (editMode === "visual" && editorView) {
-    currentMarkdown = pmToMarkdown(editorView.state.doc, registry)
+    markdown = pmToMarkdown(editorView.state.doc, registry)
   } else if (editMode === "raw" && rawEditor) {
-    currentMarkdown = rawEditor.value
+    markdown = rawEditor.value
   }
 
-  if (nextEditMode === "visual") {
-    try {
-      currentDoc = markdownToPM(currentMarkdown, registry)
-    } catch (err) {
-      console.error("Switch to visual failed", err)
-      setStatus("Invalid Markdown for visual mode")
-      return
-    }
+  try {
+    const normalized = normalizeMarkdownForStorage(markdown)
+    currentMarkdown = normalized.markdown
+    currentDoc = normalized.doc
+  } catch (err) {
+    console.error("Switch mode failed", err)
+    setStatus("Invalid Markdown")
+    return
   }
 
   editMode = nextEditMode
@@ -516,6 +545,15 @@ function renderRawEdit() {
   editorEl.id = "gowiki-raw-editor"
   editorEl.className = "gowiki-raw-editor"
   editorEl.value = currentMarkdown
+  editorEl.addEventListener("blur", () => {
+    if (mode !== "edit" || editMode !== "raw") return
+    try {
+      const normalized = normalizeMarkdownForStorage(editorEl.value)
+      applyNormalizedEditState(normalized)
+    } catch {
+      // Keep invalid in-progress raw text unchanged.
+    }
+  })
   contentRoot.appendChild(editorEl)
   rawEditor = editorEl
 }
@@ -550,7 +588,22 @@ function renderEdit(nextEditMode) {
     ],
   })
 
-  editorView = new EditorView(editorEl, { state })
+  editorView = new EditorView(editorEl, {
+    state,
+    handleDOMEvents: {
+      blur(view) {
+        if (mode !== "edit" || editMode !== "visual") return false
+        try {
+          const serialized = pmToMarkdown(view.state.doc, registry)
+          const normalized = normalizeMarkdownForStorage(serialized)
+          applyNormalizedEditState(normalized, true)
+        } catch {
+          // Keep edit session live while user content is in progress.
+        }
+        return false
+      },
+    },
+  })
 }
 
 function makeActionButton(label, onClick) {
@@ -646,10 +699,13 @@ async function saveAndMaybeSwitch(toView) {
       markdown = rawEditor.value
     }
 
-    await savePage(pagePath, markdown)
-    currentMarkdown = markdown
-    currentDoc = markdownToPM(markdown, registry)
-    editBaselineMarkdown = markdown
+    const normalized = normalizeMarkdownForStorage(markdown)
+    await savePage(pagePath, normalized.markdown)
+    applyNormalizedEditState(
+      normalized,
+      !toView && mode === "edit" && editMode === "visual"
+    )
+    editBaselineMarkdown = normalized.markdown
     setStatus(`Saved ${new Date().toLocaleTimeString()}`)
     if (toView) {
       setMode("view")
