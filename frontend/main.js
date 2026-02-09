@@ -1,4 +1,4 @@
-import { EditorState } from "prosemirror-state"
+import { EditorState, TextSelection } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
 import { DOMSerializer } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
@@ -16,8 +16,16 @@ const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
 registry.bindSchema(schema)
 
-const pagePath =
-  new URLSearchParams(window.location.search).get("page") ?? "home"
+function resolvePagePathFromLocation(loc) {
+  const path = decodeURIComponent(loc.pathname || "/")
+  if (path === "/") return "index"
+  const trimmed = path.replace(/^\/+|\/+$/g, "")
+  if (!trimmed) return "index"
+  return trimmed
+}
+
+const pagePath = resolvePagePathFromLocation(window.location)
+const pageDisplayPath = pagePath === "index" ? "/" : `/${pagePath}`
 const defaultMarkdown = `
 ## Gowiki
 
@@ -74,6 +82,138 @@ registry.onCommand((namespace, name, cmd) => {
 
 function findLinkMarkInMarks(marks, linkType) {
   return marks.find(mark => mark.type === linkType) ?? null
+}
+
+function classifyLinkTarget(rawTarget) {
+  const target = (rawTarget ?? "").trim()
+  if (target.length === 0) {
+    return { ok: false, error: "URL/path cannot be empty." }
+  }
+  if (/^https?:\/\//i.test(target)) {
+    return { ok: true, normalized: target, kind: "external" }
+  }
+  if (/^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(target)) {
+    return { ok: true, normalized: target, kind: "internal" }
+  }
+  return {
+    ok: false,
+    error:
+      "Use http://, https://, or an internal path starting with '/', './', or '../'.",
+  }
+}
+
+function defaultLinkTextForTarget(target) {
+  if (/^https?:\/\//i.test(target)) return target
+  const pathOnly = target.split(/[?#]/)[0]
+  const clean = pathOnly.replace(/\/+$/, "")
+  const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
+  return parts[parts.length - 1] ?? "index"
+}
+
+function promptLinkForm(initialTarget, initialText) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-link-modal-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-link-modal"
+
+    const title = document.createElement("div")
+    title.className = "gowiki-link-modal-title"
+    title.textContent = "Set link target"
+
+    const textLabel = document.createElement("label")
+    textLabel.className = "gowiki-link-modal-label"
+    textLabel.textContent = "Link text"
+
+    const textInput = document.createElement("input")
+    textInput.type = "text"
+    textInput.className = "gowiki-link-modal-input"
+    textInput.value = initialText ?? ""
+    textInput.placeholder = "(optional)"
+
+    const targetLabel = document.createElement("label")
+    targetLabel.className = "gowiki-link-modal-label"
+    targetLabel.textContent = "Link target"
+
+    const targetInput = document.createElement("input")
+    targetInput.type = "text"
+    targetInput.className = "gowiki-link-modal-input"
+    targetInput.value = initialTarget
+    targetInput.placeholder = "https://example.org or /namespace/page"
+
+    const warning = document.createElement("div")
+    warning.className = "gowiki-link-modal-warning"
+
+    const buttons = document.createElement("div")
+    buttons.className = "gowiki-link-modal-actions"
+
+    const cancelBtn = document.createElement("button")
+    cancelBtn.type = "button"
+    cancelBtn.textContent = "Cancel"
+    cancelBtn.className = "gowiki-link-modal-btn"
+
+    const okBtn = document.createElement("button")
+    okBtn.type = "button"
+    okBtn.textContent = "OK"
+    okBtn.className = "gowiki-link-modal-btn"
+
+    function close(value) {
+      overlay.remove()
+      resolve(value)
+    }
+
+    function submit() {
+      const verdict = classifyLinkTarget(targetInput.value)
+      if (!verdict.ok) {
+        warning.textContent = verdict.error
+        targetInput.focus()
+        return
+      }
+      close({
+        target: verdict.normalized,
+        text: textInput.value,
+      })
+    }
+
+    cancelBtn.addEventListener("click", () => close(null))
+    okBtn.addEventListener("click", submit)
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay) close(null)
+    })
+    targetInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        submit()
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        close(null)
+      }
+    })
+    textInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        submit()
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        close(null)
+      }
+    })
+
+    buttons.appendChild(cancelBtn)
+    buttons.appendChild(okBtn)
+    dialog.appendChild(title)
+    dialog.appendChild(textLabel)
+    dialog.appendChild(textInput)
+    dialog.appendChild(targetLabel)
+    dialog.appendChild(targetInput)
+    dialog.appendChild(warning)
+    dialog.appendChild(buttons)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+    targetInput.focus()
+    targetInput.select()
+  })
 }
 
 function findLinkRangeAtCursor(state) {
@@ -154,55 +294,93 @@ function isSelectionInLink(state) {
 }
 
 function setExternalLinkCommand() {
-  return (state, dispatch) => {
+  return (state, dispatch, view) => {
     const linkType = state.schema.marks.link
     if (!linkType) return false
 
     let target = null
     let currentHref = ""
+    let currentText = ""
 
     const linkAtCursor = findLinkRangeAtCursor(state)
     if (linkAtCursor) {
       target = { from: linkAtCursor.from, to: linkAtCursor.to }
       currentHref = linkAtCursor.mark.attrs.href ?? ""
+      currentText = state.doc.textBetween(
+        linkAtCursor.from,
+        linkAtCursor.to,
+        ""
+      )
     } else if (!state.selection.empty) {
       target = { from: state.selection.from, to: state.selection.to }
+      currentText = state.doc.textBetween(state.selection.from, state.selection.to, "")
     } else {
       const wordRange = findWordRangeAtCursor(state)
       if (wordRange) {
         target = wordRange
+        currentText = state.doc.textBetween(wordRange.from, wordRange.to, "")
       }
     }
 
     const promptSeed = currentHref || "https://"
-    const href = window.prompt("External link (http/https)", promptSeed)
-    if (href === null) return false
+    void promptLinkForm(promptSeed, currentText).then(form => {
+      if (form === null) return
+      const activeState = view.state
+      const activeDispatch = view.dispatch
+      const activeLinkType = activeState.schema.marks.link
+      if (!activeLinkType) return
 
-    const normalized = href.trim()
-    if (!/^https?:\/\//i.test(normalized)) {
-      setStatus("Invalid link: use http:// or https://")
-      return false
-    }
+      let activeTarget = null
+      const activeLinkAtCursor = findLinkRangeAtCursor(activeState)
+      if (activeLinkAtCursor) {
+        activeTarget = {
+          from: activeLinkAtCursor.from,
+          to: activeLinkAtCursor.to,
+        }
+      } else if (!activeState.selection.empty) {
+        activeTarget = {
+          from: activeState.selection.from,
+          to: activeState.selection.to,
+        }
+      } else {
+        activeTarget = findWordRangeAtCursor(activeState)
+      }
 
-    if (!dispatch) return true
-    const tr = state.tr
-    if (target) {
-      tr.removeMark(target.from, target.to, linkType)
-      tr.addMark(target.from, target.to, linkType.create({ href: normalized }))
-    } else {
-      const linkMark = linkType.create({ href: normalized })
-      const linkText = state.schema.text(normalized, [linkMark])
-      tr.replaceSelectionWith(linkText)
-    }
-    setStatus("Link updated")
-    dispatch(tr.scrollIntoView())
+      const normalized = form.target
+      const isAutoText = form.text.trim().length === 0
+      const displayText = isAutoText
+        ? defaultLinkTextForTarget(normalized)
+        : form.text
+
+      const tr = activeState.tr
+      const linkMark = activeLinkType.create({
+        href: normalized,
+        autoText: isAutoText,
+      })
+      let markFrom = activeState.selection.from
+      let markTo = markFrom
+      if (activeTarget) {
+        tr.insertText(displayText, activeTarget.from, activeTarget.to)
+        markFrom = activeTarget.from
+        markTo = activeTarget.from + displayText.length
+      } else {
+        tr.insertText(displayText, activeState.selection.from, activeState.selection.to)
+        markFrom = activeState.selection.from
+        markTo = activeState.selection.from + displayText.length
+      }
+      tr.removeMark(markFrom, markTo, activeLinkType)
+      tr.addMark(markFrom, markTo, linkMark)
+      tr.setSelection(TextSelection.create(tr.doc, markFrom, markTo))
+      setStatus("Link updated")
+      activeDispatch(tr.scrollIntoView())
+    })
     return true
   }
 }
 
 const linkMenuItem = new MenuItem({
   icon: icons.link,
-  title: "Set or edit external link",
+  title: "Set or edit link",
   run: setExternalLinkCommand(),
   enable: state => Boolean(state.schema.marks.link),
   active: state => isSelectionInLink(state),
@@ -389,7 +567,7 @@ function renderActions() {
 
   const pageLabel = document.createElement("div")
   pageLabel.className = "gowiki-status"
-  pageLabel.textContent = `Page: /${pagePath}`
+  pageLabel.textContent = `Page: ${pageDisplayPath}`
   actionsRoot.appendChild(pageLabel)
 
   if (mode === "edit") {

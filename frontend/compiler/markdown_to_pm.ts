@@ -133,6 +133,47 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   return out
 }
 
+function defaultLinkTextForTarget(target: string): string {
+  if (/^https?:\/\//i.test(target)) return target
+  const pathOnly = target.split(/[?#]/)[0]
+  const clean = pathOnly.replace(/\/+$/, "")
+  const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
+  return parts[parts.length - 1] ?? "index"
+}
+
+function normalizeInlineLinkTokens(children: any[]) {
+  const out: any[] = []
+  for (let i = 0; i < children.length; i++) {
+    const tok = children[i]
+    if (tok?.type === "link_open") {
+      const close = children[i + 1]
+      if (close?.type === "link_close") {
+        const href = tok.attrGet?.("href") ?? ""
+        tok.meta = { ...(tok.meta ?? {}), autoText: true }
+        out.push(tok)
+        out.push({
+          type: "text",
+          content: defaultLinkTextForTarget(href),
+        })
+        out.push(close)
+        i += 1
+        continue
+      }
+    }
+    out.push(tok)
+  }
+  return out
+}
+
+function normalizeEmptyLinkLabels(tokens: any[]) {
+  for (const tok of tokens) {
+    if (Array.isArray(tok.children)) {
+      tok.children = normalizeInlineLinkTokens(tok.children)
+    }
+  }
+  return tokens
+}
+
 function isTopLevelBlockStart(token: any) {
   if (!token?.block || token.level !== 0) return false
   return token.nesting === 1 || token.nesting === 0
@@ -238,7 +279,9 @@ export function markdownToPM(
   }
   md.use(directivePlugin)
   const tokens = injectExtraBlankParagraphs(
-    applyDirectives(md.parse(markdown, {}), registry, true)
+    normalizeEmptyLinkLabels(
+      applyDirectives(md.parse(markdown, {}), registry, true)
+    )
   )
 
 

@@ -37,6 +37,16 @@ export function pmToMarkdown(
         if (!printer) {
           throw new Error(`No Markdown printer for mark "${mark.type.name}"`)
         }
+        if (mark.type.name === "link" && mark.attrs.autoText) {
+          const href = mark.attrs.href ?? ""
+          const title = mark.attrs.title
+          if (title) {
+            text = `[](${href} "${String(title).replace(/"/g, '\\"')}")`
+          } else {
+            text = `[](${href})`
+          }
+          continue
+        }
         const open =
           typeof printer.open === "function"
             ? printer.open(mark)

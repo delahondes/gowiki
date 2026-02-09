@@ -50,7 +50,7 @@ When a namespace has an index page, that page is rendered at the namespace path 
 
 Initially, a path may correspond to a single page. If that page later needs to grow into a namespace, this is an explicit structural operation that converts the page into a namespace index page. After this conversion, the path is reserved for the namespace and can no longer be used as a standalone page.
 
-Note: it is thus forbidden to create a `regulatory/qms` content page in the `regulatory` namespace after the transformation to ensure unicity of path.
+Note: it is thus forbidden to create a `regulatory/qms` content page in the `regulatory` namespace after the transformation of `regulatory/qms` into a namespace to ensure unicity of path.
 
 This model ensures stable, intuitive URLs and avoids ambiguity between pages and namespaces.
 

@@ -28,6 +28,17 @@ export function registerCoreNodes(reg: Registry) {
     marks[name] = spec
   })
 
+  // Extend link mark to preserve whether label was explicit or auto-derived.
+  if (marks.link) {
+    marks.link = {
+      ...marks.link,
+      attrs: {
+        ...(marks.link.attrs ?? {}),
+        autoText: { default: false },
+      },
+    }
+  }
+
   reg.registerSchema({ nodes, marks })
 
   // 2) Restore core Markdown → PM semantics
@@ -98,6 +109,11 @@ function registerParagraph(reg: Registry) {
  * -------------------------------------------------- */
 
 function registerEmphasis(reg: Registry) {
+  function isAllowedLinkTarget(href: string): boolean {
+    if (/^https?:\/\//i.test(href)) return true
+    return /^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(href)
+  }
+
   reg.registerMark("em_open", {
     open(ctx) {
       ctx.pushMark(ctx.schema.marks.em.create())
@@ -131,14 +147,18 @@ function registerEmphasis(reg: Registry) {
   reg.registerMark("link_open", {
     open(ctx, tok) {
       const href = tok.attrGet?.("href") ?? ""
-      if (!/^https?:\/\//i.test(href)) {
-        throw new Error(`Only external links are supported: ${href}`)
+      if (!isAllowedLinkTarget(href)) {
+        throw new Error(
+          `Invalid link target "${href}". Expected http(s) URL or internal path starting with '/', './', or '../'.`
+        )
       }
       const title = tok.attrGet?.("title") ?? null
+      const autoText = Boolean(tok.meta?.autoText)
       ctx.pushMark(
         ctx.schema.marks.link.create({
           href,
           title,
+          autoText,
         })
       )
     },
@@ -287,10 +307,16 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("strong", { open: "**", close: "**" })
   reg.registerPMMark("code", { open: "`", close: "`" })
   reg.registerPMMark("link", {
-    open: () => "[",
+    open: mark => (mark.attrs.autoText ? "" : "["),
     close: mark => {
       const href = mark.attrs.href ?? ""
       const title = mark.attrs.title
+      if (mark.attrs.autoText) {
+        if (title) {
+          return `[](${href} "${String(title).replace(/"/g, '\\"')}")`
+        }
+        return `[](${href})`
+      }
       if (title) {
         return `](${href} "${String(title).replace(/"/g, '\\"')}")`
       }
