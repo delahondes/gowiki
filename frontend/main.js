@@ -5,7 +5,7 @@ import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
 import { baseKeymap } from "prosemirror-commands"
 import { history } from "prosemirror-history"
-import { menuBar, MenuItem } from "prosemirror-menu"
+import { menuBar, MenuItem, icons } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
@@ -40,6 +40,27 @@ let rawEditor = null
 let statusText = ""
 
 const menu = buildMenuItems(schema)
+menu.fullMenu = menu.fullMenu
+  .map(group =>
+    group.filter(item => item.spec?.title !== "Add or remove link")
+  )
+  .filter(group => group.length > 0)
+
+function insertMenuItemAfterTitle(menuGroups, title, item) {
+  for (const group of menuGroups) {
+    const idx = group.findIndex(menuItem => menuItem.spec?.title === title)
+    if (idx >= 0) {
+      group.splice(idx + 1, 0, item)
+      return
+    }
+  }
+  if (menuGroups.length === 0) {
+    menuGroups.push([item])
+    return
+  }
+  menuGroups[0].push(item)
+}
+
 registry.onCommand((namespace, name, cmd) => {
   const label = `${namespace}:${name}`
   const item = new MenuItem({
@@ -50,6 +71,144 @@ registry.onCommand((namespace, name, cmd) => {
   })
   menu.fullMenu.push([item])
 })
+
+function findLinkMarkInMarks(marks, linkType) {
+  return marks.find(mark => mark.type === linkType) ?? null
+}
+
+function findLinkRangeAtCursor(state) {
+  const linkType = state.schema.marks.link
+  if (!linkType) return null
+  if (!state.selection.empty) return null
+
+  const $from = state.selection.$from
+  const parent = $from.parent
+  const parentStart = $from.start()
+
+  let childInfo = parent.childAfter($from.parentOffset)
+  if (!childInfo.node && $from.parentOffset > 0) {
+    childInfo = parent.childBefore($from.parentOffset)
+  }
+  if (!childInfo.node) return null
+
+  const link = findLinkMarkInMarks(childInfo.node.marks, linkType)
+  if (!link) return null
+
+  let from = parentStart + childInfo.offset
+  let to = from + childInfo.node.nodeSize
+
+  for (let i = childInfo.index - 1; i >= 0; i--) {
+    const prev = parent.child(i)
+    if (!findLinkMarkInMarks(prev.marks, linkType)) break
+    from -= prev.nodeSize
+  }
+
+  for (let i = childInfo.index + 1; i < parent.childCount; i++) {
+    const next = parent.child(i)
+    if (!findLinkMarkInMarks(next.marks, linkType)) break
+    to += next.nodeSize
+  }
+
+  return { from, to, mark: link }
+}
+
+function findWordRangeAtCursor(state) {
+  if (!state.selection.empty) return null
+
+  const $from = state.selection.$from
+  const parent = $from.parent
+  const parentStart = $from.start()
+  const isWordChar = ch => /[A-Za-z0-9_]/.test(ch)
+
+  let childInfo = parent.childAfter($from.parentOffset)
+  if (!childInfo.node && $from.parentOffset > 0) {
+    childInfo = parent.childBefore($from.parentOffset)
+  }
+  if (!childInfo.node || !childInfo.node.isText) return null
+
+  const text = childInfo.node.text ?? ""
+  const textOffset = Math.max(0, $from.parentOffset - childInfo.offset)
+
+  let start = textOffset
+  while (start > 0 && isWordChar(text[start - 1])) start--
+
+  let end = textOffset
+  while (end < text.length && isWordChar(text[end])) end++
+
+  if (start === end) return null
+
+  return {
+    from: parentStart + childInfo.offset + start,
+    to: parentStart + childInfo.offset + end,
+  }
+}
+
+function isSelectionInLink(state) {
+  const linkType = state.schema.marks.link
+  if (!linkType) return false
+  const { from, to, empty } = state.selection
+  if (empty) {
+    return Boolean(findLinkRangeAtCursor(state))
+  }
+  return state.doc.rangeHasMark(from, to, linkType)
+}
+
+function setExternalLinkCommand() {
+  return (state, dispatch) => {
+    const linkType = state.schema.marks.link
+    if (!linkType) return false
+
+    let target = null
+    let currentHref = ""
+
+    const linkAtCursor = findLinkRangeAtCursor(state)
+    if (linkAtCursor) {
+      target = { from: linkAtCursor.from, to: linkAtCursor.to }
+      currentHref = linkAtCursor.mark.attrs.href ?? ""
+    } else if (!state.selection.empty) {
+      target = { from: state.selection.from, to: state.selection.to }
+    } else {
+      const wordRange = findWordRangeAtCursor(state)
+      if (wordRange) {
+        target = wordRange
+      }
+    }
+
+    const promptSeed = currentHref || "https://"
+    const href = window.prompt("External link (http/https)", promptSeed)
+    if (href === null) return false
+
+    const normalized = href.trim()
+    if (!/^https?:\/\//i.test(normalized)) {
+      setStatus("Invalid link: use http:// or https://")
+      return false
+    }
+
+    if (!dispatch) return true
+    const tr = state.tr
+    if (target) {
+      tr.removeMark(target.from, target.to, linkType)
+      tr.addMark(target.from, target.to, linkType.create({ href: normalized }))
+    } else {
+      const linkMark = linkType.create({ href: normalized })
+      const linkText = state.schema.text(normalized, [linkMark])
+      tr.replaceSelectionWith(linkText)
+    }
+    setStatus("Link updated")
+    dispatch(tr.scrollIntoView())
+    return true
+  }
+}
+
+const linkMenuItem = new MenuItem({
+  icon: icons.link,
+  title: "Set or edit external link",
+  run: setExternalLinkCommand(),
+  enable: state => Boolean(state.schema.marks.link),
+  active: state => isSelectionInLink(state),
+})
+
+insertMenuItemAfterTitle(menu.fullMenu, "Toggle code font", linkMenuItem)
 
 function applyStyles(styles) {
   for (const { id, css } of styles) {

@@ -71,12 +71,12 @@
   background: #e0e0e0;
 }
 
-.ProseMirror-menuitem-active {
+.ProseMirror-menu-active {
   background: #d0d0d0;
 }
 
 /* Disabled */
-.ProseMirror-menuitem-disabled {
+.ProseMirror-menu-disabled {
   opacity: 0.4;
   pointer-events: none;
 }
