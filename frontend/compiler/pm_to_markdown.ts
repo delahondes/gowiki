@@ -37,7 +37,15 @@ export function pmToMarkdown(
         if (!printer) {
           throw new Error(`No Markdown printer for mark "${mark.type.name}"`)
         }
-        text = printer.open + text + printer.close
+        const open =
+          typeof printer.open === "function"
+            ? printer.open(mark)
+            : printer.open
+        const close =
+          typeof printer.close === "function"
+            ? printer.close(mark)
+            : printer.close
+        text = open + text + close
       }
       return text
     }

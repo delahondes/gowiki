@@ -34,8 +34,8 @@ export interface NodePrinter {
 }
 
 export interface MarkPrinter {
-  open: string
-  close: string
+  open: string | ((mark: Mark) => string)
+  close: string | ((mark: Mark) => string)
 }
 
 /* -----------------------------

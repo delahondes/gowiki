@@ -127,6 +127,28 @@ function registerEmphasis(reg: Registry) {
       ctx.text(tok.content ?? "", [ctx.schema.marks.code.create()])
     },
   })
+
+  reg.registerMark("link_open", {
+    open(ctx, tok) {
+      const href = tok.attrGet?.("href") ?? ""
+      if (!/^https?:\/\//i.test(href)) {
+        throw new Error(`Only external links are supported: ${href}`)
+      }
+      const title = tok.attrGet?.("title") ?? null
+      ctx.pushMark(
+        ctx.schema.marks.link.create({
+          href,
+          title,
+        })
+      )
+    },
+  })
+
+  reg.registerMark("link_close", {
+    close(ctx) {
+      ctx.popMark()
+    },
+  })
 }
 
 /* --------------------------------------------------
@@ -264,6 +286,17 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("em", { open: "*", close: "*" })
   reg.registerPMMark("strong", { open: "**", close: "**" })
   reg.registerPMMark("code", { open: "`", close: "`" })
+  reg.registerPMMark("link", {
+    open: () => "[",
+    close: mark => {
+      const href = mark.attrs.href ?? ""
+      const title = mark.attrs.title
+      if (title) {
+        return `](${href} "${String(title).replace(/"/g, '\\"')}")`
+      }
+      return `](${href})`
+    },
+  })
   reg.registerPMNode("hard_break", {
     print() {
       return "\\n"
