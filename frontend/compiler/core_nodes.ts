@@ -30,11 +30,37 @@ export function registerCoreNodes(reg: Registry) {
 
   // Extend link mark to preserve whether label was explicit or auto-derived.
   if (marks.link) {
+    const baseLink = marks.link
+    const baseToDOM =
+      typeof baseLink.toDOM === "function"
+        ? baseLink.toDOM
+        : (node: any) => ["a", node.attrs, 0]
     marks.link = {
-      ...marks.link,
+      ...baseLink,
       attrs: {
-        ...(marks.link.attrs ?? {}),
+        ...(baseLink.attrs ?? {}),
         autoText: { default: false },
+      },
+      toDOM(node) {
+        const spec = baseToDOM(node)
+        if (!Array.isArray(spec)) return spec
+        const [tag, maybeAttrs, ...rest] = spec
+        const hasAttrs =
+          maybeAttrs &&
+          typeof maybeAttrs === "object" &&
+          !Array.isArray(maybeAttrs)
+        const attrs = hasAttrs ? { ...maybeAttrs } : {}
+        const href = String(node.attrs.href ?? "")
+        if (/^https?:\/\//i.test(href)) {
+          attrs.target = "_blank"
+          attrs.rel = "noopener noreferrer"
+          const prevClass = attrs.class ? String(attrs.class) : ""
+          attrs.class = prevClass
+            ? `${prevClass} gowiki-external-link`
+            : "gowiki-external-link"
+        }
+        const children = hasAttrs ? rest : [maybeAttrs, ...rest]
+        return [tag, attrs, ...children]
       },
     }
   }

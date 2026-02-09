@@ -19,6 +19,22 @@ function escapeMarkdownText(text: string): string {
   return text.replace(/[\\*_`]/g, ch => "\\" + ch)
 }
 
+function serializePlainTextWithAutoLinks(text: string): string {
+  const urlRe = /https?:\/\/[^\s<>()]+/g
+  let out = ""
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = urlRe.exec(text)) !== null) {
+    const start = m.index
+    const url = m[0]
+    out += escapeMarkdownText(text.slice(last, start))
+    out += `[](${url})`
+    last = start + url.length
+  }
+  out += escapeMarkdownText(text.slice(last))
+  return out
+}
+
 /**
  * Convert a ProseMirror document to Markdown.
  */
@@ -31,6 +47,9 @@ export function pmToMarkdown(
   function printNode(node: PMNode): string {
     // Text node
     if (node.isText) {
+      if (node.marks.length === 0) {
+        return serializePlainTextWithAutoLinks(node.text ?? "")
+      }
       let text = escapeMarkdownText(node.text ?? "")
       for (const mark of node.marks) {
         const printer = registry.getPMMark(mark.type.name)
