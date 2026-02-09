@@ -58,7 +58,11 @@ function directivePlugin(md: MarkdownIt) {
 
 function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   const out: any[] = []
-  let pending: { name: string; attrs: Record<string, string> } | null = null
+  let pending: {
+    name: string
+    attrs: Record<string, string>
+    lineCount: number
+  } | null = null
   let pendingSpec: ReturnType<Registry["getDirective"]> | null = null
 
   for (const token of tokens) {
@@ -77,7 +81,10 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
         if (strict) throw new Error(`Unknown directive: ${meta.name}`)
         continue
       }
-      pending = meta
+      const directiveLineCount = Array.isArray(token.map)
+        ? Math.max(1, token.map[1] - token.map[0])
+        : 1
+      pending = { ...meta, lineCount: directiveLineCount }
       pendingSpec = spec
       continue
     }
@@ -107,6 +114,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
         }
         token.meta = token.meta ?? {}
         token.meta.directives = token.meta.directives ?? {}
+        token.meta.directiveLineCount = pending.lineCount
         token.meta.directives[pending.name] = parsedAttrs
         pending = null
         pendingSpec = null
@@ -120,6 +128,87 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
     throw new Error(
       `Directive "${pending.name}" must be followed by a block`
     )
+  }
+
+  return out
+}
+
+function isTopLevelBlockStart(token: any) {
+  if (!token?.block || token.level !== 0) return false
+  return token.nesting === 1 || token.nesting === 0
+}
+
+function findBlockEndIndex(tokens: any[], startIndex: number) {
+  const start = tokens[startIndex]
+  if (!start || start.nesting !== 1) return startIndex
+
+  let depth = 1
+  for (let i = startIndex + 1; i < tokens.length; i++) {
+    depth += tokens[i].nesting
+    if (depth === 0) return i
+  }
+  return startIndex
+}
+
+function semanticBlockEnd(tokens: any[], startIndex: number, endIndex: number, fallbackEnd: number) {
+  let inlineEnd: number | null = null
+  for (let i = startIndex; i <= endIndex; i++) {
+    const tok = tokens[i]
+    if (tok.type === "inline" && Array.isArray(tok.map)) {
+      inlineEnd = inlineEnd === null ? tok.map[1] : Math.max(inlineEnd, tok.map[1])
+    }
+  }
+  if (inlineEnd !== null) return inlineEnd
+
+  let leafEnd: number | null = null
+  for (let i = startIndex; i <= endIndex; i++) {
+    const tok = tokens[i]
+    if (tok.nesting === 0 && Array.isArray(tok.map)) {
+      leafEnd = leafEnd === null ? tok.map[1] : Math.max(leafEnd, tok.map[1])
+    }
+  }
+  return leafEnd ?? fallbackEnd
+}
+
+function injectExtraBlankParagraphs(tokens: any[]) {
+  const out: any[] = []
+  let lastSemanticEnd: number | null = null
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (isTopLevelBlockStart(token) && Array.isArray(token.map)) {
+      const startLine = token.map[0]
+      const blockEndIndex = findBlockEndIndex(tokens, i)
+      const semanticEnd = semanticBlockEnd(tokens, i, blockEndIndex, token.map[1])
+      const directiveLineCount =
+        token.meta && typeof token.meta.directiveLineCount === "number"
+          ? token.meta.directiveLineCount
+          : 0
+
+      if (lastSemanticEnd !== null) {
+        const effectiveGap = Math.max(
+          0,
+          startLine - lastSemanticEnd - directiveLineCount
+        )
+        const extraBlankParagraphs = Math.max(0, effectiveGap - 1)
+        for (let j = 0; j < extraBlankParagraphs; j++) {
+          out.push({ type: "paragraph_open", tag: "p", nesting: 1 })
+          out.push({ type: "paragraph_close", tag: "p", nesting: -1 })
+        }
+      }
+
+      for (let j = i; j <= blockEndIndex; j++) {
+        out.push(tokens[j])
+      }
+      lastSemanticEnd = semanticEnd
+      i = blockEndIndex
+      continue
+    }
+
+    out.push(token)
+    if (lastSemanticEnd === null && Array.isArray(token.map)) {
+      lastSemanticEnd = token.map[1]
+    }
   }
 
   return out
@@ -148,7 +237,9 @@ export function markdownToPM(
     plugin(md)
   }
   md.use(directivePlugin)
-  const tokens = applyDirectives(md.parse(markdown, {}), registry, true)
+  const tokens = injectExtraBlankParagraphs(
+    applyDirectives(md.parse(markdown, {}), registry, true)
+  )
 
 
 

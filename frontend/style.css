@@ -67,6 +67,10 @@
   min-height: 0;
 }
 
+.gowiki-view .ProseMirror p:empty {
+  min-height: 1em;
+}
+
 #gowiki-editor .ProseMirror {
   border: 3px solid #1e3f72;
 }

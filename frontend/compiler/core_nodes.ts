@@ -208,6 +208,9 @@ function registerMarkdownPrinters(reg: Registry) {
 
   reg.registerPMNode("paragraph", {
     print(node, ctx, recurse) {
+      if (node.content.size === 0) {
+        return "\n"
+      }
       let out = ""
       node.content.forEach((child) => {
         out += recurse(child)
