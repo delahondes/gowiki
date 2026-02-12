@@ -19,16 +19,26 @@ func main() {
 	)
 	flag.Parse()
 
-	store, err := storage.NewFileStore(filepath.Clean(*dataDir))
+	pagesRoot := filepath.Clean(*dataDir)
+	mediaRoot := filepath.Join(filepath.Dir(pagesRoot), "media")
+
+	store, err := storage.NewFileStore(pagesRoot)
 	if err != nil {
-		log.Fatalf("init storage: %v", err)
+		log.Fatalf("init page storage: %v", err)
 	}
 
-	router := api.NewRouter(store, *serveWeb, filepath.Clean(*webDir))
+	mediaStore, err := storage.NewMediaFileStore(mediaRoot)
+	if err != nil {
+		log.Fatalf("init media storage: %v", err)
+	}
+
+	router := api.NewRouter(store, mediaStore, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)
 	}
+	log.Printf("pages root: %s", pagesRoot)
+	log.Printf("media root: %s", mediaRoot)
 	if err := http.ListenAndServe(*addr, router); err != nil {
 		log.Fatalf("http server failed: %v", err)
 	}

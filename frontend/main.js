@@ -11,6 +11,7 @@ import { splitListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
+import { openMediaManager } from "./media_manager.js"
 
 const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
@@ -26,6 +27,9 @@ function resolvePagePathFromLocation(loc) {
 
 const pagePath = resolvePagePathFromLocation(window.location)
 const pageDisplayPath = pagePath === "index" ? "/" : `/${pagePath}`
+const pageNamespace = pagePath.includes("/")
+  ? pagePath.split("/").slice(0, -1).join("/")
+  : ""
 const defaultMarkdown = `
 ## Gowiki
 
@@ -695,6 +699,11 @@ function renderActions() {
     actionsRoot.appendChild(editModeLabel)
 
     if (editMode === "visual") {
+      actionsRoot.appendChild(
+        makeActionButton("Media manager", () => {
+          openMediaManager(pageNamespace, text => setStatus(text))
+        })
+      )
       actionsRoot.appendChild(
         makeActionButton("Switch to raw", () => {
           setEditMode("raw")

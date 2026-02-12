@@ -191,3 +191,98 @@
     padding-left: 0;
   }
 }
+
+.gowiki-media-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.gowiki-media-modal {
+  width: 760px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #b7b7b7;
+  border-radius: 6px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.gowiki-media-modal-header,
+.gowiki-media-modal-nav,
+.gowiki-media-modal-upload,
+.gowiki-media-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gowiki-media-modal-header {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.gowiki-media-modal-title {
+  font-weight: 600;
+}
+
+.gowiki-media-modal-nav {
+  margin-bottom: 8px;
+}
+
+.gowiki-media-modal-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #2f2f2f;
+}
+
+.gowiki-media-modal-upload {
+  margin-bottom: 10px;
+}
+
+.gowiki-media-modal-overwrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #444;
+}
+
+.gowiki-media-modal-list {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px;
+  min-height: 80px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.gowiki-media-row {
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.gowiki-media-row-main {
+  flex: 1;
+  text-align: left;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f8f8f8;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.gowiki-media-row-main:disabled {
+  opacity: 0.85;
+  cursor: default;
+}
+
+.gowiki-media-modal-empty {
+  color: #666;
+  font-style: italic;
+  padding: 6px;
+}
