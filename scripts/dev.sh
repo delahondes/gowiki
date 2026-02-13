@@ -11,7 +11,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd backend
-  go run ./cmd/server -addr :8080 -data-dir ./data/pages
+  go run ./cmd/server -addr :8080 -data-dir ./data/content
 ) &
 BACKEND_PID=$!
 

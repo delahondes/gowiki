@@ -238,6 +238,9 @@ func normalizeMediaFileName(raw string) (string, error) {
 	if strings.ContainsRune(name, '/') || strings.ContainsRune(name, '\\') {
 		return "", fmt.Errorf("invalid file name")
 	}
+	if path.Ext(name) == "" {
+		return "", fmt.Errorf("attachments must have a file extension")
+	}
 	return name, nil
 }
 

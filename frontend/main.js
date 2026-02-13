@@ -476,6 +476,72 @@ function encodePagePath(path) {
     .join("/")
 }
 
+function splitPathParts(raw) {
+  return String(raw ?? "")
+    .split("/")
+    .filter(Boolean)
+}
+
+function buildMediaReferencePath(currentNamespace, mediaPath) {
+  const from = splitPathParts(currentNamespace)
+  const to = splitPathParts(mediaPath)
+
+  let idx = 0
+  while (idx < from.length && idx < to.length && from[idx] === to[idx]) {
+    idx += 1
+  }
+
+  const upCount = from.length - idx
+  const down = to.slice(idx).join("/")
+
+  if (upCount <= 2) {
+    if (upCount === 0) return "./" + down
+    return "../".repeat(upCount) + down
+  }
+
+  return "/" + to.join("/")
+}
+
+function mediaLabelFromPath(mediaPath) {
+  const parts = splitPathParts(mediaPath)
+  return parts[parts.length - 1] ?? "file"
+}
+
+function insertMediaReference(kind, mediaEntry) {
+  if (!editorView || mode !== "edit" || editMode !== "visual") return
+
+  const target = buildMediaReferencePath(pageNamespace, mediaEntry.path)
+  const label = mediaLabelFromPath(mediaEntry.path)
+  const state = editorView.state
+  const tr = state.tr
+
+  if (kind === "image" && state.schema.nodes.image) {
+    const imageNode = state.schema.nodes.image.create({
+      src: target,
+      alt: label,
+      title: null,
+    })
+    tr.replaceSelectionWith(imageNode, false)
+    editorView.dispatch(tr.scrollIntoView())
+    editorView.focus()
+    setStatus("Inserted image " + target)
+    return
+  }
+
+  const linkType = state.schema.marks.link
+  if (!linkType) return
+
+  const from = state.selection.from
+  const to = state.selection.to
+  tr.insertText(label, from, to)
+  const end = from + label.length
+  tr.addMark(from, end, linkType.create({ href: target, autoText: false }))
+  tr.setSelection(TextSelection.create(tr.doc, from, end))
+  editorView.dispatch(tr.scrollIntoView())
+  editorView.focus()
+  setStatus("Inserted link " + target)
+}
+
 async function fetchPage(path) {
   const resp = await fetch(`/api/pages/${encodePagePath(path)}`)
   if (resp.status === 404) return null
@@ -701,7 +767,11 @@ function renderActions() {
     if (editMode === "visual") {
       actionsRoot.appendChild(
         makeActionButton("Media manager", () => {
-          openMediaManager(pageNamespace, text => setStatus(text))
+          openMediaManager(
+            pageNamespace,
+            text => setStatus(text),
+            (kind, entry) => insertMediaReference(kind, entry)
+          )
         })
       )
       actionsRoot.appendChild(

@@ -8,7 +8,7 @@ function encodePath(path) {
 
 function buildMediaApiPath(path) {
   const encoded = encodePath(path)
-  return encoded ? `/api/media/` : "/api/media"
+  return encoded ? `/api/media/${encoded}` : "/api/media"
 }
 
 function normalizeNamespacePath(rawPath) {
@@ -23,6 +23,10 @@ function parentNamespacePath(namespacePath) {
   if (parts.length === 0) return ""
   parts.pop()
   return parts.join("/")
+}
+
+function isImageFile(name) {
+  return /\.(png|jpe?g|gif|svg)$/i.test(name)
 }
 
 async function listMedia(namespacePath) {
@@ -68,7 +72,7 @@ function formatMediaSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function openMediaManager(initialNamespacePath, onStatus) {
+export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
   const state = {
     namespacePath: normalizeNamespacePath(initialNamespacePath),
     entries: [],
@@ -161,24 +165,50 @@ export function openMediaManager(initialNamespacePath, onStatus) {
       const row = document.createElement("div")
       row.className = "gowiki-media-row"
 
-      const mainBtn = document.createElement("button")
-      mainBtn.type = "button"
-      mainBtn.className = "gowiki-media-row-main"
+      const label = document.createElement("div")
+      label.className = "gowiki-media-row-label"
       const prefix = entry.kind === "folder" ? "[dir] " : "[file] "
       const size = entry.kind === "file" ? ` (${formatMediaSize(entry.size)})` : ""
-      mainBtn.textContent = `${prefix}${entry.name}${size}`
-      row.appendChild(mainBtn)
+      label.textContent = `${prefix}${entry.name}${size}`
+      row.appendChild(label)
 
       if (entry.kind === "folder") {
-        mainBtn.addEventListener("click", () => {
+        const openBtn = document.createElement("button")
+        openBtn.type = "button"
+        openBtn.className = "gowiki-link-modal-btn"
+        openBtn.textContent = "Open"
+        openBtn.addEventListener("click", () => {
           state.namespacePath = normalizeNamespacePath(entry.path)
           void refresh()
         })
+        row.appendChild(openBtn)
       } else {
-        mainBtn.disabled = true
-      }
+        const linkBtn = document.createElement("button")
+        linkBtn.type = "button"
+        linkBtn.className = "gowiki-link-modal-btn"
+        linkBtn.textContent = "Add link"
+        linkBtn.addEventListener("click", () => {
+          if (typeof onInsert === "function") {
+            onInsert("link", entry)
+          }
+          close()
+        })
+        row.appendChild(linkBtn)
 
-      if (entry.kind === "file") {
+        if (isImageFile(entry.name)) {
+          const imgBtn = document.createElement("button")
+          imgBtn.type = "button"
+          imgBtn.className = "gowiki-link-modal-btn"
+          imgBtn.textContent = "Add image"
+          imgBtn.addEventListener("click", () => {
+            if (typeof onInsert === "function") {
+              onInsert("image", entry)
+            }
+            close()
+          })
+          row.appendChild(imgBtn)
+        }
+
         const deleteBtn = document.createElement("button")
         deleteBtn.type = "button"
         deleteBtn.className = "gowiki-link-modal-btn"

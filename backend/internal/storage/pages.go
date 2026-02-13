@@ -29,14 +29,20 @@ type Page struct {
 }
 
 type FileStore struct {
-	rootDir string
+	contentRoot string
+	metaRoot    string
 }
 
-func NewFileStore(rootDir string) (*FileStore, error) {
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create data root: %w", err)
+func NewFileStore(contentRoot string) (*FileStore, error) {
+	content := filepath.Clean(contentRoot)
+	meta := filepath.Join(filepath.Dir(content), "meta")
+	if err := os.MkdirAll(content, 0o755); err != nil {
+		return nil, fmt.Errorf("create content root: %w", err)
 	}
-	return &FileStore{rootDir: rootDir}, nil
+	if err := os.MkdirAll(meta, 0o755); err != nil {
+		return nil, fmt.Errorf("create meta root: %w", err)
+	}
+	return &FileStore{contentRoot: content, metaRoot: meta}, nil
 }
 
 func (s *FileStore) Get(pagePath string) (Page, error) {
@@ -45,20 +51,23 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 		return Page{}, err
 	}
 
-	contentPath, err := s.contentPath(normalized)
+	contentPath, _, err := s.resolveExistingContentPath(normalized)
+	if errors.Is(err, os.ErrNotExist) {
+		return Page{}, ErrPageNotFound
+	}
 	if err != nil {
 		return Page{}, err
 	}
 
 	content, err := os.ReadFile(contentPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return Page{}, ErrPageNotFound
-	}
 	if err != nil {
 		return Page{}, fmt.Errorf("read page: %w", err)
 	}
 
-	metaPath := metadataPathForContent(contentPath)
+	metaPath, err := s.metadataPathForContent(contentPath)
+	if err != nil {
+		return Page{}, err
+	}
 	meta, err := s.readOrInitMeta(normalized, contentPath, metaPath)
 	if err != nil {
 		return Page{}, err
@@ -77,7 +86,7 @@ func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
 		return Page{}, err
 	}
 
-	contentPath, err := s.contentPath(normalized)
+	contentPath, _, err := s.resolveWritableContentPath(normalized)
 	if err != nil {
 		return Page{}, err
 	}
@@ -85,9 +94,15 @@ func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
 		return Page{}, fmt.Errorf("create page directory: %w", err)
 	}
 
-	now := time.Now().UTC()
-	metaPath := metadataPathForContent(contentPath)
+	metaPath, err := s.metadataPathForContent(contentPath)
+	if err != nil {
+		return Page{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
+		return Page{}, fmt.Errorf("create metadata directory: %w", err)
+	}
 
+	now := time.Now().UTC()
 	meta, err := s.loadMeta(metaPath)
 	switch {
 	case err == nil:
@@ -149,6 +164,9 @@ func (s *FileStore) readOrInitMeta(pagePath, contentPath, metaPath string) (Page
 		return PageMetadata{}, fmt.Errorf("encode bootstrap metadata: %w", marshalErr)
 	}
 	bytes = append(bytes, '\n')
+	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
+		return PageMetadata{}, fmt.Errorf("create metadata directory: %w", err)
+	}
 	if writeErr := writeFileAtomic(metaPath, bytes); writeErr != nil {
 		return PageMetadata{}, fmt.Errorf("write bootstrap metadata: %w", writeErr)
 	}
@@ -167,20 +185,103 @@ func (s *FileStore) loadMeta(metaPath string) (PageMetadata, error) {
 	return meta, nil
 }
 
-func (s *FileStore) contentPath(pagePath string) (string, error) {
-	p := filepath.Join(s.rootDir, pagePath+".md")
-	rel, err := filepath.Rel(s.rootDir, p)
+func (s *FileStore) resolveExistingContentPath(pagePath string) (string, bool, error) {
+	pageFile, err := s.contentPagePath(pagePath)
+	if err != nil {
+		return "", false, err
+	}
+	indexFile, err := s.contentNamespaceIndexPath(pagePath)
+	if err != nil {
+		return "", false, err
+	}
+
+	pageExists := fileExists(pageFile)
+	indexExists := fileExists(indexFile)
+	if pageExists && indexExists {
+		return "", false, fmt.Errorf("ambiguous page path %q: both page and namespace index exist", pagePath)
+	}
+	if indexExists {
+		return indexFile, true, nil
+	}
+	if pageExists {
+		return pageFile, false, nil
+	}
+	return "", false, os.ErrNotExist
+}
+
+func (s *FileStore) resolveWritableContentPath(pagePath string) (string, bool, error) {
+	pageFile, err := s.contentPagePath(pagePath)
+	if err != nil {
+		return "", false, err
+	}
+	indexFile, err := s.contentNamespaceIndexPath(pagePath)
+	if err != nil {
+		return "", false, err
+	}
+
+	pageExists := fileExists(pageFile)
+	indexExists := fileExists(indexFile)
+	if pageExists && indexExists {
+		return "", false, fmt.Errorf("ambiguous page path %q: both page and namespace index exist", pagePath)
+	}
+	if indexExists {
+		return indexFile, true, nil
+	}
+	if pageExists {
+		return pageFile, false, nil
+	}
+
+	// When the namespace directory already exists, the logical page path is the namespace index.
+	indexDir := strings.TrimSuffix(indexFile, string(filepath.Separator)+"index.md")
+	if info, err := os.Stat(indexDir); err == nil && info.IsDir() {
+		return indexFile, true, nil
+	}
+
+	return pageFile, false, nil
+}
+
+func (s *FileStore) contentPagePath(pagePath string) (string, error) {
+	return s.safeJoinContent(pagePath + ".md")
+}
+
+func (s *FileStore) contentNamespaceIndexPath(pagePath string) (string, error) {
+	return s.safeJoinContent(filepath.ToSlash(filepath.Join(pagePath, "index.md")))
+}
+
+func (s *FileStore) metadataPathForContent(contentPath string) (string, error) {
+	rel, err := filepath.Rel(s.contentRoot, contentPath)
+	if err != nil {
+		return "", fmt.Errorf("derive metadata path: %w", err)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid content path")
+	}
+	rel = filepath.ToSlash(rel)
+	if !strings.HasSuffix(rel, ".md") {
+		return "", fmt.Errorf("invalid page content extension")
+	}
+	metaRel := strings.TrimSuffix(rel, ".md") + ".json"
+	metaPath := filepath.Join(s.metaRoot, filepath.FromSlash(metaRel))
+	check, err := filepath.Rel(s.metaRoot, metaPath)
+	if err != nil {
+		return "", fmt.Errorf("build metadata path: %w", err)
+	}
+	if strings.HasPrefix(check, "..") {
+		return "", fmt.Errorf("invalid metadata path")
+	}
+	return metaPath, nil
+}
+
+func (s *FileStore) safeJoinContent(rel string) (string, error) {
+	p := filepath.Join(s.contentRoot, filepath.FromSlash(rel))
+	r, err := filepath.Rel(s.contentRoot, p)
 	if err != nil {
 		return "", fmt.Errorf("build page path: %w", err)
 	}
-	if strings.HasPrefix(rel, "..") {
+	if strings.HasPrefix(r, "..") {
 		return "", fmt.Errorf("invalid page path")
 	}
 	return p, nil
-}
-
-func metadataPathForContent(contentPath string) string {
-	return strings.TrimSuffix(contentPath, ".md") + ".meta.json"
 }
 
 func normalizePagePath(raw string) (string, error) {
@@ -223,4 +324,12 @@ func writeFileAtomic(targetPath string, content []byte) error {
 func makePageID(pagePath string) string {
 	h := sha1.Sum([]byte(pagePath))
 	return hex.EncodeToString(h[:])
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
