@@ -56,6 +56,8 @@ export type SchemaContributor = {
   marks?: SchemaMarksSpec
 }
 
+export type SchemaNodeExtender = (spec: any) => any
+
 export type EditorPluginFactory = (schema: Schema) => PMPlugin
 
 export type StyleContribution = {
@@ -109,6 +111,7 @@ export class Registry {
   /* Schema contributions */
   private schemaNodes: SchemaNodesSpec = {}
   private schemaMarks: SchemaMarksSpec = {}
+  private schemaNodeExtenders = new Map<string, SchemaNodeExtender[]>()
 
   constructor(public readonly schema: Schema) {}
   registerSchema(contrib: SchemaContributor) {
@@ -133,6 +136,12 @@ export class Registry {
         this.schemaMarks[k] = contrib.marks[k]
       }
     }
+  }
+
+  extendSchemaNode(name: string, extender: SchemaNodeExtender) {
+    const extenders = this.schemaNodeExtenders.get(name) ?? []
+    extenders.push(extender)
+    this.schemaNodeExtenders.set(name, extenders)
   }
 
   /* ---- registration (Markdown → PM) ---- */
@@ -300,8 +309,21 @@ export class Registry {
   }
 
   buildSchema(): Schema {
+    const nodes = { ...this.schemaNodes }
+    for (const [name, extenders] of this.schemaNodeExtenders.entries()) {
+      const base = nodes[name]
+      if (!base) {
+        throw new Error(`Cannot extend missing schema node "${name}"`)
+      }
+      let current = base
+      for (const extend of extenders) {
+        current = extend(current)
+      }
+      nodes[name] = current
+    }
+
     return new Schema({
-      nodes: this.schemaNodes,
+      nodes,
       marks: this.schemaMarks,
     })
   }

@@ -35,6 +35,7 @@ export class CompileContext {
   public readonly output: PMNode[] = []
 
   public readonly marks: Mark[] = []
+  private readonly tokenStack: MarkdownToken[] = []
 
   constructor(schema: Schema) {
     this.schema = schema
@@ -69,6 +70,34 @@ export class CompileContext {
     const top = this.stack[this.stack.length - 1]
     if (top) top.children.push(node)
     else this.output.push(node)
+  }
+
+  /* -----------------------------
+   * Token ancestry helpers
+   * ----------------------------- */
+
+  enterToken(token: MarkdownToken) {
+    this.tokenStack.push(token)
+  }
+
+  exitToken(expectedOpenType?: string) {
+    const popped = this.tokenStack.pop()
+    if (!popped) return
+    if (expectedOpenType && popped.type !== expectedOpenType) {
+      throw new Error(
+        `Token stack mismatch: expected ${expectedOpenType}, got ${popped.type}`
+      )
+    }
+  }
+
+  findDirective(name: string): Record<string, string | null> | null {
+    for (let i = this.tokenStack.length - 1; i >= 0; i--) {
+      const directives = this.tokenStack[i].meta?.directives
+      if (directives && directives[name]) {
+        return directives[name]
+      }
+    }
+    return null
   }
 
   /* -----------------------------
@@ -143,7 +172,13 @@ function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext
   if (type.endsWith("_open")) {
     const nodeHandler = registry.getNode(type)
     if (nodeHandler?.open) {
-      nodeHandler.open(ctx, tok)
+      ctx.enterToken(tok)
+      try {
+        nodeHandler.open(ctx, tok)
+      } catch (err) {
+        ctx.exitToken()
+        throw err
+      }
       return
     }
 
@@ -160,7 +195,12 @@ function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext
   if (type.endsWith("_close")) {
     const nodeHandler = registry.getNode(type)
     if (nodeHandler?.close) {
-      nodeHandler.close(ctx, tok)
+      const openType = type.replace(/_close$/, "_open")
+      try {
+        nodeHandler.close(ctx, tok)
+      } finally {
+        ctx.exitToken(openType)
+      }
       return
     }
 

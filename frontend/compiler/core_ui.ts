@@ -1,4 +1,4 @@
-import { Plugin, PluginKey } from "prosemirror-state"
+import { NodeSelection, Plugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Registry, NodePropertySpec } from "./registry"
@@ -53,12 +53,17 @@ function buildPanel(
 
     input.addEventListener("input", () => {
       const raw = input.value
-      const parsed =
-        raw === ""
-          ? prop.default ?? null
-          : prop.parse
-          ? prop.parse(raw)
-          : raw
+      let parsed: string | null
+      try {
+        parsed =
+          raw === ""
+            ? prop.default ?? null
+            : prop.parse
+            ? prop.parse(raw)
+            : raw
+      } catch {
+        return
+      }
       const live = view.state.doc.nodeAt(pos)
       if (!live) return
       const attrs = { ...live.attrs, [prop.name]: parsed }
@@ -75,6 +80,18 @@ function buildPanel(
 }
 
 function findPropertyNode(state: any, registry: Registry) {
+  if (state.selection instanceof NodeSelection) {
+    const node = state.selection.node
+    const props = registry.getNodeProperties(node.type.name)
+    if (props.length > 0) {
+      return {
+        node,
+        pos: state.selection.from,
+        props,
+      }
+    }
+  }
+
   const $from = state.selection.$from
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth)
