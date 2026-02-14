@@ -146,6 +146,13 @@ function findPropertyNode(state: any, registry: Registry) {
   return null
 }
 
+function panelDecorationKey(target: any): string {
+  const values = target.props
+    .map((prop: NodePropertySpec) => `${prop.name}:${String(target.node.attrs[prop.name] ?? "")}`)
+    .join("|")
+  return `gowiki-props-panel-${target.anchorPos}-${values}`
+}
+
 function propertiesPlugin(registry: Registry) {
   return new Plugin<PanelState>({
     key: panelKey,
@@ -178,7 +185,7 @@ function propertiesPlugin(registry: Registry) {
           },
           {
             side: -1,
-            key: "gowiki-props-panel",
+            key: panelDecorationKey(target),
             stopEvent: () => true,
           }
         )

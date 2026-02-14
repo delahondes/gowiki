@@ -1,4 +1,6 @@
-import type { Plugin } from "../compiler/registry"
+import { NodeSelection, Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { Decoration, DecorationSet } from "prosemirror-view"
+import type { Plugin as WikiPlugin } from "../compiler/registry"
 
 const imageProperties = [
   {
@@ -9,6 +11,25 @@ const imageProperties = [
     serialize: (value: string | null) => String(value ?? ""),
   },
 ]
+
+const imageStyles = `
+.ProseMirror .gowiki-image-resize-handle {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: -8px;
+  border: 1px solid #3f5f8f;
+  background: #dbe8ff;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  vertical-align: bottom;
+}
+`
+
+const resizeKey = new PluginKey("gowiki.imageResize")
+
+const MIN_DRAG_SIZE_PX = 16
+const MAX_DRAG_SIZE_PX = 4096
 
 function escapeAltText(raw: string): string {
   return String(raw ?? "").replace(/]/g, "\\]")
@@ -74,7 +95,116 @@ function addStyleToDOMSpec(spec: any, style: string | null) {
   return [tag, { ...attrs, style: mergedStyle }, ...children]
 }
 
-export const imagePlugin: Plugin = {
+function isImageSelection(state: any) {
+  return (
+    state.selection instanceof NodeSelection &&
+    state.selection.node?.type?.name === "image"
+  )
+}
+
+function buildResizeHandle(view: any, initialPos: number) {
+  const handle = document.createElement("span")
+  handle.className = "gowiki-image-resize-handle"
+  handle.title = "Drag to resize image (Shift keeps ratio)"
+
+  handle.addEventListener("mousedown", event => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    let pos = initialPos
+    const imgEl = view.nodeDOM(pos)
+    if (!(imgEl instanceof HTMLImageElement)) return
+
+    const rect = imgEl.getBoundingClientRect()
+    const startX = event.clientX
+    const startY = event.clientY
+    const startWidth = Math.max(1, rect.width)
+    const startHeight = Math.max(1, rect.height)
+
+    const oldCursor = document.body.style.cursor
+    const oldSelect = document.body.style.userSelect
+    document.body.style.cursor = "nwse-resize"
+    document.body.style.userSelect = "none"
+
+    const ratio = startWidth / startHeight
+
+    const onMove = (moveEvent: MouseEvent) => {
+      let width = Math.round(startWidth + moveEvent.clientX - startX)
+      let height = Math.round(startHeight + moveEvent.clientY - startY)
+
+      if (moveEvent.shiftKey) {
+        const byWidth = Math.max(MIN_DRAG_SIZE_PX, width)
+        const byHeight = Math.max(MIN_DRAG_SIZE_PX, height)
+        const widthDrivenHeight = Math.round(byWidth / ratio)
+        const heightDrivenWidth = Math.round(byHeight * ratio)
+        const widthDelta = Math.abs(byWidth - startWidth)
+        const heightDelta = Math.abs(byHeight - startHeight)
+        if (widthDelta >= heightDelta) {
+          width = byWidth
+          height = widthDrivenHeight
+        } else {
+          width = heightDrivenWidth
+          height = byHeight
+        }
+      }
+
+      width = Math.max(MIN_DRAG_SIZE_PX, Math.min(MAX_DRAG_SIZE_PX, width))
+      height = Math.max(MIN_DRAG_SIZE_PX, Math.min(MAX_DRAG_SIZE_PX, height))
+      const size = `${width}px;${height}px`
+
+      const state = view.state
+      if (isImageSelection(state)) {
+        pos = state.selection.from
+      }
+      const node = state.doc.nodeAt(pos)
+      if (!node || node.type.name !== "image") return
+
+      let tr = state.tr.setNodeMarkup(pos, node.type, {
+        ...node.attrs,
+        size,
+      })
+      tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
+      view.dispatch(tr)
+    }
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      document.body.style.cursor = oldCursor
+      document.body.style.userSelect = oldSelect
+    }
+
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+  })
+
+  return handle
+}
+
+function imageResizePlugin() {
+  return new PMPlugin({
+    key: resizeKey,
+    props: {
+      decorations(state) {
+        if (!isImageSelection(state)) return null
+        const pos = state.selection.from
+        const node = state.selection.node
+        const deco = Decoration.widget(
+          pos + node.nodeSize,
+          view => buildResizeHandle(view, pos),
+          {
+            side: 1,
+            key: `gowiki-image-resize-${pos}`,
+            stopEvent: () => true,
+          }
+        )
+        return DecorationSet.create(state.doc, [deco])
+      },
+    },
+  })
+}
+
+export const imagePlugin: WikiPlugin = {
   register(reg) {
     reg.extendSchemaNode("image", spec => {
       const baseToDOM =
@@ -124,5 +254,8 @@ export const imagePlugin: Plugin = {
         return "![" + alt + "](" + src + ")"
       },
     })
+
+    reg.registerEditorPlugin(() => imageResizePlugin())
+    reg.registerStyle("image-resize", imageStyles)
   },
 }
