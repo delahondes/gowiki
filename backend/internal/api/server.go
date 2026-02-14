@@ -63,6 +63,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, serveWeb bool, webDirPath
 	r.Delete("/api/media/{path:.*}", s.handleDeleteMedia)
 
 	r.Get("/media/{path:.*}", s.handleServeMedia)
+	r.Get(`/{path:.*\..*}`, s.handleFilePath)
 
 	if serveWeb {
 		r.NotFound(s.handleFrontend)

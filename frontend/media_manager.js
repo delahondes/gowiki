@@ -76,6 +76,7 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
   const state = {
     namespacePath: normalizeNamespacePath(initialNamespacePath),
     entries: [],
+    showMarkdownFiles: false,
   }
 
   const overlay = document.createElement("div")
@@ -120,8 +121,15 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
   uploadBtn.type = "button"
   uploadBtn.className = "gowiki-link-modal-btn"
   uploadBtn.textContent = "Upload"
+  const showMarkdownLabel = document.createElement("label")
+  showMarkdownLabel.className = "gowiki-media-modal-overwrite"
+  const showMarkdownInput = document.createElement("input")
+  showMarkdownInput.type = "checkbox"
+  showMarkdownLabel.appendChild(showMarkdownInput)
+  showMarkdownLabel.appendChild(document.createTextNode("Show markdown files"))
   uploadRow.appendChild(fileInput)
   uploadRow.appendChild(overwriteLabel)
+  uploadRow.appendChild(showMarkdownLabel)
   uploadRow.appendChild(uploadBtn)
 
   const list = document.createElement("div")
@@ -147,7 +155,12 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
 
     try {
       const data = await listMedia(state.namespacePath)
-      state.entries = data.entries ?? []
+      const allEntries = data.entries ?? []
+      state.entries = allEntries.filter(entry => {
+        if (entry.kind !== "file") return true
+        if (state.showMarkdownFiles) return true
+        return !/\.md$/i.test(String(entry.name ?? ""))
+      })
     } catch (err) {
       setModalStatus(String(err?.message ?? err), true)
       return
@@ -237,6 +250,11 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
     state.namespacePath = parentNamespacePath(state.namespacePath)
     void refresh()
   })
+  showMarkdownInput.addEventListener("change", () => {
+    state.showMarkdownFiles = showMarkdownInput.checked
+    void refresh()
+  })
+
   uploadBtn.addEventListener("click", async () => {
     if (!fileInput.files || fileInput.files.length === 0) {
       setModalStatus("Choose a file to upload.", true)

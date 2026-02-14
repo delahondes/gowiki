@@ -34,7 +34,7 @@ export function registerCoreNodes(reg: Registry) {
     const baseToDOM =
       typeof baseLink.toDOM === "function"
         ? baseLink.toDOM
-        : (node: any) => ["a", node.attrs, 0]
+        : (node: any, _inline: boolean) => ["a", node.attrs, 0]
     marks.link = {
       ...baseLink,
       attrs: {
@@ -42,7 +42,7 @@ export function registerCoreNodes(reg: Registry) {
         autoText: { default: false },
       },
       toDOM(node) {
-        const spec = baseToDOM(node)
+        const spec = baseToDOM(node, true)
         if (!Array.isArray(spec)) return spec
         const [tag, maybeAttrs, ...rest] = spec
         const hasAttrs =
@@ -167,16 +167,6 @@ function registerEmphasis(reg: Registry) {
   reg.registerText("code_inline", {
     run(ctx, tok) {
       ctx.text(tok.content ?? "", [ctx.schema.marks.code.create()])
-    },
-  })
-
-  reg.registerText("image", {
-    run(ctx, tok) {
-      const src = tok.attrGet?.("src") ?? ""
-      if (!src) return
-      const title = tok.attrGet?.("title") ?? null
-      const alt = tok.content ?? tok.attrGet?.("alt") ?? ""
-      ctx.push(ctx.schema.nodes.image.create({ src, title, alt }))
     },
   })
 
@@ -357,18 +347,6 @@ function registerMarkdownPrinters(reg: Registry) {
         return `](${href} "${String(title).replace(/"/g, '\\"')}")`
       }
       return `](${href})`
-    },
-  })
-
-  reg.registerPMNode("image", {
-    print(node) {
-      const src = String(node.attrs.src ?? "")
-      const alt = String(node.attrs.alt ?? "").replace(/]/g, "\\]")
-      const title = node.attrs.title
-      if (title) {
-        return "![" + alt + "](" + src + " \"" + String(title).replace(/"/g, "\\\"") + "\")"
-      }
-      return "![" + alt + "](" + src + ")"
     },
   })
 
