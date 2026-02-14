@@ -30,6 +30,16 @@ const panelStyles = `
 .gowiki-props-label {
   color: #444;
 }
+
+.gowiki-props-error {
+  color: #a03a00;
+  font-size: 0.9em;
+}
+
+.gowiki-props-panel--block {
+  display: flex;
+  width: max-content;
+}
 `
 
 function buildPanel(
@@ -51,6 +61,9 @@ function buildPanel(
     const current = node.attrs[prop.name]
     input.value = current ?? prop.default ?? ""
 
+    const error = document.createElement("span")
+    error.className = "gowiki-props-error"
+
     input.addEventListener("input", () => {
       const raw = input.value
       let parsed: string | null
@@ -61,19 +74,30 @@ function buildPanel(
             : prop.parse
             ? prop.parse(raw)
             : raw
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Invalid value"
+        error.textContent = msg
         return
       }
+      error.textContent = ""
       const live = view.state.doc.nodeAt(pos)
       if (!live) return
       const attrs = { ...live.attrs, [prop.name]: parsed }
-      view.dispatch(
-        view.state.tr.setNodeMarkup(pos, live.type, attrs)
-      )
+
+      const state = view.state
+      const wasNodeSelection =
+        state.selection instanceof NodeSelection && state.selection.from === pos
+
+      let tr = state.tr.setNodeMarkup(pos, live.type, attrs)
+      if (wasNodeSelection) {
+        tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
+      }
+      view.dispatch(tr)
     })
 
     wrap.appendChild(label)
     wrap.appendChild(input)
+    wrap.appendChild(error)
   }
 
   return wrap
@@ -84,9 +108,22 @@ function findPropertyNode(state: any, registry: Registry) {
     const node = state.selection.node
     const props = registry.getNodeProperties(node.type.name)
     if (props.length > 0) {
+      const nodePos = state.selection.from
+      const $from = state.selection.$from
+      const isStandaloneImageParagraph =
+        node.type.name === "image" &&
+        $from.parent?.type?.name === "paragraph" &&
+        $from.parent.childCount === 1
+
+      const anchorPos =
+        isStandaloneImageParagraph && $from.depth > 0
+          ? $from.before($from.depth)
+          : nodePos
+
       return {
         node,
-        pos: state.selection.from,
+        pos: nodePos,
+        anchorPos,
         props,
       }
     }
@@ -97,9 +134,11 @@ function findPropertyNode(state: any, registry: Registry) {
     const node = $from.node(depth)
     const props = registry.getNodeProperties(node.type.name)
     if (props.length > 0) {
+      const pos = $from.before(depth)
       return {
         node,
-        pos: $from.before(depth),
+        pos,
+        anchorPos: pos,
         props,
       }
     }
@@ -129,8 +168,14 @@ function propertiesPlugin(registry: Registry) {
         const target = findPropertyNode(state, registry)
         if (!target) return null
         const deco = Decoration.widget(
-          target.pos,
-          view => buildPanel(view, target.node, target.pos, target.props),
+          target.anchorPos,
+          view => {
+            const panel = buildPanel(view, target.node, target.pos, target.props)
+            if (target.anchorPos !== target.pos) {
+              panel.classList.add("gowiki-props-panel--block")
+            }
+            return panel
+          },
           {
             side: -1,
             key: "gowiki-props-panel",

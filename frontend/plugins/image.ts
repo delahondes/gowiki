@@ -17,9 +17,29 @@ function escapeAltText(raw: string): string {
 function normalizeImageSize(raw: string): string | null {
   const value = String(raw ?? "").trim().toLowerCase()
   if (!value) return null
-  if (/^\d+%$/.test(value)) return value
-  if (/^\d+px$/.test(value)) return value
-  if (/^\d+px;\d+px$/.test(value)) return value
+
+  const pct = value.match(/^(\d+)%$/)
+  if (pct) {
+    const n = Number(pct[1])
+    if (n > 0) return `${n}%`
+    throw new Error("Image size percent must be > 0")
+  }
+
+  const px = value.match(/^(\d+)px$/)
+  if (px) {
+    const n = Number(px[1])
+    if (n > 0) return `${n}px`
+    throw new Error("Image size in px must be > 0")
+  }
+
+  const exact = value.match(/^(\d+)px;(\d+)px$/)
+  if (exact) {
+    const w = Number(exact[1])
+    const h = Number(exact[2])
+    if (w > 0 && h > 0) return `${w}px;${h}px`
+    throw new Error("Image width and height must be > 0")
+  }
+
   throw new Error(
     `Invalid image size "${raw}". Expected 50%, 200px, or 200px;100px.`
   )
