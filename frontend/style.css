@@ -57,6 +57,50 @@
   font-size: 0.9em;
 }
 
+.gowiki-menu-icon {
+  display: block;
+  width: 0.95em;
+  height: 0.95em;
+}
+
+.gowiki-menu-headings.ProseMirror-menu-dropdown {
+  font-size: 1.2em;
+  font-weight: 400;
+  padding: 2px 8px;
+  line-height: 1;
+  vertical-align: 3px;
+  position: relative;
+  top: 3px;
+}
+
+.gowiki-menu-headings.ProseMirror-menu-dropdown:after {
+  content: none;
+}
+
+.gowiki-menu-table.ProseMirror-menu-dropdown {
+  min-width: 2.1em;
+  height: 1.45em;
+  padding: 2px 10px;
+  line-height: 1;
+  vertical-align: 2px;
+  color: transparent;
+  overflow: hidden;
+  background-image: url("/icons/table.svg");
+  background-repeat: no-repeat;
+  background-position: 50% 62%;
+  background-size: 1.45em 1.45em;
+}
+
+.gowiki-menu-table.ProseMirror-menu-dropdown:after,
+.gowiki-menu-table.ProseMirror-menu-dropdown::before {
+  content: none;
+}
+
+.gowiki-menu-properties-toggle.ProseMirror-menu-active {
+  background: #dce8ff;
+  border-radius: 3px;
+}
+
 .ProseMirror {
   padding: 6px;
   min-height: 120px;

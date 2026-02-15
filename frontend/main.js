@@ -3,14 +3,15 @@ import { EditorView } from "prosemirror-view"
 import { DOMSerializer } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
-import { baseKeymap } from "prosemirror-commands"
+import { baseKeymap, setBlockType } from "prosemirror-commands"
 import { history } from "prosemirror-history"
-import { menuBar, MenuItem, icons } from "prosemirror-menu"
+import { menuBar, MenuItem, Dropdown, icons } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
 import { splitListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
+import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 
 const registry = buildRegistry(basicSchema)
@@ -54,9 +55,50 @@ let statusText = ""
 const menu = buildMenuItems(schema)
 menu.fullMenu = menu.fullMenu
   .map(group =>
-    group.filter(item => item.spec?.title !== "Add or remove link")
+    group.filter(item =>
+      item.spec?.title !== "Add or remove link" &&
+      item.options?.label !== "Type..."
+    )
   )
   .filter(group => group.length > 0)
+
+const headingItems = schema.nodes.heading
+  ? [1, 2, 3, 4, 5].map(level => {
+      const cmd = setBlockType(schema.nodes.heading, { level })
+      return new MenuItem({
+        label: `H${level}`,
+        title: `Change to heading ${level}`,
+        run: cmd,
+        enable: state => cmd(state),
+        active: state => {
+          const { $from, to, node } = state.selection
+          if (node) {
+            return node.type === schema.nodes.heading && node.attrs.level === level
+          }
+          return to <= $from.end() &&
+            $from.parent.type === schema.nodes.heading &&
+            $from.parent.attrs.level === level
+        },
+      })
+    })
+  : []
+
+if (headingItems.length > 0) {
+  const headingMenu = new Dropdown(headingItems, {
+    label: "H",
+    title: "Headings",
+    class: "gowiki-menu-headings",
+  })
+  if (menu.fullMenu.length === 0) {
+    menu.fullMenu.push([headingMenu])
+  } else {
+    menu.fullMenu[0].unshift(headingMenu)
+  }
+}
+
+const tableCommands = new Map()
+const extraCommandGroups = []
+let togglePropertiesCommand = null
 
 function insertMenuItemAfterTitle(menuGroups, title, item) {
   for (const group of menuGroups) {
@@ -73,15 +115,36 @@ function insertMenuItemAfterTitle(menuGroups, title, item) {
   menuGroups[0].push(item)
 }
 
+function svgIcon(path, alt) {
+  const img = document.createElement("img")
+  img.src = path
+  img.alt = alt
+  img.width = 14
+  img.height = 14
+  img.className = "gowiki-menu-icon"
+  return { dom: img }
+}
+
 registry.onCommand((namespace, name, cmd) => {
+  if (namespace === "table") {
+    tableCommands.set(name, cmd)
+    return
+  }
+
+  if (namespace === "ui" && name === "properties.toggle") {
+    togglePropertiesCommand = cmd
+    return
+  }
+
   const label = `${namespace}:${name}`
-  const item = new MenuItem({
-    label,
-    title: label,
-    run: cmd,
-    enable: state => cmd(state),
-  })
-  menu.fullMenu.push([item])
+  extraCommandGroups.push([
+    new MenuItem({
+      label,
+      title: label,
+      run: cmd,
+      enable: state => cmd(state),
+    }),
+  ])
 })
 
 function findLinkMarkInMarks(marks, linkType) {
@@ -456,6 +519,63 @@ const linkMenuItem = new MenuItem({
 })
 
 insertMenuItemAfterTitle(menu.fullMenu, "Toggle code font", linkMenuItem)
+
+if (togglePropertiesCommand) {
+  const propertiesMenuItem = new MenuItem({
+    icon: svgIcon("/icons/tools.svg", "Properties"),
+    title: "Toggle properties",
+    run: togglePropertiesCommand,
+    enable: state => Boolean(togglePropertiesCommand?.(state)),
+    active: state => isPropertiesPanelEnabled(state),
+    class: "gowiki-menu-properties-toggle",
+  })
+  if (menu.fullMenu.length === 0) {
+    menu.fullMenu.push([propertiesMenuItem])
+  } else {
+    menu.fullMenu[0].unshift(propertiesMenuItem)
+  }
+}
+
+if (tableCommands.size > 0) {
+  const order = [
+    "insert",
+    "row.addAfter",
+    "column.addAfter",
+    "row.delete",
+    "column.delete",
+  ]
+  const labels = {
+    insert: "Insert table",
+    "row.addAfter": "Add row",
+    "column.addAfter": "Add column",
+    "row.delete": "Delete row",
+    "column.delete": "Delete column",
+  }
+
+  const items = order
+    .filter(name => tableCommands.has(name))
+    .map(name =>
+      new MenuItem({
+        label: labels[name] ?? name,
+        title: labels[name] ?? name,
+        run: tableCommands.get(name),
+        enable: state => Boolean(tableCommands.get(name)?.(state)),
+      })
+    )
+
+  if (items.length > 0) {
+    const tableMenu = new Dropdown(items, {
+      label: " ",
+      title: "Table",
+      class: "gowiki-menu-table",
+    })
+    menu.fullMenu.splice(2, 0, [tableMenu])
+  }
+}
+
+for (const group of extraCommandGroups) {
+  menu.fullMenu.push(group)
+}
 
 function applyStyles(styles) {
   for (const { id, css } of styles) {

@@ -9,6 +9,12 @@ type PanelState = {
 
 const panelKey = new PluginKey<PanelState>("gowiki.nodePropertiesPanel")
 
+let pendingInputRefocus: {
+  propName: string
+  start: number | null
+  end: number | null
+} | null = null
+
 const panelStyles = `
 .gowiki-props-panel {
   display: inline-flex;
@@ -61,6 +67,21 @@ function buildPanel(
     const current = node.attrs[prop.name]
     input.value = current ?? prop.default ?? ""
 
+    if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
+      const focus = pendingInputRefocus
+      pendingInputRefocus = null
+      requestAnimationFrame(() => {
+        input.focus()
+        if (focus.start !== null && focus.end !== null) {
+          try {
+            input.setSelectionRange(focus.start, focus.end)
+          } catch {
+            // Ignore browsers that reject range restoration.
+          }
+        }
+      })
+    }
+
     const error = document.createElement("span")
     error.className = "gowiki-props-error"
 
@@ -87,6 +108,12 @@ function buildPanel(
       const state = view.state
       const wasNodeSelection =
         state.selection instanceof NodeSelection && state.selection.from === pos
+
+      pendingInputRefocus = {
+        propName: prop.name,
+        start: input.selectionStart,
+        end: input.selectionEnd,
+      }
 
       let tr = state.tr.setNodeMarkup(pos, live.type, attrs)
       if (wasNodeSelection) {
@@ -193,6 +220,10 @@ function propertiesPlugin(registry: Registry) {
       },
     },
   })
+}
+
+export function isPropertiesPanelEnabled(state: any): boolean {
+  return Boolean(panelKey.getState(state)?.enabled)
 }
 
 function togglePropertiesCommand() {

@@ -44,10 +44,31 @@ const tableProperties = [
     name: "width",
     label: "Width",
     default: null,
-    parse: (raw: string) => raw,
+    parse: (raw: string) => normalizeTableWidth(raw),
     serialize: (value: string | null) => String(value ?? ""),
   },
 ]
+
+function normalizeTableWidth(raw: string): string | null {
+  const value = String(raw ?? "").trim().toLowerCase()
+  if (!value) return null
+
+  const pct = value.match(/^(\d+)%$/)
+  if (pct) {
+    const n = Number(pct[1])
+    if (n > 0) return `${n}%`
+    throw new Error("Table width percent must be > 0")
+  }
+
+  const px = value.match(/^(\d+)px$/)
+  if (px) {
+    const n = Number(px[1])
+    if (n > 0) return `${n}px`
+    throw new Error("Table width in px must be > 0")
+  }
+
+  throw new Error(`Invalid table width "${raw}". Expected 80% or 800px.`)
+}
 
 function addWidthToDOM(spec: any, width: string | null) {
   if (!width) return spec
@@ -243,9 +264,10 @@ export const tablePlugin: Plugin = {
         const width = node.attrs.width ?? null
         const widthProp = tableProperties.find(p => p.name === "width")
         if (widthProp && width && width !== widthProp.default) {
+          const normalized = normalizeTableWidth(String(width))
           const rendered = widthProp.serialize
-            ? widthProp.serialize(width)
-            : String(width)
+            ? widthProp.serialize(normalized)
+            : String(normalized)
           out += `{table width=${rendered}}\n`
         }
         out += "| " + header.join(" | ") + " |\n"
