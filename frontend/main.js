@@ -820,6 +820,42 @@ function insertHardBreakCommand() {
   }
 }
 
+function scrollSelectionIntoContentView(view) {
+  const scroller = contentRoot
+  if (!(scroller instanceof HTMLElement)) return false
+
+  const menu = view.dom.parentElement?.querySelector(".ProseMirror-menubar")
+  const topInset = (menu instanceof HTMLElement ? menu.offsetHeight : 0) + 12
+  const bottomInset = 10
+
+  let fromCoords
+  let toCoords
+  try {
+    fromCoords = view.coordsAtPos(view.state.selection.from)
+    toCoords = view.coordsAtPos(view.state.selection.to)
+  } catch {
+    return false
+  }
+
+  const scrollerRect = scroller.getBoundingClientRect()
+  const topLimit = scrollerRect.top + topInset
+  const bottomLimit = scrollerRect.bottom - bottomInset
+  const selectionTop = Math.min(fromCoords.top, toCoords.top)
+  const selectionBottom = Math.max(fromCoords.bottom, toCoords.bottom)
+
+  let delta = 0
+  if (selectionTop < topLimit) {
+    delta = selectionTop - topLimit
+  } else if (selectionBottom > bottomLimit) {
+    delta = selectionBottom - bottomLimit
+  }
+
+  if (delta !== 0) {
+    scroller.scrollTop += delta
+  }
+  return true
+}
+
 function renderView() {
   clearContent()
   const wrapper = document.createElement("div")
@@ -895,6 +931,9 @@ function renderEdit(nextEditMode) {
 
   editorView = new EditorView(editorEl, {
     state,
+    handleScrollToSelection(view) {
+      return scrollSelectionIntoContentView(view)
+    },
     handleDOMEvents: {
       blur(view) {
         if (mode !== "edit" || editMode !== "visual") return false
