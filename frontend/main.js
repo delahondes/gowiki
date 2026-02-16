@@ -703,6 +703,7 @@ function applyNormalizedEditState(normalized, refreshVisual = false) {
     if (rawEditor.value !== normalized.markdown) {
       rawEditor.value = normalized.markdown
     }
+    autoResizeRawEditor(rawEditor)
     return
   }
 
@@ -795,11 +796,21 @@ function renderView() {
   contentRoot.appendChild(wrapper)
 }
 
+function autoResizeRawEditor(editorEl) {
+  editorEl.style.height = "auto"
+  editorEl.style.height = `${Math.max(editorEl.scrollHeight, 360)}px`
+}
+
 function renderRawEdit() {
   const editorEl = document.createElement("textarea")
   editorEl.id = "gowiki-raw-editor"
   editorEl.className = "gowiki-raw-editor"
   editorEl.value = currentMarkdown
+
+  editorEl.addEventListener("input", () => {
+    autoResizeRawEditor(editorEl)
+  })
+
   editorEl.addEventListener("blur", () => {
     if (mode !== "edit" || editMode !== "raw") return
     try {
@@ -809,7 +820,9 @@ function renderRawEdit() {
       // Keep invalid in-progress raw text unchanged.
     }
   })
+
   contentRoot.appendChild(editorEl)
+  autoResizeRawEditor(editorEl)
   rawEditor = editorEl
 }
 

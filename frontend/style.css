@@ -169,7 +169,8 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 14px;
   line-height: 1.45;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
 }
 
 .gowiki-link-modal-overlay {
