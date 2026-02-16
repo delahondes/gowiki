@@ -72,6 +72,7 @@ export function registerCoreNodes(reg: Registry) {
   registerEmphasis(reg)
   registerHeading(reg)
   registerLists(reg)
+  registerHorizontalRule(reg)
 
   // 3) PM → Markdown printers (unchanged)
   registerMarkdownPrinters(reg)
@@ -267,6 +268,14 @@ function registerLists(reg: Registry) {
   })
 }
 
+function registerHorizontalRule(reg: Registry) {
+  reg.registerText("hr", {
+    run(ctx) {
+      ctx.push(ctx.schema.nodes.horizontal_rule.create())
+    },
+  })
+}
+
 /* --------------------------------------------------
  * PM → Markdown printers
  * -------------------------------------------------- */
@@ -364,6 +373,12 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMNode("hard_break", {
     print() {
       return "\\n"
+    },
+  })
+
+  reg.registerPMNode("horizontal_rule", {
+    print() {
+      return "---\n\n"
     },
   })
 }

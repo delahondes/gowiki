@@ -57,7 +57,8 @@ menu.fullMenu = menu.fullMenu
   .map(group =>
     group.filter(item =>
       item.spec?.title !== "Add or remove link" &&
-      item.options?.label !== "Type..."
+      item.options?.label !== "Type..." &&
+      item.options?.label !== "Insert"
     )
   )
   .filter(group => group.length > 0)
@@ -85,7 +86,7 @@ const headingItems = schema.nodes.heading
 
 if (headingItems.length > 0) {
   const headingMenu = new Dropdown(headingItems, {
-    label: "H",
+    label: "H#",
     title: "Headings",
     class: "gowiki-menu-headings",
   })
@@ -124,6 +125,16 @@ function svgIcon(path, alt) {
   img.className = "gowiki-menu-icon"
   return { dom: img }
 }
+
+function canInsertNode(state, nodeType) {
+  const $from = state.selection.$from
+  for (let d = $from.depth; d >= 0; d--) {
+    const index = $from.index(d)
+    if ($from.node(d).canReplaceWith(index, index, nodeType)) return true
+  }
+  return false
+}
+
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -510,6 +521,25 @@ function setExternalLinkCommand() {
   }
 }
 
+const hrMenuItem = new MenuItem({
+  icon: {
+    text: "—",
+    css: "display:inline-block; transform:scaleX(2.4); font-weight:700; line-height:1;",
+  },
+  title: "Insert horizontal rule",
+  run: (state, dispatch) => {
+    const hr = state.schema.nodes.horizontal_rule
+    if (!hr) return false
+    if (!dispatch) return true
+    dispatch(state.tr.replaceSelectionWith(hr.create()).scrollIntoView())
+    return true
+  },
+  enable: state => {
+    const hr = state.schema.nodes.horizontal_rule
+    return Boolean(hr && canInsertNode(state, hr))
+  },
+})
+
 const linkMenuItem = new MenuItem({
   icon: icons.link,
   title: "Set or edit link",
@@ -519,6 +549,12 @@ const linkMenuItem = new MenuItem({
 })
 
 insertMenuItemAfterTitle(menu.fullMenu, "Toggle code font", linkMenuItem)
+
+if (menu.fullMenu.length === 0) {
+  menu.fullMenu.push([hrMenuItem])
+} else {
+  menu.fullMenu[0].splice(1, 0, hrMenuItem)
+}
 
 if (togglePropertiesCommand) {
   const propertiesMenuItem = new MenuItem({
