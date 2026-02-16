@@ -84,7 +84,7 @@
 }
 
 .gowiki-menu-table.ProseMirror-menu-dropdown {
-  min-width: 2.1em;
+  min-width: 3px;
   height: 1.45em;
   padding: 2px 10px;
   line-height: 1;
@@ -94,7 +94,7 @@
   background-image: url("/icons/table.svg");
   background-repeat: no-repeat;
   background-position: 50% 62%;
-  background-size: 1.45em 1.45em;
+  background-size: 90%;
 }
 
 .gowiki-menu-table.ProseMirror-menu-dropdown:after,
