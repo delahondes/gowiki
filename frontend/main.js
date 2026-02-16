@@ -839,6 +839,7 @@ function renderEdit(nextEditMode) {
       ...registry.getEditorPlugins(),
       menuBar({
         content: menu.fullMenu,
+        floating: false,
       }),
     ],
   })
