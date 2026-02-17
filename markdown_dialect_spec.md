@@ -20,8 +20,8 @@ In the following syntax `\n` is meant to be interpreted as a new line contained 
 | :+1: | `:1:` | 👍 | | and a list of similar UTF like :warning: ... |
 | > Blockquote | `> Blockquote` | `<blockquote>Blockquote</blockquote>` | 
 | - Unnumbered List | `- Unnumbered List` | `<ul><li>Unnumbered List</li></ul>` | `* Unnumbered List` | We reject alternative syntax only for the bijective principle, we might transform it upon import |
-| . Numbered List | `. Numbered List` | `<ol><li>Numbered List</li></ol>` | `1. Numbered List` | We deliberately break CommonMark syntax which does not recognise `. Numbered List` but we find classical markdown numbered list (1) are not much used (2) are a pain to use because either you must renumber manually or the syntax looks dumb (3) We prefer Dokuwiki syntax on that score and since it cannot be adapted directly we keep the spirit with a Markdown like approach |
-| ## . Numbered header 2 | `## . Numbered header 2` | `<h2 class="numbered">Numbered header 2</h2>` | | Does not exist in Markdown, brought to Dokuwiki by the Numbered Headings plugin, but not fully integrated |
+| 1. Numbered List | `1. Numbered List` | `<ol><li>Numbered List</li></ol>` | `. Numbered List` | We keep CommonMark ordered-list syntax for interoperability. In raw mode, helpers may still auto-renumber or generate list numbering ergonomically. |
+| Numbered heading (property-based) | `{heading numbered=true}` then `## Heading 2` | `<h2 class="numbered">Heading 2</h2>` | `## . Numbered heading 2` | Numbering is controlled by heading properties, not punctuation syntax. Typical use: skip top-level title (`#`), start numbering at `##`, and optionally disable numbering below a chosen level with `{heading numbered=false}`. |
 | --- | `---` | `<hr/>` | `***` | 
 | `Inline code` | \`Inline code\` | <code>Inline code</code> |
 | ```\nCode block\n``` | \`\`\`\nCode block\n\`\`\` | <code>Code block</code> |
@@ -42,6 +42,11 @@ Tables follow standard Markdown rules with the following clarifications:
 Object properties are represented between curly braces `{}`, the first word that appears in the curly braces is the name of the plugin / object, attributes take the form `variable=value` like in:
 
 `{table width=1000px}`
+
+Examples:
+
+- `{heading numbered=true}` before a heading starts/marks numbering at that level.
+- `{heading numbered=false}` before a heading disables numbering for that heading (useful to stop numbering below a certain depth).
 
 ## Escaping and forbidden syntax
 
@@ -188,8 +193,8 @@ Status legend:
 | Underline | `_text_` means underline (not italic) | `planned` | Conflicts with CommonMark emphasis; requires explicit dialect parser/printer rules. |
 | Headings | ATX headings (`#` .. `######`) | `implemented` | Setext headings are not implemented by custom handlers. |
 | Lists (unordered) | `- item` | `implemented` | Core list handlers support this form. |
-| Lists (ordered) | `. item` custom syntax | `planned` | Current parser expects standard ordered-list tokens, not this custom notation. |
-| Numbered headings | `## . Heading` | `planned` | Not implemented yet. |
+| Lists (ordered) | `1. item` (CommonMark) | `implemented` | Standard ordered-list syntax is canonical. Optional raw-mode helpers may auto-renumber without changing stored syntax. |
+| Numbered headings | directive/property-based (`{heading numbered=true}`) | `planned` | Avoid a different syntax for numbered headers. Allows numbering to start below top-level title and be disabled at deeper levels with explicit properties. |
 | Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
 | Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |

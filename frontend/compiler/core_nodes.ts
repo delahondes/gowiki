@@ -115,8 +115,14 @@ function registerParagraph(reg: Registry) {
 
   reg.registerText("softbreak", {
     run(ctx) {
-      // Single newline becomes a hard break only in top-level paragraphs.
-      if (ctx.currentNodeName() === "paragraph" && ctx.openDepth() === 1) {
+      const inParagraph = ctx.currentNodeName() === "paragraph"
+      const topLevelParagraph = ctx.openDepth() === 1
+      const inListItem = ctx.hasOpenNode("list_item")
+      const inTableCell =
+        ctx.hasOpenNode("table_cell") || ctx.hasOpenNode("table_header")
+
+      // In this dialect, plain newlines are hard breaks in top-level and list paragraphs.
+      if (inParagraph && !inTableCell && (topLevelParagraph || inListItem)) {
         ctx.push(ctx.schema.nodes.hard_break.create())
         return
       }
@@ -283,6 +289,30 @@ function registerHorizontalRule(reg: Registry) {
 function registerMarkdownPrinters(reg: Registry) {
   // Text: handled centrally in pm_to_markdown.ts
 
+  function renderListItemText(
+    itemNode: any,
+    recurse: (node: any) => string,
+    continuationIndent: string
+  ): string {
+    const parts: string[] = []
+
+    itemNode.content.forEach((child: any) => {
+      let rendered = recurse(child).trimEnd()
+      if (!rendered) return
+
+      rendered = rendered
+        .replace(/^[-*+]\s+/, "")
+        .replace(/^\d+\.\s+/, "")
+        .replace(/\\n/g, "\n" + continuationIndent)
+
+      parts.push(rendered)
+    })
+
+    if (parts.length === 0) return ""
+    return parts.join("\n" + continuationIndent)
+  }
+
+
   reg.registerPMNode("paragraph", {
     print(node, ctx, recurse) {
       if (node.content.size === 0) {
@@ -322,7 +352,10 @@ function registerMarkdownPrinters(reg: Registry) {
     print(node, ctx, recurse) {
       let out = ""
       node.content.forEach((child) => {
-        out += recurse(child)
+        const marker = "- "
+        const continuationIndent = " ".repeat(marker.length)
+        const item = renderListItemText(child, recurse, continuationIndent)
+        out += marker + item + "\n"
       })
       return out + "\n"
     },
@@ -333,7 +366,10 @@ function registerMarkdownPrinters(reg: Registry) {
       let index = node.attrs.order ?? 1
       let out = ""
       node.content.forEach((child) => {
-        out += `${index++}. ${recurse(child).trimEnd()}\n`
+        const marker = String(index++) + ". "
+        const continuationIndent = " ".repeat(marker.length)
+        const item = renderListItemText(child, recurse, continuationIndent)
+        out += marker + item + "\n"
       })
       return out + "\n"
     },
@@ -345,7 +381,7 @@ function registerMarkdownPrinters(reg: Registry) {
       node.content.forEach((child) => {
         out += recurse(child)
       })
-      return "- " + out.trimEnd() + "\n"
+      return out
     },
   })
 

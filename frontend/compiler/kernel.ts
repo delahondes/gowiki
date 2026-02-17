@@ -58,6 +58,10 @@ export class CompileContext {
     return top ? top.node.type.name : null
   }
 
+  hasOpenNode(name: string): boolean {
+    return this.stack.some(frame => frame.node.type.name === name)
+  }
+
   close() {
     const frame = this.stack.pop()
     if (!frame) throw new Error("close(): unbalanced close")

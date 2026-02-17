@@ -806,6 +806,42 @@ function clearContent() {
   contentRoot.innerHTML = ""
 }
 
+function backspaceEmptyListItemCommand() {
+  return (state, dispatch) => {
+    const sel = state.selection
+    if (!sel.empty) return false
+
+    const listItemType = state.schema.nodes.list_item
+    if (!listItemType) return false
+
+    const $from = sel.$from
+    if ($from.parentOffset !== 0) return false
+
+    let depth = $from.depth
+    while (depth > 0 && $from.node(depth).type !== listItemType) depth--
+    if (depth <= 0) return false
+
+    const item = $from.node(depth)
+    if (item.textContent.trim().length !== 0) return false
+
+    const listDepth = depth - 1
+    const indexInList = $from.index(listDepth)
+    if (indexInList <= 0) return false
+
+    const itemPos = $from.before(depth)
+    const prevItem = $from.node(listDepth).child(indexInList - 1)
+    const prevItemPos = itemPos - prevItem.nodeSize
+
+    if (!dispatch) return true
+
+    let tr = state.tr.delete(itemPos, itemPos + item.nodeSize)
+    const cursorPos = Math.max(prevItemPos + 1, prevItemPos + prevItem.nodeSize - 2)
+    tr = tr.setSelection(TextSelection.create(tr.doc, cursorPos))
+    dispatch(tr.scrollIntoView())
+    return true
+  }
+}
+
 function insertHardBreakCommand() {
   return (state, dispatch) => {
     const hardBreak = state.schema.nodes.hard_break
@@ -911,6 +947,7 @@ function renderEdit(nextEditMode) {
 
   const listKeymap = keymap({
     Enter: splitListItem(schema.nodes.list_item),
+    Backspace: backspaceEmptyListItemCommand(),
     "Alt-Enter": insertHardBreakCommand(),
   })
 
