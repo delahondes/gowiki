@@ -291,8 +291,7 @@ function registerMarkdownPrinters(reg: Registry) {
 
   function renderListItemText(
     itemNode: any,
-    recurse: (node: any) => string,
-    continuationIndent: string
+    recurse: (node: any) => string
   ): string {
     const parts: string[] = []
 
@@ -300,16 +299,15 @@ function registerMarkdownPrinters(reg: Registry) {
       let rendered = recurse(child).trimEnd()
       if (!rendered) return
 
-      rendered = rendered
-        .replace(/^[-*+]\s+/, "")
-        .replace(/^\d+\.\s+/, "")
-        .replace(/\\n/g, "\n" + continuationIndent)
+      // Keep visual line breaks in list paragraphs as real newlines.
+      if (child.type?.name === "paragraph") {
+        rendered = rendered.replace(/\n/g, "\n")
+      }
 
       parts.push(rendered)
     })
 
-    if (parts.length === 0) return ""
-    return parts.join("\n" + continuationIndent)
+    return parts.join("\n")
   }
 
 
@@ -354,8 +352,9 @@ function registerMarkdownPrinters(reg: Registry) {
       node.content.forEach((child) => {
         const marker = "- "
         const continuationIndent = " ".repeat(marker.length)
-        const item = renderListItemText(child, recurse, continuationIndent)
-        out += marker + item + "\n"
+        const item = renderListItemText(child, recurse)
+        const formatted = item.replace(/\n/g, "\n" + continuationIndent)
+        out += marker + formatted + "\n"
       })
       return out + "\n"
     },
@@ -368,8 +367,9 @@ function registerMarkdownPrinters(reg: Registry) {
       node.content.forEach((child) => {
         const marker = String(index++) + ". "
         const continuationIndent = " ".repeat(marker.length)
-        const item = renderListItemText(child, recurse, continuationIndent)
-        out += marker + item + "\n"
+        const item = renderListItemText(child, recurse)
+        const formatted = item.replace(/\n/g, "\n" + continuationIndent)
+        out += marker + formatted + "\n"
       })
       return out + "\n"
     },

@@ -132,6 +132,22 @@
 }
 
 
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.ProseMirror ol ol {
+  list-style-type: lower-alpha;
+}
+
+.ProseMirror ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.ProseMirror ol ol ol ol {
+  list-style-type: decimal;
+}
+
 .ProseMirror hr {
   border: 0;
   border-top: 1px solid #b9b9b9;

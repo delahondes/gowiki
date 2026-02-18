@@ -7,7 +7,7 @@ import { baseKeymap, setBlockType } from "prosemirror-commands"
 import { history } from "prosemirror-history"
 import { menuBar, MenuItem, Dropdown, icons } from "prosemirror-menu"
 import { buildMenuItems } from "prosemirror-example-setup"
-import { splitListItem } from "prosemirror-schema-list"
+import { splitListItem, sinkListItem, liftListItem } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
@@ -806,6 +806,15 @@ function clearContent() {
   contentRoot.innerHTML = ""
 }
 
+function listDepthCommand(direction) {
+  return (state, dispatch) => {
+    const itemType = state.schema.nodes.list_item
+    if (!itemType) return false
+    const command = direction === "in" ? sinkListItem(itemType) : liftListItem(itemType)
+    return command(state, dispatch)
+  }
+}
+
 function backspaceEmptyListItemCommand() {
   return (state, dispatch) => {
     const sel = state.selection
@@ -948,6 +957,8 @@ function renderEdit(nextEditMode) {
   const listKeymap = keymap({
     Enter: splitListItem(schema.nodes.list_item),
     Backspace: backspaceEmptyListItemCommand(),
+    Tab: listDepthCommand("in"),
+    "Shift-Tab": listDepthCommand("out"),
     "Alt-Enter": insertHardBreakCommand(),
   })
 
