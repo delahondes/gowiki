@@ -823,18 +823,135 @@ function isInTableCell(state) {
   return false
 }
 
+function findAncestorOfType($pos, typeName) {
+  for (let d = $pos.depth; d >= 0; d--) {
+    const node = $pos.node(d)
+    if (node.type.name === typeName) {
+      return { depth: d, node, start: $pos.start(d) }
+    }
+  }
+  return null
+}
+
+function getCodeBlockSelectionInfo(state) {
+  const sel = state.selection
+  const fromBlock = findAncestorOfType(sel.$from, "code_block")
+  const toBlock = findAncestorOfType(sel.$to, "code_block")
+  if (!fromBlock || !toBlock) return null
+  if (fromBlock.start !== toBlock.start) return null
+
+  const text = fromBlock.node.textContent ?? ""
+  return {
+    text,
+    blockStart: fromBlock.start,
+    from: sel.from - fromBlock.start,
+    to: sel.to - fromBlock.start,
+    empty: sel.empty,
+  }
+}
+
+function collectTargetLineStarts(text, from, to, empty) {
+  const starts = [0]
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) starts.push(i + 1)
+  }
+
+  const lineStartAt = pos => {
+    let lo = 0
+    let hi = starts.length - 1
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      if (starts[mid] <= pos) lo = mid + 1
+      else hi = mid - 1
+    }
+    return starts[Math.max(0, hi)]
+  }
+
+  if (empty) {
+    return [lineStartAt(from)]
+  }
+
+  const effectiveTo = to > from && text.charCodeAt(to - 1) === 10 ? to - 1 : to
+  const first = lineStartAt(from)
+  const last = lineStartAt(effectiveTo)
+  return starts.filter(pos => pos >= first && pos <= last)
+}
+
+function remapPos(pos, changes) {
+  let mapped = pos
+  for (const change of changes) {
+    const { at, delta } = change
+    if (delta >= 0) {
+      if (mapped >= at) mapped += delta
+      continue
+    }
+
+    const removed = -delta
+    if (mapped <= at) continue
+    if (mapped <= at + removed) mapped = at
+    else mapped += delta
+  }
+  return mapped
+}
+
+function applyCodeBlockIndent(direction) {
+  return (state, dispatch) => {
+    const info = getCodeBlockSelectionInfo(state)
+    if (!info) return false
+
+    const lineStarts = collectTargetLineStarts(info.text, info.from, info.to, info.empty)
+    if (lineStarts.length === 0) return true
+
+    const changes = []
+    for (const at of lineStarts) {
+      if (direction === "in") {
+        changes.push({ at, remove: 0, insert: "  ", delta: 2 })
+        continue
+      }
+      let remove = 0
+      if (info.text.charCodeAt(at) === 32) remove++
+      if (info.text.charCodeAt(at + 1) === 32) remove++
+      if (remove > 0) changes.push({ at, remove, insert: "", delta: -remove })
+    }
+
+    if (changes.length === 0) return true
+
+    let nextText = info.text
+    for (let i = changes.length - 1; i >= 0; i--) {
+      const c = changes[i]
+      nextText = nextText.slice(0, c.at) + c.insert + nextText.slice(c.at + c.remove)
+    }
+
+    if (!dispatch) return true
+
+    const mappedFrom = remapPos(info.from, changes)
+    const mappedTo = remapPos(info.to, changes)
+
+    let tr = state.tr.insertText(
+      nextText,
+      info.blockStart,
+      info.blockStart + info.text.length
+    )
+
+    tr = tr.setSelection(
+      TextSelection.create(tr.doc, info.blockStart + mappedFrom, info.blockStart + mappedTo)
+    )
+
+    dispatch(tr.scrollIntoView())
+    return true
+  }
+}
+
 function tabKeyCommand(direction) {
+  const codeIndent = applyCodeBlockIndent(direction)
+
   return (state, dispatch) => {
     // Let table plugin own Tab behavior inside table cells.
     if (isInTableCell(state)) return false
 
-    // In code blocks, Tab inserts two spaces.
+    // In code blocks, Tab/Shift-Tab always indent/dedent line starts.
     if (isInCodeBlock(state)) {
-      if (direction === "in") {
-        if (!dispatch) return true
-        dispatch(state.tr.insertText("  ").scrollIntoView())
-      }
-      return true
+      return codeIndent(state, dispatch)
     }
 
     const itemType = state.schema.nodes.list_item
@@ -847,6 +964,7 @@ function tabKeyCommand(direction) {
     return true
   }
 }
+
 
 function backspaceEmptyListItemCommand() {
   return (state, dispatch) => {
