@@ -11,7 +11,6 @@ import type { NodeSpec, MarkSpec } from "prosemirror-model"
  * not HOW compilation works.
  */
 export function registerCoreNodes(reg: Registry) {
-  // 1) Pull full base schema from prosemirror-schema-basic
   const baseNodes = addListNodes(
     basicSchema.spec.nodes,
     "paragraph block*",
@@ -67,14 +66,13 @@ export function registerCoreNodes(reg: Registry) {
 
   reg.registerSchema({ nodes, marks })
 
-  // 2) Restore core Markdown → PM semantics
   registerParagraph(reg)
   registerEmphasis(reg)
   registerHeading(reg)
   registerLists(reg)
+  registerCodeBlocks(reg)
   registerHorizontalRule(reg)
 
-  // 3) PM → Markdown printers (unchanged)
   registerMarkdownPrinters(reg)
 }
 
@@ -274,6 +272,35 @@ function registerLists(reg: Registry) {
   })
 }
 
+function registerCodeBlocks(reg: Registry) {
+  function pushCodeBlock(ctx: CompileContext, raw: string) {
+    let content = String(raw ?? "")
+    // markdown-it fence content usually ends with one trailing newline.
+    if (content.endsWith("\n")) {
+      content = content.slice(0, -1)
+    }
+    const textNode = content.length > 0 ? ctx.schema.text(content) : null
+    const block = textNode
+      ? ctx.schema.nodes.code_block.create(null, [textNode])
+      : ctx.schema.nodes.code_block.create()
+    ctx.push(block)
+  }
+
+  // Triple-backtick fenced blocks from markdown-it.
+  reg.registerText("fence", {
+    run(ctx, tok) {
+      pushCodeBlock(ctx, tok.content ?? "")
+    },
+  })
+
+  // Also accept indented code blocks when imported.
+  reg.registerText("code_block", {
+    run(ctx, tok) {
+      pushCodeBlock(ctx, tok.content ?? "")
+    },
+  })
+}
+
 function registerHorizontalRule(reg: Registry) {
   reg.registerText("hr", {
     run(ctx) {
@@ -301,7 +328,7 @@ function registerMarkdownPrinters(reg: Registry) {
 
       // Keep visual line breaks in list paragraphs as real newlines.
       if (child.type?.name === "paragraph") {
-        rendered = rendered.replace(/\n/g, "\n")
+        rendered = rendered.replace(/\\n/g, "\n")
       }
 
       parts.push(rendered)
@@ -309,7 +336,6 @@ function registerMarkdownPrinters(reg: Registry) {
 
     return parts.join("\n")
   }
-
 
   reg.registerPMNode("paragraph", {
     print(node, ctx, recurse) {
@@ -403,6 +429,14 @@ function registerMarkdownPrinters(reg: Registry) {
         return `](${href} "${String(title).replace(/"/g, '\\"')}")`
       }
       return `](${href})`
+    },
+  })
+
+  reg.registerPMNode("code_block", {
+    print(node) {
+      const text = node.textContent ?? ""
+      const body = text.endsWith("\n") ? text : text + "\n"
+      return "```\n" + body + "```\n\n"
     },
   })
 

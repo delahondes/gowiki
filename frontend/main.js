@@ -806,12 +806,45 @@ function clearContent() {
   contentRoot.innerHTML = ""
 }
 
-function listDepthCommand(direction) {
+function isInCodeBlock(state) {
+  const $from = state.selection.$from
+  for (let d = $from.depth; d >= 0; d--) {
+    if ($from.node(d).type.name === "code_block") return true
+  }
+  return false
+}
+
+function isInTableCell(state) {
+  const $from = state.selection.$from
+  for (let d = $from.depth; d >= 0; d--) {
+    const name = $from.node(d).type.name
+    if (name === "table_cell" || name === "table_header") return true
+  }
+  return false
+}
+
+function tabKeyCommand(direction) {
   return (state, dispatch) => {
+    // Let table plugin own Tab behavior inside table cells.
+    if (isInTableCell(state)) return false
+
+    // In code blocks, Tab inserts two spaces.
+    if (isInCodeBlock(state)) {
+      if (direction === "in") {
+        if (!dispatch) return true
+        dispatch(state.tr.insertText("  ").scrollIntoView())
+      }
+      return true
+    }
+
     const itemType = state.schema.nodes.list_item
-    if (!itemType) return false
-    const command = direction === "in" ? sinkListItem(itemType) : liftListItem(itemType)
-    return command(state, dispatch)
+    if (itemType) {
+      const listCmd = direction === "in" ? sinkListItem(itemType) : liftListItem(itemType)
+      if (listCmd(state, dispatch)) return true
+    }
+
+    // Outside list/table/code block, do nothing but keep focus in editor.
+    return true
   }
 }
 
@@ -957,8 +990,8 @@ function renderEdit(nextEditMode) {
   const listKeymap = keymap({
     Enter: splitListItem(schema.nodes.list_item),
     Backspace: backspaceEmptyListItemCommand(),
-    Tab: listDepthCommand("in"),
-    "Shift-Tab": listDepthCommand("out"),
+    Tab: tabKeyCommand("in"),
+    "Shift-Tab": tabKeyCommand("out"),
     "Alt-Enter": insertHardBreakCommand(),
   })
 

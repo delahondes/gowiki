@@ -132,6 +132,21 @@
 }
 
 
+.ProseMirror pre,
+.gowiki-view pre {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  text-indent: 0;
+}
+
+.ProseMirror pre code,
+.gowiki-view pre code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  text-indent: 0;
+}
+
 .ProseMirror ol {
   list-style-type: decimal;
 }
