@@ -244,12 +244,7 @@ function registerLists(reg: Registry) {
 
   reg.registerNode("ordered_list_open", {
     open(ctx) {
-      const start = ctx.token.attrGet?.("start")
-      ctx.open(
-        ctx.schema.nodes.ordered_list.create(
-          start ? { order: Number(start) } : null
-        )
-      )
+      ctx.open(ctx.schema.nodes.ordered_list.create())
     },
   })
 

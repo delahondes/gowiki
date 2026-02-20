@@ -1303,6 +1303,272 @@ function rawInsertCodeBlock(textarea) {
   }
 }
 
+// --- Raw ordered list renumbering ---
+
+function rawRenumberOrderedLists(textarea) {
+  const val = textarea.value
+  const lines = val.split("\n")
+  const origStart = textarea.selectionStart
+  const origEnd = textarea.selectionEnd
+  const olRe = /^(\s*)(\d+)(\. .*)$/
+
+  const stack = [] // {indent, counter}
+  let changed = false
+  let startDelta = 0
+  let endDelta = 0
+  let pos = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const m = line.match(olRe)
+
+    if (m) {
+      const indent = m[1].length
+      const oldNum = m[2]
+
+      // Pop entries deeper than current indent
+      while (stack.length > 0 && stack[stack.length - 1].indent > indent) {
+        stack.pop()
+      }
+
+      if (stack.length > 0 && stack[stack.length - 1].indent === indent) {
+        stack[stack.length - 1].counter++
+      } else {
+        // Pop entries at same or deeper indent (shouldn't remain, but be safe)
+        while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+          stack.pop()
+        }
+        stack.push({ indent, counter: 1 })
+      }
+
+      const newNum = String(stack[stack.length - 1].counter)
+      if (oldNum !== newNum) {
+        changed = true
+        const delta = newNum.length - oldNum.length
+        lines[i] = m[1] + newNum + m[3]
+        const numEnd = pos + indent + oldNum.length
+        if (numEnd <= origStart) startDelta += delta
+        if (numEnd <= origEnd) endDelta += delta
+      }
+    } else if (/^\s*$/.test(line)) {
+      // Blank line: don't break list continuity
+    } else if (/^\s*- /.test(line)) {
+      // Bullet list: clear ordered counters at this indent and deeper
+      const indent = line.match(/^(\s*)/)[1].length
+      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+        stack.pop()
+      }
+    } else {
+      // Non-list content: clear entire stack
+      stack.length = 0
+    }
+
+    pos += line.length + 1
+  }
+
+  if (!changed) return
+
+  const newText = lines.join("\n")
+  textarea.focus()
+  textarea.setSelectionRange(0, val.length)
+  rawInsertText(textarea, newText)
+  const newStart = Math.max(0, origStart + startDelta)
+  const newEnd = Math.max(newStart, origEnd + endDelta)
+  textarea.setSelectionRange(newStart, newEnd)
+}
+
+// --- Raw list keyboard handling ---
+
+const rawListRe = /^(\s*)(- |\d+\. )/
+
+function rawGetListPrefix(textarea) {
+  const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
+  const line = textarea.value.substring(lineStart, lineEnd)
+  const m = line.match(rawListRe)
+  if (!m) return null
+  return { lineStart, lineEnd, line, indent: m[1], marker: m[2], contentStart: m[1].length + m[2].length }
+}
+
+function rawHandleEnterInList(textarea) {
+  const info = rawGetListPrefix(textarea)
+  if (!info) return false
+
+  const pos = textarea.selectionStart
+  const contentAfterCursor = textarea.value.substring(pos, info.lineEnd)
+  const contentBeforeCursor = textarea.value.substring(info.lineStart + info.contentStart, pos)
+
+  // Empty list item: remove the prefix (exit list)
+  if (contentBeforeCursor.trim() === "" && contentAfterCursor.trim() === "") {
+    textarea.focus()
+    textarea.setSelectionRange(info.lineStart, info.lineEnd)
+    rawInsertText(textarea, "")
+    return true
+  }
+
+  // Build the next list prefix at the same indent level
+  let nextMarker = info.marker
+  const orderedMatch = info.marker.match(/^(\d+)\. $/)
+  if (orderedMatch) {
+    nextMarker = (Number(orderedMatch[1]) + 1) + ". "
+  }
+  const insertion = "\n" + info.indent + nextMarker
+
+  textarea.focus()
+  textarea.setSelectionRange(pos, pos)
+  rawInsertText(textarea, insertion)
+  rawRenumberOrderedLists(textarea)
+  return true
+}
+
+function rawListIndentWidth(line) {
+  // Ordered lists (1. ) need 3-space indent per CommonMark; unordered (- ) need 2
+  const stripped = line.replace(/^\s*/, "")
+  return /^\d+\. /.test(stripped) ? 3 : 2
+}
+
+function rawHandleTabInList(textarea, direction) {
+  const ranges = rawGetSelectedLineRanges(textarea)
+  const val = textarea.value
+  const listLines = ranges.filter(r => rawListRe.test(val.substring(r.lineStart, r.lineEnd)))
+  if (listLines.length === 0) return false
+
+  // Expand each selected root line to include its sub-items (deeper-indented lines below it).
+  // Build all line ranges for the entire textarea to scan forward.
+  const allRanges = []
+  {
+    let cur = 0
+    while (cur < val.length) {
+      let end = val.indexOf("\n", cur)
+      if (end === -1) end = val.length
+      allRanges.push({ lineStart: cur, lineEnd: end })
+      cur = end + 1
+    }
+  }
+
+  // When indenting, filter out roots that are the first item in their list —
+  // you can't sublevel the first item since there's no sibling above it.
+  let effectiveRoots = listLines
+  if (direction === "in") {
+    effectiveRoots = listLines.filter(root => {
+      const rootLine = val.substring(root.lineStart, root.lineEnd)
+      const rootIndent = rootLine.match(/^(\s*)/)[1].length
+      const rootIsOrdered = /^\s*\d+\. /.test(rootLine)
+
+      // Find this root's index in allRanges and scan backward
+      let rootIdx = -1
+      for (let i = 0; i < allRanges.length; i++) {
+        if (allRanges[i].lineStart === root.lineStart) { rootIdx = i; break }
+      }
+      if (rootIdx <= 0) return false // first line of file, definitely first item
+
+      for (let i = rootIdx - 1; i >= 0; i--) {
+        const prevLine = val.substring(allRanges[i].lineStart, allRanges[i].lineEnd)
+        if (prevLine.trim() === "") continue // blank line, keep scanning
+        const prevIndent = prevLine.match(/^(\s*)/)[1].length
+        if (prevIndent > rootIndent) continue // continuation or sub-item, keep scanning
+        if (prevIndent < rootIndent) return false // shallower level: root is first at its level
+        // Same indent: must be a list item of the same type (both ordered or both unordered)
+        if (!rawListRe.test(prevLine)) return false // not a list item
+        const prevIsOrdered = /^\s*\d+\. /.test(prevLine)
+        if (prevIsOrdered !== rootIsOrdered) return false // different list type = first item of new list
+        return true // same-type sibling found, can indent
+      }
+      return false // reached start of file, first item
+    })
+    if (effectiveRoots.length === 0) return false
+  }
+
+  // Collect the full set of lines to indent: roots + their sub-items
+  const linesToProcess = new Set()
+  for (const root of effectiveRoots) {
+    linesToProcess.add(root.lineStart)
+    const rootLine = val.substring(root.lineStart, root.lineEnd)
+    const rootIndent = rootLine.match(/^(\s*)/)[1].length
+
+    // Find this root's index in allRanges
+    let rootIdx = -1
+    for (let i = 0; i < allRanges.length; i++) {
+      if (allRanges[i].lineStart === root.lineStart) { rootIdx = i; break }
+    }
+    if (rootIdx === -1) continue
+
+    // Scan forward: collect all subsequent lines at deeper indent (sub-items)
+    for (let i = rootIdx + 1; i < allRanges.length; i++) {
+      const subLine = val.substring(allRanges[i].lineStart, allRanges[i].lineEnd)
+      if (subLine.trim() === "") {
+        // Blank line: include it (may be inside a list), keep scanning
+        linesToProcess.add(allRanges[i].lineStart)
+        continue
+      }
+      const subIndent = subLine.match(/^(\s*)/)[1].length
+      if (subIndent > rootIndent) {
+        linesToProcess.add(allRanges[i].lineStart)
+      } else {
+        break
+      }
+    }
+  }
+
+  // Remove trailing blank lines that aren't actually sub-items
+  // (they were speculatively included while scanning)
+
+  // Build the final sorted list of line ranges to process
+  const processRanges = allRanges.filter(r => linesToProcess.has(r.lineStart))
+
+  const origStart = textarea.selectionStart
+  const origEnd = textarea.selectionEnd
+  textarea.focus()
+
+  let startDelta = 0
+  let endDelta = 0
+
+  if (direction === "in") {
+    // Use the indent width of the first root for all lines in this operation
+    const firstRootLine = val.substring(effectiveRoots[0].lineStart, effectiveRoots[0].lineEnd)
+    const indentStr = " ".repeat(rawListIndentWidth(firstRootLine))
+
+    for (let i = processRanges.length - 1; i >= 0; i--) {
+      const r = processRanges[i]
+      const line = val.substring(r.lineStart, r.lineEnd)
+      if (line.trim() === "") continue // skip blank lines
+      textarea.setSelectionRange(r.lineStart, r.lineStart)
+      rawInsertText(textarea, indentStr)
+      if (r.lineStart <= origStart) startDelta += indentStr.length
+      if (r.lineStart <= origEnd) endDelta += indentStr.length
+    }
+  } else {
+    const firstRootLine = val.substring(listLines[0].lineStart, listLines[0].lineEnd)
+    const width = rawListIndentWidth(firstRootLine)
+
+    for (let i = processRanges.length - 1; i >= 0; i--) {
+      const r = processRanges[i]
+      const line = val.substring(r.lineStart, r.lineEnd)
+      if (line.trim() === "") continue // skip blank lines
+      let remove = 0
+      for (let j = 0; j < width && j < line.length; j++) {
+        if (line.charCodeAt(j) === 32) remove++
+        else break
+      }
+      if (remove > 0) {
+        textarea.setSelectionRange(r.lineStart, r.lineStart + remove)
+        rawInsertText(textarea, "")
+        if (r.lineStart < origStart) {
+          startDelta -= Math.min(remove, origStart - r.lineStart)
+        }
+        if (r.lineStart < origEnd) {
+          endDelta -= Math.min(remove, origEnd - r.lineStart)
+        }
+      }
+    }
+  }
+
+  const newStart = Math.max(0, origStart + startDelta)
+  const newEnd = Math.max(newStart, origEnd + endDelta)
+  textarea.setSelectionRange(newStart, newEnd)
+  rawRenumberOrderedLists(textarea)
+  return true
+}
+
 function rawInsertInclude(textarea) {
   const snippet = "{include path=}"
   const start = textarea.selectionStart
@@ -1325,6 +1591,27 @@ function buildRawMenubar(textarea) {
     btn.title = title
     btn.addEventListener("mousedown", e => {
       e.preventDefault() // prevent textarea blur
+      onClick()
+    })
+    bar.appendChild(btn)
+    return btn
+  }
+
+  function addIconButton(iconData, title, onClick) {
+    const btn = document.createElement("span")
+    btn.className = "gowiki-raw-menuitem"
+    btn.title = title
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    svg.setAttribute("viewBox", `0 0 ${iconData.width} ${iconData.height}`)
+    svg.style.width = (iconData.width / iconData.height) + "em"
+    svg.style.height = "1em"
+    svg.style.verticalAlign = "middle"
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
+    path.setAttribute("d", iconData.path)
+    svg.appendChild(path)
+    btn.appendChild(svg)
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault()
       onClick()
     })
     bar.appendChild(btn)
@@ -1398,17 +1685,13 @@ function buildRawMenubar(textarea) {
   addSeparator()
 
   // Block actions
-  addButton("UL", "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
-  addButton("OL", "Ordered list", () => rawToggleLinePrefix(textarea, "1. "))
+  addIconButton(icons.bulletList, "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
+  addIconButton(icons.orderedList, "Ordered list", () => {
+    rawToggleLinePrefix(textarea, "1. ")
+    rawRenumberOrderedLists(textarea)
+  })
   addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
   addButton("Include", "Insert include block", () => rawInsertInclude(textarea))
-
-  addSeparator()
-
-  // Save
-  addButton("Save", "Save page", () => {
-    void saveAndMaybeSwitch(false)
-  })
 
   return bar
 }
@@ -1425,6 +1708,20 @@ function renderRawEdit() {
   const menubar = buildRawMenubar(editorEl)
   wrapper.appendChild(menubar)
   wrapper.appendChild(editorEl)
+
+  editorEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (rawHandleEnterInList(editorEl)) {
+        e.preventDefault()
+        autoResizeRawEditor(editorEl)
+      }
+    } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
+      if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
+        e.preventDefault()
+        autoResizeRawEditor(editorEl)
+      }
+    }
+  })
 
   editorEl.addEventListener("input", () => {
     autoResizeRawEditor(editorEl)
