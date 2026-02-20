@@ -20,12 +20,48 @@ const panelStyles = `
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  margin: 0 0 6px 0;
-  padding: 4px 6px;
-  border: 1px solid #ddd;
+  margin: 0 0 -10px 10px;
+  padding: 3px 8px;
   background: #fff6cf;
-  border-radius: 4px;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
   font-size: 0.85em;
+  position: relative;
+  z-index: 1;
+}
+
+.gowiki-props-panel::before,
+.gowiki-props-panel::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+}
+
+/* LEFT */
+.gowiki-props-panel::before {
+  left: -12px;
+  background:
+    radial-gradient(circle at 0% 0%,
+      transparent 11px,
+      #ddd 11px,
+      #ddd 12px,
+      #fff6cf 12px
+    );
+}
+
+/* RIGHT */
+.gowiki-props-panel::after {
+  right: -12px;
+  background:
+    radial-gradient(circle at 100% 0%,
+      transparent 11px,
+      #ddd 11px,
+      #ddd 12px,
+      #fff6cf 12px
+    );
 }
 
 .gowiki-props-panel input {

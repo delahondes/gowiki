@@ -24,7 +24,6 @@ const includeStyles = `
 /* In edit mode: show a grey zone so the user can see the block is non-editable */
 #app.gowiki-editing .gowiki-include {
   background: #f8f9fa;
-  border-radius: 4px;
   margin: 0.5em 0;
 }
 
@@ -42,6 +41,7 @@ const includeStyles = `
   outline: none;
   padding: 0;
   min-height: 0;
+  border: none;
 }
 
 .gowiki-include-loading {
