@@ -98,6 +98,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
           tag: "",
           nesting: 0,
           block: true,
+          level: 0,
           map: token.map,
           meta: { directiveName: meta.name, attrs: parsedAttrs },
         })

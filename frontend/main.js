@@ -107,6 +107,7 @@ if (headingItems.length > 0) {
 const tableCommands = new Map()
 const extraCommandGroups = []
 let togglePropertiesCommand = null
+let includeInsertCommand = null
 
 function insertMenuItemAfterTitle(menuGroups, title, item) {
   for (const group of menuGroups) {
@@ -151,6 +152,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "ui" && name === "properties.toggle") {
     togglePropertiesCommand = cmd
+    return
+  }
+
+  if (namespace === "include") {
+    if (name === "insert") includeInsertCommand = cmd
     return
   }
 
@@ -613,6 +619,23 @@ if (tableCommands.size > 0) {
       class: "gowiki-menu-table",
     })
     menu.fullMenu.splice(2, 0, [tableMenu])
+  }
+}
+
+if (includeInsertCommand) {
+  const includeMenuItem = new MenuItem({
+    label: "Include",
+    title: "Insert include block",
+    run: includeInsertCommand,
+    enable: state => {
+      const includeType = state.schema.nodes.include
+      return Boolean(includeType && canInsertNode(state, includeType))
+    },
+  })
+  if (tableCommands.size > 0) {
+    menu.fullMenu[2].push(includeMenuItem)
+  } else {
+    menu.fullMenu.splice(2, 0, [includeMenuItem])
   }
 }
 
@@ -1280,6 +1303,17 @@ function rawInsertCodeBlock(textarea) {
   }
 }
 
+function rawInsertInclude(textarea) {
+  const snippet = "{include path=}"
+  const start = textarea.selectionStart
+  textarea.focus()
+  textarea.setSelectionRange(start, textarea.selectionEnd)
+  rawInsertText(textarea, snippet)
+  // Place cursor between "=" and "}", ready to type the path
+  const cursorPos = start + snippet.length - 1
+  textarea.setSelectionRange(cursorPos, cursorPos)
+}
+
 function buildRawMenubar(textarea) {
   const bar = document.createElement("div")
   bar.className = "gowiki-raw-menubar"
@@ -1367,6 +1401,7 @@ function buildRawMenubar(textarea) {
   addButton("UL", "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
   addButton("OL", "Ordered list", () => rawToggleLinePrefix(textarea, "1. "))
   addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
+  addButton("Include", "Insert include block", () => rawInsertInclude(textarea))
 
   addSeparator()
 

@@ -1,10 +1,11 @@
-import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { DOMSerializer } from "prosemirror-model"
 import type { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
 import { markdownToPM } from "../compiler/markdown_to_pm"
+import { enablePropertiesPanel } from "../compiler/core_ui"
 
 const includeProperties = [
   {
@@ -232,6 +233,39 @@ export const includePlugin: WikiPlugin = {
           },
         },
       })
+    })
+
+    // Command: insert an empty include node and open the properties panel
+    reg.registerCommand("include", "insert", (state, dispatch) => {
+      const includeType = reg.schema.nodes.include
+      if (!includeType) return false
+      if (dispatch) {
+        const node = includeType.create({ path: "" })
+        let tr = state.tr.replaceSelectionWith(node)
+        // Find the freshly inserted include node near the original cursor position
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 5),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === includeType && insertedAt === null) {
+              insertedAt = pos
+              return false
+            }
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch {
+            // Leave default selection if NodeSelection fails
+          }
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
     })
 
     // Styles

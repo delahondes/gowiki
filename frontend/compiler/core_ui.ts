@@ -262,6 +262,10 @@ export function isPropertiesPanelEnabled(state: any): boolean {
   return Boolean(panelKey.getState(state)?.enabled)
 }
 
+export function enablePropertiesPanel(tr: any): any {
+  return tr.setMeta(panelKey, { enabled: true })
+}
+
 function togglePropertiesCommand() {
   return (state: any, dispatch: any) => {
     const current = panelKey.getState(state)
