@@ -40,8 +40,11 @@ This is editable text.
 - Two
 `
 
+const appRoot = document.querySelector("#app")
 const contentRoot = document.querySelector("#content")
 const actionsRoot = document.querySelector("#actions")
+const sidebarRoot = document.querySelector("#left")
+const footerRoot = document.querySelector("#footer")
 
 let mode = "view"
 let editMode = "visual"
@@ -51,6 +54,10 @@ let editBaselineMarkdown = defaultMarkdown
 let editorView = null
 let rawEditor = null
 let statusText = ""
+let isNewPage = false
+let viewView = null
+let sidebarView = null
+let footerView = null
 
 const menu = buildMenuItems(schema)
 menu.fullMenu = menu.fullMenu
@@ -764,8 +771,10 @@ function setMode(nextMode) {
 
   mode = nextMode
   if (mode === "edit") {
+    appRoot.classList.add("gowiki-editing")
     renderEdit(editMode)
   } else {
+    appRoot.classList.remove("gowiki-editing")
     renderView()
   }
   renderActions()
@@ -801,6 +810,10 @@ function clearContent() {
   if (editorView) {
     editorView.destroy()
     editorView = null
+  }
+  if (viewView) {
+    viewView.destroy()
+    viewView = null
   }
   rawEditor = null
   contentRoot.innerHTML = ""
@@ -1017,7 +1030,7 @@ function insertHardBreakCommand() {
 }
 
 function scrollSelectionIntoContentView(view) {
-  const scroller = contentRoot
+  const scroller = document.querySelector("#main") || contentRoot
   if (!(scroller instanceof HTMLElement)) return false
 
   const menu = view.dom.parentElement?.querySelector(".ProseMirror-menubar")
@@ -1052,16 +1065,44 @@ function scrollSelectionIntoContentView(view) {
   return true
 }
 
+function mountReadOnlyView(container, markdown, className) {
+  const doc = markdownToPM(markdown, registry)
+  const wrapper = document.createElement("div")
+  if (className) wrapper.className = className
+  container.appendChild(wrapper)
+  const state = EditorState.create({
+    doc,
+    schema,
+    plugins: registry.getEditorPlugins(),
+  })
+  return new EditorView(wrapper, {
+    state,
+    editable: () => false,
+  })
+}
+
+async function fetchAndMountZone(path, container, className) {
+  try {
+    const page = await fetchPage(path)
+    if (!page) return null
+    return mountReadOnlyView(container, page.markdown, className)
+  } catch {
+    return null
+  }
+}
+
 function renderView() {
   clearContent()
-  const wrapper = document.createElement("div")
-  wrapper.className = "gowiki-view"
-  const root = document.createElement("div")
-  root.className = "ProseMirror"
-  const serializer = DOMSerializer.fromSchema(schema)
-  root.appendChild(serializer.serializeFragment(currentDoc.content))
-  wrapper.appendChild(root)
-  contentRoot.appendChild(wrapper)
+
+  if (isNewPage) {
+    const banner = document.createElement("div")
+    banner.className = "gowiki-new-page-banner"
+    banner.textContent = "This page does not exist. Switch to Edit mode to create it."
+    contentRoot.appendChild(banner)
+    return
+  }
+
+  viewView = mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view")
 }
 
 function autoResizeRawEditor(editorEl) {
@@ -1069,11 +1110,286 @@ function autoResizeRawEditor(editorEl) {
   editorEl.style.height = `${Math.max(editorEl.scrollHeight, 360)}px`
 }
 
+// --- Raw mode menubar helpers ---
+
+function rawInsertText(textarea, text) {
+  textarea.focus()
+  document.execCommand("insertText", false, text)
+}
+
+function rawWrapSelection(textarea, before, after) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = textarea.value.substring(start, end)
+
+  if (start === end) {
+    // No selection: insert syntax with cursor between markers
+    textarea.focus()
+    textarea.setSelectionRange(start, start)
+    rawInsertText(textarea, before + after)
+    textarea.setSelectionRange(start + before.length, start + before.length)
+  } else {
+    // Wrap selection
+    textarea.focus()
+    textarea.setSelectionRange(start, end)
+    rawInsertText(textarea, before + selected + after)
+    textarea.setSelectionRange(start + before.length, start + before.length + selected.length)
+  }
+}
+
+function rawGetCurrentLineRange(textarea) {
+  const val = textarea.value
+  const pos = textarea.selectionStart
+  let lineStart = pos
+  while (lineStart > 0 && val[lineStart - 1] !== "\n") lineStart--
+  let lineEnd = pos
+  while (lineEnd < val.length && val[lineEnd] !== "\n") lineEnd++
+  return { lineStart, lineEnd }
+}
+
+function rawGetSelectedLineRanges(textarea) {
+  const val = textarea.value
+  const selStart = textarea.selectionStart
+  const selEnd = textarea.selectionEnd
+
+  let lineStart = selStart
+  while (lineStart > 0 && val[lineStart - 1] !== "\n") lineStart--
+
+  let lineEnd = selEnd
+  if (selEnd > selStart && val[selEnd - 1] === "\n") {
+    lineEnd = selEnd - 1
+  }
+  while (lineEnd < val.length && val[lineEnd] !== "\n") lineEnd++
+
+  // Split into individual line ranges
+  const ranges = []
+  let cur = lineStart
+  while (cur <= lineEnd) {
+    let end = val.indexOf("\n", cur)
+    if (end === -1 || end > lineEnd) end = lineEnd
+    ranges.push({ lineStart: cur, lineEnd: end })
+    cur = end + 1
+  }
+  return ranges
+}
+
+function rawToggleLinePrefix(textarea, prefix) {
+  const ranges = rawGetSelectedLineRanges(textarea)
+  const val = textarea.value
+
+  // Check if all lines already have the prefix
+  const allHavePrefix = ranges.every(r =>
+    val.substring(r.lineStart, r.lineStart + prefix.length) === prefix
+  )
+
+  textarea.focus()
+
+  if (allHavePrefix) {
+    // Remove prefix from all lines, working backwards to preserve positions
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const r = ranges[i]
+      textarea.setSelectionRange(r.lineStart, r.lineStart + prefix.length)
+      rawInsertText(textarea, "")
+    }
+  } else {
+    // Add prefix to lines that don't have it, working backwards
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const r = ranges[i]
+      if (val.substring(r.lineStart, r.lineStart + prefix.length) !== prefix) {
+        textarea.setSelectionRange(r.lineStart, r.lineStart)
+        rawInsertText(textarea, prefix)
+      }
+    }
+  }
+}
+
+function rawSetHeadingLevel(textarea, level) {
+  const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
+  const val = textarea.value
+  const line = val.substring(lineStart, lineEnd)
+
+  // Strip any existing heading prefix
+  const stripped = line.replace(/^#{1,6}\s*/, "")
+  const newPrefix = "#".repeat(level) + " "
+
+  // If line already has this exact heading level, toggle it off
+  const existingMatch = line.match(/^(#{1,6})\s/)
+  const alreadyThisLevel = existingMatch && existingMatch[1].length === level
+
+  textarea.focus()
+  textarea.setSelectionRange(lineStart, lineEnd)
+  if (alreadyThisLevel) {
+    rawInsertText(textarea, stripped)
+    textarea.setSelectionRange(lineStart, lineStart + stripped.length)
+  } else {
+    const newLine = newPrefix + stripped
+    rawInsertText(textarea, newLine)
+    textarea.setSelectionRange(lineStart, lineStart + newLine.length)
+  }
+}
+
+function rawInsertHorizontalRule(textarea) {
+  const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
+  const val = textarea.value
+  const line = val.substring(lineStart, lineEnd)
+
+  textarea.focus()
+  if (line.trim() === "") {
+    // Replace empty line with hr
+    textarea.setSelectionRange(lineStart, lineEnd)
+    rawInsertText(textarea, "---")
+  } else {
+    // Insert hr on a new line after current line
+    textarea.setSelectionRange(lineEnd, lineEnd)
+    rawInsertText(textarea, "\n---")
+  }
+}
+
+async function rawInsertLink(textarea) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selectedText = textarea.value.substring(start, end)
+
+  const form = await promptLinkForm("https://", selectedText)
+  if (!form) return
+
+  const displayText = form.text.trim().length === 0
+    ? defaultLinkTextForTarget(form.target)
+    : form.text
+  const md = `[${displayText}](${form.target})`
+
+  textarea.focus()
+  textarea.setSelectionRange(start, end)
+  rawInsertText(textarea, md)
+}
+
+function rawInsertCodeBlock(textarea) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = textarea.value.substring(start, end)
+
+  textarea.focus()
+  if (selected.length > 0) {
+    textarea.setSelectionRange(start, end)
+    rawInsertText(textarea, "```\n" + selected + "\n```")
+  } else {
+    textarea.setSelectionRange(start, start)
+    rawInsertText(textarea, "```\n\n```")
+    // Place cursor inside the code block
+    textarea.setSelectionRange(start + 4, start + 4)
+  }
+}
+
+function buildRawMenubar(textarea) {
+  const bar = document.createElement("div")
+  bar.className = "gowiki-raw-menubar"
+
+  function addButton(label, title, onClick) {
+    const btn = document.createElement("span")
+    btn.className = "gowiki-raw-menuitem"
+    btn.textContent = label
+    btn.title = title
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault() // prevent textarea blur
+      onClick()
+    })
+    bar.appendChild(btn)
+    return btn
+  }
+
+  function addSeparator() {
+    const sep = document.createElement("span")
+    sep.className = "gowiki-raw-menusep"
+    bar.appendChild(sep)
+  }
+
+  // Heading dropdown
+  const headingWrap = document.createElement("span")
+  headingWrap.className = "gowiki-raw-menuitem gowiki-raw-menu-dropdown-wrap"
+  headingWrap.title = "Headings"
+  headingWrap.textContent = "H#"
+  const headingMenu = document.createElement("div")
+  headingMenu.className = "gowiki-raw-dropdown-menu"
+  for (let level = 1; level <= 5; level++) {
+    const item = document.createElement("div")
+    item.className = "gowiki-raw-dropdown-item"
+    item.textContent = `H${level}`
+    item.addEventListener("mousedown", e => {
+      e.preventDefault()
+      headingMenu.style.display = "none"
+      rawSetHeadingLevel(textarea, level)
+    })
+    headingMenu.appendChild(item)
+  }
+  headingWrap.appendChild(headingMenu)
+  headingWrap.addEventListener("mousedown", e => {
+    e.preventDefault()
+    const isOpen = headingMenu.style.display === "block"
+    headingMenu.style.display = isOpen ? "none" : "block"
+  })
+  bar.appendChild(headingWrap)
+
+  // Close heading dropdown when clicking elsewhere
+  document.addEventListener("mousedown", e => {
+    if (!headingWrap.contains(e.target)) {
+      headingMenu.style.display = "none"
+    }
+  })
+
+  addSeparator()
+
+  // HR
+  const hrBtn = addButton("---", "Insert horizontal rule", () => {
+    rawInsertHorizontalRule(textarea)
+  })
+  hrBtn.style.fontWeight = "700"
+  hrBtn.style.letterSpacing = "-1px"
+
+  addSeparator()
+
+  // Inline formatting
+  addButton("B", "Bold", () => rawWrapSelection(textarea, "**", "**"))
+    .style.fontWeight = "700"
+  addButton("I", "Italic", () => rawWrapSelection(textarea, "*", "*"))
+    .style.fontStyle = "italic"
+  addButton("</>", "Inline code", () => rawWrapSelection(textarea, "`", "`"))
+
+  addSeparator()
+
+  // Link
+  addButton("Link", "Insert or edit link", () => {
+    void rawInsertLink(textarea)
+  })
+
+  addSeparator()
+
+  // Block actions
+  addButton("UL", "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
+  addButton("OL", "Ordered list", () => rawToggleLinePrefix(textarea, "1. "))
+  addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
+
+  addSeparator()
+
+  // Save
+  addButton("Save", "Save page", () => {
+    void saveAndMaybeSwitch(false)
+  })
+
+  return bar
+}
+
 function renderRawEdit() {
+  const wrapper = document.createElement("div")
+  wrapper.className = "gowiki-raw-wrapper"
+
   const editorEl = document.createElement("textarea")
   editorEl.id = "gowiki-raw-editor"
   editorEl.className = "gowiki-raw-editor"
   editorEl.value = currentMarkdown
+
+  const menubar = buildRawMenubar(editorEl)
+  wrapper.appendChild(menubar)
+  wrapper.appendChild(editorEl)
 
   editorEl.addEventListener("input", () => {
     autoResizeRawEditor(editorEl)
@@ -1089,7 +1405,7 @@ function renderRawEdit() {
     }
   })
 
-  contentRoot.appendChild(editorEl)
+  contentRoot.appendChild(wrapper)
   autoResizeRawEditor(editorEl)
   rawEditor = editorEl
 }
@@ -1158,12 +1474,109 @@ function makeActionButton(label, onClick) {
   return btn
 }
 
+function promptNewPage() {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-link-modal-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-link-modal"
+
+    const title = document.createElement("div")
+    title.className = "gowiki-link-modal-title"
+    title.textContent = "Create new page"
+
+    const pathLabel = document.createElement("label")
+    pathLabel.className = "gowiki-link-modal-label"
+    pathLabel.textContent = "Page path"
+
+    const pathInput = document.createElement("input")
+    pathInput.type = "text"
+    pathInput.className = "gowiki-link-modal-input"
+    pathInput.placeholder = "namespace/page-name"
+
+    const warning = document.createElement("div")
+    warning.className = "gowiki-link-modal-warning"
+
+    const buttons = document.createElement("div")
+    buttons.className = "gowiki-link-modal-actions"
+
+    const cancelBtn = document.createElement("button")
+    cancelBtn.type = "button"
+    cancelBtn.textContent = "Cancel"
+    cancelBtn.className = "gowiki-link-modal-btn"
+
+    const okBtn = document.createElement("button")
+    okBtn.type = "button"
+    okBtn.textContent = "Create"
+    okBtn.className = "gowiki-link-modal-btn"
+
+    function close(value) {
+      overlay.remove()
+      resolve(value)
+    }
+
+    function submit() {
+      const raw = pathInput.value.trim()
+      if (!raw) {
+        warning.textContent = "Path cannot be empty."
+        pathInput.focus()
+        return
+      }
+      if (/\.\w+$/.test(raw)) {
+        warning.textContent = "Page paths must not have a file extension."
+        pathInput.focus()
+        return
+      }
+      const cleaned = raw.replace(/^\/+/, "").replace(/\/+$/, "")
+      if (!cleaned) {
+        warning.textContent = "Invalid path."
+        pathInput.focus()
+        return
+      }
+      close(cleaned)
+    }
+
+    cancelBtn.addEventListener("click", () => close(null))
+    okBtn.addEventListener("click", submit)
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay) close(null)
+    })
+    pathInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault()
+        submit()
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        close(null)
+      }
+    })
+
+    buttons.appendChild(cancelBtn)
+    buttons.appendChild(okBtn)
+    dialog.appendChild(title)
+    dialog.appendChild(pathLabel)
+    dialog.appendChild(pathInput)
+    dialog.appendChild(warning)
+    dialog.appendChild(buttons)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+    pathInput.focus()
+  }).then(pagePath => {
+    if (pagePath) {
+      window.location.href = "/" + pagePath
+    }
+  })
+}
+
 function renderActions() {
   actionsRoot.innerHTML = ""
 
   const pageLabel = document.createElement("div")
   pageLabel.className = "gowiki-status"
-  pageLabel.textContent = `Page: ${pageDisplayPath}`
+  pageLabel.textContent = isNewPage
+    ? `Page: ${pageDisplayPath} (new)`
+    : `Page: ${pageDisplayPath}`
   actionsRoot.appendChild(pageLabel)
 
   if (mode === "edit") {
@@ -1216,6 +1629,11 @@ function renderActions() {
         setMode("edit")
       })
     )
+    actionsRoot.appendChild(
+      makeActionButton("New page", () => {
+        void promptNewPage()
+      })
+    )
   }
 
   const status = document.createElement("div")
@@ -1258,6 +1676,7 @@ async function saveAndMaybeSwitch(toView) {
       !toView && mode === "edit" && editMode === "visual"
     )
     editBaselineMarkdown = normalized.markdown
+    isNewPage = false
     setStatus(`Saved ${new Date().toLocaleTimeString()}`)
     if (toView) {
       setMode("view")
@@ -1272,9 +1691,23 @@ async function bootstrap() {
   applyStyles(registry.getStyles())
   renderActions()
   const page = await fetchPage(pagePath)
-  currentMarkdown = page?.markdown ?? defaultMarkdown
+  if (page) {
+    currentMarkdown = page.markdown
+    isNewPage = false
+  } else {
+    currentMarkdown = defaultMarkdown
+    isNewPage = true
+  }
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
+
+  // Fetch and mount sidebar and footer as read-only views (non-blocking)
+  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+    sidebarView = v
+  })
+  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+    footerView = v
+  })
 }
 
 bootstrap().catch(err => {

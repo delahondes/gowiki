@@ -81,6 +81,12 @@ export type DirectiveSpec = {
   properties: NodePropertySpec[]
 }
 
+export type SelfContainedDirectiveSpec = {
+  tokenType: string
+  nodeType: string
+  properties: NodePropertySpec[]
+}
+
 export class Registry {
   /* Markdown → PM */
   private mdNodes = new Map<string, NodeHandler>()
@@ -106,6 +112,7 @@ export class Registry {
 
   /* Directives + node properties */
   private directives = new Map<string, DirectiveSpec>()
+  private selfContainedDirectives = new Map<string, SelfContainedDirectiveSpec>()
   private nodeProperties = new Map<string, NodePropertySpec[]>()
 
   /* Schema contributions */
@@ -286,6 +293,19 @@ export class Registry {
 
   getDirective(name: string): DirectiveSpec | undefined {
     return this.directives.get(name)
+  }
+
+  registerSelfContainedDirective(name: string, spec: SelfContainedDirectiveSpec) {
+    if (this.directives.has(name)) {
+      throw new Error(`Directive name "${name}" is already registered as a prefix directive`)
+    }
+    this.assertFree(this.selfContainedDirectives as Map<string, unknown>, name, "self-contained directive")
+    this.selfContainedDirectives.set(name, spec)
+    this.registerNodeProperties(spec.nodeType, spec.properties)
+  }
+
+  getSelfContainedDirective(name: string): SelfContainedDirectiveSpec | undefined {
+    return this.selfContainedDirectives.get(name)
   }
 
   getNodeProperties(nodeType: string): NodePropertySpec[] {

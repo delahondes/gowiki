@@ -115,6 +115,10 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page, err := s.store.Put(pagePath, req.Markdown)
+	if errors.Is(err, storage.ErrNamespaceConflict) {
+		writeError(w, http.StatusConflict, "a namespace directory exists at this path")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

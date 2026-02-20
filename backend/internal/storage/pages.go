@@ -14,6 +14,7 @@ import (
 )
 
 var ErrPageNotFound = errors.New("page not found")
+var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at this path")
 
 type PageMetadata struct {
 	ID        string    `json:"id"`
@@ -90,6 +91,16 @@ func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
+
+	// Namespace constraint: if the resolved content path is a non-index page
+	// file (e.g. ns.md), check that a directory ns/ does not already exist.
+	if !strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
+		dirPath := strings.TrimSuffix(contentPath, ".md")
+		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
+			return Page{}, ErrNamespaceConflict
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(contentPath), 0o755); err != nil {
 		return Page{}, fmt.Errorf("create page directory: %w", err)
 	}

@@ -48,6 +48,19 @@ Examples:
 - `{heading numbered=true}` before a heading starts/marks numbering at that level.
 - `{heading numbered=false}` before a heading disables numbering for that heading (useful to stop numbering below a certain depth).
 
+## Include directive
+
+The include directive embeds the content of another page as a read-only zone. It is a **self-contained directive** (not a prefix to another block):
+
+```
+{include path=/path/to/page}
+```
+
+- The `include` node has one required attribute: `path` (absolute or relative, following the same resolution rules as page links).
+- The serializer produces exactly `{include path=...}` with no variation.
+- The included content is fetched at render time and displayed as non-editable content.
+- In edit mode, the include block shows a visual header identifying the included path and renders the content in a read-only zone.
+
 ## Escaping and forbidden syntax
 
 ### Backslash escaping
@@ -198,6 +211,7 @@ Status legend:
 | Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
 | Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
+| Include directive | `{include path=/path/to/page}` self-contained | `implemented` | Self-contained directive that renders included page content as a read-only zone. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |
 | HTML entities | not interpreted specially | `partial` | Not explicitly transformed by custom logic; current behavior follows markdown-it defaults. |
 | Line breaks in top-level paragraphs | single newline -> hard break | `implemented` | Implemented with context-aware `softbreak` handling. |

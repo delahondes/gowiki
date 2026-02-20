@@ -76,6 +76,34 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
           `Directive "${pending.name}" must apply to the next block`
         )
       }
+
+      // Check for self-contained directives first
+      const selfContained = registry.getSelfContainedDirective(meta.name)
+      if (selfContained) {
+        const parsedAttrs: Record<string, string | null> = {}
+        for (const [key, raw] of Object.entries(meta.attrs)) {
+          const prop = selfContained.properties.find(p => p.name === key)
+          if (!prop) {
+            if (strict) {
+              throw new Error(
+                `Unknown property "${key}" for directive "${meta.name}"`
+              )
+            }
+            continue
+          }
+          parsedAttrs[key] = prop.parse ? prop.parse(raw) : raw
+        }
+        out.push({
+          type: selfContained.tokenType,
+          tag: "",
+          nesting: 0,
+          block: true,
+          map: token.map,
+          meta: { directiveName: meta.name, attrs: parsedAttrs },
+        })
+        continue
+      }
+
       const spec = registry.getDirective(meta.name)
       if (!spec) {
         if (strict) throw new Error(`Unknown directive: ${meta.name}`)
