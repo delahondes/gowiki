@@ -5,7 +5,9 @@ import { keymap } from "prosemirror-keymap"
 import markdownItMultiMdTable from "markdown-it-multimd-table"
 import {
   addColumnAfter,
+  addColumnBefore,
   addRowAfter,
+  addRowBefore,
   deleteColumn,
   deleteRow,
 } from "prosemirror-tables"
@@ -127,6 +129,7 @@ export const tablePlugin: Plugin = {
         multiline: false,
         rowspan: false,
         headerless: false,
+        multibody: false,
       })
     })
     const nodes = tableNodes({
@@ -311,7 +314,9 @@ export const tablePlugin: Plugin = {
       return true
     })
 
+    reg.registerCommand("table", "row.addBefore", addRowBefore)
     reg.registerCommand("table", "row.addAfter", addRowAfter)
+    reg.registerCommand("table", "column.addBefore", addColumnBefore)
     reg.registerCommand("table", "column.addAfter", addColumnAfter)
     reg.registerCommand("table", "row.delete", deleteRow)
     reg.registerCommand("table", "column.delete", deleteColumn)

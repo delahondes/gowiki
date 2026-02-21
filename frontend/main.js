@@ -588,15 +588,19 @@ if (togglePropertiesCommand) {
 if (tableCommands.size > 0) {
   const order = [
     "insert",
+    "row.addBefore",
     "row.addAfter",
+    "column.addBefore",
     "column.addAfter",
     "row.delete",
     "column.delete",
   ]
   const labels = {
     insert: "Insert table",
-    "row.addAfter": "Add row",
-    "column.addAfter": "Add column",
+    "row.addBefore": "Add row above",
+    "row.addAfter": "Add row below",
+    "column.addBefore": "Add column left",
+    "column.addAfter": "Add column right",
     "row.delete": "Delete row",
     "column.delete": "Delete column",
   }
@@ -1605,6 +1609,196 @@ function rawInsertInclude(textarea) {
   textarea.setSelectionRange(cursorPos, cursorPos)
 }
 
+// --- Raw table helpers ---
+
+function rawGetTableContext(textarea) {
+  const val = textarea.value
+  const pos = textarea.selectionStart
+  const pipeRe = /^\s*\|/
+
+  // Find current line
+  let lineStart = pos
+  while (lineStart > 0 && val[lineStart - 1] !== "\n") lineStart--
+  let lineEnd = pos
+  while (lineEnd < val.length && val[lineEnd] !== "\n") lineEnd++
+  const curLine = val.substring(lineStart, lineEnd)
+  if (!pipeRe.test(curLine)) return null
+
+  // Find table boundaries (contiguous pipe lines)
+  const lines = val.split("\n")
+  let offset = 0
+  let curLineIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (offset === lineStart) { curLineIdx = i; break }
+    offset += lines[i].length + 1
+  }
+  if (curLineIdx < 0) return null
+
+  let tableFirstLine = curLineIdx
+  while (tableFirstLine > 0 && pipeRe.test(lines[tableFirstLine - 1])) tableFirstLine--
+  // Skip a {table ...} directive just above the table
+  if (tableFirstLine > 0 && /^\s*\{table\s/.test(lines[tableFirstLine - 1])) tableFirstLine--
+
+  let tableLastLine = curLineIdx
+  while (tableLastLine < lines.length - 1 && pipeRe.test(lines[tableLastLine + 1])) tableLastLine++
+
+  return { lines, curLineIdx, tableFirstLine, tableLastLine }
+}
+
+function rawParsePipeRow(line) {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
+  const inner = trimmed.slice(1, -1)
+  return inner.split("|").map(c => c.trim())
+}
+
+function rawBuildPipeRow(cells) {
+  return "| " + cells.join(" | ") + " |"
+}
+
+function rawIsSeparatorRow(line) {
+  return /^\s*\|[\s\-:|]+\|\s*$/.test(line)
+}
+
+function rawTableColCount(ctx) {
+  for (let i = ctx.tableFirstLine; i <= ctx.tableLastLine; i++) {
+    const cells = rawParsePipeRow(ctx.lines[i])
+    if (cells && !rawIsSeparatorRow(ctx.lines[i])) return cells.length
+  }
+  return 0
+}
+
+function rawReplaceLines(textarea, ctx) {
+  const val = textarea.value
+  const allLines = val.split("\n")
+  // Compute char offsets of table region
+  let startOffset = 0
+  for (let i = 0; i < ctx.tableFirstLine; i++) startOffset += allLines[i].length + 1
+  let endOffset = startOffset
+  for (let i = ctx.tableFirstLine; i <= ctx.tableLastLine; i++) endOffset += allLines[i].length + 1
+  if (endOffset > 0 && endOffset <= val.length + 1) endOffset-- // trim trailing newline
+
+  const replacement = ctx.lines.slice(ctx.tableFirstLine, ctx.tableLastLine + 1).join("\n")
+  const scroller = document.querySelector("#main")
+  const savedScroll = scroller ? scroller.scrollTop : 0
+  textarea.focus()
+  textarea.setSelectionRange(startOffset, Math.min(endOffset, val.length))
+  rawInsertText(textarea, replacement)
+  if (scroller) scroller.scrollTop = savedScroll
+}
+
+function rawInsertTable(textarea) {
+  const row1 = "| Header 1 | Header 2 | Header 3 |"
+  const sep  = "| --- | --- | --- |"
+  const row2 = "|  |  |  |"
+  const snippet = row1 + "\n" + sep + "\n" + row2
+
+  const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
+  const line = textarea.value.substring(lineStart, lineEnd)
+  textarea.focus()
+  if (line.trim() === "") {
+    textarea.setSelectionRange(lineStart, lineEnd)
+    rawInsertText(textarea, snippet)
+  } else {
+    textarea.setSelectionRange(lineEnd, lineEnd)
+    rawInsertText(textarea, "\n" + snippet)
+  }
+}
+
+function rawTableAddRowBelow(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const cols = rawTableColCount(ctx)
+  if (cols === 0) return
+  const newRow = rawBuildPipeRow(Array(cols).fill(""))
+  ctx.lines.splice(ctx.curLineIdx + 1, 0, newRow)
+  ctx.tableLastLine++
+  rawReplaceLines(textarea, ctx)
+}
+
+function rawTableAddRowAbove(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const cols = rawTableColCount(ctx)
+  if (cols === 0) return
+  // Don't insert above the header row or separator
+  const firstDataLine = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+  if (ctx.curLineIdx <= firstDataLine + 1) return // header + separator
+  const newRow = rawBuildPipeRow(Array(cols).fill(""))
+  ctx.lines.splice(ctx.curLineIdx, 0, newRow)
+  ctx.tableLastLine++
+  rawReplaceLines(textarea, ctx)
+}
+
+function rawTableAddColumnRight(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+
+  // Find column index from cursor position
+  const curLine = ctx.lines[ctx.curLineIdx]
+  const cells = rawParsePipeRow(curLine)
+  if (!cells) return
+
+  for (let i = firstData; i <= ctx.tableLastLine; i++) {
+    const row = rawParsePipeRow(ctx.lines[i])
+    if (!row) continue
+    if (rawIsSeparatorRow(ctx.lines[i])) {
+      row.push("---")
+    } else {
+      row.push("")
+    }
+    ctx.lines[i] = rawBuildPipeRow(row)
+  }
+  rawReplaceLines(textarea, ctx)
+}
+
+function rawTableAddColumnLeft(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+
+  for (let i = firstData; i <= ctx.tableLastLine; i++) {
+    const row = rawParsePipeRow(ctx.lines[i])
+    if (!row) continue
+    if (rawIsSeparatorRow(ctx.lines[i])) {
+      row.unshift("---")
+    } else {
+      row.unshift("")
+    }
+    ctx.lines[i] = rawBuildPipeRow(row)
+  }
+  rawReplaceLines(textarea, ctx)
+}
+
+function rawTableDeleteRow(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+  // Don't delete header or separator
+  if (ctx.curLineIdx <= firstData + 1) return
+  ctx.lines.splice(ctx.curLineIdx, 1)
+  ctx.tableLastLine--
+  rawReplaceLines(textarea, ctx)
+}
+
+function rawTableDeleteColumn(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+  const cols = rawTableColCount(ctx)
+  if (cols <= 1) return // don't delete the last column
+
+  // Remove the last column
+  for (let i = firstData; i <= ctx.tableLastLine; i++) {
+    const row = rawParsePipeRow(ctx.lines[i])
+    if (!row || row.length <= 1) continue
+    row.pop()
+    ctx.lines[i] = rawBuildPipeRow(row)
+  }
+  rawReplaceLines(textarea, ctx)
+}
+
 function rawInsertProperty(textarea) {
   const val = textarea.value
   const pos = textarea.selectionStart
@@ -1817,7 +2011,54 @@ function buildRawMenubar(textarea) {
 
   addSeparator()
 
-  // Block actions
+  // Table dropdown
+  const tableWrap = document.createElement("span")
+  tableWrap.className = "gowiki-raw-menuitem gowiki-raw-menu-dropdown-wrap"
+  tableWrap.title = "Table"
+  const tableIcon = document.createElement("img")
+  tableIcon.src = "/icons/table.svg"
+  tableIcon.alt = "Table"
+  tableIcon.width = 14
+  tableIcon.height = 14
+  tableIcon.className = "gowiki-menu-icon"
+  tableIcon.style.verticalAlign = "middle"
+  tableWrap.appendChild(tableIcon)
+  const tableDropMenu = document.createElement("div")
+  tableDropMenu.className = "gowiki-raw-dropdown-menu"
+  const tableActions = [
+    { label: "Insert table", fn: () => rawInsertTable(textarea) },
+    { label: "Add row above", fn: () => rawTableAddRowAbove(textarea) },
+    { label: "Add row below", fn: () => rawTableAddRowBelow(textarea) },
+    { label: "Add column left", fn: () => rawTableAddColumnLeft(textarea) },
+    { label: "Add column right", fn: () => rawTableAddColumnRight(textarea) },
+    { label: "Delete row", fn: () => rawTableDeleteRow(textarea) },
+    { label: "Delete column", fn: () => rawTableDeleteColumn(textarea) },
+  ]
+  for (const action of tableActions) {
+    const item = document.createElement("div")
+    item.className = "gowiki-raw-dropdown-item"
+    item.textContent = action.label
+    item.addEventListener("mousedown", e => {
+      e.preventDefault()
+      tableDropMenu.style.display = "none"
+      action.fn()
+    })
+    tableDropMenu.appendChild(item)
+  }
+  tableWrap.appendChild(tableDropMenu)
+  tableWrap.addEventListener("mousedown", e => {
+    e.preventDefault()
+    const isOpen = tableDropMenu.style.display === "block"
+    tableDropMenu.style.display = isOpen ? "none" : "block"
+  })
+  bar.appendChild(tableWrap)
+  document.addEventListener("mousedown", e => {
+    if (!tableWrap.contains(e.target)) {
+      tableDropMenu.style.display = "none"
+    }
+  })
+
+  // List actions
   addIconButton(icons.bulletList, "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
   addIconButton(icons.orderedList, "Ordered list", () => {
     rawToggleLinePrefix(textarea, "1. ")
