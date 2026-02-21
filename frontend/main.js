@@ -1151,8 +1151,11 @@ function renderView() {
 }
 
 function autoResizeRawEditor(editorEl) {
-  editorEl.style.height = "auto"
+  const scroller = document.querySelector("#main")
+  const scrollTop = scroller ? scroller.scrollTop : 0
+  editorEl.style.height = "0"
   editorEl.style.height = `${Math.max(editorEl.scrollHeight, 360)}px`
+  if (scroller) scroller.scrollTop = scrollTop
 }
 
 // --- Raw mode menubar helpers ---
@@ -1602,6 +1605,91 @@ function rawInsertInclude(textarea) {
   textarea.setSelectionRange(cursorPos, cursorPos)
 }
 
+function rawInsertProperty(textarea) {
+  const val = textarea.value
+  const pos = textarea.selectionStart
+
+  // Find current line
+  let lineStart = pos
+  while (lineStart > 0 && val[lineStart - 1] !== "\n") lineStart--
+  let lineEnd = pos
+  while (lineEnd < val.length && val[lineEnd] !== "\n") lineEnd++
+  const line = val.substring(lineStart, lineEnd)
+
+  // Detect context: what directive to insert
+  let directive = null
+  let tableStart = lineStart
+  if (/!\[.*\]\(.*\)/.test(line)) {
+    // Image line — check if a {image ...} directive already exists above
+    if (lineStart > 0) {
+      let prevEnd = lineStart - 1
+      let prevStart = prevEnd
+      while (prevStart > 0 && val[prevStart - 1] !== "\n") prevStart--
+      const prevLine = val.substring(prevStart, prevEnd)
+      if (/^\s*\{image\s/.test(prevLine)) {
+        // Already has a property directive — select its value for editing
+        const eqIdx = prevLine.indexOf("=")
+        if (eqIdx >= 0) {
+          const valStart = prevStart + eqIdx + 1
+          const valEnd = prevStart + prevLine.lastIndexOf("}")
+          textarea.focus()
+          textarea.setSelectionRange(valStart, Math.max(valStart, valEnd))
+        }
+        return
+      }
+    }
+    directive = "{image size=}"
+  } else if (/^\s*\|/.test(line)) {
+    // Table line — check if a {table ...} directive already exists above the table
+    // Find the first line of the table
+    tableStart = lineStart
+    while (tableStart > 0) {
+      let pStart = tableStart - 1
+      while (pStart > 0 && val[pStart - 1] !== "\n") pStart--
+      const pLine = val.substring(pStart, tableStart - 1)
+      if (/^\s*\|/.test(pLine)) {
+        tableStart = pStart
+      } else {
+        break
+      }
+    }
+    if (tableStart > 0) {
+      let prevEnd = tableStart - 1
+      let prevStart = prevEnd
+      while (prevStart > 0 && val[prevStart - 1] !== "\n") prevStart--
+      const prevLine = val.substring(prevStart, prevEnd)
+      if (/^\s*\{table\s/.test(prevLine)) {
+        const eqIdx = prevLine.indexOf("=")
+        if (eqIdx >= 0) {
+          const valStart = prevStart + eqIdx + 1
+          const valEnd = prevStart + prevLine.lastIndexOf("}")
+          textarea.focus()
+          textarea.setSelectionRange(valStart, Math.max(valStart, valEnd))
+        }
+        return
+      }
+    }
+    directive = "{table width=}"
+  }
+
+  if (!directive) return
+
+  // For tables, insert above the table start; for images, above the current line
+  const insertAt = /^\s*\|/.test(line) ? tableStart : lineStart
+
+  // Insert directive on its own line before the target line
+  const scroller = document.querySelector("#main")
+  const savedScroll = scroller ? scroller.scrollTop : 0
+  textarea.focus()
+  textarea.setSelectionRange(insertAt, insertAt)
+  rawInsertText(textarea, directive + "\n")
+
+  // Place cursor between "=" and "}"
+  const cursorPos = insertAt + directive.length - 1
+  textarea.setSelectionRange(cursorPos, cursorPos)
+  if (scroller) scroller.scrollTop = savedScroll
+}
+
 function buildRawMenubar(textarea) {
   const bar = document.createElement("div")
   bar.className = "gowiki-raw-menubar"
@@ -1714,6 +1802,26 @@ function buildRawMenubar(textarea) {
   })
   addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
   addButton("Include", "Insert include block", () => rawInsertInclude(textarea))
+
+  addSeparator()
+
+  // Properties toggle (same icon as visual mode)
+  const propBtn = document.createElement("span")
+  propBtn.className = "gowiki-raw-menuitem"
+  propBtn.title = "Insert property"
+  const propImg = document.createElement("img")
+  propImg.src = "/icons/tools.svg"
+  propImg.alt = "Properties"
+  propImg.width = 14
+  propImg.height = 14
+  propImg.className = "gowiki-menu-icon"
+  propImg.style.verticalAlign = "middle"
+  propBtn.appendChild(propImg)
+  propBtn.addEventListener("mousedown", e => {
+    e.preventDefault()
+    rawInsertProperty(textarea)
+  })
+  bar.appendChild(propBtn)
 
   return bar
 }
