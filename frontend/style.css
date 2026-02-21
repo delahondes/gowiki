@@ -126,6 +126,10 @@
   width: 0.95em;
   height: 0.95em;
 }
+.gowiki-menu-icon--lg {
+  width: 1.15em;
+  height: 1.15em;
+}
 
 .gowiki-menu-headings.ProseMirror-menu-dropdown {
   font-size: 1.2em;

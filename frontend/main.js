@@ -624,8 +624,8 @@ if (tableCommands.size > 0) {
 
 if (includeInsertCommand) {
   const includeMenuItem = new MenuItem({
-    label: "Include",
-    title: "Insert include block",
+    icon: (() => { const i = svgIcon("/icons/include.svg", "Include"); i.dom.classList.add("gowiki-menu-icon--lg"); return i })(),
+    title: "Include",
     run: includeInsertCommand,
     enable: state => {
       const includeType = state.schema.nodes.include
@@ -1728,11 +1728,34 @@ function buildRawMenubar(textarea) {
     return btn
   }
 
+  function addImgButton(src, title, onClick) {
+    const btn = document.createElement("span")
+    btn.className = "gowiki-raw-menuitem"
+    btn.title = title
+    const img = document.createElement("img")
+    img.src = src
+    img.alt = title
+    img.width = 14
+    img.height = 14
+    img.className = "gowiki-menu-icon"
+    img.style.verticalAlign = "middle"
+    btn.appendChild(img)
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault()
+      onClick()
+    })
+    bar.appendChild(btn)
+    return btn
+  }
+
   function addSeparator() {
     const sep = document.createElement("span")
     sep.className = "gowiki-raw-menusep"
     bar.appendChild(sep)
   }
+
+  // Properties (left-most, matches visual mode toggle position)
+  addImgButton("/icons/tools.svg", "Insert property", () => rawInsertProperty(textarea))
 
   // Heading dropdown
   const headingWrap = document.createElement("span")
@@ -1788,7 +1811,7 @@ function buildRawMenubar(textarea) {
   addSeparator()
 
   // Link
-  addButton("Link", "Insert or edit link", () => {
+  addIconButton(icons.link, "Insert or edit link", () => {
     void rawInsertLink(textarea)
   })
 
@@ -1801,27 +1824,8 @@ function buildRawMenubar(textarea) {
     rawRenumberOrderedLists(textarea)
   })
   addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
-  addButton("Include", "Insert include block", () => rawInsertInclude(textarea))
-
-  addSeparator()
-
-  // Properties toggle (same icon as visual mode)
-  const propBtn = document.createElement("span")
-  propBtn.className = "gowiki-raw-menuitem"
-  propBtn.title = "Insert property"
-  const propImg = document.createElement("img")
-  propImg.src = "/icons/tools.svg"
-  propImg.alt = "Properties"
-  propImg.width = 14
-  propImg.height = 14
-  propImg.className = "gowiki-menu-icon"
-  propImg.style.verticalAlign = "middle"
-  propBtn.appendChild(propImg)
-  propBtn.addEventListener("mousedown", e => {
-    e.preventDefault()
-    rawInsertProperty(textarea)
-  })
-  bar.appendChild(propBtn)
+  addImgButton("/icons/include.svg", "Include", () => rawInsertInclude(textarea))
+    .querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
 
   return bar
 }
