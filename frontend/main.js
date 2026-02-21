@@ -1657,7 +1657,11 @@ function rawBuildPipeRow(cells) {
 }
 
 function rawIsSeparatorRow(line) {
-  return /^\s*\|[\s\-:|]+\|\s*$/.test(line)
+  const trimmed = line.trim()
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return false
+  const cells = trimmed.slice(1, -1).split("|")
+  // Every cell must contain at least one dash
+  return cells.length > 0 && cells.every(c => /^\s*:?-+:?\s*$/.test(c))
 }
 
 function rawTableColCount(ctx) {
@@ -1666,6 +1670,49 @@ function rawTableColCount(ctx) {
     if (cells && !rawIsSeparatorRow(ctx.lines[i])) return cells.length
   }
   return 0
+}
+
+// Get current cell coordinates (row index within table, column index)
+function rawGetCellCoords(textarea, ctx) {
+  const val = textarea.value
+  const pos = textarea.selectionStart
+  const lineStart = ctx.lines.slice(0, ctx.curLineIdx).reduce((s, l) => s + l.length + 1, 0)
+  const lineEnd = lineStart + ctx.lines[ctx.curLineIdx].length
+  const pipes = rawFindPipes(val, lineStart, lineEnd)
+  let col = 0
+  for (let i = 0; i < pipes.length - 1; i++) {
+    if (pos >= pipes[i] && pos <= pipes[i + 1]) { col = i; break }
+  }
+  return { row: ctx.curLineIdx, col }
+}
+
+// Position cursor at cell (row, col) in the table after replacement
+function rawFocusCell(textarea, ctx, row, col) {
+  const newVal = textarea.value
+  // Compute offset of tableFirstLine
+  let tableOffset = 0
+  const allLines = newVal.split("\n")
+  for (let i = 0; i < ctx.tableFirstLine; i++) tableOffset += allLines[i].length + 1
+
+  // Find the target row offset
+  let targetLineOffset = tableOffset
+  for (let i = ctx.tableFirstLine; i < row && i <= ctx.tableLastLine; i++) {
+    targetLineOffset += allLines[i].length + 1
+  }
+  if (row > ctx.tableLastLine) return
+
+  const targetLine = allLines[row]
+  if (!targetLine) return
+  const lineStart = targetLineOffset
+  const lineEnd = lineStart + targetLine.length
+  const pipes = rawFindPipes(newVal, lineStart, lineEnd)
+
+  // Clamp col to available cells
+  const maxCol = Math.max(0, pipes.length - 2)
+  const c = Math.min(col, maxCol)
+  if (pipes.length >= 2 && c < pipes.length - 1) {
+    rawSelectCell(textarea, pipes[c], pipes[c + 1])
+  }
 }
 
 function rawReplaceLines(textarea, ctx, origTableLastLine) {
@@ -1709,6 +1756,7 @@ function rawInsertTable(textarea) {
 function rawTableAddRowBelow(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const cols = rawTableColCount(ctx)
   if (cols === 0) return
   const origLast = ctx.tableLastLine
@@ -1716,32 +1764,31 @@ function rawTableAddRowBelow(textarea) {
   ctx.lines.splice(ctx.curLineIdx + 1, 0, newRow)
   ctx.tableLastLine++
   rawReplaceLines(textarea, ctx, origLast)
+  rawFocusCell(textarea, ctx, coords.row, coords.col)
 }
 
 function rawTableAddRowAbove(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const cols = rawTableColCount(ctx)
   if (cols === 0) return
-  // Don't insert above the header row or separator
   const firstDataLine = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
-  if (ctx.curLineIdx <= firstDataLine + 1) return // header + separator
+  if (ctx.curLineIdx <= firstDataLine + 1) return
   const origLast = ctx.tableLastLine
   const newRow = rawBuildPipeRow(Array(cols).fill(""))
   ctx.lines.splice(ctx.curLineIdx, 0, newRow)
   ctx.tableLastLine++
   rawReplaceLines(textarea, ctx, origLast)
+  // Cursor row shifted down by 1 due to insertion above
+  rawFocusCell(textarea, ctx, coords.row + 1, coords.col)
 }
 
 function rawTableAddColumnRight(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
-
-  // Find column index from cursor position
-  const curLine = ctx.lines[ctx.curLineIdx]
-  const cells = rawParsePipeRow(curLine)
-  if (!cells) return
 
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
     const row = rawParsePipeRow(ctx.lines[i])
@@ -1754,11 +1801,13 @@ function rawTableAddColumnRight(textarea) {
     ctx.lines[i] = rawBuildPipeRow(row)
   }
   rawReplaceLines(textarea, ctx)
+  rawFocusCell(textarea, ctx, coords.row, coords.col)
 }
 
 function rawTableAddColumnLeft(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
 
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
@@ -1772,26 +1821,32 @@ function rawTableAddColumnLeft(textarea) {
     ctx.lines[i] = rawBuildPipeRow(row)
   }
   rawReplaceLines(textarea, ctx)
+  // Column shifted right by 1 due to insertion at left
+  rawFocusCell(textarea, ctx, coords.row, coords.col + 1)
 }
 
 function rawTableDeleteRow(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
-  // Don't delete header or separator
   if (ctx.curLineIdx <= firstData + 1) return
   const origLast = ctx.tableLastLine
   ctx.lines.splice(ctx.curLineIdx, 1)
   ctx.tableLastLine--
   rawReplaceLines(textarea, ctx, origLast)
+  // Focus cell below (same row index, since rows shifted up), or above if was last row
+  const targetRow = Math.min(coords.row, ctx.tableLastLine)
+  rawFocusCell(textarea, ctx, targetRow, coords.col)
 }
 
 function rawTableDeleteColumn(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
+  const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
   const cols = rawTableColCount(ctx)
-  if (cols <= 1) return // don't delete the last column
+  if (cols <= 1) return
 
   // Remove the last column
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
@@ -1801,6 +1856,9 @@ function rawTableDeleteColumn(textarea) {
     ctx.lines[i] = rawBuildPipeRow(row)
   }
   rawReplaceLines(textarea, ctx)
+  // Focus cell to the right (same col), or left if was last column
+  const targetCol = Math.min(coords.col, cols - 2)
+  rawFocusCell(textarea, ctx, coords.row, targetCol)
 }
 
 // Select a cell's content between two pipe positions.
