@@ -1,9 +1,9 @@
 import { Plugin } from "../compiler/registry"
-import { tableNodes, tableEditing, goToNextCell } from "prosemirror-tables"
-import { Node } from "prosemirror-model"
-import { keymap } from "prosemirror-keymap"
-import markdownItMultiMdTable from "markdown-it-multimd-table"
 import {
+  tableNodes,
+  tableEditing,
+  goToNextCell,
+  isInTable,
   addColumnAfter,
   addColumnBefore,
   addRowAfter,
@@ -11,6 +11,10 @@ import {
   deleteColumn,
   deleteRow,
 } from "prosemirror-tables"
+import { Node } from "prosemirror-model"
+import { TextSelection } from "prosemirror-state"
+import { keymap } from "prosemirror-keymap"
+import markdownItMultiMdTable from "markdown-it-multimd-table"
 
 const tableStyles = `
 .ProseMirror table {
@@ -286,9 +290,23 @@ export const tablePlugin: Plugin = {
      * Editor integration
      * ---------------------------- */
 
+    // Tab at last cell: add a row and move to its first cell
+    const tabInTable = (state: any, dispatch: any, view: any) => {
+      if (goToNextCell(1)(state, dispatch)) return true
+      if (!isInTable(state)) return false
+      if (dispatch) {
+        // Add row, then move to its first cell on the updated state
+        addRowAfter(state, dispatch)
+        if (view) {
+          goToNextCell(1)(view.state, view.dispatch)
+        }
+      }
+      return true
+    }
+
     reg.registerEditorPlugin(() =>
       keymap({
-        Tab: goToNextCell(1),
+        Tab: tabInTable,
         "Shift-Tab": goToNextCell(-1),
       })
     )

@@ -1668,14 +1668,15 @@ function rawTableColCount(ctx) {
   return 0
 }
 
-function rawReplaceLines(textarea, ctx) {
+function rawReplaceLines(textarea, ctx, origTableLastLine) {
   const val = textarea.value
   const allLines = val.split("\n")
-  // Compute char offsets of table region
+  const origLast = origTableLastLine ?? ctx.tableLastLine
+  // Compute char offsets of the original table region
   let startOffset = 0
   for (let i = 0; i < ctx.tableFirstLine; i++) startOffset += allLines[i].length + 1
   let endOffset = startOffset
-  for (let i = ctx.tableFirstLine; i <= ctx.tableLastLine; i++) endOffset += allLines[i].length + 1
+  for (let i = ctx.tableFirstLine; i <= origLast; i++) endOffset += allLines[i].length + 1
   if (endOffset > 0 && endOffset <= val.length + 1) endOffset-- // trim trailing newline
 
   const replacement = ctx.lines.slice(ctx.tableFirstLine, ctx.tableLastLine + 1).join("\n")
@@ -1710,10 +1711,11 @@ function rawTableAddRowBelow(textarea) {
   if (!ctx) return
   const cols = rawTableColCount(ctx)
   if (cols === 0) return
+  const origLast = ctx.tableLastLine
   const newRow = rawBuildPipeRow(Array(cols).fill(""))
   ctx.lines.splice(ctx.curLineIdx + 1, 0, newRow)
   ctx.tableLastLine++
-  rawReplaceLines(textarea, ctx)
+  rawReplaceLines(textarea, ctx, origLast)
 }
 
 function rawTableAddRowAbove(textarea) {
@@ -1724,10 +1726,11 @@ function rawTableAddRowAbove(textarea) {
   // Don't insert above the header row or separator
   const firstDataLine = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
   if (ctx.curLineIdx <= firstDataLine + 1) return // header + separator
+  const origLast = ctx.tableLastLine
   const newRow = rawBuildPipeRow(Array(cols).fill(""))
   ctx.lines.splice(ctx.curLineIdx, 0, newRow)
   ctx.tableLastLine++
-  rawReplaceLines(textarea, ctx)
+  rawReplaceLines(textarea, ctx, origLast)
 }
 
 function rawTableAddColumnRight(textarea) {
@@ -1777,9 +1780,10 @@ function rawTableDeleteRow(textarea) {
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
   // Don't delete header or separator
   if (ctx.curLineIdx <= firstData + 1) return
+  const origLast = ctx.tableLastLine
   ctx.lines.splice(ctx.curLineIdx, 1)
   ctx.tableLastLine--
-  rawReplaceLines(textarea, ctx)
+  rawReplaceLines(textarea, ctx, origLast)
 }
 
 function rawTableDeleteColumn(textarea) {
@@ -1797,6 +1801,155 @@ function rawTableDeleteColumn(textarea) {
     ctx.lines[i] = rawBuildPipeRow(row)
   }
   rawReplaceLines(textarea, ctx)
+}
+
+// Select a cell's content between two pipe positions.
+// For empty cells, place cursor in the middle (after leading space).
+function rawSelectCell(textarea, pipeLeft, pipeRight) {
+  const val = textarea.value
+  const cellStart = pipeLeft + 1
+  let contentStart = cellStart
+  while (contentStart < pipeRight && val[contentStart] === " ") contentStart++
+  let contentEnd = pipeRight
+  while (contentEnd > contentStart && val[contentEnd - 1] === " ") contentEnd--
+  if (contentStart >= contentEnd) {
+    // Empty cell: place cursor after leading space (middle of cell)
+    const mid = Math.min(cellStart + 1, pipeRight)
+    textarea.setSelectionRange(mid, mid)
+  } else {
+    textarea.setSelectionRange(contentStart, contentEnd)
+  }
+}
+
+// Find all pipe positions on a line (within lineStart..lineEnd)
+function rawFindPipes(val, lineStart, lineEnd) {
+  const pipes = []
+  for (let i = lineStart; i <= lineEnd; i++) {
+    if (val[i] === "|") pipes.push(i)
+  }
+  return pipes
+}
+
+function rawHandleTabInTable(textarea, direction) {
+  const val = textarea.value
+  const pos = textarea.selectionStart
+  const pipeRe = /^\s*\|/
+
+  // Check if cursor is on a table line
+  let lineStart = pos
+  while (lineStart > 0 && val[lineStart - 1] !== "\n") lineStart--
+  let lineEnd = pos
+  while (lineEnd < val.length && val[lineEnd] !== "\n") lineEnd++
+  const line = val.substring(lineStart, lineEnd)
+  if (!pipeRe.test(line)) return false
+
+  // Don't navigate on the separator row
+  if (rawIsSeparatorRow(line)) return false
+
+  const pipes = rawFindPipes(val, lineStart, lineEnd)
+  if (pipes.length < 2) return false
+
+  // Find which cell the cursor is in
+  let cellIdx = -1
+  for (let i = 0; i < pipes.length - 1; i++) {
+    if (pos >= pipes[i] && pos <= pipes[i + 1]) { cellIdx = i; break }
+  }
+  if (cellIdx === -1) cellIdx = 0
+
+  const totalCells = pipes.length - 1
+
+  if (direction === 1) {
+    // Forward
+    if (cellIdx < totalCells - 1) {
+      // Move to next cell on same line
+      rawSelectCell(textarea, pipes[cellIdx + 1], pipes[cellIdx + 2])
+      return true
+    }
+
+    // Last cell on this line — move to next data row
+    let nextLineStart = lineEnd + 1
+    if (nextLineStart >= val.length) return rawTabAddTableRow(textarea)
+    let nextLineEnd = nextLineStart
+    while (nextLineEnd < val.length && val[nextLineEnd] !== "\n") nextLineEnd++
+    let nextLine = val.substring(nextLineStart, nextLineEnd)
+
+    if (!pipeRe.test(nextLine)) return rawTabAddTableRow(textarea)
+
+    // Skip separator rows
+    if (rawIsSeparatorRow(nextLine)) {
+      nextLineStart = nextLineEnd + 1
+      if (nextLineStart >= val.length) return rawTabAddTableRow(textarea)
+      nextLineEnd = nextLineStart
+      while (nextLineEnd < val.length && val[nextLineEnd] !== "\n") nextLineEnd++
+      nextLine = val.substring(nextLineStart, nextLineEnd)
+      if (!pipeRe.test(nextLine) || rawIsSeparatorRow(nextLine)) return rawTabAddTableRow(textarea)
+    }
+
+    // Move to first cell of next row
+    const nextPipes = rawFindPipes(val, nextLineStart, nextLineEnd)
+    if (nextPipes.length < 2) return false
+    rawSelectCell(textarea, nextPipes[0], nextPipes[1])
+    return true
+  } else {
+    // Backward
+    if (cellIdx > 0) {
+      // Move to previous cell on same line
+      rawSelectCell(textarea, pipes[cellIdx - 1], pipes[cellIdx])
+      return true
+    }
+
+    // First cell — move to previous row's last cell
+    if (lineStart === 0) return false
+    let prevLineEnd = lineStart - 1
+    let prevLineStart = prevLineEnd
+    while (prevLineStart > 0 && val[prevLineStart - 1] !== "\n") prevLineStart--
+    let prevLine = val.substring(prevLineStart, prevLineEnd)
+
+    // Skip separator rows
+    if (rawIsSeparatorRow(prevLine)) {
+      if (prevLineStart === 0) return false
+      prevLineEnd = prevLineStart - 1
+      prevLineStart = prevLineEnd
+      while (prevLineStart > 0 && val[prevLineStart - 1] !== "\n") prevLineStart--
+      prevLine = val.substring(prevLineStart, prevLineEnd)
+    }
+
+    if (!pipeRe.test(prevLine)) return false
+    const prevPipes = rawFindPipes(val, prevLineStart, prevLineEnd)
+    if (prevPipes.length < 2) return false
+    // Select last cell
+    rawSelectCell(textarea, prevPipes[prevPipes.length - 2], prevPipes[prevPipes.length - 1])
+    return true
+  }
+}
+
+function rawTabAddTableRow(textarea) {
+  const ctx = rawGetTableContext(textarea)
+  if (!ctx) return false
+  const cols = rawTableColCount(ctx)
+  if (cols === 0) return false
+
+  const newRow = rawBuildPipeRow(Array(cols).fill(""))
+
+  // Find the end of the last table line
+  let endOffset = 0
+  for (let i = 0; i <= ctx.tableLastLine; i++) endOffset += ctx.lines[i].length + 1
+  endOffset-- // remove trailing newline offset
+
+  textarea.focus()
+  textarea.setSelectionRange(endOffset, endOffset)
+  rawInsertText(textarea, "\n" + newRow)
+
+  // Move cursor to first cell of the new row
+  const newRowStart = endOffset + 1
+  const newVal = textarea.value
+  let newRowEnd = newRowStart
+  while (newRowEnd < newVal.length && newVal[newRowEnd] !== "\n") newRowEnd++
+  const newPipes = rawFindPipes(newVal, newRowStart, newRowEnd)
+  if (newPipes.length >= 2) {
+    rawSelectCell(textarea, newPipes[0], newPipes[1])
+  }
+  return true
 }
 
 function rawInsertProperty(textarea) {
@@ -2091,7 +2244,10 @@ function renderRawEdit() {
         autoResizeRawEditor(editorEl)
       }
     } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
-      if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
+      if (rawHandleTabInTable(editorEl, e.shiftKey ? -1 : 1)) {
+        e.preventDefault()
+        autoResizeRawEditor(editorEl)
+      } else if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
         e.preventDefault()
         autoResizeRawEditor(editorEl)
       }
