@@ -693,6 +693,28 @@ function mediaLabelFromPath(mediaPath) {
   return parts[parts.length - 1] ?? "file"
 }
 
+function rawInsertMediaReference(kind, mediaEntry) {
+  const textarea = document.querySelector(".gowiki-raw-editor")
+  if (!textarea) return
+
+  const target = buildMediaReferencePath(pageNamespace, mediaEntry.path)
+  const label = mediaLabelFromPath(mediaEntry.path)
+
+  let snippet
+  if (kind === "image") {
+    snippet = `![${label}](${target})`
+  } else {
+    snippet = `[${label}](${target})`
+  }
+
+  textarea.focus()
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  textarea.setSelectionRange(start, end)
+  rawInsertText(textarea, snippet)
+  setStatus("Inserted " + (kind === "image" ? "image" : "link") + " " + target)
+}
+
 function insertMediaReference(kind, mediaEntry) {
   if (!editorView || mode !== "edit" || editMode !== "visual") return
 
@@ -1917,16 +1939,23 @@ function renderActions() {
     editModeLabel.textContent = `Edit mode: ${editMode}`
     actionsRoot.appendChild(editModeLabel)
 
+    actionsRoot.appendChild(
+      makeActionButton("Media manager", () => {
+        openMediaManager(
+          pageNamespace,
+          text => setStatus(text),
+          (kind, entry) => {
+            if (editMode === "raw") {
+              rawInsertMediaReference(kind, entry)
+            } else {
+              insertMediaReference(kind, entry)
+            }
+          }
+        )
+      })
+    )
+
     if (editMode === "visual") {
-      actionsRoot.appendChild(
-        makeActionButton("Media manager", () => {
-          openMediaManager(
-            pageNamespace,
-            text => setStatus(text),
-            (kind, entry) => insertMediaReference(kind, entry)
-          )
-        })
-      )
       actionsRoot.appendChild(
         makeActionButton("Switch to raw", () => {
           setEditMode("raw")
