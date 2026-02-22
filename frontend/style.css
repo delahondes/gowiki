@@ -131,54 +131,14 @@
   height: 1.15em;
 }
 
-.gowiki-menu-headings.ProseMirror-menu-dropdown {
-  font-size: 1.2em;
-  font-weight: 400;
-  padding: 2px 8px;
-  line-height: 1;
-  vertical-align: 3px;
-  position: relative;
-  top: 3px;
-}
-
-.gowiki-menu-headings.ProseMirror-menu-dropdown:after {
-  content: none;
-}
-
-.gowiki-menu-table.ProseMirror-menu-dropdown {
-  min-width: 3px;
-  height: 1.45em;
-  padding: 2px 10px;
-  line-height: 1;
-  vertical-align: 2px;
-  color: transparent;
-  overflow: hidden;
-  background-image: url("/icons/table.svg");
-  background-repeat: no-repeat;
-  background-position: 50% 62%;
-  background-size: 90%;
-}
-
-.gowiki-menu-table.ProseMirror-menu-dropdown:after,
-.gowiki-menu-table.ProseMirror-menu-dropdown::before {
-  content: none;
-}
-
-.gowiki-menu-properties-toggle.ProseMirror-menu-active {
+.gowiki-raw-menuitem-active {
   background: #dce8ff;
   border-radius: 3px;
 }
 
-#gowiki-editor .ProseMirror-menubar-wrapper {
-  position: relative;
-}
-
-#gowiki-editor .ProseMirror-menubar {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 15;
+.gowiki-raw-menuitem-disabled {
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 .ProseMirror {
@@ -257,8 +217,8 @@
   min-height: 1em;
 }
 
-#gowiki-editor > .ProseMirror {
-  border: 3px solid #1e3f72;
+.gowiki-raw-wrapper .ProseMirror {
+  border: none;
 }
 
 .gowiki-raw-wrapper {

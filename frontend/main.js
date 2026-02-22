@@ -1,13 +1,12 @@
-import { EditorState, TextSelection } from "prosemirror-state"
+import { EditorState, TextSelection, Plugin } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
 import { DOMSerializer } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
-import { baseKeymap, setBlockType } from "prosemirror-commands"
-import { history } from "prosemirror-history"
-import { menuBar, MenuItem, Dropdown, icons } from "prosemirror-menu"
-import { buildMenuItems } from "prosemirror-example-setup"
-import { splitListItem, sinkListItem, liftListItem } from "prosemirror-schema-list"
+import { baseKeymap, setBlockType, toggleMark, wrapIn } from "prosemirror-commands"
+import { history, undo, redo } from "prosemirror-history"
+import { icons } from "prosemirror-menu"
+import { splitListItem, sinkListItem, liftListItem, wrapInList } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
@@ -59,91 +58,10 @@ let viewView = null
 let sidebarView = null
 let footerView = null
 
-const menu = buildMenuItems(schema)
-menu.fullMenu = menu.fullMenu
-  .map(group =>
-    group.filter(item =>
-      item.spec?.title !== "Add or remove link" &&
-      item.spec?.title !== "Select parent node" &&
-      item.options?.label !== "Type..." &&
-      item.options?.label !== "Insert"
-    )
-  )
-  .filter(group => group.length > 0)
-
-const headingItems = schema.nodes.heading
-  ? [1, 2, 3, 4, 5].map(level => {
-      const cmd = setBlockType(schema.nodes.heading, { level })
-      return new MenuItem({
-        label: `H${level}`,
-        title: `Change to heading ${level}`,
-        run: cmd,
-        enable: state => cmd(state),
-        active: state => {
-          const { $from, to, node } = state.selection
-          if (node) {
-            return node.type === schema.nodes.heading && node.attrs.level === level
-          }
-          return to <= $from.end() &&
-            $from.parent.type === schema.nodes.heading &&
-            $from.parent.attrs.level === level
-        },
-      })
-    })
-  : []
-
-if (headingItems.length > 0) {
-  const headingMenu = new Dropdown(headingItems, {
-    label: "H#",
-    title: "Headings",
-    class: "gowiki-menu-headings",
-  })
-  if (menu.fullMenu.length === 0) {
-    menu.fullMenu.push([headingMenu])
-  } else {
-    menu.fullMenu[0].unshift(headingMenu)
-  }
-}
-
 const tableCommands = new Map()
-const extraCommandGroups = []
+const extraCommands = []
 let togglePropertiesCommand = null
 let includeInsertCommand = null
-
-function insertMenuItemAfterTitle(menuGroups, title, item) {
-  for (const group of menuGroups) {
-    const idx = group.findIndex(menuItem => menuItem.spec?.title === title)
-    if (idx >= 0) {
-      group.splice(idx + 1, 0, item)
-      return
-    }
-  }
-  if (menuGroups.length === 0) {
-    menuGroups.push([item])
-    return
-  }
-  menuGroups[0].push(item)
-}
-
-function svgIcon(path, alt) {
-  const img = document.createElement("img")
-  img.src = path
-  img.alt = alt
-  img.width = 14
-  img.height = 14
-  img.className = "gowiki-menu-icon"
-  return { dom: img }
-}
-
-function canInsertNode(state, nodeType) {
-  const $from = state.selection.$from
-  for (let d = $from.depth; d >= 0; d--) {
-    const index = $from.index(d)
-    if ($from.node(d).canReplaceWith(index, index, nodeType)) return true
-  }
-  return false
-}
-
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -161,15 +79,7 @@ registry.onCommand((namespace, name, cmd) => {
     return
   }
 
-  const label = `${namespace}:${name}`
-  extraCommandGroups.push([
-    new MenuItem({
-      label,
-      title: label,
-      run: cmd,
-      enable: state => cmd(state),
-    }),
-  ])
+  extraCommands.push({ label: `${namespace}:${name}`, cmd })
 })
 
 function findLinkMarkInMarks(marks, linkType) {
@@ -440,16 +350,6 @@ function findWordRangeAtCursor(state) {
   }
 }
 
-function isSelectionInLink(state) {
-  const linkType = state.schema.marks.link
-  if (!linkType) return false
-  const { from, to, empty } = state.selection
-  if (empty) {
-    return Boolean(findLinkRangeAtCursor(state))
-  }
-  return state.doc.rangeHasMark(from, to, linkType)
-}
-
 function setExternalLinkCommand() {
   return (state, dispatch, view) => {
     const linkType = state.schema.marks.link
@@ -533,162 +433,6 @@ function setExternalLinkCommand() {
     })
     return true
   }
-}
-
-const hrMenuItem = new MenuItem({
-  icon: {
-    text: "—",
-    css: "display:inline-block; transform:scaleX(2.4); font-weight:700; line-height:1;",
-  },
-  title: "Insert horizontal rule",
-  run: (state, dispatch) => {
-    const hr = state.schema.nodes.horizontal_rule
-    if (!hr) return false
-    if (!dispatch) return true
-    dispatch(state.tr.replaceSelectionWith(hr.create()).scrollIntoView())
-    return true
-  },
-  enable: state => {
-    const hr = state.schema.nodes.horizontal_rule
-    return Boolean(hr && canInsertNode(state, hr))
-  },
-})
-
-const linkMenuItem = new MenuItem({
-  icon: icons.link,
-  title: "Set or edit link",
-  run: setExternalLinkCommand(),
-  enable: state => Boolean(state.schema.marks.link),
-  active: state => isSelectionInLink(state),
-})
-
-insertMenuItemAfterTitle(menu.fullMenu, "Toggle code font", linkMenuItem)
-
-if (menu.fullMenu.length === 0) {
-  menu.fullMenu.push([hrMenuItem])
-} else {
-  menu.fullMenu[0].splice(1, 0, hrMenuItem)
-}
-
-if (togglePropertiesCommand) {
-  const propertiesMenuItem = new MenuItem({
-    icon: svgIcon("/icons/tools.svg", "Properties"),
-    title: "Toggle properties",
-    run: togglePropertiesCommand,
-    enable: state => Boolean(togglePropertiesCommand?.(state)),
-    active: state => isPropertiesPanelEnabled(state),
-    class: "gowiki-menu-properties-toggle",
-  })
-  if (menu.fullMenu.length === 0) {
-    menu.fullMenu.push([propertiesMenuItem])
-  } else {
-    menu.fullMenu[0].unshift(propertiesMenuItem)
-  }
-}
-
-if (tableCommands.size > 0) {
-  const order = [
-    "insert",
-    "row.addBefore",
-    "row.addAfter",
-    "column.addBefore",
-    "column.addAfter",
-    "row.delete",
-    "column.delete",
-  ]
-  const labels = {
-    insert: "Insert table",
-    "row.addBefore": "Add row above",
-    "row.addAfter": "Add row below",
-    "column.addBefore": "Add column left",
-    "column.addAfter": "Add column right",
-    "row.delete": "Delete row",
-    "column.delete": "Delete column",
-  }
-
-  const items = order
-    .filter(name => tableCommands.has(name))
-    .map(name =>
-      new MenuItem({
-        label: labels[name] ?? name,
-        title: labels[name] ?? name,
-        run: tableCommands.get(name),
-        enable: state => Boolean(tableCommands.get(name)?.(state)),
-      })
-    )
-
-  if (items.length > 0) {
-    const tableMenu = new Dropdown(items, {
-      label: " ",
-      title: "Table",
-      class: "gowiki-menu-table",
-    })
-    menu.fullMenu.splice(2, 0, [tableMenu])
-  }
-}
-
-// Code block button
-const codeBlockMenuItem = new MenuItem({
-  icon: svgIcon("/icons/codeblock.svg", "Code block"),
-  title: "Code block",
-  run: (state, dispatch) => {
-    const codeBlockType = state.schema.nodes.code_block
-    if (!codeBlockType) return false
-    if (dispatch) {
-      dispatch(state.tr.replaceSelectionWith(codeBlockType.create()).scrollIntoView())
-    }
-    return true
-  },
-  enable: state => {
-    const codeBlockType = state.schema.nodes.code_block
-    return Boolean(codeBlockType && canInsertNode(state, codeBlockType))
-  },
-})
-
-if (includeInsertCommand) {
-  const includeMenuItem = new MenuItem({
-    icon: (() => { const i = svgIcon("/icons/include.svg", "Include"); i.dom.classList.add("gowiki-menu-icon--lg"); return i })(),
-    title: "Include",
-    run: includeInsertCommand,
-    enable: state => {
-      const includeType = state.schema.nodes.include
-      return Boolean(includeType && canInsertNode(state, includeType))
-    },
-  })
-  if (tableCommands.size > 0) {
-    menu.fullMenu[2].push(codeBlockMenuItem, includeMenuItem)
-  } else {
-    menu.fullMenu.splice(2, 0, [codeBlockMenuItem, includeMenuItem])
-  }
-} else {
-  if (tableCommands.size > 0) {
-    menu.fullMenu[2].push(codeBlockMenuItem)
-  } else {
-    menu.fullMenu.splice(2, 0, [codeBlockMenuItem])
-  }
-}
-
-// "Add a paragraph at the end" button
-const paragraphAtEndMenuItem = new MenuItem({
-  icon: svgIcon("/icons/paragraphdown.svg", "Add paragraph at end"),
-  title: "Add a paragraph at the end",
-  run: (state, dispatch) => {
-    const paragraphType = state.schema.nodes.paragraph
-    if (!paragraphType) return false
-    if (dispatch) {
-      const endPos = state.doc.content.size
-      const tr = state.tr.insert(endPos, paragraphType.create())
-      tr.setSelection(TextSelection.near(tr.doc.resolve(endPos + 1)))
-      dispatch(tr.scrollIntoView())
-    }
-    return true
-  },
-  enable: () => true,
-})
-menu.fullMenu.push([paragraphAtEndMenuItem])
-
-for (const group of extraCommandGroups) {
-  menu.fullMenu.push(group)
 }
 
 function applyStyles(styles) {
@@ -1126,7 +870,7 @@ function scrollSelectionIntoContentView(view) {
   const scroller = document.querySelector("#main") || contentRoot
   if (!(scroller instanceof HTMLElement)) return false
 
-  const menu = view.dom.parentElement?.querySelector(".ProseMirror-menubar")
+  const menu = view.dom.closest(".gowiki-raw-wrapper")?.querySelector(".gowiki-raw-menubar")
   const topInset = (menu instanceof HTMLElement ? menu.offsetHeight : 0) + 12
   const bottomInset = 10
 
@@ -2139,24 +1883,52 @@ function rawInsertProperty(textarea) {
   if (scroller) scroller.scrollTop = savedScroll
 }
 
-function buildRawMenubar(textarea) {
+function markActive(state, type) {
+  const { from, $from, to, empty } = state.selection
+  if (empty) return Boolean(type.isInSet(state.storedMarks || $from.marks()))
+  return state.doc.rangeHasMark(from, to, type)
+}
+
+function updateMenubarState(state, refs) {
+  if (!refs) return
+  const setActive = (btn, active) => {
+    if (!btn) return
+    btn.classList.toggle("gowiki-raw-menuitem-active", active)
+  }
+  if (schema.marks.strong && refs.bold) {
+    setActive(refs.bold, markActive(state, schema.marks.strong))
+  }
+  if (schema.marks.em && refs.italic) {
+    setActive(refs.italic, markActive(state, schema.marks.em))
+  }
+  if (schema.marks.code && refs.code) {
+    setActive(refs.code, markActive(state, schema.marks.code))
+  }
+  if (refs.properties) {
+    setActive(refs.properties, isPropertiesPanelEnabled(state))
+  }
+}
+
+function buildMenubar() {
   const bar = document.createElement("div")
   bar.className = "gowiki-raw-menubar"
+  const refs = {}
 
-  function addButton(label, title, onClick) {
+  function addButton(label, title, onClick, refName) {
     const btn = document.createElement("span")
     btn.className = "gowiki-raw-menuitem"
     btn.textContent = label
     btn.title = title
     btn.addEventListener("mousedown", e => {
-      e.preventDefault() // prevent textarea blur
+      e.preventDefault()
       onClick()
     })
     bar.appendChild(btn)
+    if (refName) refs[refName] = btn
     return btn
   }
 
-  function addIconButton(iconData, title, onClick) {
+  function addIconButton(iconData, title, onClick, refName) {
     const btn = document.createElement("span")
     btn.className = "gowiki-raw-menuitem"
     btn.title = title
@@ -2174,10 +1946,11 @@ function buildRawMenubar(textarea) {
       onClick()
     })
     bar.appendChild(btn)
+    if (refName) refs[refName] = btn
     return btn
   }
 
-  function addImgButton(src, title, onClick) {
+  function addImgButton(src, title, onClick, refName) {
     const btn = document.createElement("span")
     btn.className = "gowiki-raw-menuitem"
     btn.title = title
@@ -2194,6 +1967,7 @@ function buildRawMenubar(textarea) {
       onClick()
     })
     bar.appendChild(btn)
+    if (refName) refs[refName] = btn
     return btn
   }
 
@@ -2203,8 +1977,15 @@ function buildRawMenubar(textarea) {
     bar.appendChild(sep)
   }
 
-  // Properties (left-most, matches visual mode toggle position)
-  addImgButton("/icons/tools.svg", "Insert property", () => rawInsertProperty(textarea))
+  // Properties
+  addImgButton("/icons/tools.svg", "Toggle properties", () => {
+    if (editMode === "visual" && editorView) {
+      if (togglePropertiesCommand) togglePropertiesCommand(editorView.state, editorView.dispatch, editorView)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawInsertProperty(rawEditor)
+    }
+  }, "properties")
 
   // Heading dropdown
   const headingWrap = document.createElement("span")
@@ -2220,7 +2001,12 @@ function buildRawMenubar(textarea) {
     item.addEventListener("mousedown", e => {
       e.preventDefault()
       headingMenu.style.display = "none"
-      rawSetHeadingLevel(textarea, level)
+      if (editMode === "visual" && editorView) {
+        setBlockType(schema.nodes.heading, { level })(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawSetHeadingLevel(rawEditor, level)
+      }
     })
     headingMenu.appendChild(item)
   }
@@ -2232,7 +2018,6 @@ function buildRawMenubar(textarea) {
   })
   bar.appendChild(headingWrap)
 
-  // Close heading dropdown when clicking elsewhere
   document.addEventListener("mousedown", e => {
     if (!headingWrap.contains(e.target)) {
       headingMenu.style.display = "none"
@@ -2243,37 +2028,82 @@ function buildRawMenubar(textarea) {
 
   // HR
   const hrBtn = addButton("---", "Insert horizontal rule", () => {
-    rawInsertHorizontalRule(textarea)
+    if (editMode === "visual" && editorView) {
+      const hr = schema.nodes.horizontal_rule
+      if (hr) editorView.dispatch(editorView.state.tr.replaceSelectionWith(hr.create()).scrollIntoView())
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawInsertHorizontalRule(rawEditor)
+    }
   })
   hrBtn.style.fontWeight = "700"
   hrBtn.style.letterSpacing = "-1px"
 
   addSeparator()
 
-  // Inline formatting
-  addButton("B", "Bold", () => rawWrapSelection(textarea, "**", "**"))
-    .style.fontWeight = "700"
-  addButton("I", "Italic", () => rawWrapSelection(textarea, "*", "*"))
-    .style.fontStyle = "italic"
-  addButton("</>", "Inline code", () => rawWrapSelection(textarea, "`", "`"))
+  // Bold
+  addButton("B", "Bold", () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.strong)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "**", "**")
+    }
+  }, "bold").style.fontWeight = "700"
+
+  // Italic
+  addButton("I", "Italic", () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.em)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "*", "*")
+    }
+  }, "italic").style.fontStyle = "italic"
+
+  // Inline code
+  addButton("</>", "Inline code", () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.code)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "`", "`")
+    }
+  }, "code")
 
   addSeparator()
 
   // Link
-  addIconButton(icons.link, "Insert or edit link", () => {
-    void rawInsertLink(textarea)
+  addIconButton(icons.link, "Set or edit link", () => {
+    if (editMode === "visual" && editorView) {
+      setExternalLinkCommand()(editorView.state, editorView.dispatch, editorView)
+    } else if (editMode === "raw" && rawEditor) {
+      void rawInsertLink(rawEditor)
+    }
   })
 
   addSeparator()
 
-  // Undo / Redo
+  // Undo
   addIconButton(icons.undo, "Undo", () => {
-    textarea.focus()
-    document.execCommand("undo")
+    if (editMode === "visual" && editorView) {
+      undo(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawEditor.focus()
+      document.execCommand("undo")
+    }
   })
+
+  // Redo
   addIconButton(icons.redo, "Redo", () => {
-    textarea.focus()
-    document.execCommand("redo")
+    if (editMode === "visual" && editorView) {
+      redo(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawEditor.focus()
+      document.execCommand("redo")
+    }
   })
 
   addSeparator()
@@ -2293,14 +2123,23 @@ function buildRawMenubar(textarea) {
   const tableDropMenu = document.createElement("div")
   tableDropMenu.className = "gowiki-raw-dropdown-menu"
   const tableActions = [
-    { label: "Insert table", fn: () => rawInsertTable(textarea) },
-    { label: "Add row above", fn: () => rawTableAddRowAbove(textarea) },
-    { label: "Add row below", fn: () => rawTableAddRowBelow(textarea) },
-    { label: "Add column left", fn: () => rawTableAddColumnLeft(textarea) },
-    { label: "Add column right", fn: () => rawTableAddColumnRight(textarea) },
-    { label: "Delete row", fn: () => rawTableDeleteRow(textarea) },
-    { label: "Delete column", fn: () => rawTableDeleteColumn(textarea) },
+    { name: "insert", label: "Insert table" },
+    { name: "row.addBefore", label: "Add row above" },
+    { name: "row.addAfter", label: "Add row below" },
+    { name: "column.addBefore", label: "Add column left" },
+    { name: "column.addAfter", label: "Add column right" },
+    { name: "row.delete", label: "Delete row" },
+    { name: "column.delete", label: "Delete column" },
   ]
+  const rawTableFns = {
+    insert: rawInsertTable,
+    "row.addBefore": rawTableAddRowAbove,
+    "row.addAfter": rawTableAddRowBelow,
+    "column.addBefore": rawTableAddColumnLeft,
+    "column.addAfter": rawTableAddColumnRight,
+    "row.delete": rawTableDeleteRow,
+    "column.delete": rawTableDeleteColumn,
+  }
   for (const action of tableActions) {
     const item = document.createElement("div")
     item.className = "gowiki-raw-dropdown-item"
@@ -2308,7 +2147,13 @@ function buildRawMenubar(textarea) {
     item.addEventListener("mousedown", e => {
       e.preventDefault()
       tableDropMenu.style.display = "none"
-      action.fn()
+      if (editMode === "visual" && editorView) {
+        const cmd = tableCommands.get(action.name)
+        if (cmd) cmd(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawTableFns[action.name](rawEditor)
+      }
     })
     tableDropMenu.appendChild(item)
   }
@@ -2325,79 +2170,161 @@ function buildRawMenubar(textarea) {
     }
   })
 
-  // List actions
-  addIconButton(icons.bulletList, "Unordered list", () => rawToggleLinePrefix(textarea, "- "))
+  // Unordered list
+  addIconButton(icons.bulletList, "Unordered list", () => {
+    if (editMode === "visual" && editorView) {
+      wrapInList(schema.nodes.bullet_list)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawToggleLinePrefix(rawEditor, "- ")
+    }
+  })
+
+  // Ordered list
   addIconButton(icons.orderedList, "Ordered list", () => {
-    rawToggleLinePrefix(textarea, "1. ")
-    rawRenumberOrderedLists(textarea)
-  })
-  addImgButton("/icons/codeblock.svg", "Code block", () => rawInsertCodeBlock(textarea))
-  addImgButton("/icons/include.svg", "Include", () => rawInsertInclude(textarea))
-    .querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
-  addIconButton(icons.blockquote, "Quote block", () => rawToggleLinePrefix(textarea, "> "))
-
-  return bar
-}
-
-function renderRawEdit() {
-  const wrapper = document.createElement("div")
-  wrapper.className = "gowiki-raw-wrapper"
-
-  const editorEl = document.createElement("textarea")
-  editorEl.id = "gowiki-raw-editor"
-  editorEl.className = "gowiki-raw-editor"
-  editorEl.value = currentMarkdown
-
-  const menubar = buildRawMenubar(editorEl)
-  wrapper.appendChild(menubar)
-  wrapper.appendChild(editorEl)
-
-  editorEl.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      if (rawHandleEnterInList(editorEl)) {
-        e.preventDefault()
-        autoResizeRawEditor(editorEl)
-      }
-    } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
-      if (rawHandleTabInTable(editorEl, e.shiftKey ? -1 : 1)) {
-        e.preventDefault()
-        autoResizeRawEditor(editorEl)
-      } else if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
-        e.preventDefault()
-        autoResizeRawEditor(editorEl)
-      }
+    if (editMode === "visual" && editorView) {
+      wrapInList(schema.nodes.ordered_list)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawToggleLinePrefix(rawEditor, "1. ")
+      rawRenumberOrderedLists(rawEditor)
     }
   })
 
-  editorEl.addEventListener("input", () => {
-    autoResizeRawEditor(editorEl)
-  })
-
-  editorEl.addEventListener("blur", () => {
-    if (mode !== "edit" || editMode !== "raw") return
-    try {
-      const normalized = normalizeMarkdownForStorage(editorEl.value)
-      applyNormalizedEditState(normalized)
-    } catch {
-      // Keep invalid in-progress raw text unchanged.
+  // Code block
+  addImgButton("/icons/codeblock.svg", "Code block", () => {
+    if (editMode === "visual" && editorView) {
+      const codeBlockType = schema.nodes.code_block
+      if (codeBlockType) {
+        editorView.dispatch(editorView.state.tr.replaceSelectionWith(codeBlockType.create()).scrollIntoView())
+      }
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawInsertCodeBlock(rawEditor)
     }
   })
 
-  contentRoot.appendChild(wrapper)
-  autoResizeRawEditor(editorEl)
-  rawEditor = editorEl
+  // Include
+  if (includeInsertCommand) {
+    const includeBtn = addImgButton("/icons/include.svg", "Include", () => {
+      if (editMode === "visual" && editorView) {
+        includeInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawInsertInclude(rawEditor)
+      }
+    })
+    includeBtn.querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
+  }
+
+  // Blockquote
+  addIconButton(icons.blockquote, "Quote block", () => {
+    if (editMode === "visual" && editorView) {
+      wrapIn(schema.nodes.blockquote)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawToggleLinePrefix(rawEditor, "> ")
+    }
+  })
+
+  // Paragraph at end
+  addImgButton("/icons/paragraphdown.svg", "Add paragraph at end", () => {
+    if (editMode === "visual" && editorView) {
+      const paragraphType = schema.nodes.paragraph
+      if (paragraphType) {
+        const state = editorView.state
+        const endPos = state.doc.content.size
+        const tr = state.tr.insert(endPos, paragraphType.create())
+        tr.setSelection(TextSelection.near(tr.doc.resolve(endPos + 1)))
+        editorView.dispatch(tr.scrollIntoView())
+      }
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawEditor.focus()
+      const end = rawEditor.value.length
+      rawEditor.setSelectionRange(end, end)
+      rawInsertText(rawEditor, "\n")
+    }
+  })
+
+  // Extra commands from plugins
+  for (const { label, cmd } of extraCommands) {
+    addButton(label, label, () => {
+      if (editMode === "visual" && editorView) {
+        cmd(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      }
+    })
+  }
+
+  return { dom: bar, refs }
 }
 
 function renderEdit(nextEditMode) {
   clearContent()
+
+  const wrapper = document.createElement("div")
+  wrapper.className = "gowiki-raw-wrapper"
+
+  const { dom: menubarDom, refs: menubarRefs } = buildMenubar()
+  wrapper.appendChild(menubarDom)
+
   if (nextEditMode === "raw") {
-    renderRawEdit()
+    const editorEl = document.createElement("textarea")
+    editorEl.id = "gowiki-raw-editor"
+    editorEl.className = "gowiki-raw-editor"
+    editorEl.value = currentMarkdown
+
+    editorEl.addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (rawHandleEnterInList(editorEl)) {
+          e.preventDefault()
+          autoResizeRawEditor(editorEl)
+        }
+      } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
+        if (rawHandleTabInTable(editorEl, e.shiftKey ? -1 : 1)) {
+          e.preventDefault()
+          autoResizeRawEditor(editorEl)
+        } else if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
+          e.preventDefault()
+          autoResizeRawEditor(editorEl)
+        }
+      }
+    })
+
+    editorEl.addEventListener("input", () => {
+      autoResizeRawEditor(editorEl)
+    })
+
+    editorEl.addEventListener("blur", () => {
+      if (mode !== "edit" || editMode !== "raw") return
+      try {
+        const normalized = normalizeMarkdownForStorage(editorEl.value)
+        applyNormalizedEditState(normalized)
+      } catch {
+        // Keep invalid in-progress raw text unchanged.
+      }
+    })
+
+    wrapper.appendChild(editorEl)
+    contentRoot.appendChild(wrapper)
+    autoResizeRawEditor(editorEl)
+    rawEditor = editorEl
     return
   }
 
+  // Visual mode
   const editorEl = document.createElement("div")
-  editorEl.id = "gowiki-editor"
-  contentRoot.appendChild(editorEl)
+  wrapper.appendChild(editorEl)
+  contentRoot.appendChild(wrapper)
+
+  const menubarStatePlugin = new Plugin({
+    view() {
+      return {
+        update(view) { updateMenubarState(view.state, menubarRefs) }
+      }
+    }
+  })
 
   const listKeymap = keymap({
     Enter: splitListItem(schema.nodes.list_item),
@@ -2415,10 +2342,7 @@ function renderEdit(nextEditMode) {
       history(),
       keymap(baseKeymap),
       ...registry.getEditorPlugins(),
-      menuBar({
-        content: menu.fullMenu,
-        floating: false,
-      }),
+      menubarStatePlugin,
     ],
   })
 
