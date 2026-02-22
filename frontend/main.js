@@ -626,6 +626,24 @@ if (tableCommands.size > 0) {
   }
 }
 
+// Code block button
+const codeBlockMenuItem = new MenuItem({
+  icon: svgIcon("/icons/codeblock.svg", "Code block"),
+  title: "Code block",
+  run: (state, dispatch) => {
+    const codeBlockType = state.schema.nodes.code_block
+    if (!codeBlockType) return false
+    if (dispatch) {
+      dispatch(state.tr.replaceSelectionWith(codeBlockType.create()).scrollIntoView())
+    }
+    return true
+  },
+  enable: state => {
+    const codeBlockType = state.schema.nodes.code_block
+    return Boolean(codeBlockType && canInsertNode(state, codeBlockType))
+  },
+})
+
 if (includeInsertCommand) {
   const includeMenuItem = new MenuItem({
     icon: (() => { const i = svgIcon("/icons/include.svg", "Include"); i.dom.classList.add("gowiki-menu-icon--lg"); return i })(),
@@ -637,9 +655,15 @@ if (includeInsertCommand) {
     },
   })
   if (tableCommands.size > 0) {
-    menu.fullMenu[2].push(includeMenuItem)
+    menu.fullMenu[2].push(codeBlockMenuItem, includeMenuItem)
   } else {
-    menu.fullMenu.splice(2, 0, [includeMenuItem])
+    menu.fullMenu.splice(2, 0, [codeBlockMenuItem, includeMenuItem])
+  }
+} else {
+  if (tableCommands.size > 0) {
+    menu.fullMenu[2].push(codeBlockMenuItem)
+  } else {
+    menu.fullMenu.splice(2, 0, [codeBlockMenuItem])
   }
 }
 
@@ -2222,6 +2246,18 @@ function buildRawMenubar(textarea) {
 
   addSeparator()
 
+  // Undo / Redo
+  addIconButton(icons.undo, "Undo", () => {
+    textarea.focus()
+    document.execCommand("undo")
+  })
+  addIconButton(icons.redo, "Redo", () => {
+    textarea.focus()
+    document.execCommand("redo")
+  })
+
+  addSeparator()
+
   // Table dropdown
   const tableWrap = document.createElement("span")
   tableWrap.className = "gowiki-raw-menuitem gowiki-raw-menu-dropdown-wrap"
@@ -2275,7 +2311,7 @@ function buildRawMenubar(textarea) {
     rawToggleLinePrefix(textarea, "1. ")
     rawRenumberOrderedLists(textarea)
   })
-  addButton("CB", "Code block", () => rawInsertCodeBlock(textarea))
+  addImgButton("/icons/codeblock.svg", "Code block", () => rawInsertCodeBlock(textarea))
   addImgButton("/icons/include.svg", "Include", () => rawInsertInclude(textarea))
     .querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
 
