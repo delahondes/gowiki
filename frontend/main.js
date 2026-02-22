@@ -64,6 +64,7 @@ menu.fullMenu = menu.fullMenu
   .map(group =>
     group.filter(item =>
       item.spec?.title !== "Add or remove link" &&
+      item.spec?.title !== "Select parent node" &&
       item.options?.label !== "Type..." &&
       item.options?.label !== "Insert"
     )
@@ -666,6 +667,25 @@ if (includeInsertCommand) {
     menu.fullMenu.splice(2, 0, [codeBlockMenuItem])
   }
 }
+
+// "Add a paragraph at the end" button
+const paragraphAtEndMenuItem = new MenuItem({
+  icon: svgIcon("/icons/paragraphdown.svg", "Add paragraph at end"),
+  title: "Add a paragraph at the end",
+  run: (state, dispatch) => {
+    const paragraphType = state.schema.nodes.paragraph
+    if (!paragraphType) return false
+    if (dispatch) {
+      const endPos = state.doc.content.size
+      const tr = state.tr.insert(endPos, paragraphType.create())
+      tr.setSelection(TextSelection.near(tr.doc.resolve(endPos + 1)))
+      dispatch(tr.scrollIntoView())
+    }
+    return true
+  },
+  enable: () => true,
+})
+menu.fullMenu.push([paragraphAtEndMenuItem])
 
 for (const group of extraCommandGroups) {
   menu.fullMenu.push(group)
@@ -2314,6 +2334,7 @@ function buildRawMenubar(textarea) {
   addImgButton("/icons/codeblock.svg", "Code block", () => rawInsertCodeBlock(textarea))
   addImgButton("/icons/include.svg", "Include", () => rawInsertInclude(textarea))
     .querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
+  addIconButton(icons.blockquote, "Quote block", () => rawToggleLinePrefix(textarea, "> "))
 
   return bar
 }
