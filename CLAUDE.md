@@ -49,9 +49,10 @@ Key divergences from CommonMark:
 - HTML entities not interpreted — use UTF-8 directly
 - Single newline in a top-level paragraph = hard line break (`<br>`)
 - Trailing spaces have no meaning — two-space line break rule does not exist
-- `\n` literal = explicit hard line break (valid in paragraphs, lists, tables)
+- `\n` literal = explicit hard line break (valid in lists and tables only, not in paragraphs where a bare newline already produces a hard break)
 - Properties syntax: `{pluginname key=value}` on its own line before the target block
 - No column alignment syntax in tables
+- Multi-body tables (`<tbody>`) are not supported and must be rejected
 
 Round-trip between raw, visual, and view modes must be lossless. Deterministic serialization is a hard requirement.
 
@@ -109,30 +110,54 @@ Known smell: `frontend/compiler/core_nodes.ts` lines 114–129 contain a specifi
 - Tables, with Tab to navigate between cells
 - Images with drag-resize (Shift to constrain proportions), live-updating size property in both the node and the Markdown source
 - Internal and external links (external links display a distinct icon and open in a new tab)
-- Media manager: fully implemented frontend and backend, handles file upload and storage, inserts image nodes or download links. Currently limited to a flat file listing (no image thumbnails, no file-type icons in listing or rendering). No orphan detection or media versioning yet.
+- Media manager: fully implemented frontend and backend, handles file upload and storage, inserts image nodes or download links. Currently limited to a flat file listing (no image thumbnails, no file-type icons in listing or rendering). No orphan detection yet.
 - Code blocks with basic Tab/Shift-Tab indent/deindent support (no language specifier yet)
+- Include nodes: implemented, renders as read-only zone in visual mode with property panel (yellow, consistent with other property panels). Include button in toolbar (visual and raw).
 - Save/reload cycle is implemented and validated
 - New page creation is functional but minimal (creates a base .md, editing tested)
+- Navigation between pages is implemented
 
 ### Properties system
-- Defined and working for: image nodes (size, drag-resize updates property live), table nodes (size property defined, drag-resize not yet implemented)
+- Defined and working for: image nodes (size, drag-resize updates property live), table nodes (size property defined, drag-resize not yet implemented), include nodes (path property)
 - Defined but not yet implemented for: headings (numbered heading property)
 
 ### Rendering model
 Rendering is done entirely by ProseMirror. There is no separate rendering pipeline for view mode — the visual editor output and the rendered view are identical by construction. This is a deliberate architectural choice and should not be changed.
 
-### v0.1 gap assessment
-Core editing, persistence, and media management are functional. Outstanding v0.1 items: sidebar/footer composition (not yet implemented), include rendering as read-only zones, and new page creation UX (currently bare minimum). History and search are out of scope for v0.1.
+### v0.1 status
+v0.1 is complete. All core editing, persistence, sidebar/footer composition, include rendering, and media management are functional.
 
 ## Milestone targets
 
-- **v0.1** — Single-page correctness: edit and persist main page content, render sidebar and footer composition, save/reload reliably, render included content as read-only. No media, no history, no search.
-- **v0.2** — Site-level consistency: navigation, media upload, reference tracking, orphan detection.
+- **v0.1** ✓ — Single-page correctness: edit and persist main page content, render sidebar and footer composition, save/reload reliably, render included content as read-only.
+- **v0.2** — Site-level consistency: reference tracking and orphan detection. Navigation and media upload are already done.
 - **v0.3** — Search: full-text, incremental, typo-tolerant.
 - **v0.4** — Editing robustness: copy/paste across editable/non-editable regions, round-trip guarantees under complex edits.
 - **v0.5** — History and diff: page history, rollback.
 - **v0.6** — Admin page: configuration UI, authentication backends, ACL.
 - **v0.7** — Structured data: per-page structured fields, queries, rendering.
+
+## v0.2 detailed scope
+
+### Reference tracking
+The backend maintains a map of which pages reference which media files. This map is updated immediately on every write (not batch-based). It is the foundation for orphan detection.
+
+### Orphan detection
+When a media file becomes unreferenced (no page links to it), the backend detects it immediately. The frontend may prompt the user for deletion. Orphan handling is backend-driven. Media versioning is out of scope.
+
+### Circular include detection
+The backend must detect and reject circular includes at save time (not render time). If saving a page would create a direct or transitive include loop, the backend returns an error. The frontend displays the error to the user. No partial saves, no silent failures.
+
+Examples of forbidden loops:
+- Direct: page A includes page A
+- Transitive: page A includes page B which includes page A
+
+The frontend does not attempt to detect or prevent cycles locally — this is a backend responsibility.
+
+### Out of scope for v0.2
+- "Consistency across pages and shared regions" from the original spec is retired — it was a remnant of a dropped inheritance model. Sidebar/footer are already handled as special content pages. Nothing remains to implement here.
+- Media versioning is explicitly deferred.
+- Search is v0.3.
 
 ## Dialect implementation status (reference)
 
@@ -146,10 +171,11 @@ Core editing, persistence, and media management are functional. Outstanding v0.1
 | `1. ordered list` | implemented |
 | `{heading numbered=true/false}` | planned |
 | Pipe tables + directives | implemented |
+| Multi-body tables | rejected |
 | Properties/directives `{name key=value}` | implemented |
 | Raw HTML forbidden | implemented |
 | Single newline → hard break in paragraphs | implemented |
-| `\n` literal → `<br>` | implemented |
+| `\n` literal → `<br>` (lists and tables only) | implemented |
 | Deterministic round-trip | partial |
 | HTML entities not interpreted | partial |
 
@@ -163,3 +189,5 @@ Core editing, persistence, and media management are functional. Outstanding v0.1
 - Do not encode editor semantics in the backend
 - Do not let plugins touch authentication, ACL, storage layout, or search indexing
 - Do not bundle core and plugins together — they must remain independently loadable
+- Do not detect include cycles in the frontend — this is a backend responsibility
+- Do not implement media versioning before v0.5
