@@ -60,7 +60,14 @@ async function deleteMedia(mediaPath) {
     method: "DELETE",
   })
   if (!resp.ok) {
-    throw new Error(`Failed to delete media: ${resp.status}`)
+    const body = await resp.json().catch(() => null)
+    if (resp.status === 409 && body?.referencing_pages) {
+      const pages = body.referencing_pages
+      throw new Error(
+        `Still referenced by: ${pages.join(", ")}`
+      )
+    }
+    throw new Error(body?.error || `Failed to delete media: ${resp.status}`)
   }
   return await resp.json()
 }

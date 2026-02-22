@@ -19,7 +19,12 @@ import (
 
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
-	Put(pagePath, markdown string) (storage.Page, error)
+	Put(pagePath, markdown string) (storage.PutResult, error)
+}
+
+type OrphanDetector interface {
+	FindOrphans() ([]string, error)
+	GetReferencingPages(mediaPath string) []string
 }
 
 type MediaStore interface {
@@ -30,18 +35,20 @@ type MediaStore interface {
 }
 
 type Server struct {
-	store      PageStore
-	mediaStore MediaStore
-	serveWeb   bool
-	webDirPath string
+	store          PageStore
+	mediaStore     MediaStore
+	orphanDetector OrphanDetector
+	serveWeb       bool
+	webDirPath     string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
-		store:      store,
-		mediaStore: mediaStore,
-		serveWeb:   serveWeb,
-		webDirPath: webDirPath,
+		store:          store,
+		mediaStore:     mediaStore,
+		orphanDetector: orphanDetector,
+		serveWeb:       serveWeb,
+		webDirPath:     webDirPath,
 	}
 
 	r := chi.NewRouter()
@@ -61,6 +68,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, serveWeb bool, webDirPath
 	r.Post("/api/media/", s.handleUploadMedia)
 	r.Post("/api/media/{path:.*}", s.handleUploadMedia)
 	r.Delete("/api/media/{path:.*}", s.handleDeleteMedia)
+	r.Get("/api/media-orphans", s.handleMediaOrphans)
 
 	r.Get("/media/{path:.*}", s.handleServeMedia)
 	r.Get(`/{path:.*\..*}`, s.handleFilePath)
@@ -114,16 +122,24 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := s.store.Put(pagePath, req.Markdown)
+	result, err := s.store.Put(pagePath, req.Markdown)
 	if errors.Is(err, storage.ErrNamespaceConflict) {
 		writeError(w, http.StatusConflict, "a namespace directory exists at this path")
+		return
+	}
+	var cycleErr *storage.CircularIncludeError
+	if errors.As(err, &cycleErr) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error": cycleErr.Error(),
+			"cycle": cycleErr.Cycle,
+		})
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +206,15 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if the media is still referenced by any pages.
+	if pages := s.orphanDetector.GetReferencingPages(mediaPath); len(pages) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":            "media is still referenced",
+			"referencing_pages": pages,
+		})
+		return
+	}
+
 	err := s.mediaStore.Delete(mediaPath)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "media file not found")
@@ -200,6 +225,15 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": mediaPath})
+}
+
+func (s *Server) handleMediaOrphans(w http.ResponseWriter, _ *http.Request) {
+	orphans, err := s.orphanDetector.FindOrphans()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"orphans": orphans})
 }
 
 func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {

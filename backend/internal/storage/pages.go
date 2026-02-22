@@ -11,10 +11,28 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gowiki/backend/internal/markdown"
 )
 
 var ErrPageNotFound = errors.New("page not found")
 var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at this path")
+
+// CircularIncludeError is returned when saving a page would create a cycle
+// in the include graph.
+type CircularIncludeError struct {
+	Cycle []string // the cycle path, e.g. ["a", "b", "a"]
+}
+
+func (e *CircularIncludeError) Error() string {
+	return fmt.Sprintf("circular include detected: %s", strings.Join(e.Cycle, " → "))
+}
+
+// PutResult is the result of a page write, including side-effect information.
+type PutResult struct {
+	Page          Page     `json:"page"`
+	OrphanedMedia []string `json:"orphaned_media,omitempty"`
+}
 
 type PageMetadata struct {
 	ID        string    `json:"id"`
@@ -30,8 +48,10 @@ type Page struct {
 }
 
 type FileStore struct {
-	contentRoot string
-	metaRoot    string
+	contentRoot  string
+	metaRoot     string
+	RefIndex     *RefIndex
+	IncludeIndex *IncludeIndex
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -43,7 +63,12 @@ func NewFileStore(contentRoot string) (*FileStore, error) {
 	if err := os.MkdirAll(meta, 0o755); err != nil {
 		return nil, fmt.Errorf("create meta root: %w", err)
 	}
-	return &FileStore{contentRoot: content, metaRoot: meta}, nil
+	return &FileStore{
+		contentRoot:  content,
+		metaRoot:     meta,
+		RefIndex:     NewRefIndex(meta),
+		IncludeIndex: NewIncludeIndex(meta),
+	}, nil
 }
 
 func (s *FileStore) Get(pagePath string) (Page, error) {
@@ -81,15 +106,15 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 	}, nil
 }
 
-func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
+func (s *FileStore) Put(pagePath, markdownContent string) (PutResult, error) {
 	normalized, err := normalizePagePath(pagePath)
 	if err != nil {
-		return Page{}, err
+		return PutResult{}, err
 	}
 
 	contentPath, _, err := s.resolveWritableContentPath(normalized)
 	if err != nil {
-		return Page{}, err
+		return PutResult{}, err
 	}
 
 	// Namespace constraint: if the resolved content path is a non-index page
@@ -97,20 +122,31 @@ func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
 	if !strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
 		dirPath := strings.TrimSuffix(contentPath, ".md")
 		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
-			return Page{}, ErrNamespaceConflict
+			return PutResult{}, ErrNamespaceConflict
 		}
 	}
 
+	// --- Include cycle detection (before writing) ---
+	newIncludes := markdown.ExtractIncludes(markdownContent, normalized)
+	if cycle, hasCycle := s.IncludeIndex.DetectCycle(normalized, newIncludes); hasCycle {
+		return PutResult{}, &CircularIncludeError{Cycle: cycle}
+	}
+
+	// --- Extract media refs ---
+	newMediaRefs := markdown.ExtractMediaRefs(markdownContent, normalized)
+	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)
+
+	// --- Write page and metadata ---
 	if err := os.MkdirAll(filepath.Dir(contentPath), 0o755); err != nil {
-		return Page{}, fmt.Errorf("create page directory: %w", err)
+		return PutResult{}, fmt.Errorf("create page directory: %w", err)
 	}
 
 	metaPath, err := s.metadataPathForContent(contentPath)
 	if err != nil {
-		return Page{}, err
+		return PutResult{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(metaPath), 0o755); err != nil {
-		return Page{}, fmt.Errorf("create metadata directory: %w", err)
+		return PutResult{}, fmt.Errorf("create metadata directory: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -127,27 +163,109 @@ func (s *FileStore) Put(pagePath, markdown string) (Page, error) {
 			Version:   1,
 		}
 	default:
-		return Page{}, fmt.Errorf("load metadata: %w", err)
+		return PutResult{}, fmt.Errorf("load metadata: %w", err)
 	}
 
-	if err := writeFileAtomic(contentPath, []byte(markdown)); err != nil {
-		return Page{}, fmt.Errorf("write page: %w", err)
+	if err := writeFileAtomic(contentPath, []byte(markdownContent)); err != nil {
+		return PutResult{}, fmt.Errorf("write page: %w", err)
 	}
 
 	metaBytes, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return Page{}, fmt.Errorf("encode metadata: %w", err)
+		return PutResult{}, fmt.Errorf("encode metadata: %w", err)
 	}
 	metaBytes = append(metaBytes, '\n')
 	if err := writeFileAtomic(metaPath, metaBytes); err != nil {
-		return Page{}, fmt.Errorf("write metadata: %w", err)
+		return PutResult{}, fmt.Errorf("write metadata: %w", err)
 	}
 
-	return Page{
-		Path:     normalized,
-		Markdown: markdown,
-		Meta:     meta,
+	// --- Update indexes ---
+	s.RefIndex.UpdatePage(normalized, newMediaRefs)
+	s.IncludeIndex.UpdatePage(normalized, newIncludes)
+
+	// Persist indexes (best effort — indexes are rebuilt on startup anyway).
+	_ = s.RefIndex.Save()
+	_ = s.IncludeIndex.Save()
+
+	// --- Compute newly orphaned media ---
+	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, newMediaRefs)
+
+	return PutResult{
+		Page: Page{
+			Path:     normalized,
+			Markdown: markdownContent,
+			Meta:     meta,
+		},
+		OrphanedMedia: orphaned,
 	}, nil
+}
+
+// FindOrphans returns media files under contentRoot with zero page references.
+func (s *FileStore) FindOrphans() ([]string, error) {
+	return s.RefIndex.FindOrphans(s.contentRoot)
+}
+
+// GetReferencingPages returns the list of pages that reference a given media file.
+func (s *FileStore) GetReferencingPages(mediaPath string) []string {
+	return s.RefIndex.GetReferencingPages(mediaPath)
+}
+
+// RebuildIndexes walks all .md pages under contentRoot, extracts media refs
+// and include directives, and rebuilds both RefIndex and IncludeIndex from scratch.
+// Called on server startup.
+func (s *FileStore) RebuildIndexes() error {
+	refIdx := NewRefIndex(s.metaRoot)
+	incIdx := NewIncludeIndex(s.metaRoot)
+
+	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(s.contentRoot, absPath)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+
+		// Derive the logical page path from the file path.
+		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath = strings.TrimSuffix(pagePath, "/index")
+
+		content, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			return readErr
+		}
+
+		mediaRefs := markdown.ExtractMediaRefs(string(content), pagePath)
+		refIdx.UpdatePage(pagePath, mediaRefs)
+
+		includes := markdown.ExtractIncludes(string(content), pagePath)
+		incIdx.UpdatePage(pagePath, includes)
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("rebuild indexes: %w", err)
+	}
+
+	s.RefIndex = refIdx
+	s.IncludeIndex = incIdx
+
+	if err := s.RefIndex.Save(); err != nil {
+		return fmt.Errorf("save ref index: %w", err)
+	}
+	if err := s.IncludeIndex.Save(); err != nil {
+		return fmt.Errorf("save include index: %w", err)
+	}
+
+	return nil
 }
 
 func (s *FileStore) readOrInitMeta(pagePath, contentPath, metaPath string) (PageMetadata, error) {

@@ -1,7 +1,6 @@
-import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
+import { Plugin as PMPlugin, PluginKey, NodeSelection, EditorState } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
-import { DOMSerializer } from "prosemirror-model"
-import type { EditorView } from "prosemirror-view"
+import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
 import { markdownToPM } from "../compiler/markdown_to_pm"
@@ -71,6 +70,7 @@ class IncludeNodeView {
   private bodyEl: HTMLElement
   private node: PMNode
   private registry: Registry
+  private innerView: EditorView | null = null
 
   constructor(
     node: PMNode,
@@ -98,6 +98,7 @@ class IncludeNodeView {
   }
 
   private showError(message: string) {
+    this.destroyInnerView()
     this.bodyEl.innerHTML = ""
     const msg = document.createElement("div")
     msg.className = "gowiki-include-error"
@@ -105,7 +106,15 @@ class IncludeNodeView {
     this.bodyEl.appendChild(msg)
   }
 
+  private destroyInnerView() {
+    if (this.innerView) {
+      this.innerView.destroy()
+      this.innerView = null
+    }
+  }
+
   private async fetchAndRender(path: string) {
+    this.destroyInnerView()
     this.bodyEl.innerHTML = ""
     const loading = document.createElement("div")
     loading.className = "gowiki-include-loading"
@@ -128,14 +137,17 @@ class IncludeNodeView {
       const markdown = data.markdown ?? ""
 
       const doc = markdownToPM(markdown, this.registry)
-      const schema = this.registry.schema
 
       this.bodyEl.innerHTML = ""
-      const pmRoot = document.createElement("div")
-      pmRoot.className = "ProseMirror"
-      const serializer = DOMSerializer.fromSchema(schema)
-      pmRoot.appendChild(serializer.serializeFragment(doc.content))
-      this.bodyEl.appendChild(pmRoot)
+      const state = EditorState.create({
+        doc,
+        schema: this.registry.schema,
+        plugins: this.registry.getEditorPlugins(),
+      })
+      this.innerView = new EditorView(this.bodyEl, {
+        state,
+        editable: () => false,
+      })
     } catch (err) {
       this.showError(
         `Error loading include: ${err instanceof Error ? err.message : String(err)}`
@@ -160,6 +172,10 @@ class IncludeNodeView {
 
   ignoreMutation(): boolean {
     return true
+  }
+
+  destroy() {
+    this.destroyInnerView()
   }
 }
 

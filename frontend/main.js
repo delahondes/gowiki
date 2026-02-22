@@ -551,16 +551,54 @@ async function fetchPage(path) {
   return await resp.json()
 }
 
+class CircularIncludeError extends Error {
+  constructor(cycle) {
+    super(`Circular include detected: ${cycle.join(" → ")}`)
+    this.name = "CircularIncludeError"
+    this.cycle = cycle
+  }
+}
+
 async function savePage(path, markdown) {
   const resp = await fetch(`/api/pages/${encodePagePath(path)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ markdown }),
   })
+  if (resp.status === 422) {
+    const body = await resp.json()
+    if (body.cycle) {
+      throw new CircularIncludeError(body.cycle)
+    }
+    throw new Error(body.error || `Save rejected: ${resp.status}`)
+  }
   if (!resp.ok) {
     throw new Error(`Failed to save page ${path}: ${resp.status}`)
   }
   return await resp.json()
+}
+
+async function deleteMedia(mediaPath) {
+  const resp = await fetch(`/api/media/${encodePagePath(mediaPath)}`, {
+    method: "DELETE",
+  })
+  return resp.ok
+}
+
+function promptOrphanDeletion(orphanedMedia) {
+  const names = orphanedMedia.map((p) => p.split("/").pop())
+  const msg =
+    orphanedMedia.length === 1
+      ? `"${names[0]}" is no longer referenced. Delete it?`
+      : `${orphanedMedia.length} files are no longer referenced:\n${names.join(", ")}\nDelete them?`
+  if (!confirm(msg)) return
+
+  Promise.all(orphanedMedia.map(deleteMedia)).then((results) => {
+    const deleted = results.filter(Boolean).length
+    if (deleted > 0) {
+      setStatus(`Deleted ${deleted} orphaned file${deleted > 1 ? "s" : ""}`)
+    }
+  })
 }
 
 function normalizeMarkdownForStorage(markdown) {
@@ -2579,7 +2617,7 @@ async function saveAndMaybeSwitch(toView) {
     }
 
     const normalized = normalizeMarkdownForStorage(markdown)
-    await savePage(pagePath, normalized.markdown)
+    const result = await savePage(pagePath, normalized.markdown)
     applyNormalizedEditState(
       normalized,
       !toView && mode === "edit" && editMode === "visual"
@@ -2587,12 +2625,22 @@ async function saveAndMaybeSwitch(toView) {
     editBaselineMarkdown = normalized.markdown
     isNewPage = false
     setStatus(`Saved ${new Date().toLocaleTimeString()}`)
+
+    // Prompt for orphaned media deletion.
+    if (result.orphaned_media && result.orphaned_media.length > 0) {
+      promptOrphanDeletion(result.orphaned_media)
+    }
+
     if (toView) {
       setMode("view")
     }
   } catch (err) {
     console.error("Save failed", err)
-    setStatus("Save failed")
+    if (err instanceof CircularIncludeError) {
+      setStatus(`Save failed: ${err.message}`)
+    } else {
+      setStatus("Save failed")
+    }
   }
 }
 
