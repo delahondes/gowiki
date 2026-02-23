@@ -2,6 +2,10 @@ import hljs from "highlight.js/lib/common"
 import { Plugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 
+// Suppress hljs warning about unescaped HTML in code blocks —
+// our code block content is plain text from ProseMirror, not user HTML.
+hljs.configure({ ignoreUnescapedHTML: true })
+
 /**
  * Apply syntax highlighting to all <pre><code> elements in a container.
  * Only call this for view-mode / read-only views — never in the editable editor.
@@ -76,9 +80,9 @@ export function highlightPlugin() {
       init(_, state) {
         return safeBuildDecorations(state)
       },
-      apply(tr, oldSet) {
+      apply(tr, oldSet, _oldState, newState) {
         if (!tr.docChanged) return oldSet
-        return safeBuildDecorations(tr.state as any)
+        return safeBuildDecorations(newState)
       },
     },
     props: {
@@ -120,14 +124,22 @@ function buildDecorations(state: any): DecorationSet {
 
     // Position of the first text character inside the code_block.
     const basePos = pos + 1
-    const tokens = parseHighlightTokens(result.value)
+    const textLen = text.length
 
-    for (const token of tokens) {
-      decorations.push(
-        Decoration.inline(basePos + token.from, basePos + token.to, {
-          class: token.classes,
-        })
-      )
+    try {
+      const tokens = parseHighlightTokens(result.value)
+      for (const token of tokens) {
+        // Guard against out-of-bounds tokens.
+        if (token.from >= textLen || token.to > textLen) continue
+        if (token.from >= token.to) continue
+        decorations.push(
+          Decoration.inline(basePos + token.from, basePos + token.to, {
+            class: token.classes,
+          })
+        )
+      }
+    } catch {
+      // Skip this code block if decoration creation fails.
     }
   })
 
