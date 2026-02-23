@@ -2311,23 +2311,30 @@ function buildMenubar() {
     }
   })
 
-  // Paragraph at end
-  addImgButton("/icons/paragraphdown.svg", "Add paragraph at end", () => {
+  // Paragraph below
+  addImgButton("/icons/paragraphdown.svg", "Add paragraph below", () => {
     if (editMode === "visual" && editorView) {
       const paragraphType = schema.nodes.paragraph
       if (paragraphType) {
         const state = editorView.state
-        const endPos = state.doc.content.size
-        const tr = state.tr.insert(endPos, paragraphType.create())
-        tr.setSelection(TextSelection.near(tr.doc.resolve(endPos + 1)))
+        const $from = state.selection.$from
+        // Find the top-level block containing the cursor.
+        const depth = $from.depth > 0 ? 1 : 0
+        const afterBlock = $from.after(depth)
+        const tr = state.tr.insert(afterBlock, paragraphType.create())
+        tr.setSelection(TextSelection.near(tr.doc.resolve(afterBlock + 1)))
         editorView.dispatch(tr.scrollIntoView())
       }
       editorView.focus()
     } else if (editMode === "raw" && rawEditor) {
       rawEditor.focus()
-      const end = rawEditor.value.length
-      rawEditor.setSelectionRange(end, end)
-      rawInsertText(rawEditor, "\n")
+      // Insert a blank line after the current line.
+      const val = rawEditor.value
+      const pos = rawEditor.selectionStart
+      const lineEnd = val.indexOf("\n", pos)
+      const insertAt = lineEnd === -1 ? val.length : lineEnd
+      rawEditor.setSelectionRange(insertAt, insertAt)
+      rawInsertText(rawEditor, "\n\n")
     }
   })
 
