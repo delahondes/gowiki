@@ -5,6 +5,7 @@ import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
 import { markdownToPM } from "../compiler/markdown_to_pm"
 import { enablePropertiesPanel } from "../compiler/core_ui"
+import { highlightCodeBlocks } from "../highlight"
 
 const includeProperties = [
   {
@@ -148,6 +149,7 @@ class IncludeNodeView {
         state,
         editable: () => false,
       })
+      highlightCodeBlocks(this.bodyEl)
     } catch (err) {
       this.showError(
         `Error loading include: ${err instanceof Error ? err.message : String(err)}`

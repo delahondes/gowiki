@@ -34,19 +34,31 @@ type MediaStore interface {
 	ResolvePath(mediaPath string) (string, error)
 }
 
+type SearchStore interface {
+	Search(query string, limit int) ([]storage.SearchResult, error)
+}
+
+type LogoResolver interface {
+	ResolveLogo() (string, error)
+}
+
 type Server struct {
 	store          PageStore
 	mediaStore     MediaStore
 	orphanDetector OrphanDetector
+	searchStore    SearchStore
+	logoResolver   LogoResolver
 	serveWeb       bool
 	webDirPath     string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, logoResolver LogoResolver, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
 		store:          store,
 		mediaStore:     mediaStore,
 		orphanDetector: orphanDetector,
+		searchStore:    searchStore,
+		logoResolver:   logoResolver,
 		serveWeb:       serveWeb,
 		webDirPath:     webDirPath,
 	}
@@ -69,6 +81,9 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Post("/api/media/{path:.*}", s.handleUploadMedia)
 	r.Delete("/api/media/{path:.*}", s.handleDeleteMedia)
 	r.Get("/api/media-orphans", s.handleMediaOrphans)
+
+	r.Get("/api/search", s.handleSearch)
+	r.Get("/api/site/logo", s.handleSiteLogo)
 
 	r.Get("/media/{path:.*}", s.handleServeMedia)
 	r.Get(`/{path:.*\..*}`, s.handleFilePath)
@@ -257,6 +272,44 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, filepath.Clean(targetPath))
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		return
+	}
+
+	limit := 10
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	results, err := s.searchStore.Search(q, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+func (s *Server) handleSiteLogo(w http.ResponseWriter, _ *http.Request) {
+	logoPath, err := s.logoResolver.ResolveLogo()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if logoPath == "" {
+		writeError(w, http.StatusNotFound, "no logo found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": logoPath})
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

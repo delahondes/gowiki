@@ -12,6 +12,8 @@ import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
+import { highlightCodeBlocks } from "./highlight.ts"
+import "highlight.js/styles/github.css"
 
 const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
@@ -950,10 +952,12 @@ function mountReadOnlyView(container, markdown, className) {
     schema,
     plugins: registry.getEditorPlugins(),
   })
-  return new EditorView(wrapper, {
+  const view = new EditorView(wrapper, {
     state,
     editable: () => false,
   })
+  highlightCodeBlocks(wrapper)
+  return view
 }
 
 async function fetchAndMountZone(path, container, className) {
@@ -978,6 +982,48 @@ function renderView() {
   }
 
   viewView = mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view")
+
+  // Highlight searched terms if navigating from search.
+  const highlight = new URLSearchParams(window.location.search).get("highlight")
+  if (highlight) {
+    highlightTermsInView(contentRoot, highlight)
+  }
+}
+
+function highlightTermsInView(container, query) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const matches = []
+
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode
+    // Skip code blocks and script/style elements.
+    const parent = textNode.parentElement
+    if (!parent) continue
+    if (parent.closest("pre, code, script, style")) continue
+
+    const text = textNode.textContent.toLowerCase()
+    for (const term of terms) {
+      let idx = 0
+      while ((idx = text.indexOf(term, idx)) !== -1) {
+        matches.push({ node: textNode, start: idx, length: term.length })
+        idx += term.length
+      }
+    }
+  }
+
+  // Apply highlights in reverse order to preserve positions.
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const { node, start, length } = matches[i]
+    const range = document.createRange()
+    range.setStart(node, start)
+    range.setEnd(node, start + length)
+    const mark = document.createElement("mark")
+    mark.className = "search-highlight"
+    range.surroundContents(mark)
+  }
 }
 
 function autoResizeRawEditor(editorEl) {
@@ -2644,9 +2690,198 @@ async function saveAndMaybeSwitch(toView) {
   }
 }
 
+// ── Banner: logo resolution ──────────────────────────
+
+async function resolveLogo() {
+  try {
+    const resp = await fetch("/api/site/logo")
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.path) {
+        document.getElementById("banner-logo-img").src = "/media/" + data.path
+      }
+    }
+  } catch { /* keep default */ }
+}
+
+// ── Banner: search ──────────────────────────────────
+
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+function initSearch() {
+  const input = document.getElementById("search-input")
+  const resultsEl = document.getElementById("search-results")
+  let debounceTimer = null
+  let activeIndex = -1
+  let currentResults = []
+
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer)
+    const query = input.value.trim()
+    if (!query) { hideResults(); return }
+    debounceTimer = setTimeout(() => runSearch(query), 200)
+  })
+
+  input.addEventListener("keydown", (e) => {
+    if (resultsEl.classList.contains("search-results-hidden")) return
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      activeIndex = Math.min(activeIndex + 1, currentResults.length - 1)
+      updateActiveResult()
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      activeIndex = Math.max(activeIndex - 1, 0)
+      updateActiveResult()
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      if (activeIndex >= 0 && activeIndex < currentResults.length) {
+        navigateToSearchResult(currentResults[activeIndex].path)
+      } else {
+        const query = input.value.trim()
+        if (query) {
+          hideResults()
+          window.location.href = "/?q=" + encodeURIComponent(query)
+        }
+      }
+    } else if (e.key === "Escape") {
+      hideResults()
+      input.blur()
+    }
+  })
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#banner-search")) hideResults()
+  })
+
+  function updateActiveResult() {
+    const items = resultsEl.querySelectorAll(".search-result-item")
+    items.forEach((el, i) => {
+      el.classList.toggle("search-result-active", i === activeIndex)
+    })
+    if (items[activeIndex]) {
+      items[activeIndex].scrollIntoView({ block: "nearest" })
+    }
+  }
+
+  async function runSearch(query) {
+    try {
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
+      if (!resp.ok) return
+      const data = await resp.json()
+      currentResults = data.results || []
+      activeIndex = -1
+      renderSearchResults(currentResults)
+    } catch { /* ignore */ }
+  }
+
+  function renderSearchResults(results) {
+    resultsEl.innerHTML = ""
+    if (results.length === 0) {
+      resultsEl.innerHTML = '<div class="search-no-results">No results</div>'
+      resultsEl.classList.remove("search-results-hidden")
+      return
+    }
+    for (const r of results) {
+      const item = document.createElement("a")
+      item.href = "/" + r.path
+      item.className = "search-result-item"
+      item.innerHTML =
+        `<div class="search-result-title">${escapeHtml(r.title || r.path)}</div>` +
+        `<div class="search-result-path">${escapeHtml(r.path)}</div>` +
+        (r.snippet ? `<div class="search-result-snippet">${r.snippet}</div>` : "")
+      item.addEventListener("click", (e) => {
+        e.preventDefault()
+        navigateToSearchResult(r.path)
+      })
+      resultsEl.appendChild(item)
+    }
+    resultsEl.classList.remove("search-results-hidden")
+  }
+
+  function hideResults() {
+    resultsEl.classList.add("search-results-hidden")
+    activeIndex = -1
+    currentResults = []
+  }
+
+  function navigateToSearchResult(path) {
+    const query = input.value.trim()
+    const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
+    window.location.href = "/" + path + qs
+  }
+}
+
+// ── Bootstrap ───────────────────────────────────────
+
+async function renderSearchResultsPage(query) {
+  clearContent()
+
+  const heading = document.createElement("h1")
+  heading.textContent = `Search results for "${query}"`
+  heading.className = "search-page-heading"
+  contentRoot.appendChild(heading)
+
+  const container = document.createElement("div")
+  container.className = "search-page-results"
+  contentRoot.appendChild(container)
+
+  try {
+    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`)
+    if (!resp.ok) {
+      container.textContent = "Search failed."
+      return
+    }
+    const data = await resp.json()
+    const results = data.results || []
+
+    if (results.length === 0) {
+      container.innerHTML = '<div class="search-page-empty">No results found.</div>'
+      return
+    }
+
+    for (const r of results) {
+      const item = document.createElement("a")
+      const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
+      item.href = "/" + r.path + qs
+      item.className = "search-page-item"
+      item.innerHTML =
+        `<div class="search-page-item-title">${escapeHtml(r.title || r.path)}</div>` +
+        `<div class="search-page-item-path">${escapeHtml(r.path)}</div>` +
+        (r.snippet ? `<div class="search-page-item-snippet">${r.snippet}</div>` : "")
+      container.appendChild(item)
+    }
+  } catch {
+    container.textContent = "Search failed."
+  }
+}
+
 async function bootstrap() {
   applyStyles(registry.getStyles())
   renderActions()
+
+  // Non-blocking banner setup
+  resolveLogo()
+  initSearch()
+
+  // Check for search query in URL.
+  const searchQuery = new URLSearchParams(window.location.search).get("q")
+  if (searchQuery) {
+    const input = document.getElementById("search-input")
+    if (input) input.value = searchQuery
+    await renderSearchResultsPage(searchQuery)
+    // Still mount sidebar and footer.
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+      sidebarView = v
+    })
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+      footerView = v
+    })
+    return
+  }
+
   const page = await fetchPage(pagePath)
   if (page) {
     currentMarkdown = page.markdown

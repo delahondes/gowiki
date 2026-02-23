@@ -3,6 +3,7 @@ import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import type { NodeSpec, MarkSpec } from "prosemirror-model"
+import { highlightPlugin } from "../highlight"
 
 /**
  * Core semantic nodes for the document language.
@@ -268,7 +269,39 @@ function registerLists(reg: Registry) {
 }
 
 function registerCodeBlocks(reg: Registry) {
-  function pushCodeBlock(ctx: CompileContext, raw: string) {
+  // Extend the code_block node spec to carry a language attribute.
+  reg.extendSchemaNode("code_block", (spec: any) => ({
+    ...spec,
+    attrs: { ...(spec.attrs ?? {}), language: { default: "" } },
+    toDOM(node: any) {
+      return [
+        "pre",
+        ["code", { class: node.attrs.language ? "language-" + node.attrs.language : "" }, 0],
+      ]
+    },
+    parseDOM: [
+      {
+        tag: "pre",
+        getAttrs(dom: HTMLElement) {
+          const code = dom.querySelector("code")
+          const cls = code?.className?.match(/language-(\S+)/)
+          return { language: cls ? cls[1] : "" }
+        },
+        contentElement: "code",
+      },
+    ],
+  }))
+
+  // Register language as a node property — uses the proven property panel system.
+  reg.registerNodeProperties("code_block", [
+    {
+      name: "language",
+      label: "Language:",
+      default: "",
+    },
+  ])
+
+  function pushCodeBlock(ctx: CompileContext, raw: string, language = "") {
     let content = String(raw ?? "")
     // markdown-it fence content usually ends with one trailing newline.
     if (content.endsWith("\n")) {
@@ -276,15 +309,15 @@ function registerCodeBlocks(reg: Registry) {
     }
     const textNode = content.length > 0 ? ctx.schema.text(content) : null
     const block = textNode
-      ? ctx.schema.nodes.code_block.create(null, [textNode])
-      : ctx.schema.nodes.code_block.create()
+      ? ctx.schema.nodes.code_block.create({ language }, [textNode])
+      : ctx.schema.nodes.code_block.create({ language })
     ctx.push(block)
   }
 
   // Triple-backtick fenced blocks from markdown-it.
   reg.registerText("fence", {
     run(ctx, tok) {
-      pushCodeBlock(ctx, tok.content ?? "")
+      pushCodeBlock(ctx, tok.content ?? "", (tok.info ?? "").trim())
     },
   })
 
@@ -294,6 +327,9 @@ function registerCodeBlocks(reg: Registry) {
       pushCodeBlock(ctx, tok.content ?? "")
     },
   })
+
+  // Syntax highlighting decorations in the editor.
+  reg.registerEditorPlugin(() => highlightPlugin())
 }
 
 function registerHorizontalRule(reg: Registry) {
@@ -429,9 +465,10 @@ function registerMarkdownPrinters(reg: Registry) {
 
   reg.registerPMNode("code_block", {
     print(node) {
+      const lang = node.attrs.language ?? ""
       const text = node.textContent ?? ""
       const body = text.endsWith("\n") ? text : text + "\n"
-      return "```\n" + body + "```\n\n"
+      return "```" + lang + "\n" + body + "```\n\n"
     },
   })
 

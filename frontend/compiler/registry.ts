@@ -312,7 +312,7 @@ export class Registry {
     return this.nodeProperties.get(nodeType) ?? []
   }
 
-  private registerNodeProperties(
+  registerNodeProperties(
     nodeType: string,
     properties: NodePropertySpec[]
   ) {

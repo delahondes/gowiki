@@ -52,6 +52,7 @@ type FileStore struct {
 	metaRoot     string
 	RefIndex     *RefIndex
 	IncludeIndex *IncludeIndex
+	SearchIndex  *SearchIndex
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -183,6 +184,13 @@ func (s *FileStore) Put(pagePath, markdownContent string) (PutResult, error) {
 	s.RefIndex.UpdatePage(normalized, newMediaRefs)
 	s.IncludeIndex.UpdatePage(normalized, newIncludes)
 
+	// --- Update search index ---
+	if s.SearchIndex != nil {
+		title := markdown.ExtractTitle(markdownContent)
+		plaintext := markdown.StripMarkdown(markdownContent)
+		_ = s.SearchIndex.IndexPage(normalized, title, plaintext)
+	}
+
 	// Persist indexes (best effort — indexes are rebuilt on startup anyway).
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
@@ -263,6 +271,13 @@ func (s *FileStore) RebuildIndexes() error {
 	}
 	if err := s.IncludeIndex.Save(); err != nil {
 		return fmt.Errorf("save include index: %w", err)
+	}
+
+	// Rebuild search index if available.
+	if s.SearchIndex != nil {
+		if err := s.SearchIndex.RebuildFromDir(s.contentRoot); err != nil {
+			return fmt.Errorf("rebuild search index: %w", err)
+		}
 	}
 
 	return nil
@@ -461,4 +476,20 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// logoExtensions is the ordered list of file extensions to check for a site logo.
+var logoExtensions = []string{".png", ".svg", ".jpg", ".jpeg", ".gif", ".webp"}
+
+// ResolveLogo scans the content root for a logo file (logo.{png,svg,jpg,jpeg,gif,webp}).
+// Returns the relative path of the first match, or empty string if none found.
+func (s *FileStore) ResolveLogo() (string, error) {
+	for _, ext := range logoExtensions {
+		name := "logo" + ext
+		fp := filepath.Join(s.contentRoot, name)
+		if fileExists(fp) {
+			return name, nil
+		}
+	}
+	return "", nil
 }

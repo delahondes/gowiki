@@ -1,0 +1,225 @@
+package storage
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/blevesearch/bleve/v2"
+	"github.com/blevesearch/bleve/v2/mapping"
+	"github.com/blevesearch/bleve/v2/search/highlight/highlighter/ansi"
+
+	"gowiki/backend/internal/markdown"
+)
+
+// SearchResult represents a single search hit.
+type SearchResult struct {
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Snippet string `json:"snippet"`
+}
+
+// searchDocument is the struct indexed by Bleve.
+type searchDocument struct {
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// SearchIndex wraps a Bleve index for full-text search.
+type SearchIndex struct {
+	index bleve.Index
+}
+
+// OpenSearchIndex opens an existing Bleve index at indexPath, or creates a new one.
+func OpenSearchIndex(indexPath string) (*SearchIndex, error) {
+	idx, err := bleve.Open(indexPath)
+	if err == bleve.ErrorIndexPathDoesNotExist {
+		m := buildIndexMapping()
+		idx, err = bleve.New(indexPath, m)
+		if err != nil {
+			return nil, fmt.Errorf("create search index: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("open search index: %w", err)
+	}
+	return &SearchIndex{index: idx}, nil
+}
+
+func buildIndexMapping() mapping.IndexMapping {
+	// Field mappings.
+	pathField := bleve.NewTextFieldMapping()
+	pathField.Analyzer = "keyword"
+	pathField.Store = true
+
+	titleField := bleve.NewTextFieldMapping()
+	titleField.Analyzer = "standard"
+	titleField.Store = true
+
+	bodyField := bleve.NewTextFieldMapping()
+	bodyField.Analyzer = "standard"
+	bodyField.Store = true
+
+	docMapping := bleve.NewDocumentMapping()
+	docMapping.AddFieldMappingsAt("path", pathField)
+	docMapping.AddFieldMappingsAt("title", titleField)
+	docMapping.AddFieldMappingsAt("body", bodyField)
+
+	im := bleve.NewIndexMapping()
+	im.DefaultMapping = docMapping
+	im.DefaultAnalyzer = "standard"
+	return im
+}
+
+// Close closes the Bleve index.
+func (s *SearchIndex) Close() error {
+	return s.index.Close()
+}
+
+// IndexPage upserts a document in the search index.
+func (s *SearchIndex) IndexPage(pagePath, title, plaintext string) error {
+	doc := searchDocument{
+		Path:  pagePath,
+		Title: title,
+		Body:  plaintext,
+	}
+	return s.index.Index(pagePath, doc)
+}
+
+// DeletePage removes a document from the search index.
+func (s *SearchIndex) DeletePage(pagePath string) error {
+	return s.index.Delete(pagePath)
+}
+
+// Search queries the index and returns results with path, title, and snippet.
+func (s *SearchIndex) Search(query string, limit int) ([]SearchResult, error) {
+	q := bleve.NewQueryStringQuery(query)
+	req := bleve.NewSearchRequestOptions(q, limit, 0, false)
+	req.Fields = []string{"path", "title", "body"}
+	req.Highlight = bleve.NewHighlightWithStyle(ansi.Name)
+	req.Highlight.AddField("body")
+
+	sr, err := s.index.Search(req)
+	if err != nil {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+
+	results := make([]SearchResult, 0, len(sr.Hits))
+	for _, hit := range sr.Hits {
+		r := SearchResult{
+			Path: hit.ID,
+		}
+
+		if v, ok := hit.Fields["title"].(string); ok {
+			r.Title = v
+		}
+
+		// Use highlighted fragment from body if available.
+		if fragments, ok := hit.Fragments["body"]; ok && len(fragments) > 0 {
+			// Strip ANSI codes from the snippet since we're serving JSON.
+			r.Snippet = stripANSI(fragments[0])
+		} else if v, ok := hit.Fields["body"].(string); ok {
+			// Fallback: first 200 chars of body.
+			if len(v) > 200 {
+				r.Snippet = v[:200] + "..."
+			} else {
+				r.Snippet = v
+			}
+		}
+
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// stripANSI removes ANSI escape sequences from a string.
+func stripANSI(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] == '\033' && i+1 < len(s) && s[i+1] == '[' {
+			// Skip until 'm'.
+			j := i + 2
+			for j < len(s) && s[j] != 'm' {
+				j++
+			}
+			if j < len(s) {
+				i = j + 1
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// RebuildFromDir walks all .md files under contentDir, strips markdown,
+// extracts titles, and indexes each page.
+func (s *SearchIndex) RebuildFromDir(contentDir string) error {
+	batch := s.index.NewBatch()
+	count := 0
+
+	err := filepath.Walk(contentDir, func(absPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(contentDir, absPath)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+
+		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath = strings.TrimSuffix(pagePath, "/index")
+
+		content, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			return readErr
+		}
+
+		plaintext := markdown.StripMarkdown(string(content))
+		title := markdown.ExtractTitle(string(content))
+
+		doc := searchDocument{
+			Path:  pagePath,
+			Title: title,
+			Body:  plaintext,
+		}
+		if err := batch.Index(pagePath, doc); err != nil {
+			return fmt.Errorf("batch index %s: %w", pagePath, err)
+		}
+		count++
+
+		// Flush batch every 100 documents.
+		if count%100 == 0 {
+			if err := s.index.Batch(batch); err != nil {
+				return fmt.Errorf("flush batch: %w", err)
+			}
+			batch = s.index.NewBatch()
+		}
+
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("rebuild search index: %w", err)
+	}
+
+	// Flush remaining.
+	if batch.Size() > 0 {
+		if err := s.index.Batch(batch); err != nil {
+			return fmt.Errorf("flush final batch: %w", err)
+		}
+	}
+
+	return nil
+}
