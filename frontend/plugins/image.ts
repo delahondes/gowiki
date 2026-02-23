@@ -23,8 +23,6 @@ const imageStyles = `
 
 .gowiki-image-wrapper img {
   display: block;
-  max-width: 100%;
-  height: auto;
 }
 
 .gowiki-image-wrapper.ProseMirror-selectednode {
@@ -142,8 +140,12 @@ class ImageNodeView {
     } else {
       this.imgEl.removeAttribute("title")
     }
-    const sizeStyle = styleFromImageSize(this.node.attrs.size ?? null)
-    this.imgEl.style.cssText = sizeStyle ?? ""
+    const size = this.node.attrs.size ?? null
+    const sizeStyle = styleFromImageSize(size)
+    // Explicit size: apply it directly, allow exceeding container.
+    // No size: constrain to container with max-width.
+    this.imgEl.style.cssText = sizeStyle ?? "max-width: 100%; height: auto;"
+    this.dom.style.maxWidth = size ? "none" : ""
   }
 
   update(node: PMNode): boolean {
