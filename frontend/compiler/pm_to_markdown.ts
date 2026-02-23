@@ -16,7 +16,7 @@ import { Node as PMNode } from "prosemirror-model"
 import { Registry } from "./registry"
 
 function escapeMarkdownText(text: string): string {
-  return text.replace(/[\\*_`]/g, ch => "\\" + ch)
+  return text.replace(/[\\*_`>]/g, ch => "\\" + ch)
 }
 
 function serializePlainTextWithAutoLinks(text: string): string {
@@ -54,7 +54,8 @@ export function pmToMarkdown(
       for (const mark of node.marks) {
         const printer = registry.getPMMark(mark.type.name)
         if (!printer) {
-          throw new Error(`No Markdown printer for mark "${mark.type.name}"`)
+          console.warn(`No Markdown printer for mark "${mark.type.name}", skipping`)
+          continue
         }
         if (mark.type.name === "link" && mark.attrs.autoText) {
           const href = mark.attrs.href ?? ""
@@ -81,7 +82,8 @@ export function pmToMarkdown(
 
     const printer = registry.getPMNode(node.type.name)
     if (!printer) {
-      throw new Error(`No Markdown printer for node "${node.type.name}"`)
+      console.warn(`No Markdown printer for node "${node.type.name}", using text content`)
+      return escapeMarkdownText(node.textContent)
     }
 
     return printer.print(node, ctx, printNode)

@@ -110,12 +110,13 @@ Known smell: `frontend/compiler/core_nodes.ts` lines 114–129 contain a specifi
 - Tables, with Tab to navigate between cells
 - Images with drag-resize (Shift to constrain proportions), live-updating size property in both the node and the Markdown source
 - Internal and external links (external links display a distinct icon and open in a new tab)
-- Media manager: fully implemented frontend and backend, handles file upload and storage, inserts image nodes or download links. Currently limited to a flat file listing (no image thumbnails, no file-type icons in listing or rendering). No orphan detection yet.
-- Code blocks with basic Tab/Shift-Tab indent/deindent support (no language specifier yet)
+- Media manager: fully implemented frontend and backend, handles file upload and storage, inserts image nodes or download links. Currently limited to a flat file listing (no image thumbnails, no file-type icons in listing or rendering).
+- Code blocks with Tab/Shift-Tab indent/deindent support and language specifier (syntax highlighting per language).
 - Include nodes: implemented, renders as read-only zone in visual mode with property panel (yellow, consistent with other property panels). Include button in toolbar (visual and raw).
-- Save/reload cycle is implemented and validated
-- New page creation is functional but minimal (creates a base .md, editing tested)
-- Navigation between pages is implemented
+- Full-text search: incremental, typo-tolerant.
+- Save/reload cycle is implemented and validated.
+- Navigation between pages is implemented.
+- New page creation is functional but minimal (creates a base .md, editing tested).
 
 ### Properties system
 - Defined and working for: image nodes (size, drag-resize updates property live), table nodes (size property defined, drag-resize not yet implemented), include nodes (path property)
@@ -124,20 +125,33 @@ Known smell: `frontend/compiler/core_nodes.ts` lines 114–129 contain a specifi
 ### Rendering model
 Rendering is done entirely by ProseMirror. There is no separate rendering pipeline for view mode — the visual editor output and the rendered view are identical by construction. This is a deliberate architectural choice and should not be changed.
 
-### v0.1 status
-v0.1 is complete. All core editing, persistence, sidebar/footer composition, include rendering, and media management are functional.
+### v0.1–v0.3 status
+v0.1, v0.2, and v0.3 are complete.
 
 ## Milestone targets
 
 - **v0.1** ✓ — Single-page correctness: edit and persist main page content, render sidebar and footer composition, save/reload reliably, render included content as read-only.
-- **v0.2** — Site-level consistency: reference tracking and orphan detection. Navigation and media upload are already done.
-- **v0.3** — Search: full-text, incremental, typo-tolerant.
-- **v0.4** — Editing robustness: copy/paste across editable/non-editable regions, round-trip guarantees under complex edits.
+- **v0.2** ✓ — Site-level consistency: reference tracking, orphan detection, circular include detection.
+- **v0.3** ✓ — Search: full-text, incremental, typo-tolerant. Language-specific syntax highlighting in code blocks.
+- **v0.4** — Editing robustness: correct copy/paste semantics, document validity after any edit.
 - **v0.5** — History and diff: page history, rollback.
 - **v0.6** — Admin page: configuration UI, authentication backends, ACL.
 - **v0.7** — Structured data: per-page structured fields, queries, rendering.
 
-## v0.2 detailed scope
+## v0.4 detailed scope
+
+### Copy/paste semantics
+- Pasting into an editable region must strip or transform any content that violates the dialect (foreign Markdown syntax, raw HTML, unsupported node types).
+- Pasting must never affect non-editable regions (sidebar, footer, included content).
+- Pasting across the boundary of a non-editable region must be handled gracefully: split the paste around the non-editable zone, or reject with a clear user signal. Never silently corrupt the document.
+
+### Document validity after any edit
+- After any edit operation (paste, drag, undo, redo), the document must remain a valid Gowiki dialect document.
+- Invalid states must be caught and corrected at the ProseMirror schema level, not silently stored.
+- The Markdown produced after any edit must pass round-trip validation: serialize → parse → serialize must yield the same result.
+- This applies in both visual and raw mode.
+
+## v0.2 detailed scope (reference)
 
 ### Reference tracking
 The backend maintains a map of which pages reference which media files. This map is updated immediately on every write (not batch-based). It is the foundation for orphan detection.
@@ -146,18 +160,7 @@ The backend maintains a map of which pages reference which media files. This map
 When a media file becomes unreferenced (no page links to it), the backend detects it immediately. The frontend may prompt the user for deletion. Orphan handling is backend-driven. Media versioning is out of scope.
 
 ### Circular include detection
-The backend must detect and reject circular includes at save time (not render time). If saving a page would create a direct or transitive include loop, the backend returns an error. The frontend displays the error to the user. No partial saves, no silent failures.
-
-Examples of forbidden loops:
-- Direct: page A includes page A
-- Transitive: page A includes page B which includes page A
-
-The frontend does not attempt to detect or prevent cycles locally — this is a backend responsibility.
-
-### Out of scope for v0.2
-- "Consistency across pages and shared regions" from the original spec is retired — it was a remnant of a dropped inheritance model. Sidebar/footer are already handled as special content pages. Nothing remains to implement here.
-- Media versioning is explicitly deferred.
-- Search is v0.3.
+The backend detects and rejects circular includes at save time (not render time). If saving a page would create a direct or transitive include loop, the backend returns an error. The frontend displays the error to the user. No partial saves, no silent failures. The frontend does not attempt to detect or prevent cycles locally.
 
 ## Dialect implementation status (reference)
 
@@ -176,6 +179,7 @@ The frontend does not attempt to detect or prevent cycles locally — this is a 
 | Raw HTML forbidden | implemented |
 | Single newline → hard break in paragraphs | implemented |
 | `\n` literal → `<br>` (lists and tables only) | implemented |
+| Code block language specifier + highlighting | implemented |
 | Deterministic round-trip | partial |
 | HTML entities not interpreted | partial |
 
@@ -191,3 +195,4 @@ The frontend does not attempt to detect or prevent cycles locally — this is a 
 - Do not bundle core and plugins together — they must remain independently loadable
 - Do not detect include cycles in the frontend — this is a backend responsibility
 - Do not implement media versioning before v0.5
+- Do not silently store invalid document states — enforce at the ProseMirror schema level

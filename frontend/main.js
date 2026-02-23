@@ -1,6 +1,6 @@
 import { EditorState, TextSelection, Plugin } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
-import { DOMSerializer } from "prosemirror-model"
+import { DOMSerializer, Slice } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
 import { baseKeymap, setBlockType, toggleMark, wrapIn } from "prosemirror-commands"
@@ -603,17 +603,227 @@ function promptOrphanDeletion(orphanedMedia) {
   })
 }
 
+// ── Paste helpers ─────────────────────────────────────
+
+function buildMediaApiUrl(namespacePath) {
+  const encoded = encodePagePath(namespacePath)
+  return encoded ? `/api/media/${encoded}` : "/api/media"
+}
+
+function generatePasteFilename(originalName) {
+  const ext = (originalName.match(/\.([^.]+)$/) ?? [])[1] ?? "png"
+  const now = new Date()
+  const ts = now.getFullYear().toString()
+    + String(now.getMonth() + 1).padStart(2, "0")
+    + String(now.getDate()).padStart(2, "0")
+    + "-"
+    + String(now.getHours()).padStart(2, "0")
+    + String(now.getMinutes()).padStart(2, "0")
+    + String(now.getSeconds()).padStart(2, "0")
+  const rand = Math.random().toString(36).slice(2, 6)
+  return `paste-${ts}-${rand}.${ext}`
+}
+
+async function uploadMediaFile(file) {
+  // Rename to a unique timestamped name to avoid collisions
+  const uniqueName = generatePasteFilename(file.name)
+  const renamedFile = new File([file], uniqueName, { type: file.type })
+  const form = new FormData()
+  form.append("file", renamedFile)
+  form.append("overwrite", "false")
+  const resp = await fetch(buildMediaApiUrl(pageNamespace), {
+    method: "POST",
+    body: form,
+  })
+  if (!resp.ok) {
+    throw new Error(`Upload failed: ${resp.status}`)
+  }
+  const data = await resp.json()
+  return data.entry
+}
+
+function extractImageFiles(clipboardData) {
+  if (!clipboardData) return []
+  // Check items first (broader coverage than files in some browsers)
+  const items = clipboardData.items
+  if (items) {
+    const found = []
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === "file" && /^image\//.test(item.type)) {
+        const file = item.getAsFile()
+        if (file) found.push(file)
+      }
+    }
+    if (found.length > 0) return found
+  }
+  // Fallback to files
+  const files = clipboardData.files
+  if (files && files.length > 0) {
+    return Array.from(files).filter(f => /^image\//.test(f.type))
+  }
+  return []
+}
+
+async function handleImageFilePaste(view, imageFiles) {
+  for (const file of imageFiles) {
+    try {
+      const entry = await uploadMediaFile(file)
+      const target = buildMediaReferencePath(pageNamespace, entry.path)
+      const label = mediaLabelFromPath(entry.path)
+
+      const imageNode = schema.nodes.image.create({
+        src: target,
+        alt: label,
+        title: null,
+      })
+      const tr = view.state.tr.replaceSelectionWith(imageNode, false)
+      view.dispatch(tr.scrollIntoView())
+      setStatus("Pasted image " + target)
+    } catch (err) {
+      console.error("Image paste upload failed", err)
+      setStatus("Image paste failed: " + err.message)
+    }
+  }
+}
+
+function dataUrlToFile(dataUrl, baseName) {
+  const commaIdx = dataUrl.indexOf(",")
+  const header = dataUrl.slice(0, commaIdx)
+  const base64 = dataUrl.slice(commaIdx + 1)
+  const mime = (header.match(/data:([^;]+)/) ?? [])[1] ?? "application/octet-stream"
+  const ext = mime.split("/")[1] ?? "bin"
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new File([bytes], `${baseName}.${ext}`, { type: mime })
+}
+
+// Detect if markdown contains images with non-storable src (data URLs, file://, blob://)
+// External http(s):// images are kept as-is — they render fine in <img> tags.
+function hasNonLocalImages(md) {
+  return /!\[[^\]]*\]\((data:|file:\/\/|blob:)/.test(md)
+}
+
+// Load an image URL into a canvas and return a blob
+function fetchImageAsBlob(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas")
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext("2d")
+        ctx.drawImage(img, 0, 0)
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob)
+          else reject(new Error("Canvas toBlob failed"))
+        }, "image/png")
+      } catch (err) {
+        reject(err)
+      }
+    }
+    img.onerror = () => reject(new Error("Image load failed: " + url))
+    img.src = url
+  })
+}
+
+// Upload a single image from its URL (data:, file://, http(s)://) and return wiki path
+async function uploadImageFromUrl(url) {
+  let blob
+  if (url.startsWith("data:")) {
+    const file = dataUrlToFile(url, "pasted-image-" + Date.now())
+    const entry = await uploadMediaFile(file)
+    return buildMediaReferencePath(pageNamespace, entry.path)
+  }
+  // For file://, blob://, http(s):// — try to load via canvas
+  blob = await fetchImageAsBlob(url)
+  const ext = blob.type?.split("/")[1] ?? "png"
+  const file = new File([blob], "pasted-image-" + Date.now() + "." + ext, { type: blob.type })
+  const entry = await uploadMediaFile(file)
+  return buildMediaReferencePath(pageNamespace, entry.path)
+}
+
+// Process markdown that contains non-storable image URLs: upload each and rewrite src
+async function handleNonLocalImagePaste(view, md, slice, plainText) {
+  const re = /!\[([^\]]*)\]\(((data:|file:\/\/|blob:)[^)]*)\)/g
+  let result = md
+  let match
+  const replacements = []
+  while ((match = re.exec(md)) !== null) {
+    replacements.push({ fullMatch: match[0], alt: match[1], url: match[2] })
+  }
+
+  let uploadedCount = 0
+  for (const { fullMatch, alt, url } of replacements) {
+    try {
+      const target = await uploadImageFromUrl(url)
+      const newAlt = alt && !alt.startsWith("file://") && !alt.startsWith("http") ? alt : mediaLabelFromPath(target)
+      result = result.replace(fullMatch, `![${newAlt}](${target})`)
+      uploadedCount++
+    } catch (err) {
+      console.warn("Could not upload pasted image:", url, err)
+      // Remove the un-uploadable image
+      result = result.replace(fullMatch, "")
+    }
+  }
+
+  try {
+    const cleanDoc = markdownToPM(result, registry)
+    const tr = view.state.tr.replaceSelection(
+      new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+    )
+    view.dispatch(tr)
+    if (uploadedCount > 0) {
+      setStatus(`Uploaded ${uploadedCount} pasted image${uploadedCount > 1 ? "s" : ""}`)
+    }
+  } catch {
+    view.dispatch(view.state.tr.insertText(plainText))
+  }
+}
+
+function cleanupPastedMarkdown(md) {
+  // Convert common bullet-like characters at line starts to markdown list markers
+  // ·(middle dot) •(bullet) ◦(white bullet) ▪(small square) ‣(triangular) ►(pointer) –(en dash) —(em dash)
+  md = md.replace(/^([ \t]*)[·•◦▪‣►–—]\s+/gm, "$1- ")
+
+  // Collapse excessive whitespace after numbered list markers: "1.       text" → "1. text"
+  md = md.replace(/^(\d+\.)\s{2,}/gm, "$1 ")
+
+  return md
+}
+
 function normalizeMarkdownForStorage(markdown) {
   const doc = markdownToPM(markdown, registry)
   const normalizedMarkdown = pmToMarkdown(doc, registry)
+
+  // Second round-trip: verify stability
+  let roundTripError = false
+  try {
+    const doc2 = markdownToPM(normalizedMarkdown, registry)
+    const md3 = pmToMarkdown(doc2, registry)
+    if (md3 !== normalizedMarkdown) {
+      console.error("Round-trip validation failed: serialize→parse→serialize not stable")
+      roundTripError = true
+    }
+  } catch (err) {
+    console.error("Round-trip validation threw:", err)
+    roundTripError = true
+  }
+
   return {
     markdown: normalizedMarkdown,
     doc,
     changed: normalizedMarkdown !== markdown,
+    roundTripError,
   }
 }
 
-function applyNormalizedEditState(normalized, refreshVisual = false) {
+function applyNormalizedEditState(normalized) {
   currentMarkdown = normalized.markdown
   currentDoc = normalized.doc
 
@@ -627,8 +837,11 @@ function applyNormalizedEditState(normalized, refreshVisual = false) {
     return
   }
 
-  if (editMode === "visual" && editorView && refreshVisual && normalized.changed) {
-    renderEdit("visual")
+  if (editMode === "visual" && editorView && normalized.changed) {
+    const tr = editorView.state.tr
+    tr.replaceWith(0, editorView.state.doc.content.size, normalized.doc.content)
+    tr.setMeta("addToHistory", false)
+    editorView.dispatch(tr)
   }
 }
 
@@ -2442,13 +2655,93 @@ function renderEdit(nextEditMode) {
     handleScrollToSelection(view) {
       return scrollSelectionIntoContentView(view)
     },
+    handlePaste(view, event, slice) {
+      const plainText = event.clipboardData?.getData("text/plain") ?? ""
+
+      // Inside a code_block: insert plain text literally
+      const { $from } = view.state.selection
+      if ($from.parent.type === schema.nodes.code_block) {
+        view.dispatch(view.state.tr.insertText(plainText))
+        return true
+      }
+
+      // Direct image paste (screenshot, "Copy Image" from browser)
+      // Check both files and items for image blobs
+      const imageFiles = extractImageFiles(event.clipboardData)
+      if (imageFiles.length > 0) {
+        void handleImageFilePaste(view, imageFiles)
+        return true
+      }
+
+      // Sanitize through serialize → parse → insert pipeline
+      let md
+      try {
+        const tempDoc = schema.nodes.doc.create(null, slice.content)
+        md = pmToMarkdown(tempDoc, registry)
+      } catch {
+        // Serialization failed (unknown node types) — use plain text as markdown
+        md = plainText
+      }
+
+      // Clean up list-like patterns (·, •, numbered) from pasted content
+      md = cleanupPastedMarkdown(md)
+
+      // Handle images with non-local src (data:, file://, blob://, http(s)://)
+      if (hasNonLocalImages(md)) {
+        void handleNonLocalImagePaste(view, md, slice, plainText)
+        return true
+      }
+
+      try {
+        const cleanDoc = markdownToPM(md, registry)
+        const tr = view.state.tr.replaceSelection(
+          new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+        )
+        view.dispatch(tr)
+      } catch {
+        // Parse failed — insert as plain text
+        view.dispatch(view.state.tr.insertText(plainText))
+      }
+      return true
+    },
+    handleDrop(view, event, slice, moved) {
+      // Internal drag — let ProseMirror handle it
+      if (moved) return false
+
+      const plainText = event.dataTransfer?.getData("text/plain") ?? ""
+
+      let md
+      try {
+        const tempDoc = schema.nodes.doc.create(null, slice.content)
+        md = pmToMarkdown(tempDoc, registry)
+      } catch {
+        md = plainText
+      }
+
+      md = cleanupPastedMarkdown(md)
+
+      try {
+        const cleanDoc = markdownToPM(md, registry)
+        const tr = view.state.tr.replaceSelection(
+          new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+        )
+        view.dispatch(tr)
+      } catch {
+        view.dispatch(view.state.tr.insertText(plainText))
+      }
+      return true
+    },
     handleDOMEvents: {
       blur(view) {
         if (mode !== "edit" || editMode !== "visual") return false
         try {
           const serialized = pmToMarkdown(view.state.doc, registry)
           const normalized = normalizeMarkdownForStorage(serialized)
-          applyNormalizedEditState(normalized, true)
+          if (normalized.roundTripError) {
+            console.error("Round-trip validation failed on blur, skipping normalization")
+            return false
+          }
+          applyNormalizedEditState(normalized)
         } catch {
           // Keep edit session live while user content is in progress.
         }
@@ -2670,11 +2963,12 @@ async function saveAndMaybeSwitch(toView) {
     }
 
     const normalized = normalizeMarkdownForStorage(markdown)
+    if (normalized.roundTripError) {
+      setStatus("Document failed round-trip validation — cannot save.")
+      return
+    }
     const result = await savePage(pagePath, normalized.markdown)
-    applyNormalizedEditState(
-      normalized,
-      !toView && mode === "edit" && editMode === "visual"
-    )
+    applyNormalizedEditState(normalized)
     editBaselineMarkdown = normalized.markdown
     isNewPage = false
     setStatus(`Saved ${new Date().toLocaleTimeString()}`)

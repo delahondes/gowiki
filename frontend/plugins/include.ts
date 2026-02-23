@@ -172,6 +172,10 @@ class IncludeNodeView {
     return true
   }
 
+  stopEvent(): boolean {
+    return true
+  }
+
   ignoreMutation(): boolean {
     return true
   }

@@ -208,18 +208,18 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Render included content as read-only.
 - Media upload and management.
 
-### v0.2 ✓ Site-level consistency
+### v0.2 ✓ — Site-level consistency
 - Reference tracking: backend maintains media→pages map, updated on every write.
 - Orphan detection: backend detects unreferenced media immediately, frontend prompts for deletion.
 - Circular include detection: backend rejects cycles at save time with an error.
 
-### v0.3 — Search
+### v0.3 ✓ — Search
 - Full-text search, incremental, typo-tolerant.
-- Add language specific coloration in code blocks (enabling language specification in code block the usual way e.g. ```python ... ```).
+- Language-specific syntax highlighting in code blocks.
 
 ### v0.4 — Editing robustness
 - Correct copy/paste semantics across editable and non-editable regions.
-- Preserve editor equivalence guarantees under complex edits.
+- Document validity enforced after every edit operation.
 
 ### v0.5 — History and diff
 - Page history and diffing.
