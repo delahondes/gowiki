@@ -3,7 +3,7 @@ import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import type { NodeSpec, MarkSpec } from "prosemirror-model"
-import { highlightPlugin } from "../highlight"
+import { highlightPlugin, isKnownLanguage } from "../highlight"
 
 /**
  * Core semantic nodes for the document language.
@@ -298,6 +298,14 @@ function registerCodeBlocks(reg: Registry) {
       name: "language",
       label: "Language:",
       default: "",
+      parse(raw: string) {
+        const lang = raw.trim().toLowerCase()
+        if (lang === "") return ""
+        if (!isKnownLanguage(lang)) {
+          throw new Error(`Unknown language "${lang}"`)
+        }
+        return lang
+      },
     },
   ])
 

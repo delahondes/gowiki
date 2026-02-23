@@ -7,6 +7,13 @@ import { Decoration, DecorationSet } from "prosemirror-view"
 hljs.configure({ ignoreUnescapedHTML: true })
 
 /**
+ * Check whether a language name (or alias) is known to highlight.js.
+ */
+export function isKnownLanguage(lang: string): boolean {
+  return Boolean(hljs.getLanguage(lang))
+}
+
+/**
  * Apply syntax highlighting to all <pre><code> elements in a container.
  * Only call this for view-mode / read-only views — never in the editable editor.
  */
@@ -113,7 +120,7 @@ function buildDecorations(state: any): DecorationSet {
     const lang = node.attrs.language || ""
     let result
     try {
-      result = lang
+      result = lang && hljs.getLanguage(lang)
         ? hljs.highlight(text, { language: lang, ignoreIllegals: true })
         : hljs.highlightAuto(text)
     } catch {
