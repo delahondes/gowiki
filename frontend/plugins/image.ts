@@ -34,8 +34,8 @@ const imageStyles = `
 
 .gowiki-image-resize-handle {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
+  bottom: -3px;
+  right: -3px;
   width: 10px;
   height: 10px;
   border: 1px solid #3f5f8f;
