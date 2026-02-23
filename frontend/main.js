@@ -2600,6 +2600,32 @@ function renderEdit(nextEditMode) {
       autoResizeRawEditor(editorEl)
     })
 
+    editorEl.addEventListener("paste", e => {
+      const imageFiles = extractImageFiles(e.clipboardData)
+      if (imageFiles.length === 0) return
+      e.preventDefault()
+      void (async () => {
+        for (const file of imageFiles) {
+          try {
+            const entry = await uploadMediaFile(file)
+            const target = buildMediaReferencePath(pageNamespace, entry.path)
+            const label = mediaLabelFromPath(entry.path)
+            const snippet = `![${label}](${target})`
+            editorEl.focus()
+            const start = editorEl.selectionStart
+            const end = editorEl.selectionEnd
+            editorEl.setSelectionRange(start, end)
+            rawInsertText(editorEl, snippet)
+            setStatus("Pasted image " + target)
+          } catch (err) {
+            console.error("Image paste upload failed", err)
+            setStatus("Image paste failed: " + err.message)
+          }
+        }
+        autoResizeRawEditor(editorEl)
+      })()
+    })
+
     editorEl.addEventListener("blur", () => {
       if (mode !== "edit" || editMode !== "raw") return
       try {

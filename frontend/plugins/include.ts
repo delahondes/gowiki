@@ -172,7 +172,14 @@ class IncludeNodeView {
     return true
   }
 
-  stopEvent(): boolean {
+  stopEvent(event: Event): boolean {
+    // Allow mouse events through so ProseMirror can create NodeSelection
+    // (needed for property panel). Block keyboard/paste/input events
+    // from reaching the inner read-only EditorView.
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") {
+      return false
+    }
     return true
   }
 

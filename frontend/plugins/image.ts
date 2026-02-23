@@ -1,5 +1,6 @@
 import { NodeSelection, Plugin as PMPlugin, PluginKey } from "prosemirror-state"
-import { Decoration, DecorationSet } from "prosemirror-view"
+import { EditorView } from "prosemirror-view"
+import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 
 const imageProperties = [
@@ -13,25 +14,37 @@ const imageProperties = [
 ]
 
 const imageStyles = `
-.ProseMirror img {
+.gowiki-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.gowiki-image-wrapper img {
+  display: block;
   max-width: 100%;
   height: auto;
 }
 
-.ProseMirror .gowiki-image-resize-handle {
-  display: inline-block;
+.gowiki-image-wrapper.ProseMirror-selectednode {
+  outline: 2px solid #ffd43b;
+  outline-offset: 1px;
+}
+
+.gowiki-image-resize-handle {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
   width: 10px;
   height: 10px;
-  margin-left: -8px;
   border: 1px solid #3f5f8f;
   background: #dbe8ff;
   border-radius: 2px;
   cursor: nwse-resize;
-  vertical-align: bottom;
+  z-index: 5;
 }
 `
-
-const resizeKey = new PluginKey("gowiki.imageResize")
 
 const MIN_DRAG_SIZE_PX = 16
 const MAX_DRAG_SIZE_PX = 4096
@@ -100,38 +113,89 @@ function addStyleToDOMSpec(spec: any, style: string | null) {
   return [tag, { ...attrs, style: mergedStyle }, ...children]
 }
 
-function isImageSelection(state: any) {
-  return (
-    state.selection instanceof NodeSelection &&
-    state.selection.node?.type?.name === "image"
-  )
-}
+class ImageNodeView {
+  dom: HTMLElement
+  private imgEl: HTMLImageElement
+  private handle: HTMLElement | null = null
+  private node: PMNode
+  private outerView: EditorView
+  private getPos: () => number | undefined
 
-function buildResizeHandle(view: any, initialPos: number) {
-  const handle = document.createElement("span")
-  handle.className = "gowiki-image-resize-handle"
-  handle.title = "Drag to resize image (Shift keeps ratio)"
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+    this.node = node
+    this.outerView = view
+    this.getPos = getPos
 
-  handle.addEventListener("mousedown", event => {
+    this.dom = document.createElement("span")
+    this.dom.className = "gowiki-image-wrapper"
+
+    this.imgEl = document.createElement("img")
+    this.applyAttrs()
+    this.dom.appendChild(this.imgEl)
+  }
+
+  private applyAttrs() {
+    this.imgEl.src = this.node.attrs.src ?? ""
+    this.imgEl.alt = this.node.attrs.alt ?? ""
+    if (this.node.attrs.title) {
+      this.imgEl.title = this.node.attrs.title
+    } else {
+      this.imgEl.removeAttribute("title")
+    }
+    const sizeStyle = styleFromImageSize(this.node.attrs.size ?? null)
+    this.imgEl.style.cssText = sizeStyle ?? ""
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    this.node = node
+    this.applyAttrs()
+    return true
+  }
+
+  selectNode() {
+    this.dom.classList.add("ProseMirror-selectednode")
+    if (this.outerView.editable) {
+      this.showHandle()
+    }
+  }
+
+  deselectNode() {
+    this.dom.classList.remove("ProseMirror-selectednode")
+    this.hideHandle()
+  }
+
+  private showHandle() {
+    if (this.handle) return
+    this.handle = document.createElement("span")
+    this.handle.className = "gowiki-image-resize-handle"
+    this.handle.title = "Drag to resize (Shift keeps ratio)"
+    this.handle.addEventListener("mousedown", this.onResizeStart)
+    this.dom.appendChild(this.handle)
+  }
+
+  private hideHandle() {
+    if (this.handle) {
+      this.handle.remove()
+      this.handle = null
+    }
+  }
+
+  private onResizeStart = (event: MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
 
-    let pos = initialPos
-    const imgEl = view.nodeDOM(pos)
-    if (!(imgEl instanceof HTMLImageElement)) return
-
-    const rect = imgEl.getBoundingClientRect()
+    const rect = this.imgEl.getBoundingClientRect()
     const startX = event.clientX
     const startY = event.clientY
     const startWidth = Math.max(1, rect.width)
     const startHeight = Math.max(1, rect.height)
+    const ratio = startWidth / startHeight
 
     const oldCursor = document.body.style.cursor
     const oldSelect = document.body.style.userSelect
     document.body.style.cursor = "nwse-resize"
     document.body.style.userSelect = "none"
-
-    const ratio = startWidth / startHeight
 
     const onMove = (moveEvent: MouseEvent) => {
       let width = Math.round(startWidth + moveEvent.clientX - startX)
@@ -157,10 +221,9 @@ function buildResizeHandle(view: any, initialPos: number) {
       height = Math.max(MIN_DRAG_SIZE_PX, Math.min(MAX_DRAG_SIZE_PX, height))
       const size = `${width}px;${height}px`
 
-      const state = view.state
-      if (isImageSelection(state)) {
-        pos = state.selection.from
-      }
+      const pos = this.getPos()
+      if (pos === undefined) return
+      const state = this.outerView.state
       const node = state.doc.nodeAt(pos)
       if (!node || node.type.name !== "image") return
 
@@ -169,7 +232,7 @@ function buildResizeHandle(view: any, initialPos: number) {
         size,
       })
       tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
-      view.dispatch(tr)
+      this.outerView.dispatch(tr)
     }
 
     const onUp = () => {
@@ -181,38 +244,24 @@ function buildResizeHandle(view: any, initialPos: number) {
 
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
-  })
+  }
 
-  return handle
-}
+  stopEvent(event: Event): boolean {
+    // Let the resize handle's mousedown through to our handler,
+    // block other events on the handle from reaching ProseMirror
+    if (event.target === this.handle) {
+      return event.type === "mousedown"
+    }
+    return false
+  }
 
-function imageResizePlugin() {
-  let currentView: any = null
-  return new PMPlugin({
-    key: resizeKey,
-    view(view) {
-      currentView = view
-      return { destroy() { currentView = null } }
-    },
-    props: {
-      decorations(state) {
-        if (currentView && !currentView.editable) return null
-        if (!isImageSelection(state)) return null
-        const pos = state.selection.from
-        const node = state.selection.node
-        const deco = Decoration.widget(
-          pos + node.nodeSize,
-          view => buildResizeHandle(view, pos),
-          {
-            side: 1,
-            key: `gowiki-image-resize-${pos}`,
-            stopEvent: () => true,
-          }
-        )
-        return DecorationSet.create(state.doc, [deco])
-      },
-    },
-  })
+  ignoreMutation(): boolean {
+    return true
+  }
+
+  destroy() {
+    this.hideHandle()
+  }
 }
 
 export const imagePlugin: WikiPlugin = {
@@ -266,7 +315,19 @@ export const imagePlugin: WikiPlugin = {
       },
     })
 
-    reg.registerEditorPlugin(() => imageResizePlugin())
+    // NodeView-based image rendering with resize handle
+    reg.registerEditorPlugin(() => {
+      return new PMPlugin({
+        key: new PluginKey("gowiki.imageNodeView"),
+        props: {
+          nodeViews: {
+            image(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new ImageNodeView(node, view, getPos)
+            },
+          },
+        },
+      })
+    })
     reg.registerStyle("image-resize", imageStyles)
   },
 }
