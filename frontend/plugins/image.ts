@@ -13,6 +13,11 @@ const imageProperties = [
 ]
 
 const imageStyles = `
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+}
+
 .ProseMirror .gowiki-image-resize-handle {
   display: inline-block;
   width: 10px;
@@ -182,10 +187,16 @@ function buildResizeHandle(view: any, initialPos: number) {
 }
 
 function imageResizePlugin() {
+  let currentView: any = null
   return new PMPlugin({
     key: resizeKey,
+    view(view) {
+      currentView = view
+      return { destroy() { currentView = null } }
+    },
     props: {
       decorations(state) {
+        if (currentView && !currentView.editable) return null
         if (!isImageSelection(state)) return null
         const pos = state.selection.from
         const node = state.selection.node
