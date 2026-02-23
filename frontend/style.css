@@ -338,7 +338,9 @@ mark.search-highlight {
 }
 
 .ProseMirror pre code,
-.gowiki-view pre code {
+.gowiki-view pre code,
+.ProseMirror pre code.hljs,
+.gowiki-view pre code.hljs {
   display: block;
   margin: 0;
   padding: 0;
