@@ -1,6 +1,6 @@
 import { EditorState, TextSelection, Plugin } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
-import { DOMSerializer, Slice } from "prosemirror-model"
+import { Slice } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
 import { baseKeymap, setBlockType, toggleMark, wrapIn } from "prosemirror-commands"
@@ -3165,9 +3165,7 @@ async function viewVersion(version) {
 
     const content = document.createElement("div")
     content.className = "gowiki-version-content"
-    const doc = markdownToPM(data.markdown, registry)
-    const fragment = DOMSerializer.fromSchema(schema).serializeFragment(doc.content)
-    content.appendChild(fragment)
+    mountReadOnlyView(content, data.markdown, "gowiki-view")
 
     const actions = document.createElement("div")
     actions.style.marginTop = "16px"

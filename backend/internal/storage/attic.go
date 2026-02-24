@@ -45,14 +45,18 @@ func (a *Attic) versionFile(pagePath string, version int64) string {
 }
 
 // Archive stores a version of a page as a gzipped markdown file and updates the per-page index.
+// If the version file already exists, it is a no-op (dedup).
 func (a *Attic) Archive(pagePath string, version int64, content []byte, author, summary string) error {
 	dir := a.pageDir(pagePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create attic dir: %w", err)
 	}
 
-	// Write gzipped content.
+	// Skip if this version is already archived.
 	vPath := a.versionFile(pagePath, version)
+	if _, err := os.Stat(vPath); err == nil {
+		return nil
+	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(content); err != nil {
