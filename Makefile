@@ -1,4 +1,6 @@
-.PHONY: frontend-install dev dev-backend dev-frontend build-frontend run-prod
+.PHONY: frontend-install dev dev-backend dev-frontend build-frontend build-backend run-prod
+
+BACKEND_BIN := backend/server
 
 frontend-install:
 	npm --prefix frontend install
@@ -6,14 +8,17 @@ frontend-install:
 dev:
 	./scripts/dev.sh
 
-dev-backend:
-	cd backend && go run ./cmd/server -addr :8080 -data-dir ./data/content
+dev-backend: build-backend
+	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data/content
 
 dev-frontend:
 	npm --prefix frontend run dev
 
+build-backend:
+	cd backend && go build -o server ./cmd/server
+
 build-frontend:
 	npm --prefix frontend run build
 
-run-prod:
-	cd backend && go run ./cmd/server -addr :8080 -data-dir ./data/content -serve-web -web-dir ../frontend/dist
+run-prod: build-backend
+	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data/content -serve-web -web-dir ./frontend/dist

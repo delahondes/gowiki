@@ -1,6 +1,6 @@
 module gowiki/backend
 
-go 1.23
+go 1.24.0
 
 require github.com/go-chi/chi/v5 v5.2.3
 
@@ -28,7 +28,9 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/sergi/go-diff v1.4.0 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"gowiki/backend/internal/api"
+	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/storage"
 )
 
@@ -41,7 +42,13 @@ func main() {
 		log.Fatalf("init media storage: %v", err)
 	}
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store, *serveWeb, filepath.Clean(*webDir))
+	userStore, err := auth.NewUserStore(metaRoot)
+	if err != nil {
+		log.Fatalf("init user store: %v", err)
+	}
+	sessionStore := auth.NewSessionStore()
+
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, userStore, sessionStore, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)
@@ -49,14 +56,20 @@ func main() {
 	log.Printf("content root: %s", contentRoot)
 	log.Printf("meta root: %s", metaRoot)
 
-	// Rebuild indexes in the background so the server can accept requests immediately.
-	// Page reads work without indexes; search results may be empty until rebuild completes.
+	// Rebuild indexes and run attic migration in the background.
 	go func() {
 		log.Printf("rebuilding indexes...")
 		if err := store.RebuildIndexes(); err != nil {
 			log.Printf("WARNING: rebuild indexes failed: %v", err)
 		} else {
 			log.Printf("indexes rebuilt")
+		}
+
+		log.Printf("running attic migration (if needed)...")
+		if err := store.Attic.MigrateExistingPages(contentRoot, metaRoot, store.Changelog); err != nil {
+			log.Printf("WARNING: attic migration failed: %v", err)
+		} else {
+			log.Printf("attic migration complete")
 		}
 	}()
 

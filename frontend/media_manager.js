@@ -38,10 +38,11 @@ async function listMedia(namespacePath) {
 }
 
 async function uploadMedia(namespacePath, file, overwrite) {
+  const doFetch = window.__gowikiAuthFetch || fetch
   const form = new FormData()
   form.append("file", file)
   form.append("overwrite", overwrite ? "true" : "false")
-  const resp = await fetch(buildMediaApiPath(namespacePath), {
+  const resp = await doFetch(buildMediaApiPath(namespacePath), {
     method: "POST",
     body: form,
   })
@@ -55,8 +56,9 @@ async function uploadMedia(namespacePath, file, overwrite) {
 }
 
 async function deleteMedia(mediaPath) {
+  const doFetch = window.__gowikiAuthFetch || fetch
   const encoded = encodePath(mediaPath)
-  const resp = await fetch(`/api/media/${encoded}`, {
+  const resp = await doFetch(`/api/media/${encoded}`, {
     method: "DELETE",
   })
   if (!resp.ok) {

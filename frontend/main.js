@@ -47,6 +47,12 @@ const actionsRoot = document.querySelector("#actions")
 const sidebarRoot = document.querySelector("#left")
 const footerRoot = document.querySelector("#footer")
 
+let currentUser = null // { username } or null
+let editToken = null
+let autoSaveTimer = null
+let pageLockInfo = null // { locked_by, is_draft }
+let stashedEditorState = null // ProseMirror EditorState preserved across draft exit/resume
+
 let mode = "view"
 let editMode = "visual"
 let currentMarkdown = defaultMarkdown
@@ -562,7 +568,7 @@ class CircularIncludeError extends Error {
 }
 
 async function savePage(path, markdown) {
-  const resp = await fetch(`/api/pages/${encodePagePath(path)}`, {
+  const resp = await authFetch(`/api/pages/${encodePagePath(path)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ markdown }),
@@ -581,7 +587,7 @@ async function savePage(path, markdown) {
 }
 
 async function deleteMedia(mediaPath) {
-  const resp = await fetch(`/api/media/${encodePagePath(mediaPath)}`, {
+  const resp = await authFetch(`/api/media/${encodePagePath(mediaPath)}`, {
     method: "DELETE",
   })
   return resp.ok
@@ -631,7 +637,7 @@ async function uploadMediaFile(file) {
   const form = new FormData()
   form.append("file", renamedFile)
   form.append("overwrite", "false")
-  const resp = await fetch(buildMediaApiUrl(pageNamespace), {
+  const resp = await authFetch(buildMediaApiUrl(pageNamespace), {
     method: "POST",
     body: form,
   })
@@ -857,12 +863,14 @@ function setMode(nextMode) {
 
   if (mode === "edit" && nextMode !== "edit") {
     editBaselineMarkdown = currentMarkdown
+    stopAutoSave()
   }
 
   mode = nextMode
   if (mode === "edit") {
     appRoot.classList.add("gowiki-editing")
     renderEdit(editMode)
+    startAutoSave()
   } else {
     appRoot.classList.remove("gowiki-editing")
     renderView()
@@ -2664,17 +2672,23 @@ function renderEdit(nextEditMode) {
     "Alt-Enter": insertHardBreakCommand(),
   })
 
-  const state = EditorState.create({
-    doc: currentDoc,
-    schema,
-    plugins: [
-      listKeymap,
-      history(),
-      keymap(baseKeymap),
-      ...registry.getEditorPlugins(),
-      menubarStatePlugin,
-    ],
-  })
+  const plugins = [
+    listKeymap,
+    history(),
+    keymap(baseKeymap),
+    ...registry.getEditorPlugins(),
+    menubarStatePlugin,
+  ]
+
+  // Restore stashed state (preserves undo history) or create fresh.
+  let state
+  if (stashedEditorState) {
+    // Reconfigure with fresh plugins (new menubar refs) but keep doc + history.
+    state = stashedEditorState.reconfigure({ plugins })
+    stashedEditorState = null
+  } else {
+    state = EditorState.create({ doc: currentDoc, schema, plugins })
+  }
 
   editorView = new EditorView(editorEl, {
     state,
@@ -2927,14 +2941,20 @@ function renderActions() {
       )
     }
 
+    // Draft-based save actions.
     actionsRoot.appendChild(
       makeActionButton("Save & continue", () => {
-        void saveAndMaybeSwitch(false)
+        void saveDraftExplicit()
       })
     )
     actionsRoot.appendChild(
-      makeActionButton("Save", () => {
-        void saveAndMaybeSwitch(true)
+      makeActionButton("Save to draft", () => {
+        void saveDraftAndExit()
+      })
+    )
+    actionsRoot.appendChild(
+      makeActionButton("Publish", () => {
+        void publishDraft()
       })
     )
     actionsRoot.appendChild(
@@ -2942,10 +2962,57 @@ function renderActions() {
         cancelEdit()
       })
     )
-  } else {
     actionsRoot.appendChild(
-      makeActionButton("Edit", () => {
-        setMode("edit")
+      makeActionButton("Discard draft", () => {
+        void discardDraft()
+      })
+    )
+  } else {
+    // View mode — check lock/draft state.
+    if (pageLockInfo && pageLockInfo.is_draft && pageLockInfo.locked_by === currentUser?.username) {
+      // Draft owner — show draft banner and actions.
+      const banner = document.createElement("div")
+      banner.className = "gowiki-draft-banner"
+      banner.textContent = "You have an unpublished draft"
+      actionsRoot.appendChild(banner)
+
+      actionsRoot.appendChild(
+        makeActionButton("Edit (resume)", () => {
+          void enterEditMode(false)
+        })
+      )
+      actionsRoot.appendChild(
+        makeActionButton("Publish", () => {
+          void publishFromView()
+        })
+      )
+      actionsRoot.appendChild(
+        makeActionButton("Discard draft", () => {
+          void discardDraft()
+        })
+      )
+    } else if (pageLockInfo && pageLockInfo.locked_by && pageLockInfo.locked_by !== currentUser?.username) {
+      // Locked by another user.
+      const lockLabel = document.createElement("div")
+      lockLabel.className = "gowiki-status gowiki-lock-indicator"
+      lockLabel.textContent = `Locked by ${pageLockInfo.locked_by}`
+      actionsRoot.appendChild(lockLabel)
+
+      const editBtn = makeActionButton("Edit", () => {})
+      editBtn.disabled = true
+      editBtn.style.opacity = "0.5"
+      actionsRoot.appendChild(editBtn)
+    } else {
+      actionsRoot.appendChild(
+        makeActionButton("Edit", () => {
+          void enterEditMode(false)
+        })
+      )
+    }
+
+    actionsRoot.appendChild(
+      makeActionButton("History", () => {
+        void showHistory()
       })
     )
     actionsRoot.appendChild(
@@ -2961,8 +3028,264 @@ function renderActions() {
   actionsRoot.appendChild(status)
 }
 
+async function publishFromView() {
+  // Quick-publish: enter edit, then immediately publish.
+  const ok = await enterEditMode(false)
+  if (!ok) return
+  await publishDraft()
+}
+
+// ── History and Diff UI ──────────────────────────────
+
+async function showHistory() {
+  try {
+    const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
+    if (!resp.ok) {
+      setStatus("Failed to load history")
+      return
+    }
+    const data = await resp.json()
+    const versions = data.versions || []
+    renderHistoryPage(versions)
+  } catch {
+    setStatus("Failed to load history")
+  }
+}
+
+function renderHistoryPage(versions) {
+  clearContent()
+  mode = "view"
+  appRoot.classList.remove("gowiki-editing")
+
+  const container = document.createElement("div")
+  container.className = "gowiki-history"
+
+  const title = document.createElement("h2")
+  title.textContent = `History: ${pageDisplayPath}`
+  container.appendChild(title)
+
+  if (versions.length === 0) {
+    const empty = document.createElement("p")
+    empty.textContent = "No version history available."
+    empty.style.color = "#666"
+    container.appendChild(empty)
+  } else {
+    const table = document.createElement("table")
+    table.className = "gowiki-history-table"
+    const thead = document.createElement("thead")
+    thead.innerHTML = "<tr><th>Version</th><th>Date</th><th>Author</th><th>Actions</th></tr>"
+    table.appendChild(thead)
+    const tbody = document.createElement("tbody")
+
+    // Show newest first.
+    const sorted = [...versions].reverse()
+    for (const v of sorted) {
+      const tr = document.createElement("tr")
+
+      const tdVer = document.createElement("td")
+      tdVer.textContent = `v${v.version}`
+      tr.appendChild(tdVer)
+
+      const tdDate = document.createElement("td")
+      tdDate.textContent = new Date(v.timestamp).toLocaleString()
+      tr.appendChild(tdDate)
+
+      const tdAuthor = document.createElement("td")
+      tdAuthor.textContent = v.author || "—"
+      tr.appendChild(tdAuthor)
+
+      const tdActions = document.createElement("td")
+      tdActions.className = "gowiki-history-actions"
+
+      const viewBtn = document.createElement("button")
+      viewBtn.textContent = "View"
+      viewBtn.className = "gowiki-history-btn"
+      viewBtn.addEventListener("click", () => void viewVersion(v.version))
+      tdActions.appendChild(viewBtn)
+
+      if (v.version > 1) {
+        const diffPrevBtn = document.createElement("button")
+        diffPrevBtn.textContent = "Diff vs prev"
+        diffPrevBtn.className = "gowiki-history-btn"
+        diffPrevBtn.addEventListener("click", () => void showDiff(v.version - 1, v.version))
+        tdActions.appendChild(diffPrevBtn)
+      }
+
+      const latestVersion = sorted[0].version
+      if (v.version < latestVersion) {
+        const diffCurBtn = document.createElement("button")
+        diffCurBtn.textContent = "Diff vs current"
+        diffCurBtn.className = "gowiki-history-btn"
+        diffCurBtn.addEventListener("click", () => void showDiff(v.version, 0))
+        tdActions.appendChild(diffCurBtn)
+
+        const restoreBtn = document.createElement("button")
+        restoreBtn.textContent = "Restore"
+        restoreBtn.className = "gowiki-history-btn gowiki-history-btn-restore"
+        restoreBtn.addEventListener("click", () => void restoreVersion(v.version))
+        tdActions.appendChild(restoreBtn)
+      }
+
+      tr.appendChild(tdActions)
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    container.appendChild(table)
+  }
+
+  const backBtn = document.createElement("button")
+  backBtn.textContent = "Back to page"
+  backBtn.className = "gowiki-action-btn"
+  backBtn.style.marginTop = "16px"
+  backBtn.addEventListener("click", () => {
+    currentDoc = markdownToPM(currentMarkdown, registry)
+    setMode("view")
+  })
+  container.appendChild(backBtn)
+
+  contentRoot.appendChild(container)
+}
+
+async function viewVersion(version) {
+  try {
+    const resp = await fetch(`/api/versions/${encodePagePath(pagePath)}?v=${version}`)
+    if (!resp.ok) {
+      setStatus("Failed to load version")
+      return
+    }
+    const data = await resp.json()
+    clearContent()
+
+    const container = document.createElement("div")
+    container.className = "gowiki-version-view"
+
+    const header = document.createElement("div")
+    header.className = "gowiki-version-header"
+    header.textContent = `Viewing version ${version} of ${pageDisplayPath}`
+
+    const content = document.createElement("div")
+    content.className = "gowiki-version-content"
+    const doc = markdownToPM(data.markdown, registry)
+    const fragment = DOMSerializer.fromSchema(schema).serializeFragment(doc.content)
+    content.appendChild(fragment)
+
+    const actions = document.createElement("div")
+    actions.style.marginTop = "16px"
+    actions.style.display = "flex"
+    actions.style.gap = "8px"
+
+    const backBtn = document.createElement("button")
+    backBtn.textContent = "Back to history"
+    backBtn.className = "gowiki-action-btn"
+    backBtn.addEventListener("click", () => void showHistory())
+    actions.appendChild(backBtn)
+
+    const restoreBtn = document.createElement("button")
+    restoreBtn.textContent = "Restore this version"
+    restoreBtn.className = "gowiki-action-btn"
+    restoreBtn.addEventListener("click", () => void restoreVersion(version))
+    actions.appendChild(restoreBtn)
+
+    container.append(header, content, actions)
+    contentRoot.appendChild(container)
+  } catch {
+    setStatus("Failed to load version")
+  }
+}
+
+async function showDiff(fromVersion, toVersion) {
+  try {
+    const resp = await fetch(`/api/diff/${encodePagePath(pagePath)}?from=${fromVersion}&to=${toVersion}`)
+    if (!resp.ok) {
+      setStatus("Failed to load diff")
+      return
+    }
+    const data = await resp.json()
+    clearContent()
+    renderDiffView(data.hunks, fromVersion, toVersion)
+  } catch {
+    setStatus("Failed to load diff")
+  }
+}
+
+function renderDiffView(hunks, fromVersion, toVersion) {
+  const container = document.createElement("div")
+  container.className = "gowiki-diff"
+
+  const header = document.createElement("div")
+  header.className = "gowiki-diff-header"
+  const toLabel = toVersion === 0 ? "current" : `v${toVersion}`
+  header.textContent = `Diff: v${fromVersion} → ${toLabel} — ${pageDisplayPath}`
+
+  const diffContent = document.createElement("div")
+  diffContent.className = "gowiki-diff-content"
+
+  for (const hunk of hunks) {
+    const line = document.createElement("div")
+    line.className = `gowiki-diff-line gowiki-diff-${hunk.op}`
+    const prefix = hunk.op === "insert" ? "+" : hunk.op === "delete" ? "-" : " "
+    line.textContent = prefix + (hunk.content.endsWith("\n") ? hunk.content.slice(0, -1) : hunk.content)
+    diffContent.appendChild(line)
+  }
+
+  const actions = document.createElement("div")
+  actions.style.marginTop = "16px"
+  const backBtn = document.createElement("button")
+  backBtn.textContent = "Back to history"
+  backBtn.className = "gowiki-action-btn"
+  backBtn.addEventListener("click", () => void showHistory())
+  actions.appendChild(backBtn)
+
+  container.append(header, diffContent, actions)
+  contentRoot.appendChild(container)
+}
+
+async function restoreVersion(version) {
+  try {
+    const resp = await fetch(`/api/versions/${encodePagePath(pagePath)}?v=${version}`)
+    if (!resp.ok) {
+      setStatus("Failed to load version for restore")
+      return
+    }
+    const data = await resp.json()
+    // Enter edit mode with this version's content as a new draft.
+    currentMarkdown = data.markdown
+    currentDoc = markdownToPM(currentMarkdown, registry)
+    const ok = await enterEditMode(true)
+    if (ok) {
+      // Overwrite draft with restored content.
+      const markdown = data.markdown
+      await fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ markdown, edit_token: editToken }),
+      })
+      // Update editor with restored content.
+      if (editorView) {
+        const doc = markdownToPM(markdown, registry)
+        const state = EditorState.create({ doc, plugins: editorView.state.plugins })
+        editorView.updateState(state)
+      }
+      setStatus(`Restored version ${version} — review and publish`)
+    }
+  } catch {
+    setStatus("Failed to restore version")
+  }
+}
+
 function cancelEdit() {
   if (mode !== "edit") return
+  // Save draft silently before exiting.
+  if (editToken) {
+    const markdown = getCurrentMarkdown()
+    fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown, edit_token: editToken }),
+    }).catch(() => {})
+  }
+  stashEditorState()
+  // Keep editToken so resume works without a new API call.
   currentMarkdown = editBaselineMarkdown
   try {
     currentDoc = markdownToPM(currentMarkdown, registry)
@@ -2971,50 +3294,8 @@ function cancelEdit() {
     setStatus("Cancel failed")
     return
   }
-  setStatus("Edit cancelled")
+  setStatus("Draft preserved, exiting edit mode")
   setMode("view")
-}
-
-async function saveAndMaybeSwitch(toView) {
-  if (mode !== "edit") return
-  try {
-    let markdown = currentMarkdown
-
-    if (editMode === "visual") {
-      if (!editorView) return
-      markdown = pmToMarkdown(editorView.state.doc, registry)
-    } else {
-      if (!rawEditor) return
-      markdown = rawEditor.value
-    }
-
-    const normalized = normalizeMarkdownForStorage(markdown)
-    if (normalized.roundTripError) {
-      setStatus("Document failed round-trip validation — cannot save.")
-      return
-    }
-    const result = await savePage(pagePath, normalized.markdown)
-    applyNormalizedEditState(normalized)
-    editBaselineMarkdown = normalized.markdown
-    isNewPage = false
-    setStatus(`Saved ${new Date().toLocaleTimeString()}`)
-
-    // Prompt for orphaned media deletion.
-    if (result.orphaned_media && result.orphaned_media.length > 0) {
-      promptOrphanDeletion(result.orphaned_media)
-    }
-
-    if (toView) {
-      setMode("view")
-    }
-  } catch (err) {
-    console.error("Save failed", err)
-    if (err instanceof CircularIncludeError) {
-      setStatus(`Save failed: ${err.message}`)
-    } else {
-      setStatus("Save failed")
-    }
-  }
 }
 
 // ── Banner: logo resolution ──────────────────────────
@@ -3185,6 +3466,359 @@ async function renderSearchResultsPage(query) {
   }
 }
 
+// ── Auth ─────────────────────────────────────────────
+
+async function checkAuth() {
+  try {
+    const resp = await fetch("/api/auth/me")
+    if (resp.ok) {
+      currentUser = await resp.json()
+    } else {
+      currentUser = null
+    }
+  } catch {
+    currentUser = null
+  }
+  renderBannerUser()
+}
+
+function renderBannerUser() {
+  const el = document.getElementById("banner-user")
+  if (!el) return
+  el.innerHTML = ""
+  if (currentUser) {
+    const span = document.createElement("span")
+    span.textContent = currentUser.username
+    el.appendChild(span)
+    const logout = document.createElement("a")
+    logout.textContent = "Logout"
+    logout.addEventListener("click", async (e) => {
+      e.preventDefault()
+      await fetch("/api/auth/logout", { method: "POST" })
+      currentUser = null
+      pageLockInfo = null
+      renderBannerUser()
+      await reloadPageContent()
+    })
+    el.appendChild(logout)
+  } else {
+    const login = document.createElement("a")
+    login.textContent = "Login"
+    login.addEventListener("click", (e) => {
+      e.preventDefault()
+      showLoginDialog()
+    })
+    el.appendChild(login)
+  }
+}
+
+function showLoginDialog(onSuccess) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-login-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-login-dialog"
+
+    const title = document.createElement("h3")
+    title.textContent = "Login"
+
+    const errorEl = document.createElement("div")
+    errorEl.className = "gowiki-login-error"
+
+    const userLabel = document.createElement("label")
+    userLabel.textContent = "Username"
+    const userInput = document.createElement("input")
+    userInput.type = "text"
+    userInput.autocomplete = "username"
+
+    const passLabel = document.createElement("label")
+    passLabel.textContent = "Password"
+    const passInput = document.createElement("input")
+    passInput.type = "password"
+    passInput.autocomplete = "current-password"
+
+    const actions = document.createElement("div")
+    actions.className = "gowiki-login-actions"
+    const cancelBtn = document.createElement("button")
+    cancelBtn.textContent = "Cancel"
+    const loginBtn = document.createElement("button")
+    loginBtn.textContent = "Login"
+    loginBtn.className = "primary"
+
+    function close(success) {
+      overlay.remove()
+      resolve(success)
+    }
+
+    async function submit() {
+      errorEl.style.display = "none"
+      const username = userInput.value.trim()
+      const password = passInput.value
+      if (!username || !password) {
+        errorEl.textContent = "Username and password required"
+        errorEl.style.display = "block"
+        return
+      }
+      try {
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        })
+        if (resp.ok) {
+          currentUser = await resp.json()
+          renderBannerUser()
+          if (onSuccess) onSuccess()
+          close(true)
+          await reloadPageContent()
+        } else {
+          errorEl.textContent = "Invalid credentials"
+          errorEl.style.display = "block"
+          passInput.value = ""
+          passInput.focus()
+        }
+      } catch {
+        errorEl.textContent = "Login failed"
+        errorEl.style.display = "block"
+      }
+    }
+
+    cancelBtn.addEventListener("click", () => close(false))
+    loginBtn.addEventListener("click", submit)
+    passInput.addEventListener("keydown", e => { if (e.key === "Enter") submit() })
+    userInput.addEventListener("keydown", e => { if (e.key === "Enter") passInput.focus() })
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(false) })
+
+    actions.append(cancelBtn, loginBtn)
+    dialog.append(title, errorEl, userLabel, userInput, passLabel, passInput, actions)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+    userInput.focus()
+  })
+}
+
+// Wraps a write API call: if it returns 401, shows login dialog and retries.
+async function authFetch(url, options) {
+  let resp = await fetch(url, options)
+  if (resp.status === 401) {
+    const loggedIn = await showLoginDialog()
+    if (loggedIn) {
+      resp = await fetch(url, options)
+    }
+  }
+  return resp
+}
+// Expose for media_manager.js
+window.__gowikiAuthFetch = authFetch
+
+async function reloadPageContent() {
+  const page = await fetchPage(pagePath)
+  if (page) {
+    currentMarkdown = page.markdown
+    isNewPage = false
+    pageLockInfo = null
+    if (page.locked_by) {
+      pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
+    }
+  } else {
+    currentMarkdown = defaultMarkdown
+    isNewPage = true
+    pageLockInfo = null
+  }
+  currentDoc = markdownToPM(currentMarkdown, registry)
+  setMode("view")
+}
+
+// ── Draft / Edit mode API ────────────────────────────
+
+function stashEditorState() {
+  if (editorView) {
+    stashedEditorState = editorView.state
+  }
+}
+
+async function enterEditMode(force) {
+  // If we still have a valid edit token (saved-to-draft without exiting the session),
+  // resume directly with the stashed editor state — no API call needed.
+  if (editToken && stashedEditorState) {
+    setMode("edit")
+    return true
+  }
+
+  const forceParam = force ? "?force=true" : ""
+  const resp = await authFetch(`/api/edit/${encodePagePath(pagePath)}${forceParam}`, {
+    method: "POST",
+  })
+  if (resp.status === 423) {
+    const body = await resp.json()
+    setStatus(`Page locked by ${body.locked_by}`)
+    return false
+  }
+  if (resp.status === 409) {
+    const ok = confirm("You already have this page open in another session. Force edit?")
+    if (ok) return enterEditMode(true)
+    return false
+  }
+  if (resp.status === 401) {
+    return false
+  }
+  if (!resp.ok) {
+    setStatus("Failed to enter edit mode")
+    return false
+  }
+  const data = await resp.json()
+  editToken = data.edit_token
+  stashedEditorState = null // new session — discard any old stash
+  currentMarkdown = data.markdown
+  currentDoc = markdownToPM(currentMarkdown, registry)
+  setMode("edit")
+  return true
+}
+
+function getCurrentMarkdown() {
+  if (mode !== "edit") return currentMarkdown
+  if (editMode === "visual" && editorView) {
+    return pmToMarkdown(editorView.state.doc, registry)
+  }
+  if (editMode === "raw" && rawEditor) {
+    return rawEditor.value
+  }
+  return currentMarkdown
+}
+
+async function autoSaveDraft() {
+  if (mode !== "edit" || !editToken) return
+  const markdown = getCurrentMarkdown()
+  try {
+    const resp = await fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown, edit_token: editToken }),
+    })
+    if (resp.status === 409) {
+      stopAutoSave()
+      editToken = null
+      setStatus("Edit session superseded — another session took over")
+      setMode("view")
+      return
+    }
+    if (resp.ok) {
+      setStatus(`Draft auto-saved ${new Date().toLocaleTimeString()}`)
+    }
+  } catch {
+    // silent failure for auto-save
+  }
+}
+
+function startAutoSave() {
+  stopAutoSave()
+  autoSaveTimer = setInterval(autoSaveDraft, 2 * 60 * 1000)
+}
+
+function stopAutoSave() {
+  if (autoSaveTimer) {
+    clearInterval(autoSaveTimer)
+    autoSaveTimer = null
+  }
+}
+
+async function saveDraftExplicit() {
+  if (mode !== "edit" || !editToken) return
+  const markdown = getCurrentMarkdown()
+  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ markdown, edit_token: editToken }),
+  })
+  if (resp.status === 409) {
+    stopAutoSave()
+    editToken = null
+    setStatus("Edit session superseded")
+    setMode("view")
+    return
+  }
+  if (resp.ok) {
+    setStatus(`Draft saved ${new Date().toLocaleTimeString()}`)
+  }
+}
+
+async function publishDraft() {
+  if (mode !== "edit" || !editToken) return
+  // Save draft content first
+  const markdown = getCurrentMarkdown()
+  const normalized = normalizeMarkdownForStorage(markdown)
+  if (normalized.roundTripError) {
+    setStatus("Document failed round-trip validation — cannot publish.")
+    return
+  }
+  // Save draft with latest content
+  await fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ markdown: normalized.markdown, edit_token: editToken }),
+  })
+  // Publish
+  const resp = await authFetch(`/api/publish/${encodePagePath(pagePath)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ edit_token: editToken }),
+  })
+  if (resp.status === 409) {
+    stopAutoSave()
+    editToken = null
+    setStatus("Edit session superseded")
+    setMode("view")
+    return
+  }
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    setStatus(body.error || "Publish failed")
+    return
+  }
+  const result = await resp.json()
+  editToken = null
+  pageLockInfo = null
+  stashedEditorState = null
+  applyNormalizedEditState(normalized)
+  editBaselineMarkdown = normalized.markdown
+  isNewPage = false
+  setStatus(`Published ${new Date().toLocaleTimeString()}`)
+
+  if (result.orphaned_media && result.orphaned_media.length > 0) {
+    promptOrphanDeletion(result.orphaned_media)
+  }
+  setMode("view")
+}
+
+async function discardDraft() {
+  if (!confirm("Discard draft and lose all unpublished changes?")) return
+  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+    method: "DELETE",
+  })
+  if (resp.ok) {
+    editToken = null
+    pageLockInfo = null
+    stashedEditorState = null
+    // Reload published content.
+    const page = await fetchPage(pagePath)
+    if (page) {
+      currentMarkdown = page.markdown
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    }
+    setStatus("Draft discarded")
+    setMode("view")
+  }
+}
+
+async function saveDraftAndExit() {
+  await saveDraftExplicit()
+  // Stash editor state so undo survives resume.
+  stashEditorState()
+  // Keep editToken — we'll reuse it on resume.
+  setMode("view")
+}
+
 async function bootstrap() {
   applyStyles(registry.getStyles())
   renderActions()
@@ -3192,6 +3826,7 @@ async function bootstrap() {
   // Non-blocking banner setup
   resolveLogo()
   initSearch()
+  checkAuth()
 
   // Check for search query in URL.
   const searchQuery = new URLSearchParams(window.location.search).get("q")
@@ -3213,9 +3848,15 @@ async function bootstrap() {
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false
+    // Capture lock/draft info from page response.
+    pageLockInfo = null
+    if (page.locked_by) {
+      pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
+    }
   } else {
     currentMarkdown = defaultMarkdown
     isNewPage = true
+    pageLockInfo = null
   }
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")

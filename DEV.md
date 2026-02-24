@@ -54,3 +54,30 @@ The following invariants apply in all modes:
 - The backend is authoritative for storage, identity, access control, and export.
 - The frontend is responsible for document semantics, editing, and rendering.
 - The communication boundary between frontend and backend is HTTP (REST).
+
+# Tips
+
+## Manual user management
+
+⏺ The auth system uses `data/meta/users.json`. On first startup, it auto-creates this file with a default admin/admin account (and logs a warning).                                                                                                 
+                                                                                                                           
+  To add or change users, edit that file directly. The format is:                 
+
+```json                                                                                                                
+  [                                                                                                              
+    {"username": "admin", "password_hash": "$2a$10$..."},
+    {"username": "alice", "password_hash": "$2a$10$..."}
+  ]
+```
+
+  To generate a bcrypt hash for a new password, you can use:
+
+  ### With htpasswd (if installed)
+  htpasswd -nbBC 10 "" "yourpassword" | cut -d: -f2
+
+  ### Or with Go one-liner
+  go run -e 'package main; import ("fmt"; "golang.org/x/crypto/bcrypt"); func main() { h, _ :=
+  bcrypt.GenerateFromPassword([]byte("yourpassword"), bcrypt.DefaultCost); fmt.Println(string(h)) }'
+
+  ### Or with Python
+  python3 -c "import bcrypt; print(bcrypt.hashpw(b'yourpassword', bcrypt.gensalt()).decode())"

@@ -14,12 +14,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/storage"
 )
 
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
-	Put(pagePath, markdown string) (storage.PutResult, error)
+	Put(pagePath, markdown, author string) (storage.PutResult, error)
 }
 
 type OrphanDetector interface {
@@ -38,6 +39,11 @@ type SearchStore interface {
 	Search(query string, limit int) ([]storage.SearchResult, error)
 }
 
+type AtticStore interface {
+	ListVersions(pagePath string) ([]storage.AtticEntry, error)
+	ReadVersion(pagePath string, version int64) ([]byte, error)
+}
+
 type LogoResolver interface {
 	ResolveLogo() (string, error)
 }
@@ -47,18 +53,26 @@ type Server struct {
 	mediaStore     MediaStore
 	orphanDetector OrphanDetector
 	searchStore    SearchStore
+	atticStore     AtticStore
+	draftManager   DraftManager
 	logoResolver   LogoResolver
+	userStore      *auth.UserStore
+	sessionStore   *auth.SessionStore
 	serveWeb       bool
 	webDirPath     string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, logoResolver LogoResolver, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, userStore *auth.UserStore, sessionStore *auth.SessionStore, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
 		store:          store,
 		mediaStore:     mediaStore,
 		orphanDetector: orphanDetector,
 		searchStore:    searchStore,
+		atticStore:     atticStore,
+		draftManager:   draftManager,
 		logoResolver:   logoResolver,
+		userStore:      userStore,
+		sessionStore:   sessionStore,
 		serveWeb:       serveWeb,
 		webDirPath:     webDirPath,
 	}
@@ -69,21 +83,41 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
 
+	// Auth endpoints (public).
+	r.Post("/api/auth/login", s.handleLogin)
+	r.Post("/api/auth/logout", s.handleLogout)
+	r.Get("/api/auth/me", s.handleMe)
+
 	r.Get("/api/health", s.handleHealth)
-	r.Get("/api/pages/*", s.handleGetPage)
-	r.Put("/api/pages/*", s.handlePutPage)
 
-	r.Get("/api/media", s.handleListMedia)
-	r.Get("/api/media/", s.handleListMedia)
-	r.Get("/api/media/*", s.handleListMedia)
-	r.Post("/api/media", s.handleUploadMedia)
-	r.Post("/api/media/", s.handleUploadMedia)
-	r.Post("/api/media/*", s.handleUploadMedia)
-	r.Delete("/api/media/*", s.handleDeleteMedia)
-	r.Get("/api/media-orphans", s.handleMediaOrphans)
+	// Read endpoints — open, but with optional auth to identify user.
+	r.Group(func(r chi.Router) {
+		r.Use(s.optionalAuth)
+		r.Get("/api/pages/*", s.handleGetPage)
+		r.Get("/api/history/*", s.handlePageHistory)
+		r.Get("/api/versions/*", s.handlePageVersion)
+		r.Get("/api/diff/*", s.handlePageDiff)
+		r.Get("/api/media", s.handleListMedia)
+		r.Get("/api/media/", s.handleListMedia)
+		r.Get("/api/media/*", s.handleListMedia)
+		r.Get("/api/media-orphans", s.handleMediaOrphans)
+		r.Get("/api/search", s.handleSearch)
+		r.Get("/api/site/logo", s.handleSiteLogo)
+	})
 
-	r.Get("/api/search", s.handleSearch)
-	r.Get("/api/site/logo", s.handleSiteLogo)
+	// Write endpoints — require auth.
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Put("/api/pages/*", s.handlePutPage)
+		r.Post("/api/edit/*", s.handleEnterEdit)
+		r.Put("/api/draft/*", s.handleSaveDraft)
+		r.Post("/api/publish/*", s.handlePublish)
+		r.Delete("/api/draft/*", s.handleDiscardDraft)
+		r.Post("/api/media", s.handleUploadMedia)
+		r.Post("/api/media/", s.handleUploadMedia)
+		r.Post("/api/media/*", s.handleUploadMedia)
+		r.Delete("/api/media/*", s.handleDeleteMedia)
+	})
 
 	r.Get("/media/*", s.handleServeMedia)
 	r.Get(`/{path:.*\..*}`, s.handleFilePath)
@@ -117,7 +151,28 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, page)
+	// Check draft/lock state.
+	username := UsernameFromContext(r.Context())
+	lock := s.draftManager.GetLock(pagePath)
+
+	resp := map[string]any{
+		"path":     page.Path,
+		"markdown": page.Markdown,
+		"meta":     page.Meta,
+	}
+
+	if lock.Owner != "" {
+		resp["locked_by"] = lock.Owner
+		// If the requester is the draft owner, return draft content.
+		if username == lock.Owner {
+			if draft, err := s.draftManager.ReadDraft(pagePath, username); err == nil {
+				resp["markdown"] = draft
+				resp["is_draft"] = true
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type putPageRequest struct {
@@ -137,7 +192,8 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.store.Put(pagePath, req.Markdown)
+	author := UsernameFromContext(r.Context())
+	result, err := s.store.Put(pagePath, req.Markdown, author)
 	if errors.Is(err, storage.ErrNamespaceConflict) {
 		writeError(w, http.StatusConflict, "a namespace directory exists at this path")
 		return

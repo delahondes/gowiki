@@ -39,6 +39,7 @@ type PageMetadata struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Version   int64     `json:"version"`
+	Author    string    `json:"author,omitempty"`
 }
 
 type Page struct {
@@ -50,14 +51,19 @@ type Page struct {
 type FileStore struct {
 	contentRoot  string
 	metaRoot     string
+	dataDir      string
 	RefIndex     *RefIndex
 	IncludeIndex *IncludeIndex
 	SearchIndex  *SearchIndex
+	Attic        *Attic
+	Changelog    *Changelog
+	Drafts       *DraftStore
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
 	content := filepath.Clean(contentRoot)
-	meta := filepath.Join(filepath.Dir(content), "meta")
+	dataDir := filepath.Dir(content)
+	meta := filepath.Join(dataDir, "meta")
 	if err := os.MkdirAll(content, 0o755); err != nil {
 		return nil, fmt.Errorf("create content root: %w", err)
 	}
@@ -67,8 +73,12 @@ func NewFileStore(contentRoot string) (*FileStore, error) {
 	return &FileStore{
 		contentRoot:  content,
 		metaRoot:     meta,
+		dataDir:      dataDir,
 		RefIndex:     NewRefIndex(meta),
 		IncludeIndex: NewIncludeIndex(meta),
+		Attic:        NewAttic(dataDir),
+		Changelog:    NewChangelog(dataDir),
+		Drafts:       NewDraftStore(dataDir, meta),
 	}, nil
 }
 
@@ -107,7 +117,7 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 	}, nil
 }
 
-func (s *FileStore) Put(pagePath, markdownContent string) (PutResult, error) {
+func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, error) {
 	normalized, err := normalizePagePath(pagePath)
 	if err != nil {
 		return PutResult{}, err
@@ -150,18 +160,37 @@ func (s *FileStore) Put(pagePath, markdownContent string) (PutResult, error) {
 		return PutResult{}, fmt.Errorf("create metadata directory: %w", err)
 	}
 
+	// Read current content for MD5 dedup and archiving.
+	oldContent, _ := os.ReadFile(contentPath)
+
+	// If content is identical to current published version, skip creating a new version.
+	if len(oldContent) > 0 && md5sum(oldContent) == md5sum([]byte(markdownContent)) {
+		meta, metaErr := s.loadMeta(metaPath)
+		if metaErr == nil {
+			return PutResult{
+				Page: Page{Path: normalized, Markdown: markdownContent, Meta: meta},
+			}, nil
+		}
+	}
+
 	now := time.Now().UTC()
 	meta, err := s.loadMeta(metaPath)
 	switch {
 	case err == nil:
+		// Archive the current published content before overwriting.
+		if len(oldContent) > 0 && s.Attic != nil {
+			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "")
+		}
 		meta.UpdatedAt = now
 		meta.Version++
+		meta.Author = author
 	case errors.Is(err, os.ErrNotExist):
 		meta = PageMetadata{
 			ID:        makePageID(normalized),
 			CreatedAt: now,
 			UpdatedAt: now,
 			Version:   1,
+			Author:    author,
 		}
 	default:
 		return PutResult{}, fmt.Errorf("load metadata: %w", err)
@@ -178,6 +207,16 @@ func (s *FileStore) Put(pagePath, markdownContent string) (PutResult, error) {
 	metaBytes = append(metaBytes, '\n')
 	if err := writeFileAtomic(metaPath, metaBytes); err != nil {
 		return PutResult{}, fmt.Errorf("write metadata: %w", err)
+	}
+
+	// Archive the new version.
+	if s.Attic != nil {
+		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "")
+	}
+
+	// Append to global changelog.
+	if s.Changelog != nil {
+		s.Changelog.Append(normalized, meta.Version, author, "", "edit")
 	}
 
 	// --- Update indexes ---

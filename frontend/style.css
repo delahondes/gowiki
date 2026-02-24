@@ -692,3 +692,234 @@ mark.search-highlight {
   font-style: italic;
   padding: 6px;
 }
+
+/* ── Auth / Banner user area ──────────────────────── */
+
+#banner-user {
+  margin-left: 12px;
+  flex-shrink: 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#banner-user a {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#banner-user a:hover {
+  color: white;
+  text-decoration: underline;
+}
+
+.gowiki-login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gowiki-login-dialog {
+  background: white;
+  border-radius: 6px;
+  padding: 24px;
+  min-width: 300px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.gowiki-login-dialog h3 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.gowiki-login-dialog label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #444;
+}
+
+.gowiki-login-dialog input[type="text"],
+.gowiki-login-dialog input[type="password"] {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.gowiki-login-dialog input:focus {
+  border-color: #1e3f72;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
+}
+
+.gowiki-login-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.gowiki-login-actions button {
+  padding: 8px 16px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.gowiki-login-actions button.primary {
+  background: #1e3f72;
+  color: white;
+  border-color: #1e3f72;
+}
+
+.gowiki-login-error {
+  color: #c33;
+  font-size: 13px;
+  margin-bottom: 8px;
+  display: none;
+}
+
+/* ── Draft banner ─────────────────────────────────── */
+
+.gowiki-draft-banner {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gowiki-lock-indicator {
+  color: #856404;
+  font-weight: 600;
+}
+
+/* ── History ──────────────────────────────────────── */
+
+.gowiki-history {
+  padding: 16px 0;
+}
+
+.gowiki-history h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.gowiki-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.gowiki-history-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+  font-weight: 600;
+}
+
+.gowiki-history-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+}
+
+.gowiki-history-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.gowiki-history-btn {
+  padding: 3px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gowiki-history-btn:hover {
+  background: #e8e8e8;
+}
+
+.gowiki-history-btn-restore {
+  color: #1e3f72;
+  border-color: #1e3f72;
+}
+
+/* ── Version view ─────────────────────────────────── */
+
+.gowiki-version-header {
+  background: #e8f0fe;
+  padding: 10px 14px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.gowiki-version-content {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 16px;
+  background: white;
+}
+
+/* ── Diff viewer ──────────────────────────────────── */
+
+.gowiki-diff-header {
+  background: #e8f0fe;
+  padding: 10px 14px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.gowiki-diff-content {
+  font-family: monospace;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow-x: auto;
+  background: #fafafa;
+}
+
+.gowiki-diff-line {
+  padding: 1px 12px;
+  white-space: pre;
+  min-height: 1.4em;
+}
+
+.gowiki-diff-equal {
+  color: #555;
+}
+
+.gowiki-diff-insert {
+  background: #d4edda;
+  color: #155724;
+}
+
+.gowiki-diff-delete {
+  background: #f8d7da;
+  color: #721c24;
+}
