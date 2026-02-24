@@ -94,6 +94,8 @@ function buildPanel(
   wrap.className = "gowiki-props-panel"
 
   for (const prop of properties) {
+    if (prop.visible && !prop.visible(node.attrs)) continue
+
     const label = document.createElement("span")
     label.className = "gowiki-props-label"
     label.textContent = prop.label

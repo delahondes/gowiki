@@ -1,6 +1,36 @@
 import type { Plugin as WikiPlugin, NodePropertySpec } from "../compiler/registry"
 
-const VALID_CLASSES = ["tip", "note", "warning", "important"]
+const VALID_CLASSES = ["tip", "note", "important", "warning", "custom"]
+const VALID_ICONS = ["lightbulb", "info", "warning", "important"]
+const VALID_ALIGNS = ["left", "center", "right"]
+
+function normalizeBlockquoteWidth(raw: string): string | null {
+  const value = String(raw ?? "").trim().toLowerCase()
+  if (!value) return null
+  const pct = value.match(/^(\d+)%$/)
+  if (pct) {
+    const n = Number(pct[1])
+    if (n > 0) return `${n}%`
+    throw new Error("Width percent must be > 0")
+  }
+  const px = value.match(/^(\d+)px$/)
+  if (px) {
+    const n = Number(px[1])
+    if (n > 0) return `${n}px`
+    throw new Error("Width in px must be > 0")
+  }
+  throw new Error(`Invalid width "${raw}". Expected 80% or 400px.`)
+}
+
+function normalizeColor(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) return trimmed
+  if (/^[a-zA-Z]+$/.test(trimmed)) return trimmed
+  throw new Error(`Invalid color "${raw}". Use hex (#abc or #aabbcc) or a named color.`)
+}
+
+const isCustom = (attrs: Record<string, any>) => attrs.class === "custom"
 
 const blockquoteProperties: NodePropertySpec[] = [
   {
@@ -20,9 +50,69 @@ const blockquoteProperties: NodePropertySpec[] = [
       { value: "", label: "(none)" },
       { value: "tip", label: "Tip" },
       { value: "note", label: "Note" },
+      { value: "important", label: "Important" },
+      { value: "warning", label: "Warning" },
+      { value: "custom", label: "Custom" },
+    ],
+  },
+  {
+    name: "color",
+    label: "Color",
+    default: null,
+    parse: normalizeColor,
+    serialize: (value: string | null) => String(value ?? ""),
+    visible: isCustom,
+  },
+  {
+    name: "icon",
+    label: "Icon",
+    default: null,
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase()
+      if (!trimmed) return null
+      if (!VALID_ICONS.includes(trimmed)) {
+        throw new Error(`Unknown icon "${trimmed}". Use: ${VALID_ICONS.join(", ")}`)
+      }
+      return trimmed
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "(none)" },
+      { value: "lightbulb", label: "Lightbulb" },
+      { value: "info", label: "Info" },
       { value: "warning", label: "Warning" },
       { value: "important", label: "Important" },
     ],
+    visible: isCustom,
+  },
+  {
+    name: "width",
+    label: "Width",
+    default: null,
+    parse: normalizeBlockquoteWidth,
+    serialize: (value: string | null) => String(value ?? ""),
+    visible: isCustom,
+  },
+  {
+    name: "align",
+    label: "Align",
+    default: null,
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase()
+      if (!trimmed) return null
+      if (!VALID_ALIGNS.includes(trimmed)) {
+        throw new Error(`Invalid alignment "${trimmed}". Use: ${VALID_ALIGNS.join(", ")}`)
+      }
+      return trimmed
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "(none)" },
+      { value: "left", label: "Left" },
+      { value: "center", label: "Center" },
+      { value: "right", label: "Right" },
+    ],
+    visible: isCustom,
   },
 ]
 
@@ -35,8 +125,8 @@ const blockquoteStyles = `
 
 .ProseMirror blockquote.gowiki-bq-tip::before,
 .ProseMirror blockquote.gowiki-bq-note::before,
-.ProseMirror blockquote.gowiki-bq-warning::before,
-.ProseMirror blockquote.gowiki-bq-important::before {
+.ProseMirror blockquote.gowiki-bq-important::before,
+.ProseMirror blockquote.gowiki-bq-warning::before {
   display: block;
   font-weight: 600;
   font-size: 0.85em;
@@ -67,6 +157,16 @@ const blockquoteStyles = `
   background-image: url(/icons/info.svg);
 }
 
+.ProseMirror blockquote.gowiki-bq-important {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+.ProseMirror blockquote.gowiki-bq-important::before {
+  content: 'Important';
+  color: #d97706;
+  background-image: url(/icons/important.svg);
+}
+
 .ProseMirror blockquote.gowiki-bq-warning {
   border-left-color: #ef4444;
   background: #fef2f2;
@@ -77,45 +177,103 @@ const blockquoteStyles = `
   background-image: url(/icons/warning.svg);
 }
 
-.ProseMirror blockquote.gowiki-bq-important {
-  border-left-color: #f59e0b;
-  background: #fffbeb;
+/* Custom class */
+.ProseMirror blockquote.gowiki-bq-custom {
+  background: #f8f9fa;
 }
-.ProseMirror blockquote.gowiki-bq-important::before {
-  content: 'Important';
-  color: #d97706;
+
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-lightbulb::before,
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-info::before,
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-warning::before,
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-important::before {
+  content: '';
+  display: block;
+  width: 1.2em;
+  height: 1.2em;
+  margin-bottom: 0.3em;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-lightbulb::before {
+  background-image: url(/icons/lightbulb.svg);
+}
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-info::before {
+  background-image: url(/icons/info.svg);
+}
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-warning::before {
+  background-image: url(/icons/warning.svg);
+}
+.ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-important::before {
   background-image: url(/icons/important.svg);
 }
 `
 
 export const blockquotePlugin: WikiPlugin = {
   register(reg) {
-    // Extend blockquote schema node with class attribute
+    // Extend blockquote schema node with class + custom attrs
     reg.extendSchemaNode("blockquote", spec => ({
       ...spec,
-      attrs: { ...(spec.attrs ?? {}), class: { default: null } },
+      attrs: {
+        ...(spec.attrs ?? {}),
+        class: { default: null },
+        color: { default: null },
+        icon: { default: null },
+        width: { default: null },
+        align: { default: null },
+      },
       toDOM(node: any) {
         const cls = node.attrs.class
-        const attrs: Record<string, string> = {}
-        if (cls) {
-          attrs.class = `gowiki-bq-${cls}`
+        const domAttrs: Record<string, string> = {}
+        const styles: string[] = []
+
+        if (cls === "custom") {
+          const classes = ["gowiki-bq-custom"]
+          if (node.attrs.icon) classes.push(`gowiki-bq-icon-${node.attrs.icon}`)
+          domAttrs.class = classes.join(" ")
+          if (node.attrs.color) {
+            styles.push(`border-left-color: ${node.attrs.color}`)
+            styles.push(`background: color-mix(in srgb, ${node.attrs.color} 10%, transparent)`)
+          }
+          if (node.attrs.width) styles.push(`width: ${node.attrs.width}`)
+          if (node.attrs.align) styles.push(`text-align: ${node.attrs.align}`)
+        } else if (cls) {
+          domAttrs.class = `gowiki-bq-${cls}`
         }
-        return ["blockquote", attrs, 0]
+
+        if (styles.length > 0) {
+          domAttrs.style = styles.join("; ") + ";"
+        }
+
+        return ["blockquote", domAttrs, 0]
       },
       parseDOM: [
         {
           tag: "blockquote",
           getAttrs(dom: HTMLElement) {
             const clsList = dom.className || ""
-            const match = clsList.match(/gowiki-bq-(\S+)/)
-            if (match) return { class: match[1] }
-            return {}
+            const result: Record<string, any> = {}
+
+            if (clsList.includes("gowiki-bq-custom")) {
+              result.class = "custom"
+              const iconMatch = clsList.match(/gowiki-bq-icon-(\S+)/)
+              if (iconMatch) result.icon = iconMatch[1]
+              const style = dom.style
+              if (style.borderLeftColor) result.color = style.borderLeftColor
+              if (style.width) result.width = style.width
+              if (style.textAlign) result.align = style.textAlign
+            } else {
+              const match = clsList.match(/gowiki-bq-(\S+)/)
+              if (match) result.class = match[1]
+            }
+
+            return result
           },
         },
       ],
     }))
 
-    // Register directive for blockquote properties (class attr + property panel)
+    // Register directive for blockquote properties (class + custom attrs)
     reg.registerDirective("blockquote", {
       nodeType: "blockquote",
       appliesTo: ["blockquote_open"],
@@ -140,14 +298,23 @@ export const blockquotePlugin: WikiPlugin = {
     reg.registerPMNode("blockquote", {
       print(node, ctx, recurse) {
         let out = ""
-        const cls = node.attrs.class ?? null
-        if (cls) {
-          const classProp = blockquoteProperties.find(p => p.name === "class")
-          const rendered = classProp?.serialize
-            ? classProp.serialize(cls)
-            : String(cls)
-          out += `{blockquote class=${rendered}}\n`
+
+        // Serialize directive with all non-default properties
+        const parts: string[] = []
+        for (const prop of blockquoteProperties) {
+          const val = node.attrs[prop.name] ?? null
+          const def = prop.default ?? null
+          if (val !== def) {
+            const rendered = prop.serialize
+              ? prop.serialize(val)
+              : String(val)
+            parts.push(`${prop.name}=${rendered}`)
+          }
         }
+        if (parts.length > 0) {
+          out += `{blockquote ${parts.join(" ")}}\n`
+        }
+
         node.content.forEach(child => {
           const rendered = recurse(child).trimEnd()
           const lines = rendered.split("\n")
