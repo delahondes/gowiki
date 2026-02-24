@@ -57,11 +57,54 @@ This model ensures stable, intuitive URLs and avoids ambiguity between pages and
 - Writes must be atomic.
 - Partial writes must not leave corrupted state.
 
-### History
-- The backend must be compatible with:
-  - diffing
-  - version history
-  - rollback
+### Version storage (Dokuwiki-inspired)
+
+Full versions are stored in an attic folder, gzipped, one file per version:
+
+```
+data/attic/path/to/page/
+  1.md.gz
+  2.md.gz
+  ...
+```
+
+A per-page index file records metadata for each version:
+
+```
+data/attic/path/to/page/index.json
+```
+
+Each index entry contains: version number, timestamp, author, md5 of Markdown content, and published/draft status.
+
+A global append-only changes log tracks all edits across the wiki:
+
+```
+data/changes.log
+```
+
+Each line records: page path, version number, timestamp, author, edit summary, change type.
+
+Diffs are computed on the fly from stored full versions, never stored separately.
+
+### Draft storage
+
+Each user may hold at most one draft per page. Drafts are stored separately from published versions:
+
+```
+data/drafts/{username}/path/to/page.md
+```
+
+A draft is a full Markdown file. It is not versioned until published. It is auto-saved every 2 minutes during editing.
+
+### User storage
+
+Users are stored in a hand-editable site-level metadata file:
+
+```
+data/meta/users.json
+```
+
+Hand-editability is an explicit anti-lockout mechanism, consistent with the configuration file philosophy. The admin UI (v0.6) is a view over this file, not its source of truth.
 
 ## Media management
 
@@ -84,6 +127,40 @@ This model ensures stable, intuitive URLs and avoids ambiguity between pages and
 ### Versioning (future)
 - Media versioning is not required initially.
 - The backend design must not prevent it.
+
+## Document lifecycle and locking
+
+### Published versions
+- A published version is a numbered, immutable snapshot of a page.
+- Version numbers are integers starting at 1, incrementing on each publish.
+- Each version is associated with an md5 of its Markdown content.
+- Future validation plugins may influence versioning numbering — the design must not hardcode assumptions about numbering semantics.
+
+### Draft state
+- A draft is user-owned. Only one draft may exist per page per user.
+- As long as a draft exists, the document is locked to that user.
+- The draft owner sees their draft when viewing the page.
+- Other users see the latest published version, or a 404 if no published version exists.
+
+### Editing flow
+While editing, the user may:
+- **Save and continue**: saves the draft, remains in edit mode. Undo/redo works across saves within the same draft.
+- **Save to draft**: saves the draft and returns to view mode, showing the draft.
+- **Save and publish**: publishes a new version. If the draft content is identical to the latest published version (md5 match), the draft is discarded with no new version created.
+- **Cancel**: exits edit mode, draft is preserved.
+- **Cancel and discard draft**: exits edit mode, draft is deleted, lock is released.
+
+Auto-save to draft occurs every 2 minutes during editing.
+
+### View mode actions (draft owner)
+- **Publish**: publishes the current draft as a new version.
+- **Cancel draft**: discards the draft and releases the lock.
+
+### Locking and admin override
+- A document locked by a draft cannot be edited by other users.
+- Admins may discard any user's draft and release the lock.
+- Discarding another user's draft is a destructive action and must be logged in changes.log.
+- Admin override UI is part of v0.6.
 
 ## Document structure: include
 
@@ -135,6 +212,7 @@ Page templates are special content pages that:
 ### Consistency
 - The index must reflect the current state of documents.
 - Index updates are triggered by writes.
+- Search indexes published content only, not drafts.
 
 ## Admin page
 
@@ -157,6 +235,11 @@ The admin page is not required for basic usage and is introduced late to avoid p
 - Access control follows a namespace-based, declarative model inspired by Dokuwiki.
 - ACL rules may use regular expressions and variables (e.g. USER).
 - This model is considered complete and is not intended to be extended unless necessary.
+
+### Admin capabilities (v0.6)
+- View and manage all users.
+- Discard any user's draft and release the associated lock (destructive, logged).
+- View configuration and system status.
 
 ## Plugins
 
@@ -190,8 +273,9 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Maintain consistency
 - Detect circular includes
 - Track media references
+- Manage draft state and document locking
 - Provide composed views
-- Provide search results
+- Provide search results (published content only)
 
 ### Frontend responsibilities
 - Edit Markdown content
@@ -217,16 +301,23 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Full-text search, incremental, typo-tolerant.
 - Language-specific syntax highlighting in code blocks.
 
-### v0.4 — Editing robustness
+### v0.4 ✓ — Editing robustness
 - Correct copy/paste semantics across editable and non-editable regions.
 - Document validity enforced after every edit operation.
 
-### v0.5 — History and diff
-- Page history and diffing.
-- Undo/rollback support based on persisted content.
+### v0.5 — History, diff, and draft workflow
+- Page locking: a user holding a draft locks the document.
+- Draft state: user-owned, auto-saved every 2 minutes, stored under data/drafts/.
+- Full editing flow: save and continue, save to draft, save and publish, cancel, cancel and discard draft.
+- View mode actions for draft owner: publish, cancel draft.
+- Version storage: full copies in data/attic/, gzipped, per-page index.json, global changes.log.
+- Page history UI and diff between any two versions.
+- Undo/rollback to any published version.
 
 ### v0.6 — Admin page
 - Configuration UI, authentication backends, ACL management.
+- User management.
+- Admin override: discard any user's draft, release lock, log the action.
 
 ### v0.7 — Structured data
 - Structured fields associated with pages.
