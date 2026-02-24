@@ -52,6 +52,9 @@ let editToken = null
 let autoSaveTimer = null
 let pageLockInfo = null // { locked_by, is_draft }
 let stashedEditorState = null // ProseMirror EditorState preserved across draft exit/resume
+let historyLatestVersion = null // latest version number from history listing
+let draftSavedThisSession = false // true once any draft save succeeds in this edit session
+let lastSavedDraftMarkdown = null // markdown from the last successful draft save
 
 let mode = "view"
 let editMode = "visual"
@@ -3037,6 +3040,30 @@ async function publishFromView() {
 
 // ── History and Diff UI ──────────────────────────────
 
+let inHistoryView = false // true when showing history/version/diff
+
+function enterHistoryView() {
+  if (!inHistoryView) {
+    // Push a state so the browser back button returns to the page.
+    window.history.pushState({ gowikiHistory: true }, "", window.location.href)
+    inHistoryView = true
+  }
+}
+
+function exitHistoryView() {
+  inHistoryView = false
+  currentDoc = markdownToPM(currentMarkdown, registry)
+  setMode("view")
+}
+
+window.addEventListener("popstate", (e) => {
+  if (inHistoryView) {
+    inHistoryView = false
+    currentDoc = markdownToPM(currentMarkdown, registry)
+    setMode("view")
+  }
+})
+
 async function showHistory() {
   try {
     const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
@@ -3046,6 +3073,7 @@ async function showHistory() {
     }
     const data = await resp.json()
     const versions = data.versions || []
+    enterHistoryView()
     renderHistoryPage(versions)
   } catch {
     setStatus("Failed to load history")
@@ -3079,6 +3107,9 @@ function renderHistoryPage(versions) {
 
     // Show newest first.
     const sorted = [...versions].reverse()
+    const latestVersion = sorted[0].version
+    const oldestVersion = sorted[sorted.length - 1].version
+    historyLatestVersion = latestVersion
     for (const v of sorted) {
       const tr = document.createElement("tr")
 
@@ -3103,15 +3134,15 @@ function renderHistoryPage(versions) {
       viewBtn.addEventListener("click", () => void viewVersion(v.version))
       tdActions.appendChild(viewBtn)
 
-      if (v.version > 1) {
+      if (v.version > oldestVersion) {
         const diffPrevBtn = document.createElement("button")
         diffPrevBtn.textContent = "Diff vs prev"
         diffPrevBtn.className = "gowiki-history-btn"
-        diffPrevBtn.addEventListener("click", () => void showDiff(v.version - 1, v.version))
+        const prevVersion = sorted[sorted.indexOf(v) + 1].version
+        diffPrevBtn.addEventListener("click", () => void showDiff(prevVersion, v.version))
         tdActions.appendChild(diffPrevBtn)
       }
 
-      const latestVersion = sorted[0].version
       if (v.version < latestVersion) {
         const diffCurBtn = document.createElement("button")
         diffCurBtn.textContent = "Diff vs current"
@@ -3138,8 +3169,7 @@ function renderHistoryPage(versions) {
   backBtn.className = "gowiki-action-btn"
   backBtn.style.marginTop = "16px"
   backBtn.addEventListener("click", () => {
-    currentDoc = markdownToPM(currentMarkdown, registry)
-    setMode("view")
+    window.history.back()
   })
   container.appendChild(backBtn)
 
@@ -3178,11 +3208,13 @@ async function viewVersion(version) {
     backBtn.addEventListener("click", () => void showHistory())
     actions.appendChild(backBtn)
 
-    const restoreBtn = document.createElement("button")
-    restoreBtn.textContent = "Restore this version"
-    restoreBtn.className = "gowiki-action-btn"
-    restoreBtn.addEventListener("click", () => void restoreVersion(version))
-    actions.appendChild(restoreBtn)
+    if (historyLatestVersion == null || version < historyLatestVersion) {
+      const restoreBtn = document.createElement("button")
+      restoreBtn.textContent = "Restore this version"
+      restoreBtn.className = "gowiki-action-btn"
+      restoreBtn.addEventListener("click", () => void restoreVersion(version))
+      actions.appendChild(restoreBtn)
+    }
 
     container.append(header, content, actions)
     contentRoot.appendChild(container)
@@ -3273,26 +3305,40 @@ async function restoreVersion(version) {
 
 function cancelEdit() {
   if (mode !== "edit") return
-  // Save draft silently before exiting.
-  if (editToken) {
-    const markdown = getCurrentMarkdown()
-    fetch(`/api/draft/${encodePagePath(pagePath)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ markdown, edit_token: editToken }),
-    }).catch(() => {})
+
+  if (draftSavedThisSession) {
+    // Draft was explicitly saved — preserve it, show saved draft content.
+    stashEditorState()
+    currentMarkdown = lastSavedDraftMarkdown || editBaselineMarkdown
+    try {
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    } catch (err) {
+      console.error("Cancel failed while rebuilding document", err)
+      setStatus("Cancel failed")
+      return
+    }
+    if (currentUser) {
+      pageLockInfo = { locked_by: currentUser.username, is_draft: true }
+    }
+    setStatus("Draft preserved, exiting edit mode")
+  } else {
+    // No save happened — draft is just a copy of published content, discard it.
+    if (editToken) {
+      authFetch(`/api/draft/${encodePagePath(pagePath)}`, { method: "DELETE" }).catch(() => {})
+    }
+    editToken = null
+    stashedEditorState = null
+    pageLockInfo = null
+    currentMarkdown = editBaselineMarkdown
+    try {
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    } catch (err) {
+      console.error("Cancel failed while rebuilding document", err)
+      setStatus("Cancel failed")
+      return
+    }
+    setStatus("Edit cancelled")
   }
-  stashEditorState()
-  // Keep editToken so resume works without a new API call.
-  currentMarkdown = editBaselineMarkdown
-  try {
-    currentDoc = markdownToPM(currentMarkdown, registry)
-  } catch (err) {
-    console.error("Cancel failed while rebuilding document", err)
-    setStatus("Cancel failed")
-    return
-  }
-  setStatus("Draft preserved, exiting edit mode")
   setMode("view")
 }
 
@@ -3495,6 +3541,8 @@ function renderBannerUser() {
       await fetch("/api/auth/logout", { method: "POST" })
       currentUser = null
       pageLockInfo = null
+      editToken = null
+      stashedEditorState = null
       renderBannerUser()
       await reloadPageContent()
     })
@@ -3640,6 +3688,7 @@ async function enterEditMode(force) {
   // If we still have a valid edit token (saved-to-draft without exiting the session),
   // resume directly with the stashed editor state — no API call needed.
   if (editToken && stashedEditorState) {
+    draftSavedThisSession = true
     setMode("edit")
     return true
   }
@@ -3668,6 +3717,8 @@ async function enterEditMode(force) {
   const data = await resp.json()
   editToken = data.edit_token
   stashedEditorState = null // new session — discard any old stash
+  draftSavedThisSession = false
+  lastSavedDraftMarkdown = null
   currentMarkdown = data.markdown
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("edit")
@@ -3702,6 +3753,8 @@ async function autoSaveDraft() {
       return
     }
     if (resp.ok) {
+      draftSavedThisSession = true
+      lastSavedDraftMarkdown = markdown
       setStatus(`Draft auto-saved ${new Date().toLocaleTimeString()}`)
     }
   } catch {
@@ -3737,6 +3790,8 @@ async function saveDraftExplicit() {
     return
   }
   if (resp.ok) {
+    draftSavedThisSession = true
+    lastSavedDraftMarkdown = markdown
     setStatus(`Draft saved ${new Date().toLocaleTimeString()}`)
   }
 }
@@ -3814,6 +3869,10 @@ async function saveDraftAndExit() {
   // Stash editor state so undo survives resume.
   stashEditorState()
   // Keep editToken — we'll reuse it on resume.
+  // Update lock info so the draft banner shows immediately.
+  if (currentUser) {
+    pageLockInfo = { locked_by: currentUser.username, is_draft: true }
+  }
   setMode("view")
 }
 
