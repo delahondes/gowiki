@@ -3074,13 +3074,13 @@ async function showHistory() {
     const data = await resp.json()
     const versions = data.versions || []
     enterHistoryView()
-    renderHistoryPage(versions)
+    renderHistoryPage(versions, data.draft || null)
   } catch {
     setStatus("Failed to load history")
   }
 }
 
-function renderHistoryPage(versions) {
+function renderHistoryPage(versions, draft) {
   clearContent()
   mode = "view"
   appRoot.classList.remove("gowiki-editing")
@@ -3092,7 +3092,15 @@ function renderHistoryPage(versions) {
   title.textContent = `History: ${pageDisplayPath}`
   container.appendChild(title)
 
-  if (versions.length === 0) {
+  // Draft notice for non-owners.
+  if (draft && draft.is_own === false) {
+    const notice = document.createElement("div")
+    notice.className = "gowiki-history-draft-notice"
+    notice.textContent = `A draft by ${draft.owner} exists`
+    container.appendChild(notice)
+  }
+
+  if (versions.length === 0 && !(draft && draft.is_own)) {
     const empty = document.createElement("p")
     empty.textContent = "No version history available."
     empty.style.color = "#666"
@@ -3105,60 +3113,104 @@ function renderHistoryPage(versions) {
     table.appendChild(thead)
     const tbody = document.createElement("tbody")
 
-    // Show newest first.
-    const sorted = [...versions].reverse()
-    const latestVersion = sorted[0].version
-    const oldestVersion = sorted[sorted.length - 1].version
-    historyLatestVersion = latestVersion
-    for (const v of sorted) {
+    // Draft row for owner.
+    if (draft && draft.is_own === true) {
       const tr = document.createElement("tr")
+      tr.className = "gowiki-history-draft-row"
 
       const tdVer = document.createElement("td")
-      tdVer.textContent = `v${v.version}`
+      tdVer.innerHTML = "<em>Draft</em>"
       tr.appendChild(tdVer)
 
       const tdDate = document.createElement("td")
-      tdDate.textContent = new Date(v.timestamp).toLocaleString()
+      tdDate.textContent = draft.since ? new Date(draft.since).toLocaleString() : "—"
       tr.appendChild(tdDate)
 
       const tdAuthor = document.createElement("td")
-      tdAuthor.textContent = v.author || "—"
+      tdAuthor.textContent = draft.owner
       tr.appendChild(tdAuthor)
 
       const tdActions = document.createElement("td")
       tdActions.className = "gowiki-history-actions"
 
-      const viewBtn = document.createElement("button")
-      viewBtn.textContent = "View"
-      viewBtn.className = "gowiki-history-btn"
-      viewBtn.addEventListener("click", () => void viewVersion(v.version))
-      tdActions.appendChild(viewBtn)
+      const diffBtn = document.createElement("button")
+      diffBtn.textContent = "Diff vs published"
+      diffBtn.className = "gowiki-history-btn"
+      diffBtn.addEventListener("click", () => void showDiff(0, -1))
+      tdActions.appendChild(diffBtn)
 
-      if (v.version > oldestVersion) {
-        const diffPrevBtn = document.createElement("button")
-        diffPrevBtn.textContent = "Diff vs prev"
-        diffPrevBtn.className = "gowiki-history-btn"
-        const prevVersion = sorted[sorted.indexOf(v) + 1].version
-        diffPrevBtn.addEventListener("click", () => void showDiff(prevVersion, v.version))
-        tdActions.appendChild(diffPrevBtn)
-      }
+      const publishBtn = document.createElement("button")
+      publishBtn.textContent = "Publish"
+      publishBtn.className = "gowiki-history-btn gowiki-history-btn-restore"
+      publishBtn.addEventListener("click", () => void publishDraftFromHistory())
+      tdActions.appendChild(publishBtn)
 
-      if (v.version < latestVersion) {
-        const diffCurBtn = document.createElement("button")
-        diffCurBtn.textContent = "Diff vs current"
-        diffCurBtn.className = "gowiki-history-btn"
-        diffCurBtn.addEventListener("click", () => void showDiff(v.version, 0))
-        tdActions.appendChild(diffCurBtn)
-
-        const restoreBtn = document.createElement("button")
-        restoreBtn.textContent = "Restore"
-        restoreBtn.className = "gowiki-history-btn gowiki-history-btn-restore"
-        restoreBtn.addEventListener("click", () => void restoreVersion(v.version))
-        tdActions.appendChild(restoreBtn)
-      }
+      const discardBtn = document.createElement("button")
+      discardBtn.textContent = "Discard"
+      discardBtn.className = "gowiki-history-btn gowiki-history-btn-discard"
+      discardBtn.addEventListener("click", () => void discardDraftFromHistory(draft.has_changes))
+      tdActions.appendChild(discardBtn)
 
       tr.appendChild(tdActions)
       tbody.appendChild(tr)
+    }
+
+    // Show newest first.
+    if (versions.length > 0) {
+      const sorted = [...versions].reverse()
+      const latestVersion = sorted[0].version
+      const oldestVersion = sorted[sorted.length - 1].version
+      historyLatestVersion = latestVersion
+      for (const v of sorted) {
+        const tr = document.createElement("tr")
+
+        const tdVer = document.createElement("td")
+        tdVer.textContent = `v${v.version}`
+        tr.appendChild(tdVer)
+
+        const tdDate = document.createElement("td")
+        tdDate.textContent = new Date(v.timestamp).toLocaleString()
+        tr.appendChild(tdDate)
+
+        const tdAuthor = document.createElement("td")
+        tdAuthor.textContent = v.author || "—"
+        tr.appendChild(tdAuthor)
+
+        const tdActions = document.createElement("td")
+        tdActions.className = "gowiki-history-actions"
+
+        const viewBtn = document.createElement("button")
+        viewBtn.textContent = "View"
+        viewBtn.className = "gowiki-history-btn"
+        viewBtn.addEventListener("click", () => void viewVersion(v.version))
+        tdActions.appendChild(viewBtn)
+
+        if (v.version > oldestVersion) {
+          const diffPrevBtn = document.createElement("button")
+          diffPrevBtn.textContent = "Diff vs prev"
+          diffPrevBtn.className = "gowiki-history-btn"
+          const prevVersion = sorted[sorted.indexOf(v) + 1].version
+          diffPrevBtn.addEventListener("click", () => void showDiff(prevVersion, v.version))
+          tdActions.appendChild(diffPrevBtn)
+        }
+
+        if (v.version < latestVersion) {
+          const diffCurBtn = document.createElement("button")
+          diffCurBtn.textContent = "Diff vs current"
+          diffCurBtn.className = "gowiki-history-btn"
+          diffCurBtn.addEventListener("click", () => void showDiff(v.version, 0))
+          tdActions.appendChild(diffCurBtn)
+
+          const restoreBtn = document.createElement("button")
+          restoreBtn.textContent = "Restore"
+          restoreBtn.className = "gowiki-history-btn gowiki-history-btn-restore"
+          restoreBtn.addEventListener("click", () => void restoreVersion(v.version))
+          tdActions.appendChild(restoreBtn)
+        }
+
+        tr.appendChild(tdActions)
+        tbody.appendChild(tr)
+      }
     }
     table.appendChild(tbody)
     container.appendChild(table)
@@ -3244,8 +3296,9 @@ function renderDiffView(hunks, fromVersion, toVersion) {
 
   const header = document.createElement("div")
   header.className = "gowiki-diff-header"
-  const toLabel = toVersion === 0 ? "current" : `v${toVersion}`
-  header.textContent = `Diff: v${fromVersion} → ${toLabel} — ${pageDisplayPath}`
+  const fromLabel = fromVersion === 0 ? "current" : `v${fromVersion}`
+  const toLabel = toVersion === -1 ? "draft" : toVersion === 0 ? "current" : `v${toVersion}`
+  header.textContent = `Diff: ${fromLabel} → ${toLabel} — ${pageDisplayPath}`
 
   const diffContent = document.createElement("div")
   diffContent.className = "gowiki-diff-content"
@@ -3845,7 +3898,11 @@ async function publishDraft() {
 }
 
 async function discardDraft() {
-  if (!confirm("Discard draft and lose all unpublished changes?")) return
+  const hasChanges = currentMarkdown !== editBaselineMarkdown
+  const msg = hasChanges
+    ? "Discard draft and lose all unpublished changes?"
+    : "The draft has no changes from the published version. Discard?"
+  if (!confirm(msg)) return
   const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
     method: "DELETE",
   })
@@ -3861,6 +3918,57 @@ async function discardDraft() {
     }
     setStatus("Draft discarded")
     setMode("view")
+  }
+}
+
+async function publishDraftFromHistory() {
+  // Enter edit mode to get a token, then immediately publish.
+  const forceParam = "?force=true"
+  const editResp = await authFetch(`/api/edit/${encodePagePath(pagePath)}${forceParam}`, {
+    method: "POST",
+  })
+  if (!editResp.ok) {
+    setStatus("Failed to enter edit mode for publish")
+    return
+  }
+  const editData = await editResp.json()
+  const token = editData.edit_token
+
+  const resp = await authFetch(`/api/publish/${encodePagePath(pagePath)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ edit_token: token }),
+  })
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    setStatus(body.error || "Publish failed")
+    return
+  }
+
+  editToken = null
+  pageLockInfo = null
+  stashedEditorState = null
+  await reloadPageContent()
+  setStatus("Draft published")
+  showHistory()
+}
+
+async function discardDraftFromHistory(hasChanges) {
+  const msg = hasChanges === false
+    ? "The draft has no changes from the published version. Discard?"
+    : "Discard draft and lose all unpublished changes?"
+  if (!confirm(msg)) return
+
+  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+    method: "DELETE",
+  })
+  if (resp.ok) {
+    editToken = null
+    pageLockInfo = null
+    stashedEditorState = null
+    await reloadPageContent()
+    setStatus("Draft discarded")
+    showHistory()
   }
 }
 

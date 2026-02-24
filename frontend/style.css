@@ -866,6 +866,29 @@ mark.search-highlight {
   border-color: #1e3f72;
 }
 
+.gowiki-history-draft-row {
+  background: #fdf8e8;
+}
+
+.gowiki-history-btn-discard {
+  color: #c33;
+  border-color: #c33;
+}
+
+.gowiki-history-btn-discard:hover {
+  background: #fce8e8;
+}
+
+.gowiki-history-draft-notice {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
 /* ── Version view ─────────────────────────────────── */
 
 .gowiki-version-header {

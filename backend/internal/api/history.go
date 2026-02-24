@@ -22,11 +22,46 @@ func (s *Server) handlePageHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	result := map[string]any{}
 	if entries == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"versions": []any{}})
-		return
+		result["versions"] = []any{}
+	} else {
+		result["versions"] = entries
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"versions": entries})
+
+	// Include draft info if a lock exists.
+	lock := s.draftManager.GetLock(pagePath)
+	if lock.Owner != "" {
+		username := UsernameFromContext(r.Context())
+		if username == lock.Owner {
+			// Requester owns the draft — include has_changes.
+			hasChanges := true
+			draftContent, err := s.draftManager.ReadDraft(pagePath, username)
+			if err == nil {
+				page, err := s.store.Get(pagePath)
+				if err == nil {
+					hasChanges = draftContent != page.Markdown
+				}
+			}
+			result["draft"] = map[string]any{
+				"owner":       lock.Owner,
+				"since":       lock.Since,
+				"is_own":      true,
+				"has_changes": hasChanges,
+			}
+		} else if username != "" {
+			// Authenticated but not the owner.
+			result["draft"] = map[string]any{
+				"owner":  lock.Owner,
+				"since":  lock.Since,
+				"is_own": false,
+			}
+		}
+		// Unauthenticated: omit draft field.
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
@@ -39,20 +74,31 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")
 	from, err := strconv.ParseInt(fromStr, 10, 64)
-	if err != nil || from < 1 {
+	if err != nil || from < 0 {
 		writeError(w, http.StatusBadRequest, "invalid 'from' version")
 		return
 	}
 	to, err := strconv.ParseInt(toStr, 10, 64)
-	if err != nil || to < 0 {
+	if err != nil || to < -1 {
 		writeError(w, http.StatusBadRequest, "invalid 'to' version")
 		return
 	}
 
-	fromContent, err := s.atticStore.ReadVersion(pagePath, from)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "from version not found")
-		return
+	var fromContent []byte
+	if from == 0 {
+		// from=0 means current published version
+		page, err := s.store.Get(pagePath)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "page not found")
+			return
+		}
+		fromContent = []byte(page.Markdown)
+	} else {
+		fromContent, err = s.atticStore.ReadVersion(pagePath, from)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "from version not found")
+			return
+		}
 	}
 
 	var toContent []byte
@@ -64,6 +110,24 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		toContent = []byte(page.Markdown)
+	} else if to == -1 {
+		// to=-1 means draft content — requires auth + ownership.
+		username := UsernameFromContext(r.Context())
+		if username == "" {
+			writeError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		lock := s.draftManager.GetLock(pagePath)
+		if lock.Owner != username {
+			writeError(w, http.StatusForbidden, "not the draft owner")
+			return
+		}
+		draftContent, err := s.draftManager.ReadDraft(pagePath, username)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "draft not found")
+			return
+		}
+		toContent = []byte(draftContent)
 	} else {
 		toContent, err = s.atticStore.ReadVersion(pagePath, to)
 		if err != nil {
