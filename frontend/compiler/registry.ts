@@ -73,6 +73,7 @@ export type NodePropertySpec = {
   default?: string | null
   parse?: (raw: string) => string | null
   serialize?: (value: string | null) => string
+  options?: { value: string; label: string }[]
 }
 
 export type DirectiveSpec = {

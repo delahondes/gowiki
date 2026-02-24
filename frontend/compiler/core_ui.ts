@@ -98,31 +98,11 @@ function buildPanel(
     label.className = "gowiki-props-label"
     label.textContent = prop.label
 
-    const input = document.createElement("input")
-    input.type = "text"
     const current = node.attrs[prop.name]
-    input.value = current ?? prop.default ?? ""
-
-    if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
-      const focus = pendingInputRefocus
-      pendingInputRefocus = null
-      requestAnimationFrame(() => {
-        input.focus()
-        if (focus.start !== null && focus.end !== null) {
-          try {
-            input.setSelectionRange(focus.start, focus.end)
-          } catch {
-            // Ignore browsers that reject range restoration.
-          }
-        }
-      })
-    }
-
     const error = document.createElement("span")
     error.className = "gowiki-props-error"
 
-    input.addEventListener("input", () => {
-      const raw = input.value
+    const dispatchChange = (raw: string) => {
       let parsed: string | null
       try {
         parsed =
@@ -145,21 +125,58 @@ function buildPanel(
       const wasNodeSelection =
         state.selection instanceof NodeSelection && state.selection.from === pos
 
-      pendingInputRefocus = {
-        propName: prop.name,
-        start: input.selectionStart,
-        end: input.selectionEnd,
-      }
-
       let tr = state.tr.setNodeMarkup(pos, live.type, attrs)
       if (wasNodeSelection) {
         tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
       }
       view.dispatch(tr)
-    })
+    }
+
+    let control: HTMLElement
+    if (prop.options) {
+      const select = document.createElement("select")
+      for (const opt of prop.options) {
+        const option = document.createElement("option")
+        option.value = opt.value
+        option.textContent = opt.label
+        select.appendChild(option)
+      }
+      select.value = current ?? prop.default ?? ""
+      select.addEventListener("change", () => dispatchChange(select.value))
+      control = select
+    } else {
+      const input = document.createElement("input")
+      input.type = "text"
+      input.value = current ?? prop.default ?? ""
+
+      if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
+        const focus = pendingInputRefocus
+        pendingInputRefocus = null
+        requestAnimationFrame(() => {
+          input.focus()
+          if (focus.start !== null && focus.end !== null) {
+            try {
+              input.setSelectionRange(focus.start, focus.end)
+            } catch {
+              // Ignore browsers that reject range restoration.
+            }
+          }
+        })
+      }
+
+      input.addEventListener("input", () => {
+        pendingInputRefocus = {
+          propName: prop.name,
+          start: input.selectionStart,
+          end: input.selectionEnd,
+        }
+        dispatchChange(input.value)
+      })
+      control = input
+    }
 
     wrap.appendChild(label)
-    wrap.appendChild(input)
+    wrap.appendChild(control)
     wrap.appendChild(error)
   }
 

@@ -70,22 +70,22 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Use(middleware.Logger)
 
 	r.Get("/api/health", s.handleHealth)
-	r.Get("/api/pages/{path:.*}", s.handleGetPage)
-	r.Put("/api/pages/{path:.*}", s.handlePutPage)
+	r.Get("/api/pages/*", s.handleGetPage)
+	r.Put("/api/pages/*", s.handlePutPage)
 
 	r.Get("/api/media", s.handleListMedia)
 	r.Get("/api/media/", s.handleListMedia)
-	r.Get("/api/media/{path:.*}", s.handleListMedia)
+	r.Get("/api/media/*", s.handleListMedia)
 	r.Post("/api/media", s.handleUploadMedia)
 	r.Post("/api/media/", s.handleUploadMedia)
-	r.Post("/api/media/{path:.*}", s.handleUploadMedia)
-	r.Delete("/api/media/{path:.*}", s.handleDeleteMedia)
+	r.Post("/api/media/*", s.handleUploadMedia)
+	r.Delete("/api/media/*", s.handleDeleteMedia)
 	r.Get("/api/media-orphans", s.handleMediaOrphans)
 
 	r.Get("/api/search", s.handleSearch)
 	r.Get("/api/site/logo", s.handleSiteLogo)
 
-	r.Get("/media/{path:.*}", s.handleServeMedia)
+	r.Get("/media/*", s.handleServeMedia)
 	r.Get(`/{path:.*\..*}`, s.handleFilePath)
 
 	if serveWeb {
@@ -101,7 +101,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
-	pagePath := strings.TrimSpace(chi.URLParam(r, "path"))
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
 	if pagePath == "" {
 		writeError(w, http.StatusBadRequest, "missing page path")
 		return
@@ -125,7 +125,7 @@ type putPageRequest struct {
 }
 
 func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
-	pagePath := strings.TrimSpace(chi.URLParam(r, "path"))
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
 	if pagePath == "" {
 		writeError(w, http.StatusBadRequest, "missing page path")
 		return
@@ -158,7 +158,7 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
-	nsPath := strings.TrimSpace(chi.URLParam(r, "path"))
+	nsPath := strings.TrimSpace(chi.URLParam(r, "*"))
 	entries, err := s.mediaStore.List(nsPath)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -187,7 +187,7 @@ func parseBoolFlag(raw string) bool {
 }
 
 func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
-	nsPath := strings.TrimSpace(chi.URLParam(r, "path"))
+	nsPath := strings.TrimSpace(chi.URLParam(r, "*"))
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid multipart form")
 		return
@@ -215,7 +215,7 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
-	mediaPath := strings.TrimSpace(chi.URLParam(r, "path"))
+	mediaPath := strings.TrimSpace(chi.URLParam(r, "*"))
 	if mediaPath == "" {
 		writeError(w, http.StatusBadRequest, "missing media path")
 		return
@@ -252,7 +252,7 @@ func (s *Server) handleMediaOrphans(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimSpace(chi.URLParam(r, "path"))
+	raw := strings.TrimSpace(chi.URLParam(r, "*"))
 	if raw == "" {
 		http.NotFound(w, r)
 		return
