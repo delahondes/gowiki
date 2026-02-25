@@ -15,12 +15,14 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/storage"
 )
 
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
+	Delete(pagePath, author string) (storage.DeleteResult, error)
 }
 
 type OrphanDetector interface {
@@ -30,7 +32,7 @@ type OrphanDetector interface {
 
 type MediaStore interface {
 	List(namespacePath string) ([]storage.MediaEntry, error)
-	Put(namespacePath, fileName string, content io.Reader, overwrite bool) (storage.MediaEntry, error)
+	Put(namespacePath, fileName string, content io.Reader, overwrite bool, author string) (storage.MediaEntry, error)
 	Delete(mediaPath string) error
 	ResolvePath(mediaPath string) (string, error)
 }
@@ -42,39 +44,54 @@ type SearchStore interface {
 type AtticStore interface {
 	ListVersions(pagePath string) ([]storage.AtticEntry, error)
 	ReadVersion(pagePath string, version int64) ([]byte, error)
+	GetEntry(pagePath string, version int64) (*storage.AtticEntry, error)
 }
 
 type LogoResolver interface {
 	ResolveLogo() (string, error)
 }
 
-type Server struct {
-	store          PageStore
-	mediaStore     MediaStore
-	orphanDetector OrphanDetector
-	searchStore    SearchStore
-	atticStore     AtticStore
-	draftManager   DraftManager
-	logoResolver   LogoResolver
-	userStore      *auth.UserStore
-	sessionStore   *auth.SessionStore
-	serveWeb       bool
-	webDirPath     string
+type MediaAtticStore interface {
+	ReadVersion(mediaPath string, version int64) ([]byte, error)
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, userStore *auth.UserStore, sessionStore *auth.SessionStore, serveWeb bool, webDirPath string) http.Handler {
+type Server struct {
+	store           PageStore
+	mediaStore      MediaStore
+	orphanDetector  OrphanDetector
+	searchStore     SearchStore
+	atticStore      AtticStore
+	draftManager    DraftManager
+	logoResolver    LogoResolver
+	mediaAtticStore MediaAtticStore
+	configStore     *config.Store
+	userStore       *auth.UserStore
+	groupStore      *auth.GroupStore
+	sessionStore    *auth.SessionStore
+	aclStore        *auth.ACLStore
+	changelog       *storage.Changelog
+	serveWeb        bool
+	webDirPath      string
+}
+
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
-		store:          store,
-		mediaStore:     mediaStore,
-		orphanDetector: orphanDetector,
-		searchStore:    searchStore,
-		atticStore:     atticStore,
-		draftManager:   draftManager,
-		logoResolver:   logoResolver,
-		userStore:      userStore,
-		sessionStore:   sessionStore,
-		serveWeb:       serveWeb,
-		webDirPath:     webDirPath,
+		store:           store,
+		mediaStore:      mediaStore,
+		orphanDetector:  orphanDetector,
+		searchStore:     searchStore,
+		atticStore:      atticStore,
+		draftManager:    draftManager,
+		logoResolver:    logoResolver,
+		mediaAtticStore: mediaAtticStore,
+		configStore:     configStore,
+		userStore:       userStore,
+		groupStore:      groupStore,
+		sessionStore:    sessionStore,
+		aclStore:        aclStore,
+		changelog:       changelog,
+		serveWeb:        serveWeb,
+		webDirPath:      webDirPath,
 	}
 
 	r := chi.NewRouter()
@@ -90,9 +107,10 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 
 	r.Get("/api/health", s.handleHealth)
 
-	// Read endpoints — open, but with optional auth to identify user.
+	// Read endpoints — optional auth + ACL "view" permission.
 	r.Group(func(r chi.Router) {
 		r.Use(s.optionalAuth)
+		r.Use(s.requirePermission("view"))
 		r.Get("/api/pages/*", s.handleGetPage)
 		r.Get("/api/history/*", s.handlePageHistory)
 		r.Get("/api/versions/*", s.handlePageVersion)
@@ -101,13 +119,20 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/media/", s.handleListMedia)
 		r.Get("/api/media/*", s.handleListMedia)
 		r.Get("/api/media-orphans", s.handleMediaOrphans)
+		r.Get("/api/media-version/*", s.handleServeMediaVersion)
+	})
+
+	// Public read endpoints — no ACL check (search, logo, site info).
+	r.Group(func(r chi.Router) {
+		r.Use(s.optionalAuth)
 		r.Get("/api/search", s.handleSearch)
 		r.Get("/api/site/logo", s.handleSiteLogo)
 	})
 
-	// Write endpoints — require auth.
+	// Write endpoints — require auth + ACL "edit" permission.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
+		r.Use(s.requirePermission("edit"))
 		r.Put("/api/pages/*", s.handlePutPage)
 		r.Post("/api/edit/*", s.handleEnterEdit)
 		r.Put("/api/draft/*", s.handleSaveDraft)
@@ -116,7 +141,40 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Post("/api/media", s.handleUploadMedia)
 		r.Post("/api/media/", s.handleUploadMedia)
 		r.Post("/api/media/*", s.handleUploadMedia)
+	})
+
+	// Delete endpoints — require auth + ACL "delete" permission.
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requirePermission("delete"))
+		r.Delete("/api/pages/*", s.handleDeletePage)
 		r.Delete("/api/media/*", s.handleDeleteMedia)
+	})
+
+	// Admin endpoints — require auth + admin group.
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requireAdmin)
+
+		r.Get("/api/admin/users", s.handleListUsers)
+		r.Post("/api/admin/users", s.handleCreateUser)
+		r.Put("/api/admin/users/{username}", s.handleUpdateUser)
+		r.Delete("/api/admin/users/{username}", s.handleDeleteUser)
+		r.Put("/api/admin/users/{username}/password", s.handleSetPassword)
+
+		r.Get("/api/admin/groups", s.handleListGroups)
+		r.Post("/api/admin/groups", s.handleCreateGroup)
+		r.Put("/api/admin/groups/{name}", s.handleUpdateGroup)
+		r.Delete("/api/admin/groups/{name}", s.handleDeleteGroup)
+
+		r.Get("/api/admin/config", s.handleGetConfig)
+		r.Put("/api/admin/config", s.handleUpdateConfig)
+
+		r.Get("/api/admin/acl", s.handleListACL)
+		r.Put("/api/admin/acl", s.handleReplaceACL)
+
+		r.Get("/api/admin/locks", s.handleListLocks)
+		r.Delete("/api/admin/drafts/*", s.handleAdminDiscardDraft)
 	})
 
 	r.Get("/media/*", s.handleServeMedia)
@@ -213,6 +271,37 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	username := UsernameFromContext(r.Context())
+	result, err := s.store.Delete(pagePath, username)
+	if errors.Is(err, storage.ErrPageNotFound) {
+		writeError(w, http.StatusNotFound, "page not found")
+		return
+	}
+	if errors.Is(err, storage.ErrPageHasLock) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted":        pagePath,
+		"orphaned_media": result.OrphanedMedia,
+		"included_by":    result.IncludedBy,
+	})
+}
+
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 	nsPath := strings.TrimSpace(chi.URLParam(r, "*"))
 	entries, err := s.mediaStore.List(nsPath)
@@ -257,7 +346,8 @@ func (s *Server) handleUploadMedia(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	overwrite := parseBoolFlag(r.FormValue("overwrite"))
-	entry, err := s.mediaStore.Put(nsPath, header.Filename, file, overwrite)
+	author := UsernameFromContext(r.Context())
+	entry, err := s.mediaStore.Put(nsPath, header.Filename, file, overwrite, author)
 	if errors.Is(err, storage.ErrMediaConflict) {
 		writeError(w, http.StatusConflict, "media file already exists")
 		return
@@ -328,6 +418,80 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.ServeFile(w, r, filepath.Clean(targetPath))
+}
+
+func (s *Server) handleServeMediaVersion(w http.ResponseWriter, r *http.Request) {
+	mediaPath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if mediaPath == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	cleaned := path.Clean("/" + mediaPath)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+
+	vStr := r.URL.Query().Get("v")
+	version, err := strconv.ParseInt(vStr, 10, 64)
+	if err != nil || version < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version number")
+		return
+	}
+
+	if s.mediaAtticStore == nil {
+		writeError(w, http.StatusNotFound, "media versioning not available")
+		return
+	}
+
+	content, err := s.mediaAtticStore.ReadVersion(cleaned, version)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Set Content-Type based on file extension.
+	ext := filepath.Ext(cleaned)
+	ct := "application/octet-stream"
+	switch strings.ToLower(ext) {
+	case ".png":
+		ct = "image/png"
+	case ".jpg", ".jpeg":
+		ct = "image/jpeg"
+	case ".gif":
+		ct = "image/gif"
+	case ".svg":
+		ct = "image/svg+xml"
+	case ".webp":
+		ct = "image/webp"
+	case ".pdf":
+		ct = "application/pdf"
+	case ".txt":
+		ct = "text/plain"
+	case ".html", ".htm":
+		ct = "text/html"
+	case ".css":
+		ct = "text/css"
+	case ".js":
+		ct = "application/javascript"
+	case ".json":
+		ct = "application/json"
+	case ".xml":
+		ct = "application/xml"
+	case ".zip":
+		ct = "application/zip"
+	case ".mp4":
+		ct = "video/mp4"
+	case ".webm":
+		ct = "video/webm"
+	case ".mp3":
+		ct = "audio/mpeg"
+	case ".ogg":
+		ct = "audio/ogg"
+	}
+
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(content)
 }
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {

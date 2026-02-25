@@ -305,7 +305,7 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Correct copy/paste semantics across editable and non-editable regions.
 - Document validity enforced after every edit operation.
 
-### v0.5 — History, diff, and draft workflow
+### v0.5 ✓ History, diff, and draft workflow
 - Page locking: a user holding a draft locks the document.
 - Draft state: user-owned, auto-saved every 2 minutes, stored under data/drafts/.
 - Full editing flow: save and continue, save to draft, save and publish, cancel, cancel and discard draft.
@@ -315,8 +315,12 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Undo/rollback to any published version.
 
 ### v0.6 — Admin page
+- Page deletion.
+- Media versionning (page version points to the correct media version)
 - Configuration UI, authentication backends, ACL management.
+  - ACL associate a permission (view, edit, delete) with a user or a group, and a regexp on namespace URI.
 - User management.
+- Group management.
 - Admin override: discard any user's draft, release lock, log the action.
 
 ### v0.7 — Structured data

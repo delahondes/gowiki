@@ -79,6 +79,32 @@ func (idx *IncludeIndex) Save() error {
 	return writeFileAtomic(filePath, data)
 }
 
+// GetIncluders returns the list of pages that include the given page.
+// This is a reverse lookup across the PageToIncludes map.
+func (idx *IncludeIndex) GetIncluders(pagePath string) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	var result []string
+	for page, includes := range idx.PageToIncludes {
+		for _, inc := range includes {
+			if inc == pagePath {
+				result = append(result, page)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// RemovePage removes a page from the include index (both as includer and as included).
+func (idx *IncludeIndex) RemovePage(pagePath string) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	delete(idx.PageToIncludes, pagePath)
+}
+
 // UpdatePage replaces the includes for a page. If includes is empty,
 // the page entry is removed from the index.
 func (idx *IncludeIndex) UpdatePage(pagePath string, includes []string) {

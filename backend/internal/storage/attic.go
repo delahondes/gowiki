@@ -15,11 +15,12 @@ import (
 
 // AtticEntry describes one archived version of a page.
 type AtticEntry struct {
-	Version   int64  `json:"version"`
-	Timestamp string `json:"timestamp"`
-	Author    string `json:"author"`
-	MD5       string `json:"md5"`
-	Summary   string `json:"summary"`
+	Version   int64            `json:"version"`
+	Timestamp string           `json:"timestamp"`
+	Author    string           `json:"author"`
+	MD5       string           `json:"md5"`
+	Summary   string           `json:"summary"`
+	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
 }
 
 // Attic manages the version archive under data/attic/.
@@ -46,7 +47,8 @@ func (a *Attic) versionFile(pagePath string, version int64) string {
 
 // Archive stores a version of a page as a gzipped markdown file and updates the per-page index.
 // If the version file already exists, it is a no-op (dedup).
-func (a *Attic) Archive(pagePath string, version int64, content []byte, author, summary string) error {
+// mediaRefs is optional: if non-nil, it records the media path -> media version at time of archive.
+func (a *Attic) Archive(pagePath string, version int64, content []byte, author, summary string, mediaRefs map[string]int64) error {
 	dir := a.pageDir(pagePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create attic dir: %w", err)
@@ -72,13 +74,17 @@ func (a *Attic) Archive(pagePath string, version int64, content []byte, author, 
 
 	// Update index.
 	entries, _ := a.readIndex(pagePath) // ignore error on first write
-	entries = append(entries, AtticEntry{
+	entry := AtticEntry{
 		Version:   version,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Author:    author,
 		MD5:       md5sum(content),
 		Summary:   summary,
-	})
+	}
+	if len(mediaRefs) > 0 {
+		entry.MediaRefs = mediaRefs
+	}
+	entries = append(entries, entry)
 	return a.writeIndex(pagePath, entries)
 }
 
@@ -111,6 +117,20 @@ func (a *Attic) ListVersions(pagePath string) ([]AtticEntry, error) {
 		return entries[i].Version < entries[j].Version
 	})
 	return entries, nil
+}
+
+// GetEntry returns the attic entry for a specific version, or nil if not found.
+func (a *Attic) GetEntry(pagePath string, version int64) (*AtticEntry, error) {
+	entries, err := a.readIndex(pagePath)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].Version == version {
+			return &entries[i], nil
+		}
+	}
+	return nil, nil
 }
 
 func (a *Attic) readIndex(pagePath string) ([]AtticEntry, error) {
@@ -178,7 +198,7 @@ func (a *Attic) MigrateExistingPages(contentRoot, metaRoot string, changelog *Ch
 			}
 		}
 
-		if err := a.Archive(pagePath, version, content, author, "migration: initial archive"); err != nil {
+		if err := a.Archive(pagePath, version, content, author, "migration: initial archive", nil); err != nil {
 			return fmt.Errorf("migrate %s: %w", pagePath, err)
 		}
 

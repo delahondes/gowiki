@@ -23,7 +23,9 @@ type MediaEntry struct {
 }
 
 type MediaFileStore struct {
-	rootDir string
+	rootDir       string
+	VersionStore  *MediaVersionStore
+	MediaAttic    *MediaAttic
 }
 
 func NewMediaFileStore(rootDir string) (*MediaFileStore, error) {
@@ -88,7 +90,7 @@ func (s *MediaFileStore) List(namespacePath string) ([]MediaEntry, error) {
 	return out, nil
 }
 
-func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, overwrite bool) (MediaEntry, error) {
+func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, overwrite bool, author string) (MediaEntry, error) {
 	ns, err := normalizeMediaNamespacePath(namespacePath)
 	if err != nil {
 		return MediaEntry{}, err
@@ -108,11 +110,25 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 	}
 
 	targetPath := filepath.Join(dirPath, safeName)
+
+	relPath := safeName
+	if ns != "" {
+		relPath = ns + "/" + safeName
+	}
+
 	if !overwrite {
 		if _, statErr := os.Stat(targetPath); statErr == nil {
 			return MediaEntry{}, ErrMediaConflict
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return MediaEntry{}, fmt.Errorf("check media conflict: %w", statErr)
+		}
+	} else {
+		// Archive existing file before overwriting, if it exists.
+		if oldContent, readErr := os.ReadFile(targetPath); readErr == nil && s.VersionStore != nil && s.MediaAttic != nil {
+			currentVersion := s.VersionStore.GetVersion(relPath)
+			if currentVersion > 0 {
+				_ = s.MediaAttic.Archive(relPath, currentVersion, oldContent, author)
+			}
 		}
 	}
 
@@ -120,14 +136,21 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 		return MediaEntry{}, fmt.Errorf("write media file: %w", err)
 	}
 
+	// Track version: increment on overwrite, set to 1 on new upload.
+	if s.VersionStore != nil {
+		currentVersion := s.VersionStore.GetVersion(relPath)
+		if currentVersion == 0 {
+			// New file — set version 1.
+			_ = s.VersionStore.SetVersion(relPath, 1)
+		} else {
+			// Overwrite — increment.
+			_, _ = s.VersionStore.IncrementVersion(relPath)
+		}
+	}
+
 	info, err := os.Stat(targetPath)
 	if err != nil {
 		return MediaEntry{}, fmt.Errorf("stat media file: %w", err)
-	}
-
-	relPath := safeName
-	if ns != "" {
-		relPath = ns + "/" + safeName
 	}
 
 	return MediaEntry{

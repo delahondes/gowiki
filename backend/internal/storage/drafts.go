@@ -8,10 +8,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// LockInfo describes an active draft lock for admin listing.
+type LockInfo struct {
+	Page  string `json:"page"`
+	Owner string `json:"owner"`
+	Since string `json:"since"`
+}
 
 var (
 	ErrPageLocked      = errors.New("page is locked by another user")
@@ -261,6 +269,67 @@ func (d *DraftStore) CleanStaleLocks() error {
 		}
 		return nil
 	})
+}
+
+// ListLocks returns all current draft locks across the wiki.
+func (d *DraftStore) ListLocks() []LockInfo {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	var locks []LockInfo
+	_ = filepath.Walk(d.metaRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".lock.json") {
+			return nil
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		var lock DraftLock
+		if json.Unmarshal(data, &lock) != nil {
+			return nil
+		}
+		if lock.Owner == "" {
+			return nil
+		}
+
+		// Derive page path from file path: strip metaRoot prefix and .lock.json suffix.
+		rel, relErr := filepath.Rel(d.metaRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		pagePath := strings.TrimSuffix(filepath.ToSlash(rel), ".lock.json")
+
+		locks = append(locks, LockInfo{
+			Page:  pagePath,
+			Owner: lock.Owner,
+			Since: lock.Since,
+		})
+		return nil
+	})
+
+	sort.Slice(locks, func(i, j int) bool {
+		return locks[i].Page < locks[j].Page
+	})
+
+	return locks
+}
+
+// AdminDiscardDraft forcefully discards any user's draft, regardless of ownership.
+// This is used for admin override — it does not check that the caller is the draft owner.
+func (d *DraftStore) AdminDiscardDraft(pagePath, draftOwner string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Remove the draft file.
+	os.Remove(d.draftPath(draftOwner, pagePath))
+
+	// Clear the lock file.
+	return d.clearLock(pagePath)
 }
 
 func generateEditToken() string {

@@ -17,6 +17,7 @@ import (
 
 var ErrPageNotFound = errors.New("page not found")
 var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at this path")
+var ErrPageHasLock = errors.New("page is locked by a draft")
 
 // CircularIncludeError is returned when saving a page would create a cycle
 // in the include graph.
@@ -34,6 +35,12 @@ type PutResult struct {
 	OrphanedMedia []string `json:"orphaned_media,omitempty"`
 }
 
+// DeleteResult is returned by Delete with side-effect information.
+type DeleteResult struct {
+	OrphanedMedia []string `json:"orphaned_media,omitempty"`
+	IncludedBy    []string `json:"included_by,omitempty"`
+}
+
 type PageMetadata struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -49,15 +56,16 @@ type Page struct {
 }
 
 type FileStore struct {
-	contentRoot  string
-	metaRoot     string
-	dataDir      string
-	RefIndex     *RefIndex
-	IncludeIndex *IncludeIndex
-	SearchIndex  *SearchIndex
-	Attic        *Attic
-	Changelog    *Changelog
-	Drafts       *DraftStore
+	contentRoot       string
+	metaRoot          string
+	dataDir           string
+	RefIndex          *RefIndex
+	IncludeIndex      *IncludeIndex
+	SearchIndex       *SearchIndex
+	Attic             *Attic
+	Changelog         *Changelog
+	Drafts            *DraftStore
+	MediaVersionStore *MediaVersionStore
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -179,7 +187,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	case err == nil:
 		// Archive the current published content before overwriting.
 		if len(oldContent) > 0 && s.Attic != nil {
-			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "")
+			var oldMediaVersions map[string]int64
+			if s.MediaVersionStore != nil && len(oldMediaRefs) > 0 {
+				oldMediaVersions = s.MediaVersionStore.GetVersionsForPaths(oldMediaRefs)
+			}
+			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "", oldMediaVersions)
 		}
 		meta.UpdatedAt = now
 		meta.Version++
@@ -211,7 +223,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 
 	// Archive the new version.
 	if s.Attic != nil {
-		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "")
+		var newMediaVersions map[string]int64
+		if s.MediaVersionStore != nil && len(newMediaRefs) > 0 {
+			newMediaVersions = s.MediaVersionStore.GetVersionsForPaths(newMediaRefs)
+		}
+		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "", newMediaVersions)
 	}
 
 	// Append to global changelog.
@@ -245,6 +261,108 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		},
 		OrphanedMedia: orphaned,
 	}, nil
+}
+
+// Delete removes a page, archiving its content first. It returns information
+// about orphaned media and pages that included the deleted page.
+func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+
+	contentPath, _, err := s.resolveExistingContentPath(normalized)
+	if errors.Is(err, os.ErrNotExist) {
+		return DeleteResult{}, ErrPageNotFound
+	}
+	if err != nil {
+		return DeleteResult{}, err
+	}
+
+	// Check for draft lock — cannot delete a page being edited.
+	if s.Drafts != nil {
+		lock := s.Drafts.GetLock(normalized)
+		if lock.Owner != "" {
+			return DeleteResult{}, fmt.Errorf("%w: locked by %s", ErrPageHasLock, lock.Owner)
+		}
+	}
+
+	// Read current content for archiving.
+	content, err := os.ReadFile(contentPath)
+	if err != nil {
+		return DeleteResult{}, fmt.Errorf("read page for archiving: %w", err)
+	}
+
+	// Load metadata for version number.
+	metaPath, err := s.metadataPathForContent(contentPath)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	meta, err := s.readOrInitMeta(normalized, contentPath, metaPath)
+	if err != nil {
+		return DeleteResult{}, fmt.Errorf("load metadata: %w", err)
+	}
+
+	// Archive current version with summary "deleted".
+	if s.Attic != nil {
+		if archiveErr := s.Attic.Archive(normalized, meta.Version, content, author, "deleted", nil); archiveErr != nil {
+			return DeleteResult{}, fmt.Errorf("archive before delete: %w", archiveErr)
+		}
+	}
+
+	// Append to global changelog with type "delete".
+	if s.Changelog != nil {
+		s.Changelog.Append(normalized, meta.Version, author, "deleted", "delete")
+	}
+
+	// Remove the .md file.
+	if err := os.Remove(contentPath); err != nil {
+		return DeleteResult{}, fmt.Errorf("remove page file: %w", err)
+	}
+
+	// Remove the metadata .json file (best effort).
+	os.Remove(metaPath)
+
+	// Clean up empty parent directories for content and meta paths.
+	cleanEmptyParents(filepath.Dir(contentPath), s.contentRoot)
+	cleanEmptyParents(filepath.Dir(metaPath), s.metaRoot)
+
+	// Snapshot old media refs before removing from index.
+	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)
+
+	// Update RefIndex: remove all refs from this page.
+	s.RefIndex.RemovePage(normalized)
+
+	// Update IncludeIndex: find pages that include this page (for warning), then remove.
+	includedBy := s.IncludeIndex.GetIncluders(normalized)
+	s.IncludeIndex.RemovePage(normalized)
+
+	// Update SearchIndex: remove this page.
+	if s.SearchIndex != nil {
+		_ = s.SearchIndex.DeletePage(normalized)
+	}
+
+	// Persist indexes (best effort).
+	_ = s.RefIndex.Save()
+	_ = s.IncludeIndex.Save()
+
+	// Compute newly orphaned media: all old refs that now have zero references.
+	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, nil)
+
+	return DeleteResult{
+		OrphanedMedia: orphaned,
+		IncludedBy:    includedBy,
+	}, nil
+}
+
+// cleanEmptyParents removes empty directories from dir up to (but not including) stopAt.
+func cleanEmptyParents(dir, stopAt string) {
+	for dir != stopAt && dir != "." && dir != "/" {
+		if err := os.Remove(dir); err != nil {
+			break // directory not empty or other error
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // FindOrphans returns media files under contentRoot with zero page references.

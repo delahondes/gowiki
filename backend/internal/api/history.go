@@ -166,9 +166,17 @@ func (s *Server) handlePageVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"path":     pagePath,
 		"version":  version,
 		"markdown": string(content),
-	})
+	}
+
+	// Include media_refs from the attic entry if available.
+	entry, entryErr := s.atticStore.GetEntry(pagePath, version)
+	if entryErr == nil && entry != nil && len(entry.MediaRefs) > 0 {
+		resp["media_refs"] = entry.MediaRefs
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

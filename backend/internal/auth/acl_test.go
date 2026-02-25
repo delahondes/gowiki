@@ -1,0 +1,431 @@
+package auth
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestNewACLStore_Bootstrap(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	rules := store.List()
+	if len(rules) != 3 {
+		t.Fatalf("expected 3 bootstrap rules, got %d", len(rules))
+	}
+
+	// Verify the bootstrap file was created.
+	data, err := os.ReadFile(filepath.Join(dir, "acl.json"))
+	if err != nil {
+		t.Fatalf("read acl.json: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("acl.json is empty")
+	}
+}
+
+func TestNewACLStore_LoadExisting(t *testing.T) {
+	dir := t.TempDir()
+	content := `[{"pattern":"wiki/.*","subject_type":"group","subject":"editors","permissions":["view","edit"]}]`
+	if err := os.WriteFile(filepath.Join(dir, "acl.json"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+	rules := store.List()
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+	if rules[0].Pattern != "wiki/.*" {
+		t.Fatalf("unexpected pattern: %s", rules[0].Pattern)
+	}
+}
+
+func TestNewACLStore_InvalidFile(t *testing.T) {
+	dir := t.TempDir()
+	// Write invalid JSON.
+	if err := os.WriteFile(filepath.Join(dir, "acl.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewACLStore(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestNewACLStore_InvalidRulesInFile(t *testing.T) {
+	dir := t.TempDir()
+	// Valid JSON but invalid subject_type.
+	content := `[{"pattern":".*","subject_type":"bogus","subject":"x","permissions":["view"]}]`
+	if err := os.WriteFile(filepath.Join(dir, "acl.json"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewACLStore(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid subject_type")
+	}
+}
+
+func TestACLStore_Replace(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	newRules := []ACLRule{
+		{Pattern: "public/.*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: ".*", SubjectType: "special", Subject: "@authenticated", Permissions: []string{"view", "edit"}},
+	}
+	if err := store.Replace(newRules); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	rules := store.List()
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
+	}
+
+	// Reload from disk to verify persistence.
+	store2, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	rules2 := store2.List()
+	if len(rules2) != 2 {
+		t.Fatalf("persisted rules: expected 2, got %d", len(rules2))
+	}
+}
+
+func TestACLStore_Replace_ValidationErrors(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		rules []ACLRule
+	}{
+		{
+			name:  "invalid regexp",
+			rules: []ACLRule{{Pattern: "[invalid", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}}},
+		},
+		{
+			name:  "invalid subject_type",
+			rules: []ACLRule{{Pattern: ".*", SubjectType: "role", Subject: "admin", Permissions: []string{"view"}}},
+		},
+		{
+			name:  "invalid special subject",
+			rules: []ACLRule{{Pattern: ".*", SubjectType: "special", Subject: "@nobody", Permissions: []string{"view"}}},
+		},
+		{
+			name:  "invalid permission",
+			rules: []ACLRule{{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"fly"}}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := store.Replace(tc.rules); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	// Verify original rules are unchanged after failed Replace attempts.
+	rules := store.List()
+	if len(rules) != 3 {
+		t.Fatalf("expected original 3 rules after failed replace, got %d", len(rules))
+	}
+}
+
+func TestCheckPermission_AllowAll(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+	// Bootstrap rules: @all can view, editors can view+edit, admin can view+edit+delete.
+
+	// Unauthenticated user can view.
+	if !store.CheckPermission("", nil, "some/page", "view") {
+		t.Error("@all should allow view for unauthenticated")
+	}
+
+	// Unauthenticated user cannot edit.
+	if store.CheckPermission("", nil, "some/page", "edit") {
+		t.Error("@all should not allow edit for unauthenticated")
+	}
+}
+
+func TestCheckPermission_GroupMatch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// User in "editors" group should be able to edit.
+	if !store.CheckPermission("alice", []string{"editors"}, "any/path", "edit") {
+		t.Error("editors group should allow edit")
+	}
+
+	// User in "editors" group should be able to view.
+	if !store.CheckPermission("alice", []string{"editors"}, "any/path", "view") {
+		t.Error("editors group should allow view")
+	}
+
+	// User in "editors" group should not be able to delete.
+	if store.CheckPermission("alice", []string{"editors"}, "any/path", "delete") {
+		t.Error("editors group should not allow delete")
+	}
+}
+
+func TestCheckPermission_AdminGroup(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// User in "admin" group should be able to do everything.
+	for _, action := range []string{"view", "edit", "delete"} {
+		if !store.CheckPermission("root", []string{"admin"}, "any/path", action) {
+			t.Errorf("admin group should allow %s", action)
+		}
+	}
+}
+
+func TestCheckPermission_SpecificPattern(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Replace with rules where a specific pattern overrides the general one.
+	err = store.Replace([]ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "secret/.*", SubjectType: "group", Subject: "admin", Permissions: []string{"view", "edit", "delete"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Unauthenticated can view public pages.
+	if !store.CheckPermission("", nil, "public/page", "view") {
+		t.Error("@all should allow view for public pages")
+	}
+
+	// Unauthenticated can also view secret pages because @all matches them via ".*".
+	// The spec says: collect matching rules (path + subject), then pick most specific.
+	// For an unauthenticated user, only @all at ".*" matches. The admin rule at "secret/.*"
+	// does not match because the user is not in the admin group. So the most specific
+	// matching rule is @all at ".*", which grants "view".
+	if !store.CheckPermission("", nil, "secret/page", "view") {
+		t.Error("@all should still allow view for secret pages (no matching deny rule)")
+	}
+
+	// To truly restrict secret pages, you must NOT have @all at ".*" or add
+	// a more specific @all deny. Test that pattern:
+	err = store.Replace([]ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "secret/.*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "secret/.*", SubjectType: "group", Subject: "admin", Permissions: []string{"view", "edit", "delete"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Now the most specific level for "secret/page" is "secret/.*" (len 9).
+	// At that level, both @all and admin group match. Union gives view + edit + delete.
+	// Unauthenticated user (matched by @all) gets "view" from the @all rule at "secret/.*".
+	if !store.CheckPermission("", nil, "secret/page", "view") {
+		t.Error("@all at secret/.* should grant view")
+	}
+	// Unauthenticated should NOT get edit (only admin group has it at this level).
+	if store.CheckPermission("", nil, "secret/page", "edit") {
+		t.Error("unauthenticated should not get edit even at specific level")
+	}
+
+	// Admin can view and edit secret pages.
+	if !store.CheckPermission("root", []string{"admin"}, "secret/page", "view") {
+		t.Error("admin should be able to view secret pages")
+	}
+	if !store.CheckPermission("root", []string{"admin"}, "secret/page", "edit") {
+		t.Error("admin should be able to edit secret pages")
+	}
+}
+
+func TestCheckPermission_UserMatch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	err = store.Replace([]ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "user/alice/.*", SubjectType: "user", Subject: "alice", Permissions: []string{"view", "edit"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Alice can edit her own pages.
+	if !store.CheckPermission("alice", nil, "user/alice/notes", "edit") {
+		t.Error("alice should be able to edit her pages")
+	}
+
+	// Bob cannot edit alice's pages.
+	if store.CheckPermission("bob", nil, "user/alice/notes", "edit") {
+		t.Error("bob should not be able to edit alice's pages")
+	}
+
+	// Bob can still view public pages.
+	if !store.CheckPermission("bob", nil, "public/page", "view") {
+		t.Error("bob should be able to view public pages via @all")
+	}
+}
+
+func TestCheckPermission_AuthenticatedSpecial(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	err = store.Replace([]ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@authenticated", Permissions: []string{"view", "edit"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Authenticated user can view.
+	if !store.CheckPermission("alice", nil, "any/page", "view") {
+		t.Error("@authenticated should match logged-in user for view")
+	}
+
+	// Authenticated user can edit.
+	if !store.CheckPermission("alice", nil, "any/page", "edit") {
+		t.Error("@authenticated should match logged-in user for edit")
+	}
+
+	// Unauthenticated user cannot view.
+	if store.CheckPermission("", nil, "any/page", "view") {
+		t.Error("@authenticated should not match unauthenticated user")
+	}
+}
+
+func TestCheckPermission_NoRulesMatch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Replace with a narrow rule that won't match.
+	err = store.Replace([]ACLRule{
+		{Pattern: "specific/page", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// A different path should be denied.
+	if store.CheckPermission("", nil, "other/page", "view") {
+		t.Error("should deny when no rules match")
+	}
+}
+
+func TestCheckPermission_UnionAtSameSpecificity(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Two rules with the same pattern length that both match.
+	err = store.Replace([]ACLRule{
+		{Pattern: "docs/.*", SubjectType: "group", Subject: "readers", Permissions: []string{"view"}},
+		{Pattern: "docs/.*", SubjectType: "group", Subject: "writers", Permissions: []string{"edit"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// A user in both groups should get the union: view + edit.
+	if !store.CheckPermission("alice", []string{"readers", "writers"}, "docs/guide", "view") {
+		t.Error("should have view from readers group")
+	}
+	if !store.CheckPermission("alice", []string{"readers", "writers"}, "docs/guide", "edit") {
+		t.Error("should have edit from writers group")
+	}
+}
+
+func TestCheckPermission_PatternAnchoring(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	err = store.Replace([]ACLRule{
+		{Pattern: "secret", SubjectType: "group", Subject: "admin", Permissions: []string{"view"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// "secret" should match exactly "secret" but not "secret/sub".
+	if !store.CheckPermission("root", []string{"admin"}, "secret", "view") {
+		t.Error("exact pattern should match exact path")
+	}
+	if store.CheckPermission("root", []string{"admin"}, "secret/sub", "view") {
+		t.Error("exact pattern should not match sub-path")
+	}
+	if store.CheckPermission("root", []string{"admin"}, "notsecret", "view") {
+		t.Error("exact pattern should not match different prefix")
+	}
+}
+
+func TestValidateRules(t *testing.T) {
+	// Valid rule set.
+	valid := []ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "admin/.*", SubjectType: "group", Subject: "admin", Permissions: []string{"view", "edit", "delete"}},
+		{Pattern: "user/alice/.*", SubjectType: "user", Subject: "alice", Permissions: []string{"view", "edit"}},
+		{Pattern: ".*", SubjectType: "special", Subject: "@authenticated", Permissions: []string{"view", "edit"}},
+	}
+	if err := validateRules(valid); err != nil {
+		t.Fatalf("expected valid rules to pass: %v", err)
+	}
+}
+
+func TestList_ReturnsCopy(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	rules := store.List()
+	// Mutate the returned slice.
+	rules[0].Pattern = "modified"
+
+	// Original should be unaffected.
+	original := store.List()
+	if original[0].Pattern == "modified" {
+		t.Error("List should return a copy, not a reference to internal state")
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	"gowiki/backend/internal/api"
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/storage"
 )
 
@@ -42,13 +43,44 @@ func main() {
 		log.Fatalf("init media storage: %v", err)
 	}
 
+	// Initialize media version tracking.
+	mediaVersionStore := storage.NewMediaVersionStore(metaRoot)
+	if err := mediaVersionStore.Load(); err != nil {
+		log.Fatalf("init media version store: %v", err)
+	}
+	mediaStore.VersionStore = mediaVersionStore
+	store.MediaVersionStore = mediaVersionStore
+
+	// Initialize media attic for archiving old media versions.
+	mediaDataDir := filepath.Dir(contentRoot)
+	mediaAttic := storage.NewMediaAttic(mediaDataDir)
+	mediaStore.MediaAttic = mediaAttic
+
 	userStore, err := auth.NewUserStore(metaRoot)
 	if err != nil {
 		log.Fatalf("init user store: %v", err)
 	}
+	groupStore, err := auth.NewGroupStore(metaRoot)
+	if err != nil {
+		log.Fatalf("init group store: %v", err)
+	}
 	sessionStore := auth.NewSessionStore()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, userStore, sessionStore, *serveWeb, filepath.Clean(*webDir))
+	aclStore, err := auth.NewACLStore(metaRoot)
+	if err != nil {
+		log.Fatalf("init acl store: %v", err)
+	}
+
+	// Load site configuration (creates default config.yaml if absent).
+	dataRoot := filepath.Dir(contentRoot)
+	configPath := filepath.Join(dataRoot, "config.yaml")
+	configStore, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("init config: %v", err)
+	}
+	log.Printf("config: %s", configPath)
+
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

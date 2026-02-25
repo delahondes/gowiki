@@ -3023,6 +3023,15 @@ function renderActions() {
         void promptNewPage()
       })
     )
+
+    // Delete button — only shown when authenticated and not a new page.
+    if (currentUser && !isNewPage) {
+      const deleteBtn = makeActionButton("Delete", () => {
+        void deletePage()
+      })
+      deleteBtn.className = "gowiki-action-btn gowiki-action-delete"
+      actionsRoot.appendChild(deleteBtn)
+    }
   }
 
   const status = document.createElement("div")
@@ -3036,6 +3045,36 @@ async function publishFromView() {
   const ok = await enterEditMode(false)
   if (!ok) return
   await publishDraft()
+}
+
+async function deletePage() {
+  if (!confirm(`Delete page "${pageDisplayPath}"? This will archive the content.`)) {
+    return
+  }
+
+  const resp = await authFetch(`/api/pages/${pagePath}`, { method: "DELETE" })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    const msg = data.error || `Delete failed (${resp.status})`
+    setStatus(msg)
+    return
+  }
+
+  const data = await resp.json()
+
+  // Warn about pages that include this page.
+  if (data.included_by && data.included_by.length > 0) {
+    alert(
+      `Warning: this page was included by:\n${data.included_by.join("\n")}\n\nThose pages may now have broken includes.`
+    )
+  }
+
+  // Navigate to parent namespace or root.
+  const parent = pagePath.includes("/")
+    ? "/" + pagePath.split("/").slice(0, -1).join("/")
+    : "/"
+  setStatus("Page deleted.")
+  window.location.href = parent
 }
 
 // ── History and Diff UI ──────────────────────────────
@@ -3097,6 +3136,17 @@ function renderHistoryPage(versions, draft) {
     const notice = document.createElement("div")
     notice.className = "gowiki-history-draft-notice"
     notice.textContent = `A draft by ${draft.owner} exists`
+
+    // Admin users get a force-discard button.
+    if (currentUser && currentUser.is_admin) {
+      const forceBtn = document.createElement("button")
+      forceBtn.textContent = "Force discard"
+      forceBtn.className = "gowiki-history-btn gowiki-history-btn-discard"
+      forceBtn.style.marginLeft = "12px"
+      forceBtn.addEventListener("click", () => void adminForceDiscardDraft(draft.owner))
+      notice.appendChild(forceBtn)
+    }
+
     container.appendChild(notice)
   }
 
@@ -3587,6 +3637,16 @@ function renderBannerUser() {
     const span = document.createElement("span")
     span.textContent = currentUser.username
     el.appendChild(span)
+    if (currentUser.is_admin) {
+      const adminLink = document.createElement("a")
+      adminLink.textContent = "Admin"
+      adminLink.href = "/admin"
+      adminLink.addEventListener("click", (e) => {
+        e.preventDefault()
+        window.location.href = "/admin"
+      })
+      el.appendChild(adminLink)
+    }
     const logout = document.createElement("a")
     logout.textContent = "Logout"
     logout.addEventListener("click", async (e) => {
@@ -3972,6 +4032,24 @@ async function discardDraftFromHistory(hasChanges) {
   }
 }
 
+async function adminForceDiscardDraft(draftOwner) {
+  const msg = `Discard ${draftOwner}'s draft on ${pageDisplayPath}? This is irreversible and will be logged.`
+  if (!confirm(msg)) return
+
+  const resp = await authFetch(`/api/admin/drafts/${encodePagePath(pagePath)}`, {
+    method: "DELETE",
+  })
+  if (resp.ok) {
+    pageLockInfo = null
+    await reloadPageContent()
+    setStatus(`Draft by ${draftOwner} discarded (admin override)`)
+    showHistory()
+  } else {
+    const body = await resp.json().catch(() => ({}))
+    setStatus(body.error || "Force discard failed")
+  }
+}
+
 async function saveDraftAndExit() {
   await saveDraftExplicit()
   // Stash editor state so undo survives resume.
@@ -3984,6 +4062,940 @@ async function saveDraftAndExit() {
   setMode("view")
 }
 
+// ── Admin Page ────────────────────────────────────────
+
+function renderAdminPage() {
+  contentRoot.innerHTML = ""
+  actionsRoot.innerHTML = ""
+
+  // Show "Administration" in actions sidebar
+  const label = document.createElement("div")
+  label.className = "gowiki-status"
+  label.textContent = "Administration"
+  actionsRoot.appendChild(label)
+
+  // Back to wiki link
+  const backBtn = document.createElement("button")
+  backBtn.className = "gowiki-action-btn"
+  backBtn.textContent = "Back to Wiki"
+  backBtn.addEventListener("click", () => { window.location.href = "/" })
+  actionsRoot.appendChild(backBtn)
+
+  // Tab bar
+  const tabBar = document.createElement("div")
+  tabBar.className = "gowiki-admin-tabs"
+
+  const tabContent = document.createElement("div")
+  tabContent.className = "gowiki-admin-content"
+
+  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration"]
+  let activeTab = "Users"
+
+  function renderTabBar() {
+    tabBar.innerHTML = ""
+    for (const name of tabs) {
+      const btn = document.createElement("button")
+      btn.className = "gowiki-admin-tab" + (name === activeTab ? " gowiki-admin-tab-active" : "")
+      btn.textContent = name
+      btn.addEventListener("click", () => switchTab(name))
+      tabBar.appendChild(btn)
+    }
+  }
+
+  function switchTab(name) {
+    activeTab = name
+    renderTabBar()
+    loadTab(name)
+  }
+
+  function loadTab(name) {
+    tabContent.innerHTML = ""
+    switch (name) {
+      case "Users": renderAdminUsersTab(tabContent); break
+      case "Groups": renderAdminGroupsTab(tabContent); break
+      case "ACL": renderAdminACLTab(tabContent); break
+      case "Locks": renderAdminLocksTab(tabContent); break
+      case "Configuration": renderAdminConfigTab(tabContent); break
+    }
+  }
+
+  renderTabBar()
+  loadTab("Users")
+
+  contentRoot.appendChild(tabBar)
+  contentRoot.appendChild(tabContent)
+}
+
+// ── Admin: Modal helper ───────────────────────────────
+
+function showAdminModal(title, buildContent) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-admin-modal-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-admin-modal"
+
+    const h3 = document.createElement("h3")
+    h3.textContent = title
+    dialog.appendChild(h3)
+
+    const errorEl = document.createElement("div")
+    errorEl.className = "gowiki-admin-modal-error"
+    dialog.appendChild(errorEl)
+
+    function showError(msg) {
+      errorEl.textContent = msg
+      errorEl.style.display = "block"
+    }
+
+    function close(result) {
+      overlay.remove()
+      resolve(result)
+    }
+
+    const body = document.createElement("div")
+    body.className = "gowiki-admin-modal-body"
+    dialog.appendChild(body)
+
+    buildContent(body, close, showError)
+
+    overlay.appendChild(dialog)
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(null) })
+    document.addEventListener("keydown", function handler(e) {
+      if (e.key === "Escape") {
+        document.removeEventListener("keydown", handler)
+        close(null)
+      }
+    })
+    document.body.appendChild(overlay)
+  })
+}
+
+function adminModalActions(parent, onCancel, onConfirm, confirmLabel) {
+  const actions = document.createElement("div")
+  actions.className = "gowiki-admin-modal-actions"
+  const cancelBtn = document.createElement("button")
+  cancelBtn.textContent = "Cancel"
+  cancelBtn.addEventListener("click", onCancel)
+  const confirmBtn = document.createElement("button")
+  confirmBtn.textContent = confirmLabel || "Save"
+  confirmBtn.className = "primary"
+  confirmBtn.addEventListener("click", onConfirm)
+  actions.append(cancelBtn, confirmBtn)
+  parent.appendChild(actions)
+  return { cancelBtn, confirmBtn }
+}
+
+function adminFormField(parent, labelText, type, value) {
+  const label = document.createElement("label")
+  label.textContent = labelText
+  parent.appendChild(label)
+  const input = document.createElement("input")
+  input.type = type || "text"
+  if (value !== undefined) input.value = value
+  parent.appendChild(input)
+  return input
+}
+
+function adminFormSelect(parent, labelText, options, selectedValue) {
+  const label = document.createElement("label")
+  label.textContent = labelText
+  parent.appendChild(label)
+  const select = document.createElement("select")
+  for (const opt of options) {
+    const o = document.createElement("option")
+    o.value = opt.value
+    o.textContent = opt.label
+    if (opt.value === selectedValue) o.selected = true
+    select.appendChild(o)
+  }
+  parent.appendChild(select)
+  return select
+}
+
+// ── Admin: Users Tab ──────────────────────────────────
+
+async function renderAdminUsersTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading users...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/users")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load users.</div>'
+      return
+    }
+    const data = await resp.json()
+    const users = data.users || []
+
+    container.innerHTML = ""
+
+    // Create user button
+    const toolbar = document.createElement("div")
+    toolbar.className = "gowiki-admin-toolbar"
+    const createBtn = document.createElement("button")
+    createBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    createBtn.textContent = "Create User"
+    createBtn.addEventListener("click", async () => {
+      const result = await showCreateUserModal()
+      if (result) renderAdminUsersTab(container)
+    })
+    toolbar.appendChild(createBtn)
+    container.appendChild(toolbar)
+
+    if (users.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-admin-empty"
+      empty.textContent = "No users found."
+      container.appendChild(empty)
+      return
+    }
+
+    const table = document.createElement("table")
+    table.className = "gowiki-admin-table"
+
+    const thead = document.createElement("thead")
+    const headerRow = document.createElement("tr")
+    for (const col of ["Username", "Display Name", "Email", "Groups", "Status", "Last Login", "Actions"]) {
+      const th = document.createElement("th")
+      th.textContent = col
+      headerRow.appendChild(th)
+    }
+    thead.appendChild(headerRow)
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+    for (const user of users) {
+      const tr = document.createElement("tr")
+
+      const tdUsername = document.createElement("td")
+      tdUsername.textContent = user.username
+      tr.appendChild(tdUsername)
+
+      const tdDisplay = document.createElement("td")
+      tdDisplay.textContent = user.display_name || ""
+      tr.appendChild(tdDisplay)
+
+      const tdEmail = document.createElement("td")
+      tdEmail.textContent = user.email || ""
+      tr.appendChild(tdEmail)
+
+      const tdGroups = document.createElement("td")
+      tdGroups.textContent = (user.groups || []).join(", ")
+      tr.appendChild(tdGroups)
+
+      const tdStatus = document.createElement("td")
+      const badge = document.createElement("span")
+      badge.className = user.disabled ? "gowiki-admin-badge-disabled" : "gowiki-admin-badge-active"
+      badge.textContent = user.disabled ? "Disabled" : "Active"
+      tdStatus.appendChild(badge)
+      tr.appendChild(tdStatus)
+
+      const tdLogin = document.createElement("td")
+      tdLogin.textContent = user.last_login ? new Date(user.last_login).toLocaleString() : "Never"
+      tr.appendChild(tdLogin)
+
+      const tdActions = document.createElement("td")
+      tdActions.className = "gowiki-admin-actions-cell"
+
+      const editBtn = document.createElement("button")
+      editBtn.className = "gowiki-admin-btn-small"
+      editBtn.textContent = "Edit"
+      editBtn.addEventListener("click", async () => {
+        const result = await showEditUserModal(user)
+        if (result) renderAdminUsersTab(container)
+      })
+      tdActions.appendChild(editBtn)
+
+      const pwBtn = document.createElement("button")
+      pwBtn.className = "gowiki-admin-btn-small"
+      pwBtn.textContent = "Password"
+      pwBtn.addEventListener("click", async () => {
+        await showSetPasswordModal(user.username)
+      })
+      tdActions.appendChild(pwBtn)
+
+      // Don't allow deleting yourself
+      if (user.username !== currentUser.username) {
+        const delBtn = document.createElement("button")
+        delBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+        delBtn.textContent = "Delete"
+        delBtn.addEventListener("click", async () => {
+          if (confirm("Delete user \"" + user.username + "\"? This cannot be undone.")) {
+            const r = await authFetch("/api/admin/users/" + encodeURIComponent(user.username), { method: "DELETE" })
+            if (r.ok) renderAdminUsersTab(container)
+            else alert("Failed to delete user.")
+          }
+        })
+        tdActions.appendChild(delBtn)
+      }
+
+      tr.appendChild(tdActions)
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    container.appendChild(table)
+
+  } catch (err) {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load users.</div>'
+  }
+}
+
+async function showCreateUserModal() {
+  return showAdminModal("Create User", (body, close, showError) => {
+    const usernameInput = adminFormField(body, "Username", "text")
+    const passwordInput = adminFormField(body, "Password", "password")
+    const emailInput = adminFormField(body, "Email", "email")
+    const displayInput = adminFormField(body, "Display Name", "text")
+    const groupsInput = adminFormField(body, "Groups (comma-separated)", "text")
+
+    adminModalActions(body, () => close(null), async () => {
+      const username = usernameInput.value.trim()
+      const password = passwordInput.value
+      if (!username || !password) {
+        showError("Username and password are required.")
+        return
+      }
+      const groups = groupsInput.value.split(",").map(s => s.trim()).filter(Boolean)
+      try {
+        const resp = await authFetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username,
+            password,
+            email: emailInput.value.trim(),
+            display_name: displayInput.value.trim(),
+            groups,
+          }),
+        })
+        if (resp.ok) {
+          close(true)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          showError(err.error || "Failed to create user.")
+        }
+      } catch {
+        showError("Network error.")
+      }
+    }, "Create")
+  })
+}
+
+async function showEditUserModal(user) {
+  return showAdminModal("Edit User: " + user.username, (body, close, showError) => {
+    const emailInput = adminFormField(body, "Email", "email", user.email || "")
+    const displayInput = adminFormField(body, "Display Name", "text", user.display_name || "")
+    const groupsInput = adminFormField(body, "Groups (comma-separated)", "text", (user.groups || []).join(", "))
+
+    const disabledLabel = document.createElement("label")
+    disabledLabel.className = "gowiki-admin-checkbox-label"
+    const disabledCheck = document.createElement("input")
+    disabledCheck.type = "checkbox"
+    disabledCheck.checked = !!user.disabled
+    disabledLabel.appendChild(disabledCheck)
+    disabledLabel.appendChild(document.createTextNode(" Disabled"))
+    body.appendChild(disabledLabel)
+
+    adminModalActions(body, () => close(null), async () => {
+      const groups = groupsInput.value.split(",").map(s => s.trim()).filter(Boolean)
+      try {
+        const resp = await authFetch("/api/admin/users/" + encodeURIComponent(user.username), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: emailInput.value.trim(),
+            display_name: displayInput.value.trim(),
+            groups,
+            disabled: disabledCheck.checked,
+          }),
+        })
+        if (resp.ok) {
+          close(true)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          showError(err.error || "Failed to update user.")
+        }
+      } catch {
+        showError("Network error.")
+      }
+    }, "Save")
+  })
+}
+
+async function showSetPasswordModal(username) {
+  return showAdminModal("Set Password: " + username, (body, close, showError) => {
+    const passwordInput = adminFormField(body, "New Password", "password")
+    const confirmInput = adminFormField(body, "Confirm Password", "password")
+
+    adminModalActions(body, () => close(null), async () => {
+      const password = passwordInput.value
+      if (!password) {
+        showError("Password is required.")
+        return
+      }
+      if (password !== confirmInput.value) {
+        showError("Passwords do not match.")
+        return
+      }
+      try {
+        const resp = await authFetch("/api/admin/users/" + encodeURIComponent(username) + "/password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        })
+        if (resp.ok) {
+          close(true)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          showError(err.error || "Failed to set password.")
+        }
+      } catch {
+        showError("Network error.")
+      }
+    }, "Set Password")
+  })
+}
+
+// ── Admin: Groups Tab ─────────────────────────────────
+
+async function renderAdminGroupsTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading groups...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/groups")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load groups.</div>'
+      return
+    }
+    const data = await resp.json()
+    const groups = data.groups || []
+
+    container.innerHTML = ""
+
+    const toolbar = document.createElement("div")
+    toolbar.className = "gowiki-admin-toolbar"
+    const createBtn = document.createElement("button")
+    createBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    createBtn.textContent = "Create Group"
+    createBtn.addEventListener("click", async () => {
+      const result = await showCreateGroupModal()
+      if (result) renderAdminGroupsTab(container)
+    })
+    toolbar.appendChild(createBtn)
+    container.appendChild(toolbar)
+
+    if (groups.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-admin-empty"
+      empty.textContent = "No groups found."
+      container.appendChild(empty)
+      return
+    }
+
+    const table = document.createElement("table")
+    table.className = "gowiki-admin-table"
+
+    const thead = document.createElement("thead")
+    const headerRow = document.createElement("tr")
+    for (const col of ["Name", "Description", "Actions"]) {
+      const th = document.createElement("th")
+      th.textContent = col
+      headerRow.appendChild(th)
+    }
+    thead.appendChild(headerRow)
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+    for (const group of groups) {
+      const tr = document.createElement("tr")
+
+      const tdName = document.createElement("td")
+      tdName.textContent = group.name
+      tr.appendChild(tdName)
+
+      const tdDesc = document.createElement("td")
+      tdDesc.textContent = group.description || ""
+      tr.appendChild(tdDesc)
+
+      const tdActions = document.createElement("td")
+      tdActions.className = "gowiki-admin-actions-cell"
+
+      const editBtn = document.createElement("button")
+      editBtn.className = "gowiki-admin-btn-small"
+      editBtn.textContent = "Edit"
+      editBtn.addEventListener("click", async () => {
+        const result = await showEditGroupModal(group)
+        if (result) renderAdminGroupsTab(container)
+      })
+      tdActions.appendChild(editBtn)
+
+      // Protect the admin group from deletion
+      if (group.name !== "admin") {
+        const delBtn = document.createElement("button")
+        delBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+        delBtn.textContent = "Delete"
+        delBtn.addEventListener("click", async () => {
+          if (confirm("Delete group \"" + group.name + "\"? This cannot be undone.")) {
+            const r = await authFetch("/api/admin/groups/" + encodeURIComponent(group.name), { method: "DELETE" })
+            if (r.ok) renderAdminGroupsTab(container)
+            else alert("Failed to delete group.")
+          }
+        })
+        tdActions.appendChild(delBtn)
+      }
+
+      tr.appendChild(tdActions)
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    container.appendChild(table)
+
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load groups.</div>'
+  }
+}
+
+async function showCreateGroupModal() {
+  return showAdminModal("Create Group", (body, close, showError) => {
+    const nameInput = adminFormField(body, "Name", "text")
+    const descInput = adminFormField(body, "Description", "text")
+
+    adminModalActions(body, () => close(null), async () => {
+      const name = nameInput.value.trim()
+      if (!name) {
+        showError("Group name is required.")
+        return
+      }
+      try {
+        const resp = await authFetch("/api/admin/groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, description: descInput.value.trim() }),
+        })
+        if (resp.ok) {
+          close(true)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          showError(err.error || "Failed to create group.")
+        }
+      } catch {
+        showError("Network error.")
+      }
+    }, "Create")
+  })
+}
+
+async function showEditGroupModal(group) {
+  return showAdminModal("Edit Group: " + group.name, (body, close, showError) => {
+    const descInput = adminFormField(body, "Description", "text", group.description || "")
+
+    adminModalActions(body, () => close(null), async () => {
+      try {
+        const resp = await authFetch("/api/admin/groups/" + encodeURIComponent(group.name), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: descInput.value.trim() }),
+        })
+        if (resp.ok) {
+          close(true)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          showError(err.error || "Failed to update group.")
+        }
+      } catch {
+        showError("Network error.")
+      }
+    }, "Save")
+  })
+}
+
+// ── Admin: ACL Tab ────────────────────────────────────
+
+async function renderAdminACLTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading ACL rules...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/acl")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load ACL rules.</div>'
+      return
+    }
+    const data = await resp.json()
+    let rules = data.rules || []
+
+    container.innerHTML = ""
+
+    const toolbar = document.createElement("div")
+    toolbar.className = "gowiki-admin-toolbar"
+
+    const addBtn = document.createElement("button")
+    addBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    addBtn.textContent = "Add Rule"
+    addBtn.addEventListener("click", () => {
+      rules.push({ pattern: ".*", subject_type: "special", subject: "@all", permissions: ["view"] })
+      renderRules()
+    })
+    toolbar.appendChild(addBtn)
+
+    const saveBtn = document.createElement("button")
+    saveBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    saveBtn.textContent = "Save ACL"
+    saveBtn.addEventListener("click", async () => {
+      collectRulesFromDOM()
+      try {
+        const r = await authFetch("/api/admin/acl", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rules }),
+        })
+        if (r.ok) {
+          statusMsg.textContent = "ACL saved."
+          statusMsg.style.color = "#155724"
+          statusMsg.style.display = "inline"
+          setTimeout(() => { statusMsg.style.display = "none" }, 3000)
+        } else {
+          const err = await r.json().catch(() => ({}))
+          statusMsg.textContent = err.error || "Failed to save ACL."
+          statusMsg.style.color = "#c33"
+          statusMsg.style.display = "inline"
+        }
+      } catch {
+        statusMsg.textContent = "Network error."
+        statusMsg.style.color = "#c33"
+        statusMsg.style.display = "inline"
+      }
+    })
+    toolbar.appendChild(saveBtn)
+
+    const statusMsg = document.createElement("span")
+    statusMsg.className = "gowiki-admin-status-msg"
+    statusMsg.style.display = "none"
+    toolbar.appendChild(statusMsg)
+
+    container.appendChild(toolbar)
+
+    const tableContainer = document.createElement("div")
+    container.appendChild(tableContainer)
+
+    function collectRulesFromDOM() {
+      const rows = tableContainer.querySelectorAll("tr[data-rule-index]")
+      rules = []
+      rows.forEach((row) => {
+        const patternInput = row.querySelector("[data-field='pattern']")
+        const typeSelect = row.querySelector("[data-field='subject_type']")
+        const subjectInput = row.querySelector("[data-field='subject']")
+        const viewCheck = row.querySelector("[data-perm='view']")
+        const editCheck = row.querySelector("[data-perm='edit']")
+        const deleteCheck = row.querySelector("[data-perm='delete']")
+        const perms = []
+        if (viewCheck && viewCheck.checked) perms.push("view")
+        if (editCheck && editCheck.checked) perms.push("edit")
+        if (deleteCheck && deleteCheck.checked) perms.push("delete")
+        rules.push({
+          pattern: patternInput ? patternInput.value : "",
+          subject_type: typeSelect ? typeSelect.value : "special",
+          subject: subjectInput ? subjectInput.value : "@all",
+          permissions: perms,
+        })
+      })
+    }
+
+    function renderRules() {
+      tableContainer.innerHTML = ""
+
+      if (rules.length === 0) {
+        const empty = document.createElement("div")
+        empty.className = "gowiki-admin-empty"
+        empty.textContent = "No ACL rules defined."
+        tableContainer.appendChild(empty)
+        return
+      }
+
+      const table = document.createElement("table")
+      table.className = "gowiki-admin-table"
+
+      const thead = document.createElement("thead")
+      const headerRow = document.createElement("tr")
+      for (const col of ["Pattern", "Subject Type", "Subject", "View", "Edit", "Delete", ""]) {
+        const th = document.createElement("th")
+        th.textContent = col
+        headerRow.appendChild(th)
+      }
+      thead.appendChild(headerRow)
+      table.appendChild(thead)
+
+      const tbody = document.createElement("tbody")
+      rules.forEach((rule, index) => {
+        const tr = document.createElement("tr")
+        tr.setAttribute("data-rule-index", index)
+
+        const tdPattern = document.createElement("td")
+        const patternInput = document.createElement("input")
+        patternInput.type = "text"
+        patternInput.value = rule.pattern || ""
+        patternInput.className = "gowiki-admin-input-inline"
+        patternInput.setAttribute("data-field", "pattern")
+        tdPattern.appendChild(patternInput)
+        tr.appendChild(tdPattern)
+
+        const tdType = document.createElement("td")
+        const typeSelect = document.createElement("select")
+        typeSelect.className = "gowiki-admin-input-inline"
+        typeSelect.setAttribute("data-field", "subject_type")
+        for (const opt of [
+          { value: "user", label: "User" },
+          { value: "group", label: "Group" },
+          { value: "special", label: "Special" },
+        ]) {
+          const o = document.createElement("option")
+          o.value = opt.value
+          o.textContent = opt.label
+          if (opt.value === rule.subject_type) o.selected = true
+          typeSelect.appendChild(o)
+        }
+        tdType.appendChild(typeSelect)
+        tr.appendChild(tdType)
+
+        const tdSubject = document.createElement("td")
+        const subjectInput = document.createElement("input")
+        subjectInput.type = "text"
+        subjectInput.value = rule.subject || ""
+        subjectInput.className = "gowiki-admin-input-inline"
+        subjectInput.setAttribute("data-field", "subject")
+        tdSubject.appendChild(subjectInput)
+        tr.appendChild(tdSubject)
+
+        const allPerms = ["view", "edit", "delete"]
+        for (const perm of allPerms) {
+          const td = document.createElement("td")
+          td.style.textAlign = "center"
+          const check = document.createElement("input")
+          check.type = "checkbox"
+          check.checked = (rule.permissions || []).includes(perm)
+          check.setAttribute("data-perm", perm)
+          td.appendChild(check)
+          tr.appendChild(td)
+        }
+
+        const tdRemove = document.createElement("td")
+        const removeBtn = document.createElement("button")
+        removeBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+        removeBtn.textContent = "Remove"
+        removeBtn.addEventListener("click", () => {
+          collectRulesFromDOM()
+          rules.splice(index, 1)
+          renderRules()
+        })
+        tdRemove.appendChild(removeBtn)
+        tr.appendChild(tdRemove)
+
+        tbody.appendChild(tr)
+      })
+      table.appendChild(tbody)
+      tableContainer.appendChild(table)
+    }
+
+    renderRules()
+
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load ACL rules.</div>'
+  }
+}
+
+// ── Admin: Locks Tab ──────────────────────────────────
+
+async function renderAdminLocksTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading locks...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/locks")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load locks.</div>'
+      return
+    }
+    const data = await resp.json()
+    const locks = data.locks || []
+
+    container.innerHTML = ""
+
+    const toolbar = document.createElement("div")
+    toolbar.className = "gowiki-admin-toolbar"
+    const refreshBtn = document.createElement("button")
+    refreshBtn.className = "gowiki-admin-btn"
+    refreshBtn.textContent = "Refresh"
+    refreshBtn.addEventListener("click", () => renderAdminLocksTab(container))
+    toolbar.appendChild(refreshBtn)
+    container.appendChild(toolbar)
+
+    if (locks.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-admin-empty"
+      empty.textContent = "No active locks."
+      container.appendChild(empty)
+      return
+    }
+
+    const table = document.createElement("table")
+    table.className = "gowiki-admin-table"
+
+    const thead = document.createElement("thead")
+    const headerRow = document.createElement("tr")
+    for (const col of ["Page", "Owner", "Since", "Actions"]) {
+      const th = document.createElement("th")
+      th.textContent = col
+      headerRow.appendChild(th)
+    }
+    thead.appendChild(headerRow)
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+    for (const lock of locks) {
+      const tr = document.createElement("tr")
+
+      const tdPage = document.createElement("td")
+      tdPage.textContent = lock.page
+      tr.appendChild(tdPage)
+
+      const tdOwner = document.createElement("td")
+      tdOwner.textContent = lock.owner
+      tr.appendChild(tdOwner)
+
+      const tdSince = document.createElement("td")
+      tdSince.textContent = lock.since ? new Date(lock.since).toLocaleString() : ""
+      tr.appendChild(tdSince)
+
+      const tdActions = document.createElement("td")
+      tdActions.className = "gowiki-admin-actions-cell"
+      const discardBtn = document.createElement("button")
+      discardBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+      discardBtn.textContent = "Force Discard"
+      discardBtn.addEventListener("click", async () => {
+        if (confirm("Force discard draft for \"" + lock.page + "\" owned by " + lock.owner + "?")) {
+          const pagePath = lock.page
+          const r = await authFetch("/api/admin/drafts/" + encodeURIComponent(pagePath), { method: "DELETE" })
+          if (r.ok) {
+            renderAdminLocksTab(container)
+          } else {
+            alert("Failed to discard draft.")
+          }
+        }
+      })
+      tdActions.appendChild(discardBtn)
+      tr.appendChild(tdActions)
+
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    container.appendChild(table)
+
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load locks.</div>'
+  }
+}
+
+// ── Admin: Configuration Tab ──────────────────────────
+
+async function renderAdminConfigTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading configuration...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/config")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load configuration.</div>'
+      return
+    }
+    const config = await resp.json()
+
+    container.innerHTML = ""
+
+    const form = document.createElement("div")
+    form.className = "gowiki-admin-config-form"
+
+    // Site section
+    const siteHeading = document.createElement("h3")
+    siteHeading.textContent = "Site"
+    form.appendChild(siteHeading)
+
+    const titleInput = adminFormField(form, "Site Title", "text", (config.site && config.site.title) || "")
+    const sidebarInput = adminFormField(form, "Sidebar Page", "text", (config.site && config.site.sidebar_page) || "")
+    const footerInput = adminFormField(form, "Footer Page", "text", (config.site && config.site.footer_page) || "")
+
+    // Auth section
+    const authHeading = document.createElement("h3")
+    authHeading.textContent = "Authentication"
+    form.appendChild(authHeading)
+
+    const sessionTtlInput = adminFormField(form, "Session TTL (e.g. 24h, 168h)", "text", (config.auth && config.auth.session_ttl) || "")
+
+    // Drafts section
+    const draftsHeading = document.createElement("h3")
+    draftsHeading.textContent = "Drafts"
+    form.appendChild(draftsHeading)
+
+    const autoSaveInput = adminFormField(form, "Auto Save Interval (e.g. 30s, 1m)", "text", (config.drafts && config.drafts.auto_save_interval) || "")
+    const staleLockInput = adminFormField(form, "Stale Lock Timeout (e.g. 30m, 1h)", "text", (config.drafts && config.drafts.stale_lock_timeout) || "")
+
+    // Save button
+    const actions = document.createElement("div")
+    actions.className = "gowiki-admin-config-actions"
+
+    const statusMsg = document.createElement("span")
+    statusMsg.className = "gowiki-admin-status-msg"
+    statusMsg.style.display = "none"
+
+    const saveBtn = document.createElement("button")
+    saveBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    saveBtn.textContent = "Save Configuration"
+    saveBtn.addEventListener("click", async () => {
+      const payload = {
+        site: {
+          title: titleInput.value.trim(),
+          sidebar_page: sidebarInput.value.trim(),
+          footer_page: footerInput.value.trim(),
+        },
+        auth: {
+          session_ttl: sessionTtlInput.value.trim(),
+        },
+        drafts: {
+          auto_save_interval: autoSaveInput.value.trim(),
+          stale_lock_timeout: staleLockInput.value.trim(),
+        },
+      }
+      try {
+        const r = await authFetch("/api/admin/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (r.ok) {
+          statusMsg.textContent = "Configuration saved."
+          statusMsg.style.color = "#155724"
+          statusMsg.style.display = "inline"
+          setTimeout(() => { statusMsg.style.display = "none" }, 3000)
+        } else {
+          const err = await r.json().catch(() => ({}))
+          statusMsg.textContent = err.error || "Failed to save configuration."
+          statusMsg.style.color = "#c33"
+          statusMsg.style.display = "inline"
+        }
+      } catch {
+        statusMsg.textContent = "Network error."
+        statusMsg.style.color = "#c33"
+        statusMsg.style.display = "inline"
+      }
+    })
+
+    actions.appendChild(saveBtn)
+    actions.appendChild(statusMsg)
+    form.appendChild(actions)
+    container.appendChild(form)
+
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load configuration.</div>'
+  }
+}
+
 async function bootstrap() {
   applyStyles(registry.getStyles())
   renderActions()
@@ -3991,6 +5003,34 @@ async function bootstrap() {
   // Non-blocking banner setup
   resolveLogo()
   initSearch()
+
+  // Admin page: must await auth before rendering
+  if (pagePath === "admin") {
+    await checkAuth()
+    if (!currentUser || !currentUser.is_admin) {
+      contentRoot.innerHTML = ""
+      const msg = document.createElement("div")
+      msg.style.padding = "40px 20px"
+      msg.style.textAlign = "center"
+      msg.style.color = "#666"
+      msg.style.fontSize = "16px"
+      msg.textContent = currentUser
+        ? "Access denied. Admin privileges required."
+        : "Please log in with an admin account to access this page."
+      contentRoot.appendChild(msg)
+      return
+    }
+    renderAdminPage()
+    // Still mount sidebar and footer
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+      sidebarView = v
+    })
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+      footerView = v
+    })
+    return
+  }
+
   checkAuth()
 
   // Check for search query in URL.

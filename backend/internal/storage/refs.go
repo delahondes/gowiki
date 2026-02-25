@@ -120,6 +120,18 @@ func (r *RefIndex) UpdatePage(pagePath string, newMediaRefs []string) {
 	}
 }
 
+// RemovePage removes all media references for a page and updates the reverse map.
+func (r *RefIndex) RemovePage(pagePath string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	oldRefs := r.PageToMedia[pagePath]
+	for _, media := range oldRefs {
+		r.removePageFromMedia(pagePath, media)
+	}
+	delete(r.PageToMedia, pagePath)
+}
+
 // PageToMediaSnapshot returns a copy of the media refs for a page.
 // Used to capture old refs before a page update.
 func (r *RefIndex) PageToMediaSnapshot(pagePath string) []string {

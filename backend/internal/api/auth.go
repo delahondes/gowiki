@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"gowiki/backend/internal/auth"
@@ -32,10 +33,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.userStore.Verify(req.Username, req.Password); err != nil {
+		if errors.Is(err, auth.ErrUserDisabled) {
+			writeError(w, http.StatusForbidden, "account is disabled")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
+	s.userStore.UpdateLastLogin(req.Username)
 	sessionID := s.sessionStore.Create(req.Username)
 	auth.SetSessionCookie(w, sessionID)
 	writeJSON(w, http.StatusOK, map[string]string{"username": req.Username})
@@ -62,7 +68,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "session expired")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"username": sess.Username})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"username": sess.Username,
+		"is_admin": s.userStore.IsAdmin(sess.Username),
+	})
 }
 
 // requireAuth is middleware that protects write endpoints.
