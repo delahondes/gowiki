@@ -137,12 +137,27 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hunks := storage.DiffLines(string(fromContent), string(toContent))
-	writeJSON(w, http.StatusOK, map[string]any{
+
+	resp := map[string]any{
 		"path":  pagePath,
 		"from":  from,
 		"to":    to,
 		"hunks": hunks,
-	})
+	}
+
+	// Include media_refs for both versions so the frontend can show media changes.
+	if from > 0 {
+		if entry, err := s.atticStore.GetEntry(pagePath, from); err == nil && entry != nil && len(entry.MediaRefs) > 0 {
+			resp["from_media_refs"] = entry.MediaRefs
+		}
+	}
+	if to > 0 {
+		if entry, err := s.atticStore.GetEntry(pagePath, to); err == nil && entry != nil && len(entry.MediaRefs) > 0 {
+			resp["to_media_refs"] = entry.MediaRefs
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handlePageVersion(w http.ResponseWriter, r *http.Request) {

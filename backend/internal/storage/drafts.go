@@ -53,7 +53,7 @@ func (d *DraftStore) draftPath(username, pagePath string) string {
 // EnterEditMode creates or resumes a draft for the given page.
 // Returns the draft markdown and a new edit token.
 // If another user holds the lock, returns ErrPageLocked.
-// If same user already has a lock with a different token, returns ErrEditSuperseded unless force=true.
+// If the same user already owns the lock, a new token is issued (seamless resume).
 func (d *DraftStore) EnterEditMode(pagePath, username string, force bool, currentPublished string) (markdown string, editToken string, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -67,9 +67,9 @@ func (d *DraftStore) EnterEditMode(pagePath, username string, force bool, curren
 		return "", "", fmt.Errorf("%w: locked by %s", ErrPageLocked, lock.Owner)
 	}
 
-	if lock.Owner == username && !force {
-		return "", "", ErrEditSuperseded
-	}
+	// If the same user already owns the lock, allow resuming with a new token.
+	// This handles server restarts (old session dead, lock file persists)
+	// and "resume editing" from view mode.
 
 	// Generate new edit token.
 	editToken = generateEditToken()

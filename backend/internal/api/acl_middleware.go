@@ -36,19 +36,29 @@ func (s *Server) requirePermission(action string) func(http.Handler) http.Handle
 
 // extractPagePath extracts the page/resource path from the request URL.
 // It handles the chi wildcard parameter used across all page/media endpoints.
+// The returned path is always absolute (starts with "/") to match the internal
+// link convention used in ACL patterns.
 func extractPagePath(r *http.Request) string {
+	var raw string
 	// Try the chi wildcard parameter first (used by /api/pages/*, /api/history/*, etc.)
 	if p := chi.URLParam(r, "*"); p != "" {
-		return strings.TrimSpace(p)
+		raw = strings.TrimSpace(p)
+	} else {
+		// Fallback: extract from URL path after /api/ prefix.
+		// This handles endpoints like /api/media, /api/search where there is no wildcard.
+		path := strings.TrimPrefix(r.URL.Path, "/api/")
+		// Remove the endpoint prefix (pages/, history/, etc.)
+		if idx := strings.Index(path, "/"); idx >= 0 {
+			path = path[idx+1:]
+		}
+		raw = strings.TrimSpace(path)
 	}
-	// Fallback: extract from URL path after /api/ prefix.
-	// This handles endpoints like /api/media, /api/search where there is no wildcard.
-	path := strings.TrimPrefix(r.URL.Path, "/api/")
-	// Remove the endpoint prefix (pages/, history/, etc.)
-	if idx := strings.Index(path, "/"); idx >= 0 {
-		path = path[idx+1:]
+	// Ensure the path is absolute so ACL patterns use the same convention
+	// as internal links (e.g. "/toto", "/private/secret").
+	if raw == "" || raw[0] != '/' {
+		raw = "/" + raw
 	}
-	return strings.TrimSpace(path)
+	return raw
 }
 
 // getUserGroups retrieves the groups for a user from the user store.

@@ -65,6 +65,7 @@ let editorView = null
 let rawEditor = null
 let statusText = ""
 let isNewPage = false
+let siteTitle = "Gowiki"
 let viewView = null
 let sidebarView = null
 let footerView = null
@@ -553,9 +554,17 @@ function insertMediaReference(kind, mediaEntry) {
   setStatus("Inserted link " + target)
 }
 
+class AccessDeniedError extends Error {
+  constructor(path) {
+    super(`Access denied: ${path}`)
+    this.name = "AccessDeniedError"
+  }
+}
+
 async function fetchPage(path) {
   const resp = await fetch(`/api/pages/${encodePagePath(path)}`)
   if (resp.status === 404) return null
+  if (resp.status === 403) throw new AccessDeniedError(path)
   if (!resp.ok) {
     throw new Error(`Failed to load page ${path}: ${resp.status}`)
   }
@@ -1212,6 +1221,8 @@ function renderView() {
   if (highlight) {
     highlightTermsInView(contentRoot, highlight)
   }
+
+  updatePageTitle()
 }
 
 function highlightTermsInView(container, query) {
@@ -3278,6 +3289,56 @@ function renderHistoryPage(versions, draft) {
   contentRoot.appendChild(container)
 }
 
+// rewriteMediaToVersioned rewrites <img> src attributes in a container
+// to use versioned media URLs based on the media_refs map from the attic entry.
+// media_refs maps media path (e.g. "images/photo.png") to version number.
+// resolveMediaSrc resolves an image src (as it appears in the DOM) to
+// the normalized media path used as key in media_refs.
+// Handles: /media/path, ./relative, ../relative, /absolute
+function resolveMediaSrc(src) {
+  // Absolute /media/ URL
+  const mediaMatch = src.match(/^\/media\/(.+)$/)
+  if (mediaMatch) return mediaMatch[1]
+
+  // Skip external URLs
+  if (/^https?:\/\//i.test(src)) return null
+
+  // Relative path (./file, ../dir/file) — resolve against current page namespace
+  if (src.startsWith("./") || src.startsWith("../")) {
+    const ns = pageNamespace // e.g. "" for root, "ns/sub" for nested
+    const nsParts = ns ? ns.split("/") : []
+    const refParts = src.split("/")
+    const resolved = [...nsParts]
+    for (const part of refParts) {
+      if (part === ".") continue
+      if (part === "..") { resolved.pop(); continue }
+      resolved.push(part)
+    }
+    return resolved.join("/")
+  }
+
+  // Absolute path starting with /
+  if (src.startsWith("/")) return src.slice(1)
+
+  return null
+}
+
+// rewriteMediaToVersioned rewrites <img> src attributes in a container
+// to use versioned media URLs based on the media_refs map from the attic entry.
+function rewriteMediaToVersioned(container, mediaRefs) {
+  if (!mediaRefs || typeof mediaRefs !== "object") return
+  const imgs = container.querySelectorAll("img[src]")
+  for (const img of imgs) {
+    const src = img.getAttribute("src") || ""
+    const mediaPath = resolveMediaSrc(src)
+    if (!mediaPath) continue
+    const ver = mediaRefs[mediaPath]
+    if (ver != null) {
+      img.setAttribute("src", `/api/media-version/${mediaPath}?v=${ver}`)
+    }
+  }
+}
+
 async function viewVersion(version) {
   try {
     const resp = await fetch(`/api/versions/${encodePagePath(pagePath)}?v=${version}`)
@@ -3298,6 +3359,7 @@ async function viewVersion(version) {
     const content = document.createElement("div")
     content.className = "gowiki-version-content"
     mountReadOnlyView(content, data.markdown, "gowiki-view")
+    rewriteMediaToVersioned(content, data.media_refs)
 
     const actions = document.createElement("div")
     actions.style.marginTop = "16px"
@@ -3334,13 +3396,13 @@ async function showDiff(fromVersion, toVersion) {
     }
     const data = await resp.json()
     clearContent()
-    renderDiffView(data.hunks, fromVersion, toVersion)
+    renderDiffView(data.hunks, fromVersion, toVersion, data.from_media_refs, data.to_media_refs)
   } catch {
     setStatus("Failed to load diff")
   }
 }
 
-function renderDiffView(hunks, fromVersion, toVersion) {
+function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRefs) {
   const container = document.createElement("div")
   container.className = "gowiki-diff"
 
@@ -3361,6 +3423,12 @@ function renderDiffView(hunks, fromVersion, toVersion) {
     diffContent.appendChild(line)
   }
 
+  container.append(header, diffContent)
+
+  // Show media version changes between the two versions.
+  const mediaChanges = buildMediaChanges(fromMediaRefs, toMediaRefs)
+  if (mediaChanges) container.appendChild(mediaChanges)
+
   const actions = document.createElement("div")
   actions.style.marginTop = "16px"
   const backBtn = document.createElement("button")
@@ -3369,8 +3437,91 @@ function renderDiffView(hunks, fromVersion, toVersion) {
   backBtn.addEventListener("click", () => void showHistory())
   actions.appendChild(backBtn)
 
-  container.append(header, diffContent, actions)
+  container.appendChild(actions)
   contentRoot.appendChild(container)
+}
+
+function buildMediaChanges(fromRefs, toRefs) {
+  if (!fromRefs && !toRefs) return null
+  const from = fromRefs || {}
+  const to = toRefs || {}
+
+  // Collect all media paths that differ between versions.
+  const allPaths = new Set([...Object.keys(from), ...Object.keys(to)])
+  const changed = []
+  for (const p of allPaths) {
+    const fv = from[p] ?? null
+    const tv = to[p] ?? null
+    if (fv !== tv) changed.push({ path: p, fromVersion: fv, toVersion: tv })
+  }
+  if (changed.length === 0) return null
+
+  const section = document.createElement("div")
+  section.className = "gowiki-diff-media"
+
+  const heading = document.createElement("div")
+  heading.className = "gowiki-diff-media-heading"
+  heading.textContent = "Media changes"
+  section.appendChild(heading)
+
+  for (const ch of changed) {
+    const row = document.createElement("div")
+    row.className = "gowiki-diff-media-row"
+
+    const label = document.createElement("div")
+    label.className = "gowiki-diff-media-label"
+    label.textContent = ch.path
+    row.appendChild(label)
+
+    const compare = document.createElement("div")
+    compare.className = "gowiki-diff-media-compare"
+
+    if (ch.fromVersion != null) {
+      const cell = document.createElement("div")
+      cell.className = "gowiki-diff-media-cell gowiki-diff-media-old"
+      const caption = document.createElement("div")
+      caption.className = "gowiki-diff-media-caption"
+      caption.textContent = `v${ch.fromVersion}`
+      const img = document.createElement("img")
+      img.src = `/api/media-version/${ch.path}?v=${ch.fromVersion}`
+      img.alt = `${ch.path} v${ch.fromVersion}`
+      cell.append(caption, img)
+      compare.appendChild(cell)
+    } else {
+      const cell = document.createElement("div")
+      cell.className = "gowiki-diff-media-cell gowiki-diff-media-old"
+      cell.textContent = "(not present)"
+      compare.appendChild(cell)
+    }
+
+    const arrow = document.createElement("div")
+    arrow.className = "gowiki-diff-media-arrow"
+    arrow.textContent = "→"
+    compare.appendChild(arrow)
+
+    if (ch.toVersion != null) {
+      const cell = document.createElement("div")
+      cell.className = "gowiki-diff-media-cell gowiki-diff-media-new"
+      const caption = document.createElement("div")
+      caption.className = "gowiki-diff-media-caption"
+      caption.textContent = `v${ch.toVersion}`
+      const img = document.createElement("img")
+      img.src = `/api/media-version/${ch.path}?v=${ch.toVersion}`
+      img.alt = `${ch.path} v${ch.toVersion}`
+      cell.append(caption, img)
+      compare.appendChild(cell)
+    } else {
+      const cell = document.createElement("div")
+      cell.className = "gowiki-diff-media-cell gowiki-diff-media-new"
+      cell.textContent = "(removed)"
+      compare.appendChild(cell)
+    }
+
+    row.appendChild(compare)
+    section.appendChild(row)
+  }
+
+  return section
 }
 
 async function restoreVersion(version) {
@@ -3446,6 +3597,29 @@ function cancelEdit() {
 }
 
 // ── Banner: logo resolution ──────────────────────────
+
+async function resolveSiteInfo() {
+  try {
+    const resp = await fetch("/api/site/info")
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.title) {
+        siteTitle = data.title
+        document.getElementById("banner-title").textContent = siteTitle
+        updatePageTitle()
+      }
+    }
+  } catch { /* keep default */ }
+}
+
+function updatePageTitle() {
+  document.title = siteTitle
+  if (!contentRoot) return
+  const h = contentRoot.querySelector("h1, h2, h3, h4, h5, h6")
+  if (h && h.textContent.trim()) {
+    document.title = `[${siteTitle}] ${h.textContent.trim()}`
+  }
+}
 
 async function resolveLogo() {
   try {
@@ -3726,8 +3900,7 @@ function showLoginDialog(onSuccess) {
           body: JSON.stringify({ username, password }),
         })
         if (resp.ok) {
-          currentUser = await resp.json()
-          renderBannerUser()
+          await checkAuth()
           if (onSuccess) onSuccess()
           close(true)
           await reloadPageContent()
@@ -4633,6 +4806,7 @@ async function renderAdminACLTab(container) {
     addBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
     addBtn.textContent = "Add Rule"
     addBtn.addEventListener("click", () => {
+      collectRulesFromDOM()
       rules.push({ pattern: ".*", subject_type: "special", subject: "@all", permissions: ["view"] })
       renderRules()
     })
@@ -5001,6 +5175,7 @@ async function bootstrap() {
   renderActions()
 
   // Non-blocking banner setup
+  resolveSiteInfo()
   resolveLogo()
   initSearch()
 
@@ -5049,7 +5224,46 @@ async function bootstrap() {
     return
   }
 
-  const page = await fetchPage(pagePath)
+  let page
+  try {
+    page = await fetchPage(pagePath)
+  } catch (err) {
+    if (err instanceof AccessDeniedError) {
+      clearContent()
+      actionsRoot.innerHTML = ""
+      const banner = document.createElement("div")
+      banner.className = "gowiki-access-denied"
+      const msg = document.createElement("div")
+      msg.textContent = `Access to ${pageDisplayPath} is forbidden.`
+      banner.appendChild(msg)
+      if (!currentUser) {
+        const hint = document.createElement("div")
+        hint.style.marginTop = "8px"
+        const loginLink = document.createElement("a")
+        loginLink.href = "#"
+        loginLink.textContent = "Log in"
+        loginLink.addEventListener("click", (e) => {
+          e.preventDefault()
+          showLoginDialog(() => {
+            window.location.reload()
+          })
+        })
+        hint.appendChild(loginLink)
+        hint.appendChild(document.createTextNode(" to access this page."))
+        banner.appendChild(hint)
+      }
+      contentRoot.appendChild(banner)
+      // Still mount sidebar and footer.
+      fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+        sidebarView = v
+      })
+      fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+        footerView = v
+      })
+      return
+    }
+    throw err
+  }
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false

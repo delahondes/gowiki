@@ -127,6 +127,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Use(s.optionalAuth)
 		r.Get("/api/search", s.handleSearch)
 		r.Get("/api/site/logo", s.handleSiteLogo)
+		r.Get("/api/site/info", s.handleSiteInfo)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.
@@ -517,6 +518,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
+	cfg := s.configStore.Get()
+	writeJSON(w, http.StatusOK, map[string]string{"title": cfg.Site.Title})
 }
 
 func (s *Server) handleSiteLogo(w http.ResponseWriter, _ *http.Request) {

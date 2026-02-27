@@ -126,9 +126,12 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 		// Archive existing file before overwriting, if it exists.
 		if oldContent, readErr := os.ReadFile(targetPath); readErr == nil && s.VersionStore != nil && s.MediaAttic != nil {
 			currentVersion := s.VersionStore.GetVersion(relPath)
-			if currentVersion > 0 {
-				_ = s.MediaAttic.Archive(relPath, currentVersion, oldContent, author)
+			if currentVersion == 0 {
+				// File exists but was never version-tracked — bootstrap as version 1.
+				_ = s.VersionStore.SetVersion(relPath, 1)
+				currentVersion = 1
 			}
+			_ = s.MediaAttic.Archive(relPath, currentVersion, oldContent, author)
 		}
 	}
 

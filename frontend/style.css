@@ -802,6 +802,24 @@ mark.search-highlight {
   display: none;
 }
 
+/* ── Access denied ────────────────────────────────── */
+
+.gowiki-access-denied {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 16px 20px;
+  margin: 24px 0;
+  font-size: 14px;
+}
+
+.gowiki-access-denied a {
+  color: #1e3f72;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 /* ── Draft banner ─────────────────────────────────── */
 
 .gowiki-draft-banner {
@@ -954,6 +972,83 @@ mark.search-highlight {
 .gowiki-diff-delete {
   background: #f8d7da;
   color: #721c24;
+}
+
+/* ── Diff media changes ──────────────────────────── */
+
+.gowiki-diff-media {
+  margin-top: 16px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.gowiki-diff-media-heading {
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 14px;
+  background: #e8f0fe;
+  border-radius: 4px 4px 0 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.gowiki-diff-media-row {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eee;
+}
+
+.gowiki-diff-media-row:last-child {
+  border-bottom: none;
+}
+
+.gowiki-diff-media-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+  font-family: monospace;
+}
+
+.gowiki-diff-media-compare {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gowiki-diff-media-cell {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: #666;
+}
+
+.gowiki-diff-media-cell img {
+  max-width: 100%;
+  max-height: 200px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  display: block;
+  margin: 4px auto 0;
+}
+
+.gowiki-diff-media-old img {
+  border-color: #f5c6cb;
+}
+
+.gowiki-diff-media-new img {
+  border-color: #c3e6cb;
+}
+
+.gowiki-diff-media-caption {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.gowiki-diff-media-arrow {
+  font-size: 18px;
+  color: #999;
+  flex-shrink: 0;
 }
 
 /* ── Admin page ──────────────────────────────────── */

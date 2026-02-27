@@ -126,11 +126,12 @@ class IncludeNodeView {
       const cleanPath = path.replace(/^\/+/, "")
       const resp = await fetch(`/api/pages/${encodePagePath(cleanPath)}`)
       if (!resp.ok) {
-        this.showError(
-          resp.status === 404
-            ? `Page not found: ${path}`
-            : `Failed to load: ${path} (${resp.status})`
-        )
+        if (resp.status === 403) {
+          // ACL-restricted: fail silently (render nothing).
+          this.bodyEl.innerHTML = ""
+          return
+        }
+        this.showError(`Page not found: ${path}`)
         return
       }
 
