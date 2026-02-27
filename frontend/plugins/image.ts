@@ -3,6 +3,15 @@ import { EditorView } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 
+function normalizeImageVersion(raw: string): string | null {
+  const value = String(raw ?? "").trim().toLowerCase()
+  if (!value) return null
+  if (value === "latest") return "latest"
+  const n = Number(value)
+  if (Number.isInteger(n) && n >= 1) return String(n)
+  throw new Error(`Invalid version "${raw}". Expected a positive integer or "latest".`)
+}
+
 const imageProperties = [
   {
     name: "size",
@@ -10,6 +19,27 @@ const imageProperties = [
     default: null,
     parse: (raw: string) => normalizeImageSize(raw),
     serialize: (value: string | null) => String(value ?? ""),
+  },
+  {
+    name: "version",
+    label: "Version",
+    default: null,
+    parse: (raw: string) => normalizeImageVersion(raw),
+    serialize: (value: string | null) => String(value ?? ""),
+    options: (attrs: Record<string, any>) => {
+      const opts = [{ value: "", label: "(default)" }]
+      const src = attrs.src || ""
+      const cache = (window as any).__gowikiMediaVersions as Map<string, number> | undefined
+      const maxVersion = cache?.get(src) ?? 0
+      const currentV = attrs.version
+      const currentN = currentV && currentV !== "latest" ? parseInt(currentV, 10) : 0
+      const upper = Math.max(maxVersion, currentN || 0)
+      for (let i = 2; i <= upper; i++) {
+        opts.push({ value: String(i), label: `v=${i}` })
+      }
+      opts.push({ value: "latest", label: "latest" })
+      return opts
+    },
   },
 ]
 
@@ -133,7 +163,12 @@ class ImageNodeView {
   }
 
   private applyAttrs() {
-    this.imgEl.src = this.node.attrs.src ?? ""
+    let src = this.node.attrs.src ?? ""
+    const version = this.node.attrs.version ?? null
+    if (version) {
+      src += (src.includes("?") ? "&" : "?") + "v=" + version
+    }
+    this.imgEl.src = src
     this.imgEl.alt = this.node.attrs.alt ?? ""
     if (this.node.attrs.title) {
       this.imgEl.title = this.node.attrs.title
@@ -278,6 +313,7 @@ export const imagePlugin: WikiPlugin = {
         attrs: {
           ...(spec.attrs ?? {}),
           size: { default: null },
+          version: { default: null },
         },
         toDOM(node: any) {
           const domSpec = baseToDOM(node)
@@ -295,19 +331,38 @@ export const imagePlugin: WikiPlugin = {
 
     reg.registerText("image", {
       run(ctx, tok) {
-        const src = tok.attrGet?.("src") ?? ""
+        let src = tok.attrGet?.("src") ?? ""
         if (!src) return
         const title = tok.attrGet?.("title") ?? null
         const alt = tok.content ?? tok.attrGet?.("alt") ?? ""
-        const directiveSize = ctx.findDirective("image")?.size ?? null
+        const directive = ctx.findDirective("image")
+        const directiveSize = directive?.size ?? null
         const size = normalizeImageSize(directiveSize ?? "")
-        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size }))
+
+        // Extract ?v=N from src URL, store in version attr.
+        let version: string | null = null
+        const vMatch = src.match(/[?&]v=([^&]+)/)
+        if (vMatch) {
+          version = normalizeImageVersion(vMatch[1])
+          src = src.replace(/[?&]v=[^&]+/, "").replace(/\?$/, "")
+        }
+        // Directive version takes precedence over URL-embedded version.
+        const directiveVersion = directive?.version ?? null
+        if (directiveVersion !== null) {
+          version = normalizeImageVersion(String(directiveVersion))
+        }
+
+        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version }))
       },
     })
 
     reg.registerPMNode("image", {
       print(node) {
-        const src = String(node.attrs.src ?? "")
+        let src = String(node.attrs.src ?? "")
+        const version = node.attrs.version ?? null
+        if (version) {
+          src += (src.includes("?") ? "&" : "?") + "v=" + version
+        }
         const alt = escapeAltText(node.attrs.alt ?? "")
         const title = node.attrs.title
         if (title) {

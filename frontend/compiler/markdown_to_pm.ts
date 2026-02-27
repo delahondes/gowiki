@@ -203,6 +203,75 @@ function normalizeEmptyLinkLabels(tokens: any[]) {
   return tokens
 }
 
+/**
+ * Detect whether a link href points to a media file (non-.md file with extension,
+ * not an external URL).
+ */
+function isMediaLinkHref(href: string): boolean {
+  if (!href) return false
+  if (/^https?:\/\//i.test(href)) return false
+  // Strip query/hash for extension check
+  const pathOnly = href.split(/[?#]/)[0]
+  const ext = pathOnly.match(/\.([a-zA-Z0-9]+)$/)
+  if (!ext) return false
+  // .md links are page links, not media
+  if (ext[1].toLowerCase() === "md") return false
+  return true
+}
+
+/**
+ * Convert link_open + text + link_close sequences into synthetic medialink tokens
+ * when the href points to a media file.
+ */
+function convertMediaLinkChildren(children: any[]): any[] {
+  const out: any[] = []
+  for (let i = 0; i < children.length; i++) {
+    const tok = children[i]
+    if (tok?.type === "link_open") {
+      const href = tok.attrGet?.("href") ?? ""
+      if (isMediaLinkHref(href)) {
+        // Collect text content between link_open and link_close
+        const textParts: string[] = []
+        let j = i + 1
+        while (j < children.length && children[j]?.type !== "link_close") {
+          if (children[j]?.type === "text") {
+            textParts.push(children[j].content ?? "")
+          }
+          j++
+        }
+        const label = textParts.join("")
+        const title = tok.attrGet?.("title") ?? null
+        const autoText = tok.meta?.autoText ?? false
+
+        out.push({
+          type: "medialink",
+          content: label,
+          meta: { href, label, title, autoText },
+          attrGet(name: string) {
+            if (name === "href") return href
+            if (name === "title") return title
+            return null
+          },
+        })
+        // Skip past the link_close
+        i = j
+        continue
+      }
+    }
+    out.push(tok)
+  }
+  return out
+}
+
+function convertMediaLinkTokens(tokens: any[]) {
+  for (const tok of tokens) {
+    if (Array.isArray(tok.children)) {
+      tok.children = convertMediaLinkChildren(tok.children)
+    }
+  }
+  return tokens
+}
+
 function isTopLevelBlockStart(token: any) {
   if (!token?.block || token.level !== 0) return false
   return token.nesting === 1 || token.nesting === 0
@@ -308,8 +377,10 @@ export function markdownToPM(
   }
   md.use(directivePlugin)
   const tokens = injectExtraBlankParagraphs(
-    normalizeEmptyLinkLabels(
-      applyDirectives(md.parse(markdown, {}), registry, true)
+    convertMediaLinkTokens(
+      normalizeEmptyLinkLabels(
+        applyDirectives(md.parse(markdown, {}), registry, true)
+      )
     )
   )
 

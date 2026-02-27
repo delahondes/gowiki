@@ -385,9 +385,13 @@ function registerMarkdownPrinters(reg: Registry) {
       if (node.childCount === 1 && node.firstChild?.type.name === "image") {
         const image = node.firstChild
         const size = image.attrs.size ?? null
+        const version = image.attrs.version ?? null
         const body = recurse(image)
-        if (size) {
-          return `{image size=${size}}\n${body}\n\n`
+        const dirParts: string[] = []
+        if (size) dirParts.push(`size=${size}`)
+        if (version) dirParts.push(`version=${version}`)
+        if (dirParts.length > 0) {
+          return `{image ${dirParts.join(" ")}}\n${body}\n\n`
         }
         return body + "\n\n"
       }

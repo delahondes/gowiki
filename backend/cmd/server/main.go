@@ -80,7 +80,7 @@ func main() {
 	}
 	log.Printf("config: %s", configPath)
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, *serveWeb, filepath.Clean(*webDir))
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

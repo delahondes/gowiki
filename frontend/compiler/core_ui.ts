@@ -135,9 +135,12 @@ function buildPanel(
     }
 
     let control: HTMLElement
-    if (prop.options) {
+    const resolvedOptions = typeof prop.options === "function"
+      ? prop.options(node.attrs)
+      : prop.options
+    if (resolvedOptions && resolvedOptions.length > 0) {
       const select = document.createElement("select")
-      for (const opt of prop.options) {
+      for (const opt of resolvedOptions) {
         const option = document.createElement("option")
         option.value = opt.value
         option.textContent = opt.label

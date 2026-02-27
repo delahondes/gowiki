@@ -51,6 +51,13 @@ let currentUser = null // { username } or null
 let editToken = null
 let autoSaveTimer = null
 let pageLockInfo = null // { locked_by, is_draft }
+
+// Global media version cache: maps relative media paths (as in node attrs) to their max version.
+window.__gowikiMediaVersions = new Map()
+window.__gowikiUpdateMediaVersionCache = function(absPath, version) {
+  const relPath = buildMediaReferencePath(pageNamespace, absPath)
+  window.__gowikiMediaVersions.set(relPath, version)
+}
 let stashedEditorState = null // ProseMirror EditorState preserved across draft exit/resume
 let historyLatestVersion = null // latest version number from history listing
 let draftSavedThisSession = false // true once any draft save succeeds in this edit session
@@ -492,6 +499,11 @@ function buildMediaReferencePath(currentNamespace, mediaPath) {
   return "/" + to.join("/")
 }
 
+function appendMediaVersion(target, version) {
+  if (version && version > 1) return `${target}?v=${version}`
+  return target
+}
+
 function mediaLabelFromPath(mediaPath) {
   const parts = splitPathParts(mediaPath)
   return parts[parts.length - 1] ?? "file"
@@ -501,7 +513,7 @@ function rawInsertMediaReference(kind, mediaEntry) {
   const textarea = document.querySelector(".gowiki-raw-editor")
   if (!textarea) return
 
-  const target = buildMediaReferencePath(pageNamespace, mediaEntry.path)
+  const target = appendMediaVersion(buildMediaReferencePath(pageNamespace, mediaEntry.path), mediaEntry.version)
   const label = mediaLabelFromPath(mediaEntry.path)
 
   let snippet
@@ -522,24 +534,49 @@ function rawInsertMediaReference(kind, mediaEntry) {
 function insertMediaReference(kind, mediaEntry) {
   if (!editorView || mode !== "edit" || editMode !== "visual") return
 
-  const target = buildMediaReferencePath(pageNamespace, mediaEntry.path)
+  const basePath = buildMediaReferencePath(pageNamespace, mediaEntry.path)
   const label = mediaLabelFromPath(mediaEntry.path)
+  const version = (mediaEntry.version && mediaEntry.version > 1) ? String(mediaEntry.version) : null
+
+  // Update media version cache so the property panel dropdown knows the max version.
+  if (mediaEntry.version > 0) {
+    window.__gowikiMediaVersions.set(basePath, mediaEntry.version)
+  }
   const state = editorView.state
   const tr = state.tr
 
   if (kind === "image" && state.schema.nodes.image) {
     const imageNode = state.schema.nodes.image.create({
-      src: target,
+      src: basePath,
       alt: label,
       title: null,
+      version,
     })
     tr.replaceSelectionWith(imageNode, false)
     editorView.dispatch(tr.scrollIntoView())
     editorView.focus()
-    setStatus("Inserted image " + target)
+    setStatus("Inserted image " + basePath)
     return
   }
 
+  // Use medialink node for non-image media files
+  if (state.schema.nodes.medialink) {
+    const medialinkNode = state.schema.nodes.medialink.create({
+      href: basePath,
+      label,
+      version,
+      title: null,
+      autoText: false,
+    })
+    tr.replaceSelectionWith(medialinkNode, false)
+    editorView.dispatch(tr.scrollIntoView())
+    editorView.focus()
+    setStatus("Inserted media link " + basePath)
+    return
+  }
+
+  // Fallback: use link mark if medialink node not available
+  const target = appendMediaVersion(basePath, mediaEntry.version)
   const linkType = state.schema.marks.link
   if (!linkType) return
 
@@ -687,17 +724,22 @@ async function handleImageFilePaste(view, imageFiles) {
   for (const file of imageFiles) {
     try {
       const entry = await uploadMediaFile(file)
-      const target = buildMediaReferencePath(pageNamespace, entry.path)
+      const basePath = buildMediaReferencePath(pageNamespace, entry.path)
+      const version = (entry.version && entry.version > 1) ? String(entry.version) : null
       const label = mediaLabelFromPath(entry.path)
+      if (entry.version > 0) {
+        window.__gowikiMediaVersions.set(basePath, entry.version)
+      }
 
       const imageNode = schema.nodes.image.create({
-        src: target,
+        src: basePath,
         alt: label,
         title: null,
+        version,
       })
       const tr = view.state.tr.replaceSelectionWith(imageNode, false)
       view.dispatch(tr.scrollIntoView())
-      setStatus("Pasted image " + target)
+      setStatus("Pasted image " + basePath)
     } catch (err) {
       console.error("Image paste upload failed", err)
       setStatus("Image paste failed: " + err.message)
@@ -756,14 +798,14 @@ async function uploadImageFromUrl(url) {
   if (url.startsWith("data:")) {
     const file = dataUrlToFile(url, "pasted-image-" + Date.now())
     const entry = await uploadMediaFile(file)
-    return buildMediaReferencePath(pageNamespace, entry.path)
+    return appendMediaVersion(buildMediaReferencePath(pageNamespace, entry.path), entry.version)
   }
   // For file://, blob://, http(s):// — try to load via canvas
   blob = await fetchImageAsBlob(url)
   const ext = blob.type?.split("/")[1] ?? "png"
   const file = new File([blob], "pasted-image-" + Date.now() + "." + ext, { type: blob.type })
   const entry = await uploadMediaFile(file)
-  return buildMediaReferencePath(pageNamespace, entry.path)
+  return appendMediaVersion(buildMediaReferencePath(pageNamespace, entry.path), entry.version)
 }
 
 // Process markdown that contains non-storable image URLs: upload each and rewrite src
@@ -2630,7 +2672,7 @@ function renderEdit(nextEditMode) {
         for (const file of imageFiles) {
           try {
             const entry = await uploadMediaFile(file)
-            const target = buildMediaReferencePath(pageNamespace, entry.path)
+            const target = appendMediaVersion(buildMediaReferencePath(pageNamespace, entry.path), entry.version)
             const label = mediaLabelFromPath(entry.path)
             const snippet = `![${label}](${target})`
             editorEl.focus()
@@ -3324,17 +3366,21 @@ function resolveMediaSrc(src) {
 }
 
 // rewriteMediaToVersioned rewrites <img> src attributes in a container
-// to use versioned media URLs based on the media_refs map from the attic entry.
+// to use versioned media URLs based on the media_refs map from an attic entry.
+// Used for backward compat when viewing old archived page versions that have
+// frozen media_refs but bare image URLs in their markdown.
 function rewriteMediaToVersioned(container, mediaRefs) {
   if (!mediaRefs || typeof mediaRefs !== "object") return
   const imgs = container.querySelectorAll("img[src]")
   for (const img of imgs) {
     const src = img.getAttribute("src") || ""
+    // Skip images that already have a ?v= parameter (new-style versioned URLs).
+    if (/[?&]v=\d/.test(src)) continue
     const mediaPath = resolveMediaSrc(src)
     if (!mediaPath) continue
     const ver = mediaRefs[mediaPath]
     if (ver != null) {
-      img.setAttribute("src", `/api/media-version/${mediaPath}?v=${ver}`)
+      img.setAttribute("src", `/media/${mediaPath}?v=${ver}`)
     }
   }
 }
@@ -3483,7 +3529,7 @@ function buildMediaChanges(fromRefs, toRefs) {
       caption.className = "gowiki-diff-media-caption"
       caption.textContent = `v${ch.fromVersion}`
       const img = document.createElement("img")
-      img.src = `/api/media-version/${ch.path}?v=${ch.fromVersion}`
+      img.src = `/media/${ch.path}?v=${ch.fromVersion}`
       img.alt = `${ch.path} v${ch.fromVersion}`
       cell.append(caption, img)
       compare.appendChild(cell)
@@ -3506,7 +3552,7 @@ function buildMediaChanges(fromRefs, toRefs) {
       caption.className = "gowiki-diff-media-caption"
       caption.textContent = `v${ch.toVersion}`
       const img = document.createElement("img")
-      img.src = `/api/media-version/${ch.path}?v=${ch.toVersion}`
+      img.src = `/media/${ch.path}?v=${ch.toVersion}`
       img.alt = `${ch.path} v${ch.toVersion}`
       cell.append(caption, img)
       compare.appendChild(cell)
@@ -3953,6 +3999,12 @@ async function reloadPageContent() {
     if (page.locked_by) {
       pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
     }
+    // Populate media version cache from page response.
+    if (page.media_versions) {
+      for (const [absPath, ver] of Object.entries(page.media_versions)) {
+        window.__gowikiUpdateMediaVersionCache(absPath, ver)
+      }
+    }
   } else {
     currentMarkdown = defaultMarkdown
     isNewPage = true
@@ -4148,6 +4200,11 @@ async function discardDraft() {
     if (page) {
       currentMarkdown = page.markdown
       currentDoc = markdownToPM(currentMarkdown, registry)
+      if (page.media_versions) {
+        for (const [absPath, ver] of Object.entries(page.media_versions)) {
+          window.__gowikiUpdateMediaVersionCache(absPath, ver)
+        }
+      }
     }
     setStatus("Draft discarded")
     setMode("view")
@@ -5271,6 +5328,12 @@ async function bootstrap() {
     pageLockInfo = null
     if (page.locked_by) {
       pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
+    }
+    // Populate media version cache so the property panel dropdown knows the max version.
+    if (page.media_versions) {
+      for (const [absPath, ver] of Object.entries(page.media_versions)) {
+        window.__gowikiUpdateMediaVersionCache(absPath, ver)
+      }
     }
   } else {
     currentMarkdown = defaultMarkdown

@@ -42,11 +42,12 @@ type DeleteResult struct {
 }
 
 type PageMetadata struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Version   int64     `json:"version"`
-	Author    string    `json:"author,omitempty"`
+	ID        string           `json:"id"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+	Version   int64            `json:"version"`
+	Author    string           `json:"author,omitempty"`
+	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
 }
 
 type Page struct {
@@ -151,6 +152,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, &CircularIncludeError{Cycle: cycle}
 	}
 
+	// Auto-expand bare media references to include ?v=N when version > 1.
+	if s.MediaVersionStore != nil {
+		markdownContent = markdown.ExpandMediaVersions(markdownContent, normalized, s.MediaVersionStore.GetVersion)
+	}
+
 	// --- Extract media refs ---
 	newMediaRefs := markdown.ExtractMediaRefs(markdownContent, normalized)
 	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)
@@ -172,6 +178,7 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	oldContent, _ := os.ReadFile(contentPath)
 
 	// If content is identical to current published version, skip creating a new version.
+	// Media version changes are reflected in the URL (?v=N), so MD5 dedup is sufficient.
 	if len(oldContent) > 0 && md5sum(oldContent) == md5sum([]byte(markdownContent)) {
 		meta, metaErr := s.loadMeta(metaPath)
 		if metaErr == nil {
@@ -186,12 +193,10 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	switch {
 	case err == nil:
 		// Archive the current published content before overwriting.
+		// Use the media_refs frozen in the old metadata (not the version store),
+		// so the archive reflects media as they were when this version was published.
 		if len(oldContent) > 0 && s.Attic != nil {
-			var oldMediaVersions map[string]int64
-			if s.MediaVersionStore != nil && len(oldMediaRefs) > 0 {
-				oldMediaVersions = s.MediaVersionStore.GetVersionsForPaths(oldMediaRefs)
-			}
-			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "", oldMediaVersions)
+			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "", meta.MediaRefs)
 		}
 		meta.UpdatedAt = now
 		meta.Version++
@@ -208,6 +213,9 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, fmt.Errorf("load metadata: %w", err)
 	}
 
+	// Clear MediaRefs — version info is now tracked in the markdown URL (?v=N).
+	meta.MediaRefs = nil
+
 	if err := writeFileAtomic(contentPath, []byte(markdownContent)); err != nil {
 		return PutResult{}, fmt.Errorf("write page: %w", err)
 	}
@@ -221,13 +229,9 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, fmt.Errorf("write metadata: %w", err)
 	}
 
-	// Archive the new version.
+	// Archive the new version (media versions are in the markdown URLs now).
 	if s.Attic != nil {
-		var newMediaVersions map[string]int64
-		if s.MediaVersionStore != nil && len(newMediaRefs) > 0 {
-			newMediaVersions = s.MediaVersionStore.GetVersionsForPaths(newMediaRefs)
-		}
-		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "", newMediaVersions)
+		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "", nil)
 	}
 
 	// Append to global changelog.
@@ -303,9 +307,9 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 		return DeleteResult{}, fmt.Errorf("load metadata: %w", err)
 	}
 
-	// Archive current version with summary "deleted".
+	// Archive current version with summary "deleted", preserving frozen media refs.
 	if s.Attic != nil {
-		if archiveErr := s.Attic.Archive(normalized, meta.Version, content, author, "deleted", nil); archiveErr != nil {
+		if archiveErr := s.Attic.Archive(normalized, meta.Version, content, author, "deleted", meta.MediaRefs); archiveErr != nil {
 			return DeleteResult{}, fmt.Errorf("archive before delete: %w", archiveErr)
 		}
 	}

@@ -67,13 +67,15 @@ export type StyleContribution = {
 
 export type MarkdownItPlugin = (md: any) => void
 
+export type NodePropertyOption = { value: string; label: string }
+
 export type NodePropertySpec = {
   name: string
   label: string
   default?: string | null
   parse?: (raw: string) => string | null
   serialize?: (value: string | null) => string
-  options?: { value: string; label: string }[]
+  options?: NodePropertyOption[] | ((attrs: Record<string, any>) => NodePropertyOption[])
   visible?: (attrs: Record<string, any>) => boolean
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/config"
+	"gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
 )
 
@@ -55,43 +56,49 @@ type MediaAtticStore interface {
 	ReadVersion(mediaPath string, version int64) ([]byte, error)
 }
 
-type Server struct {
-	store           PageStore
-	mediaStore      MediaStore
-	orphanDetector  OrphanDetector
-	searchStore     SearchStore
-	atticStore      AtticStore
-	draftManager    DraftManager
-	logoResolver    LogoResolver
-	mediaAtticStore MediaAtticStore
-	configStore     *config.Store
-	userStore       *auth.UserStore
-	groupStore      *auth.GroupStore
-	sessionStore    *auth.SessionStore
-	aclStore        *auth.ACLStore
-	changelog       *storage.Changelog
-	serveWeb        bool
-	webDirPath      string
+type MediaVersionStoreReader interface {
+	GetVersion(mediaPath string) int64
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, serveWeb bool, webDirPath string) http.Handler {
+type Server struct {
+	store             PageStore
+	mediaStore        MediaStore
+	orphanDetector    OrphanDetector
+	searchStore       SearchStore
+	atticStore        AtticStore
+	draftManager      DraftManager
+	logoResolver      LogoResolver
+	mediaAtticStore   MediaAtticStore
+	mediaVersionStore MediaVersionStoreReader
+	configStore       *config.Store
+	userStore         *auth.UserStore
+	groupStore        *auth.GroupStore
+	sessionStore      *auth.SessionStore
+	aclStore          *auth.ACLStore
+	changelog         *storage.Changelog
+	serveWeb          bool
+	webDirPath        string
+}
+
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
-		store:           store,
-		mediaStore:      mediaStore,
-		orphanDetector:  orphanDetector,
-		searchStore:     searchStore,
-		atticStore:      atticStore,
-		draftManager:    draftManager,
-		logoResolver:    logoResolver,
-		mediaAtticStore: mediaAtticStore,
-		configStore:     configStore,
-		userStore:       userStore,
-		groupStore:      groupStore,
-		sessionStore:    sessionStore,
-		aclStore:        aclStore,
-		changelog:       changelog,
-		serveWeb:        serveWeb,
-		webDirPath:      webDirPath,
+		store:             store,
+		mediaStore:        mediaStore,
+		orphanDetector:    orphanDetector,
+		searchStore:       searchStore,
+		atticStore:        atticStore,
+		draftManager:      draftManager,
+		logoResolver:      logoResolver,
+		mediaAtticStore:   mediaAtticStore,
+		mediaVersionStore: mediaVersionStore,
+		configStore:       configStore,
+		userStore:         userStore,
+		groupStore:        groupStore,
+		sessionStore:      sessionStore,
+		aclStore:          aclStore,
+		changelog:         changelog,
+		serveWeb:          serveWeb,
+		webDirPath:        webDirPath,
 	}
 
 	r := chi.NewRouter()
@@ -218,6 +225,21 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		"path":     page.Path,
 		"markdown": page.Markdown,
 		"meta":     page.Meta,
+	}
+
+	// Include current version numbers for all referenced media files.
+	if s.mediaVersionStore != nil {
+		refs := markdown.ExtractMediaRefs(page.Markdown, page.Path)
+		mediaVersions := make(map[string]int64, len(refs))
+		for _, ref := range refs {
+			ver := s.mediaVersionStore.GetVersion(ref)
+			if ver > 0 {
+				mediaVersions[ref] = ver
+			}
+		}
+		if len(mediaVersions) > 0 {
+			resp["media_versions"] = mediaVersions
+		}
 	}
 
 	if lock.Owner != "" {
@@ -407,18 +429,8 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 
 	cleaned := path.Clean("/" + raw)
 	cleaned = strings.TrimPrefix(cleaned, "/")
-	targetPath, err := s.mediaStore.ResolvePath(cleaned)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	info, err := os.Stat(targetPath)
-	if err != nil || info.IsDir() {
-		http.NotFound(w, r)
-		return
-	}
 
-	http.ServeFile(w, r, filepath.Clean(targetPath))
+	s.serveMediaWithVersioning(w, r, cleaned)
 }
 
 func (s *Server) handleServeMediaVersion(w http.ResponseWriter, r *http.Request) {

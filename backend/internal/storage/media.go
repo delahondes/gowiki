@@ -20,6 +20,7 @@ type MediaEntry struct {
 	Kind      string    `json:"kind"` // file | folder
 	Size      int64     `json:"size"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Version   int64     `json:"version,omitempty"` // current media version (0 if untracked)
 }
 
 type MediaFileStore struct {
@@ -71,12 +72,17 @@ func (s *MediaFileStore) List(namespacePath string) ([]MediaEntry, error) {
 		if ns != "" {
 			entryPath = ns + "/" + name
 		}
+		var ver int64
+		if kind == "file" && s.VersionStore != nil {
+			ver = s.VersionStore.GetVersion(entryPath)
+		}
 		out = append(out, MediaEntry{
 			Name:      name,
 			Path:      entryPath,
 			Kind:      kind,
 			Size:      size,
 			UpdatedAt: info.ModTime().UTC(),
+			Version:   ver,
 		})
 	}
 
@@ -156,12 +162,17 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 		return MediaEntry{}, fmt.Errorf("stat media file: %w", err)
 	}
 
+	var ver int64
+	if s.VersionStore != nil {
+		ver = s.VersionStore.GetVersion(relPath)
+	}
 	return MediaEntry{
 		Name:      safeName,
 		Path:      relPath,
 		Kind:      "file",
 		Size:      info.Size(),
 		UpdatedAt: info.ModTime().UTC(),
+		Version:   ver,
 	}, nil
 }
 

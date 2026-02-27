@@ -165,6 +165,14 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
     try {
       const data = await listMedia(state.namespacePath)
       const allEntries = data.entries ?? []
+      // Update global media version cache for property panel dropdowns.
+      if (window.__gowikiUpdateMediaVersionCache) {
+        for (const entry of allEntries) {
+          if (entry.kind === "file" && entry.version > 0) {
+            window.__gowikiUpdateMediaVersionCache(entry.path, entry.version)
+          }
+        }
+      }
       state.entries = allEntries.filter(entry => {
         if (entry.kind !== "file") return true
         if (state.showMarkdownFiles) return true

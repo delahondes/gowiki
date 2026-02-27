@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -30,11 +31,9 @@ func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if canServeAsAttachmentPath(requestPath) {
-		if attachmentPath, err := s.mediaStore.ResolvePath(requestPath); err == nil {
-			if info, statErr := os.Stat(attachmentPath); statErr == nil && !info.IsDir() {
-				http.ServeFile(w, r, attachmentPath)
-				return
-			}
+		if _, err := s.mediaStore.ResolvePath(requestPath); err == nil {
+			s.serveMediaWithVersioning(w, r, requestPath)
+			return
 		}
 	}
 
@@ -74,15 +73,108 @@ func (s *Server) handleFilePath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attachmentPath, err := s.mediaStore.ResolvePath(requestPath)
+	s.serveMediaWithVersioning(w, r, requestPath)
+}
+
+// serveMediaWithVersioning implements the 3-way version dispatch for media files:
+//   - ?v=latest  → serve from disk (current file)
+//   - ?v=N       → serve from attic (via serveVersionedMedia)
+//   - bare (no ?v=) → if current version > 1, serve v=1 from attic; otherwise serve from disk
+func (s *Server) serveMediaWithVersioning(w http.ResponseWriter, r *http.Request, mediaPath string) {
+	vStr := r.URL.Query().Get("v")
+
+	if strings.EqualFold(vStr, "latest") {
+		// Explicit ?v=latest — always serve current file from disk.
+		s.serveFromDisk(w, r, mediaPath)
+		return
+	}
+
+	if vStr != "" {
+		// Explicit ?v=N — serve that version.
+		s.serveVersionedMedia(w, r, mediaPath, vStr)
+		return
+	}
+
+	// Bare URL (no ?v=). Semantics: bare = v=1 (the original).
+	// If the file has been overwritten (current version > 1), serve v=1 from attic.
+	if s.mediaVersionStore != nil {
+		current := s.mediaVersionStore.GetVersion(mediaPath)
+		if current > 1 {
+			s.serveVersionedMedia(w, r, mediaPath, "1")
+			return
+		}
+	}
+
+	// Current version is 0 or 1 — the file on disk IS v=1.
+	s.serveFromDisk(w, r, mediaPath)
+}
+
+// serveFromDisk resolves and serves a media file directly from disk.
+func (s *Server) serveFromDisk(w http.ResponseWriter, r *http.Request, mediaPath string) {
+	resolved, err := s.mediaStore.ResolvePath(mediaPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	info, statErr := os.Stat(attachmentPath)
+	info, statErr := os.Stat(resolved)
 	if statErr != nil || info.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, attachmentPath)
+	http.ServeFile(w, r, resolved)
+}
+
+// serveVersionedMedia serves a specific version of a media file from the attic.
+func (s *Server) serveVersionedMedia(w http.ResponseWriter, r *http.Request, mediaPath, vStr string) {
+	version, err := strconv.ParseInt(vStr, 10, 64)
+	if err != nil || version < 1 {
+		http.NotFound(w, r)
+		return
+	}
+	if s.mediaAtticStore == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// If this is the current version, serve from disk (supports range requests, caching).
+	if s.mediaVersionStore != nil {
+		current := s.mediaVersionStore.GetVersion(mediaPath)
+		if current == version || (current == 0 && version == 1) {
+			if resolved, resolveErr := s.mediaStore.ResolvePath(mediaPath); resolveErr == nil {
+				if info, statErr := os.Stat(resolved); statErr == nil && !info.IsDir() {
+					http.ServeFile(w, r, resolved)
+					return
+				}
+			}
+		}
+	}
+
+	content, err := s.mediaAtticStore.ReadVersion(mediaPath, version)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	ext := filepath.Ext(mediaPath)
+	ct := "application/octet-stream"
+	switch strings.ToLower(ext) {
+	case ".png":
+		ct = "image/png"
+	case ".jpg", ".jpeg":
+		ct = "image/jpeg"
+	case ".gif":
+		ct = "image/gif"
+	case ".svg":
+		ct = "image/svg+xml"
+	case ".webp":
+		ct = "image/webp"
+	case ".pdf":
+		ct = "application/pdf"
+	}
+
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.WriteHeader(http.StatusOK)
+	w.Write(content)
 }
