@@ -2601,9 +2601,12 @@ function buildMenubar() {
         databaseInsertQueryCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        const cm = rawEditor
-        const cursor = cm.state.selection.main.head
-        cm.dispatch({ changes: { from: cursor, insert: "{database-query table=}\n\n" } })
+        const snippet = "{database-query table=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
       }
     })
   }
@@ -2615,9 +2618,12 @@ function buildMenubar() {
         databaseInsertNewRowCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        const cm = rawEditor
-        const cursor = cm.state.selection.main.head
-        cm.dispatch({ changes: { from: cursor, insert: "{database-newrow table=}\n\n" } })
+        const snippet = "{database-newrow table=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
       }
     })
   }
@@ -2641,10 +2647,17 @@ function buildMenubar() {
         const $from = state.selection.$from
         // Find the top-level block containing the cursor.
         const depth = $from.depth > 0 ? 1 : 0
-        const afterBlock = $from.after(depth)
-        const tr = state.tr.insert(afterBlock, paragraphType.create())
-        tr.setSelection(TextSelection.near(tr.doc.resolve(afterBlock + 1)))
-        editorView.dispatch(tr.scrollIntoView())
+        try {
+          const afterBlock = $from.after(depth)
+          const tr = state.tr.insert(afterBlock, paragraphType.create())
+          tr.setSelection(TextSelection.near(tr.doc.resolve(afterBlock + 1)))
+          editorView.dispatch(tr.scrollIntoView())
+        } catch {
+          // At end of document — append a paragraph.
+          const tr = state.tr.insert(state.doc.content.size, paragraphType.create())
+          tr.setSelection(TextSelection.near(tr.doc.resolve(tr.doc.content.size - 1)))
+          editorView.dispatch(tr.scrollIntoView())
+        }
       }
       editorView.focus()
     } else if (editMode === "raw" && rawEditor) {

@@ -1070,8 +1070,9 @@ export const databasePlugin: WikiPlugin = {
 
     // ── Node properties ──
 
-    reg.registerNodeProperties("database_query", databaseQueryProperties)
-    reg.registerNodeProperties("database_newrow", databaseNewRowProperties)
+    // database_query and database_newrow properties are already registered
+    // by registerSelfContainedDirective above. Only database_row needs
+    // explicit registration since it uses a custom markdown-it block rule.
     reg.registerNodeProperties("database_row", databaseRowProperties)
 
     // ── Styles ──
