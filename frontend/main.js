@@ -145,8 +145,10 @@ function classifyLinkTarget(rawTarget) {
   if (/^https?:\/\//i.test(target)) {
     return { ok: true, normalized: target, kind: "external" }
   }
-  if (/^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(target)) {
-    return { ok: true, normalized: target, kind: "internal" }
+  // Encode spaces as %20 so users can type paths with spaces.
+  const normalized = target.replace(/ /g, "%20")
+  if (/^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(normalized)) {
+    return { ok: true, normalized, kind: "internal" }
   }
   return {
     ok: false,
@@ -160,7 +162,8 @@ function defaultLinkTextForTarget(target) {
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
   const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
-  return parts[parts.length - 1] ?? "index"
+  const raw = parts[parts.length - 1] ?? "index"
+  try { return decodeURIComponent(raw) } catch { return raw }
 }
 
 function promptLinkForm(initialTarget, initialText) {
@@ -479,6 +482,10 @@ function splitPathParts(raw) {
     .filter(Boolean)
 }
 
+function encodePathSegments(segments) {
+  return segments.map(s => encodeURIComponent(s)).join("/")
+}
+
 function buildMediaReferencePath(currentNamespace, mediaPath) {
   const from = splitPathParts(currentNamespace)
   const to = splitPathParts(mediaPath)
@@ -489,14 +496,14 @@ function buildMediaReferencePath(currentNamespace, mediaPath) {
   }
 
   const upCount = from.length - idx
-  const down = to.slice(idx).join("/")
+  const down = encodePathSegments(to.slice(idx))
 
   if (upCount <= 2) {
     if (upCount === 0) return "./" + down
     return "../".repeat(upCount) + down
   }
 
-  return "/" + to.join("/")
+  return "/" + encodePathSegments(to)
 }
 
 function appendMediaVersion(target, version) {
@@ -506,7 +513,8 @@ function appendMediaVersion(target, version) {
 
 function mediaLabelFromPath(mediaPath) {
   const parts = splitPathParts(mediaPath)
-  return parts[parts.length - 1] ?? "file"
+  const raw = parts[parts.length - 1] ?? "file"
+  try { return decodeURIComponent(raw) } catch { return raw }
 }
 
 function rawInsertMediaReference(kind, mediaEntry) {

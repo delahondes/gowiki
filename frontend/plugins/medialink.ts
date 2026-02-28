@@ -47,6 +47,26 @@ const medialinkProperties = [
   },
 ]
 
+// Extensions that have a dedicated vivid icon in /icons/filetypes/.
+const knownIconExtensions = new Set([
+  "7z", "avi", "bmp", "csv", "doc", "docx", "epub", "gif", "gz",
+  "html", "jpeg", "jpg", "json", "md", "mov", "mp3", "mp4", "ods",
+  "odt", "ogg", "pdf", "png", "ppt", "pptx", "rar", "rtf", "svg",
+  "tar", "tgz", "txt", "wav", "webp", "xls", "xlsx", "xml", "zip",
+])
+
+function iconPathForHref(href: string): string {
+  const pathOnly = href.split(/[?#]/)[0]
+  const dot = pathOnly.lastIndexOf(".")
+  if (dot >= 0) {
+    const ext = pathOnly.slice(dot + 1).toLowerCase()
+    if (knownIconExtensions.has(ext)) {
+      return `/icons/filetypes/${ext}.svg`
+    }
+  }
+  return "/icons/filetypes/_default.svg"
+}
+
 const medialinkStyles = `
 .gowiki-media-link {
   cursor: pointer;
@@ -54,9 +74,12 @@ const medialinkStyles = `
   color: #2b6cb0;
 }
 
-.gowiki-media-link::before {
-  content: "📎 ";
-  font-size: 0.85em;
+.gowiki-media-link-icon {
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.15em;
+  margin-right: 3px;
+  display: inline;
 }
 
 .gowiki-media-link.ProseMirror-selectednode {
@@ -72,6 +95,8 @@ function escapeMarkdownText(text: string): string {
 
 class MedialinkNodeView {
   dom: HTMLElement
+  private iconEl: HTMLImageElement
+  private textNode: Text
   private node: PMNode
   private outerView: EditorView
   private getPos: () => number | undefined
@@ -83,12 +108,22 @@ class MedialinkNodeView {
 
     this.dom = document.createElement("a")
     this.dom.className = "gowiki-media-link"
+
+    this.iconEl = document.createElement("img")
+    this.iconEl.className = "gowiki-media-link-icon"
+    this.iconEl.setAttribute("aria-hidden", "true")
+    this.dom.appendChild(this.iconEl)
+
+    this.textNode = document.createTextNode("")
+    this.dom.appendChild(this.textNode)
+
     this.dom.addEventListener("click", this.onClick)
     this.applyAttrs()
   }
 
   private applyAttrs() {
-    let href = this.node.attrs.href ?? ""
+    const rawHref = this.node.attrs.href ?? ""
+    let href = rawHref
     const version = this.node.attrs.version ?? null
     if (version) {
       href += (href.includes("?") ? "&" : "?") + "v=" + version
@@ -99,7 +134,8 @@ class MedialinkNodeView {
     } else {
       this.dom.removeAttribute("title")
     }
-    this.dom.textContent = this.node.attrs.label || this.node.attrs.href || "file"
+    this.iconEl.src = iconPathForHref(rawHref)
+    this.textNode.textContent = this.node.attrs.label || this.node.attrs.href || "file"
   }
 
   private onClick = (event: MouseEvent) => {
@@ -155,7 +191,8 @@ export const medialinkPlugin: WikiPlugin = {
             autoText: { default: false },
           },
           toDOM(node: PMNode) {
-            let href = node.attrs.href ?? ""
+            const rawHref = node.attrs.href ?? ""
+            let href = rawHref
             const version = node.attrs.version ?? null
             if (version) {
               href += (href.includes("?") ? "&" : "?") + "v=" + version
@@ -167,7 +204,14 @@ export const medialinkPlugin: WikiPlugin = {
             if (node.attrs.title) {
               attrs.title = node.attrs.title
             }
-            return ["a", attrs, node.attrs.label || node.attrs.href || "file"]
+            return ["a", attrs,
+              ["img", {
+                class: "gowiki-media-link-icon",
+                src: iconPathForHref(rawHref),
+                "aria-hidden": "true",
+              }],
+              node.attrs.label || node.attrs.href || "file",
+            ]
           },
           parseDOM: [
             {

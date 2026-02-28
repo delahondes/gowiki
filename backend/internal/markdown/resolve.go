@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"net/url"
 	"path"
 	"strings"
 )
@@ -9,6 +10,9 @@ import (
 // pagePath is the page's logical path (e.g., "docs/intro").
 // refPath is the reference target (e.g., "./diagram.png", "../logo.png", "/abs/path.png").
 // Returns normalized absolute path within content/ (no leading slash).
+//
+// Percent-encoded characters in refPath (e.g. %20 for spaces) are decoded before resolution,
+// so that markdown hrefs like "./my%20file.pdf" resolve to the file "my file.pdf" on disk.
 //
 // Rules:
 //   - "/foo/bar.png" -> "foo/bar.png" (absolute, strip leading /)
@@ -19,6 +23,10 @@ func ResolvePath(pagePath, refPath string) string {
 	refPath = strings.TrimSpace(refPath)
 	if refPath == "" {
 		return ""
+	}
+	// Decode percent-encoded characters (e.g. %20 → space).
+	if decoded, err := url.PathUnescape(refPath); err == nil {
+		refPath = decoded
 	}
 
 	// Absolute path: strip leading slash and clean.
