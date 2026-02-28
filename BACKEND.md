@@ -283,6 +283,160 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Provide editor UX
 - Never enforce backend rules locally
 
+## Database — structured data system
+
+This document specifies the database feature, implemented in v0.7. It is equivalent in spirit to Dokuwiki's Struct plugin but with a cleaner model. The keyword throughout the UI, syntax, and code is `database`.
+
+### Storage
+
+Database data is stored in PostgreSQL. Two schema categories exist:
+
+**Meta schema** — fixed tables describing all user-defined schemas:
+
+```sql
+database_tables(
+  id, name, scope_regexp, page_folder,
+  index_field, default_sort_field, default_sort_order,
+  page_template_path, created_at, updated_at
+)
+
+database_fields(
+  id, table_id, name, type, required, default_value,
+  display_order, placeholder, created_at, archived_at
+)
+
+database_enum_values(
+  id, field_id, value, display_order
+)
+
+database_schema_history(
+  id, table_id, changed_at, changed_by,
+  change_type, field_name, field_type, detail
+)
+```
+
+**Data tables** — one table per user-defined database table, created dynamically:
+
+```sql
+_{table_name}(
+  id, page_path, created_at, updated_at,
+  {field1}, {field2}, ...
+)
+```
+
+Multi-enum fields use an intermediate table:
+
+```sql
+_{table_name}__{field_name}(
+  row_id, value
+)
+```
+
+Archived fields retain their column in PostgreSQL but are excluded from all queries and UI. Hard-drop is an explicit admin action.
+
+Schema change history is recorded in `database_schema_history`. Data rows are never versioned — the live table always reflects the current schema.
+
+### Table kinds
+
+**Page-bound tables:** each row is associated with a wiki page. The page path is derived from the index field value: `{page_folder}/{index_value}`. Index values are restricted to alphanumeric characters, dashes, and underscores. When a page-bound row is created, the associated page is created at that path, optionally pre-populated from the table's page template. Database fields are rendered at the top of the page; the rest of the page is a normal wiki document.
+
+**Free tables:** rows have no associated page. Pure data, displayed and queried via database blocks embedded in wiki pages.
+
+### Table metadata
+
+Each table has:
+- **Name:** plain, unique, alphanumeric + underscore (e.g. `qms_deviation`)
+- **Scope:** regexp controlling which pages may embed query blocks for this table
+- **Page folder:** optional, plain namespace prefix starting with `/` (page-bound tables only)
+- **Index field:** mandatory, single column, unique, filesystem-safe values only
+- **Default sort field and order**
+- **Page template path:** optional, for page-bound tables
+
+Each field has:
+- **Name, type:** text, integer, float, boolean, date, datetime, page_link, enum, multi-enum, auto-increment integer
+- **Required flag**
+- **Default value** (optional)
+- **Display order**
+- **Placeholder/hint text**
+- **Archived flag** (soft delete)
+- **For enum/multi-enum:** list of allowed values
+- **Foreign key:** optional reference to another table's index field — constrains writes (reject unknown values) and displays as a link to the referenced row
+
+### Row representation in Markdown
+
+For page-bound tables, field values are stored explicitly in the page Markdown so they appear in version history and diffs. The canonical representation is a `database` directive followed immediately by a two-column field/value table:
+
+```
+{database row table=qms_deviation}
+| Field | Value |
+| --- | --- |
+| title | My deviation |
+| status | open |
+| severity | high |
+```
+
+For multi-enum fields, values are stored as a comma-separated list in the Value cell. The intermediate table `_{table}__{field}` is a derived cache rebuilt from the Markdown. Markdown is ground truth.
+
+### Replacement variables in templates
+
+Page templates for page-bound tables may use replacement variables referencing field values. Syntax uses double curly braces (unambiguous since `{` is escaped as `\{` in the dialect):
+
+```
+{{table.field}}
+```
+
+Replacement variables keep their generic form in the stored Markdown and are resolved at render time.
+
+### Query blocks
+
+Database data can be embedded in any wiki page within the table's scope using a query block:
+
+```
+{database table=qms_deviation filter="status=open" sort=severity order=asc limit=20}
+```
+
+- `table`: table name (required)
+- `filter`: field=value expression (optional, repeatable)
+- `sort`: field name (optional, defaults to table's default sort)
+- `order`: asc or desc (optional)
+- `limit`: integer (optional, no limit by default)
+
+Columns in the rendered query result are sortable. For page-bound tables, the index value is a link to the associated page.
+
+### Adding a new row
+
+A new row is inserted via a `database new-row` block embedded in any page within the table's scope:
+
+```
+{database new-row table=qms_deviation}
+```
+
+This renders as a form pre-populated with default values. On submission:
+- For **free tables:** the row is created immediately.
+- For **page-bound tables:** the new page is created at `{page_folder}/{index_value}`, optionally pre-populated from the table's page template, and the user is redirected to the new page exactly as in Dokuwiki's Struct model.
+
+### Inline field editing
+
+Double-clicking a field value in view mode opens an inline editor for that field only.
+
+- **Free tables:** saving is immediate, no draft.
+- **Page-bound tables:** saving publishes immediately as a full page version. No draft is created. Users who want to edit the full page follow the normal edit→publish workflow. The index value in query results links to the full page.
+
+### ACL and scope
+
+Query block access is governed by the table's scope regexp, following the same ACL rules as the rest of the wiki (most specific pattern wins, then most permissive, order as tiebreaker).
+
+### Index field constraints
+
+Index field values must match `^[a-zA-Z0-9_-]+$`. Enforced at input. No slugification — the stored value is exactly what the user entered.
+
+### Schema evolution
+
+- **Adding a field:** `ALTER TABLE ADD COLUMN` with default value, recorded in schema history.
+- **Archiving a field:** column retained in PostgreSQL, excluded from queries and UI, recorded in schema history. Data is never silently destroyed.
+- **Hard-drop:** explicit admin action, removes the column permanently.
+- **Renaming a field:** recorded in schema history, column renamed in PostgreSQL.
+
 ## Milestones
 
 ### v0.1 ✓ — Single-page correctness
@@ -324,5 +478,4 @@ This is out of scope until v0.7 but must be anticipated in the backend design.
 - Admin override: discard any user's draft, release lock, log the action.
 
 ### v0.7 — Structured data
-- Structured fields associated with pages.
-- Querying and rendering of structured data.
+- implement the database functions specified in `Database — structured data system` above.
