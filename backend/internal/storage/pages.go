@@ -56,6 +56,12 @@ type Page struct {
 	Meta     PageMetadata `json:"meta"`
 }
 
+// DatabaseSyncer is an optional hook for syncing page content to the database.
+type DatabaseSyncer interface {
+	SyncPageRows(pagePath, markdown string)
+	RemovePageRows(pagePath string)
+}
+
 type FileStore struct {
 	contentRoot       string
 	metaRoot          string
@@ -67,6 +73,7 @@ type FileStore struct {
 	Changelog         *Changelog
 	Drafts            *DraftStore
 	MediaVersionStore *MediaVersionStore
+	DatabaseSync      DatabaseSyncer
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -249,6 +256,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
 
+	// --- Sync database rows if configured ---
+	if s.DatabaseSync != nil {
+		s.DatabaseSync.SyncPageRows(normalized, markdownContent)
+	}
+
 	// --- Compute newly orphaned media ---
 	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, newMediaRefs)
 
@@ -325,6 +337,11 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// Clean up empty parent directories for content and meta paths.
 	cleanEmptyParents(filepath.Dir(contentPath), s.contentRoot)
 	cleanEmptyParents(filepath.Dir(metaPath), s.metaRoot)
+
+	// Sync database: remove rows for deleted page.
+	if s.DatabaseSync != nil {
+		s.DatabaseSync.RemovePageRows(normalized)
+	}
 
 	// Snapshot old media refs before removing from index.
 	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)

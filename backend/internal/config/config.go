@@ -12,9 +12,16 @@ import (
 
 // Config holds the full site configuration.
 type Config struct {
-	Site   SiteConfig   `yaml:"site" json:"site"`
-	Auth   AuthConfig   `yaml:"auth" json:"auth"`
-	Drafts DraftsConfig `yaml:"drafts" json:"drafts"`
+	Site     SiteConfig     `yaml:"site" json:"site"`
+	Auth     AuthConfig     `yaml:"auth" json:"auth"`
+	Drafts   DraftsConfig   `yaml:"drafts" json:"drafts"`
+	Database DatabaseConfig `yaml:"database" json:"database"`
+}
+
+// DatabaseConfig holds PostgreSQL connection settings.
+type DatabaseConfig struct {
+	DSN     string `yaml:"dsn" json:"dsn"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
 }
 
 // SiteConfig holds site-wide display settings.

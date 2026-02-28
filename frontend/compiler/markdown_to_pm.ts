@@ -23,13 +23,13 @@ function parseDirective(line: string): DirectiveToken | null {
   }
 
   const attrs: Record<string, string> = {}
-  for (const part of parts.slice(1)) {
-    const eq = part.indexOf("=")
-    if (eq <= 0 || eq === part.length - 1) {
-      throw new Error(`Invalid directive attribute: ${part}`)
-    }
-    const key = part.slice(0, eq)
-    const value = part.slice(eq + 1)
+  // Parse attributes, supporting quoted values: key="value with spaces or ="
+  const attrStr = inner.slice(parts[0].length).trim()
+  const attrRe = /([A-Za-z_][A-Za-z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g
+  let m: RegExpExecArray | null
+  while ((m = attrRe.exec(attrStr)) !== null) {
+    const key = m[1]
+    const value = m[2] ?? m[3] ?? m[4]
     attrs[key] = value
   }
 

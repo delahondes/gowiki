@@ -4,6 +4,7 @@ import { blockquotePlugin } from "./blockquote"
 import { tablePlugin } from "./table"
 import { includePlugin } from "./include"
 import { medialinkPlugin } from "./medialink"
+import { databasePlugin } from "./database"
 
 export const plugins: Plugin[] = [
   imagePlugin,
@@ -11,4 +12,5 @@ export const plugins: Plugin[] = [
   tablePlugin,
   includePlugin,
   medialinkPlugin,
+  databasePlugin,
 ]

@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"gowiki/backend/internal/api"
 	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/config"
+	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/storage"
 )
 
@@ -80,7 +83,28 @@ func main() {
 	}
 	log.Printf("config: %s", configPath)
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, *serveWeb, filepath.Clean(*webDir))
+	// Initialize database pool.
+	dbPool := database.NewPool()
+	cfg := configStore.Get()
+	if cfg.Database.Enabled && cfg.Database.DSN != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := dbPool.Connect(ctx, cfg.Database.DSN); err != nil {
+			log.Printf("WARNING: database connection failed: %v", err)
+		} else {
+			log.Printf("database: connected")
+			if err := database.RunMigrations(ctx, dbPool); err != nil {
+				log.Printf("WARNING: database migration failed: %v", err)
+			} else {
+				log.Printf("database: migrations applied")
+				schemaStore := database.NewSchemaStore(dbPool)
+				dataStore := database.NewDataStore(dbPool, schemaStore)
+				store.DatabaseSync = database.NewDatabaseSync(schemaStore, dataStore)
+			}
+		}
+		cancel()
+	}
+
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

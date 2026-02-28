@@ -16,6 +16,7 @@ import (
 
 	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/config"
+	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
 )
@@ -76,11 +77,14 @@ type Server struct {
 	sessionStore      *auth.SessionStore
 	aclStore          *auth.ACLStore
 	changelog         *storage.Changelog
+	dbPool            *database.Pool
+	schemaStore       *database.SchemaStore
+	dataStore         *database.DataStore
 	serveWeb          bool
 	webDirPath        string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -97,8 +101,15 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		sessionStore:      sessionStore,
 		aclStore:          aclStore,
 		changelog:         changelog,
-		serveWeb:          serveWeb,
-		webDirPath:        webDirPath,
+		dbPool:   dbPool,
+		serveWeb: serveWeb,
+		webDirPath: webDirPath,
+	}
+
+	// If database pool is already connected, initialize stores.
+	if dbPool != nil && dbPool.IsConnected() {
+		s.schemaStore = database.NewSchemaStore(dbPool)
+		s.dataStore = database.NewDataStore(dbPool, s.schemaStore)
 	}
 
 	r := chi.NewRouter()
@@ -183,6 +194,41 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 
 		r.Get("/api/admin/locks", s.handleListLocks)
 		r.Delete("/api/admin/drafts/*", s.handleAdminDiscardDraft)
+
+		// Database admin endpoints.
+		r.Get("/api/admin/database/status", s.handleDatabaseStatus)
+		r.Post("/api/admin/database/test", s.handleDatabaseTest)
+		r.Post("/api/admin/database/connect", s.handleDatabaseConnect)
+
+		// Database schema admin endpoints.
+		r.Get("/api/admin/database/tables", s.handleListDatabaseTables)
+		r.Post("/api/admin/database/tables", s.handleCreateDatabaseTable)
+		r.Get("/api/admin/database/tables/{id}", s.handleGetDatabaseTable)
+		r.Put("/api/admin/database/tables/{id}", s.handleUpdateDatabaseTable)
+		r.Delete("/api/admin/database/tables/{id}", s.handleDeleteDatabaseTable)
+		r.Post("/api/admin/database/tables/{id}/fields", s.handleCreateDatabaseField)
+		r.Put("/api/admin/database/tables/{id}/fields/{fid}", s.handleUpdateDatabaseField)
+		r.Delete("/api/admin/database/tables/{id}/fields/{fid}", s.handleArchiveDatabaseField)
+		r.Get("/api/admin/database/tables/{id}/history", s.handleDatabaseTableHistory)
+	})
+
+	// Database data endpoints — read (optional auth).
+	r.Group(func(r chi.Router) {
+		r.Use(s.optionalAuth)
+		r.Get("/api/database/{table}/schema", s.handleDatabaseSchema)
+		r.Get("/api/database/{table}/rows", s.handleDatabaseQueryRows)
+		r.Get("/api/database/{table}/rows/{id}", s.handleDatabaseGetRow)
+		r.Get("/api/database/{table}/page/*", s.handleDatabaseGetRowByPage)
+		r.Get("/api/database/{table}/export/csv", s.handleDatabaseExportCSV)
+	})
+
+	// Database data endpoints — write (require auth).
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Post("/api/database/{table}/rows", s.handleDatabaseInsertRow)
+		r.Put("/api/database/{table}/rows/{id}", s.handleDatabaseUpdateRow)
+		r.Delete("/api/database/{table}/rows/{id}", s.handleDatabaseDeleteRow)
+		r.Put("/api/database/{table}/page/*", s.handleDatabaseUpsertRowByPage)
 	})
 
 	r.Get("/media/*", s.handleServeMedia)

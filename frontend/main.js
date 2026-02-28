@@ -81,6 +81,8 @@ const tableCommands = new Map()
 const extraCommands = []
 let togglePropertiesCommand = null
 let includeInsertCommand = null
+let databaseInsertQueryCommand = null
+let databaseInsertNewRowCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -95,6 +97,12 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "include") {
     if (name === "insert") includeInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "database") {
+    if (name === "insertQuery") databaseInsertQueryCommand = cmd
+    if (name === "insertNewRow") databaseInsertNewRowCommand = cmd
     return
   }
 
@@ -2586,6 +2594,34 @@ function buildMenubar() {
     includeBtn.querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
   }
 
+  // Database Query
+  if (databaseInsertQueryCommand) {
+    addImgButton("/icons/include.svg", "Database Query", () => {
+      if (editMode === "visual" && editorView) {
+        databaseInsertQueryCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const cm = rawEditor
+        const cursor = cm.state.selection.main.head
+        cm.dispatch({ changes: { from: cursor, insert: "{database-query table=}\n\n" } })
+      }
+    })
+  }
+
+  // Database New Row
+  if (databaseInsertNewRowCommand) {
+    addImgButton("/icons/include.svg", "Database New Row", () => {
+      if (editMode === "visual" && editorView) {
+        databaseInsertNewRowCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const cm = rawEditor
+        const cursor = cm.state.selection.main.head
+        cm.dispatch({ changes: { from: cursor, insert: "{database-newrow table=}\n\n" } })
+      }
+    })
+  }
+
   // Blockquote
   addIconButton(icons.blockquote, "Quote block", () => {
     if (editMode === "visual" && editorView) {
@@ -4435,7 +4471,7 @@ function renderAdminPage() {
   const tabContent = document.createElement("div")
   tabContent.className = "gowiki-admin-content"
 
-  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration"]
+  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration", "Database"]
   let activeTab = "Users"
 
   function renderTabBar() {
@@ -4463,6 +4499,7 @@ function renderAdminPage() {
       case "ACL": renderAdminACLTab(tabContent); break
       case "Locks": renderAdminLocksTab(tabContent); break
       case "Configuration": renderAdminConfigTab(tabContent); break
+      case "Database": renderAdminDatabaseTab(tabContent); break
     }
   }
 
@@ -5342,6 +5379,618 @@ async function renderAdminConfigTab(container) {
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load configuration.</div>'
   }
+}
+
+// ── Admin: Database Tab ──────────────────────────
+
+async function renderAdminDatabaseTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading database status...</div>'
+
+  try {
+    const statusResp = await authFetch("/api/admin/database/status")
+    if (!statusResp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load database status.</div>'
+      return
+    }
+    const status = await statusResp.json()
+
+    // Also load current config to get DSN.
+    const configResp = await authFetch("/api/admin/config")
+    const config = configResp.ok ? await configResp.json() : {}
+    const dbConfig = config.database || {}
+
+    container.innerHTML = ""
+
+    const form = document.createElement("div")
+    form.className = "gowiki-admin-config-form"
+
+    // ── Connection Status ──
+    const connHeading = document.createElement("h3")
+    connHeading.textContent = "Connection"
+    form.appendChild(connHeading)
+
+    const statusIndicator = document.createElement("div")
+    statusIndicator.style.display = "flex"
+    statusIndicator.style.alignItems = "center"
+    statusIndicator.style.gap = "8px"
+    statusIndicator.style.marginBottom = "12px"
+
+    const dot = document.createElement("span")
+    dot.style.width = "12px"
+    dot.style.height = "12px"
+    dot.style.borderRadius = "50%"
+    dot.style.display = "inline-block"
+    dot.style.background = status.connected ? "#40c057" : "#e03131"
+
+    const statusText = document.createElement("span")
+    statusText.textContent = status.connected ? "Connected" : "Not connected"
+
+    statusIndicator.appendChild(dot)
+    statusIndicator.appendChild(statusText)
+    form.appendChild(statusIndicator)
+
+    const dsnInput = adminFormField(form, "DSN (e.g. postgres://user:pass@host:5432/db?sslmode=disable)", "text", dbConfig.dsn || "")
+    dsnInput.style.fontFamily = "monospace"
+    dsnInput.style.fontSize = "12px"
+
+    const connStatusMsg = document.createElement("span")
+    connStatusMsg.className = "gowiki-admin-status-msg"
+    connStatusMsg.style.display = "none"
+    connStatusMsg.style.marginLeft = "8px"
+
+    const btnRow = document.createElement("div")
+    btnRow.style.display = "flex"
+    btnRow.style.gap = "8px"
+    btnRow.style.marginTop = "8px"
+
+    const testBtn = document.createElement("button")
+    testBtn.className = "gowiki-admin-btn"
+    testBtn.textContent = "Test Connection"
+    testBtn.addEventListener("click", async () => {
+      connStatusMsg.style.display = "inline"
+      connStatusMsg.style.color = "#636e72"
+      connStatusMsg.textContent = "Testing..."
+      try {
+        const r = await authFetch("/api/admin/database/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dsn: dsnInput.value.trim() }),
+        })
+        const data = await r.json()
+        if (data.success) {
+          connStatusMsg.textContent = "Connection successful!"
+          connStatusMsg.style.color = "#155724"
+        } else {
+          connStatusMsg.textContent = data.error || "Connection failed"
+          connStatusMsg.style.color = "#c33"
+        }
+      } catch {
+        connStatusMsg.textContent = "Network error"
+        connStatusMsg.style.color = "#c33"
+      }
+    })
+
+    const saveConnBtn = document.createElement("button")
+    saveConnBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    saveConnBtn.textContent = "Save & Connect"
+    saveConnBtn.addEventListener("click", async () => {
+      connStatusMsg.style.display = "inline"
+      connStatusMsg.style.color = "#636e72"
+      connStatusMsg.textContent = "Saving..."
+      try {
+        // Update config with new DSN.
+        const currentConfig = configResp.ok ? await (await authFetch("/api/admin/config")).json() : {}
+        currentConfig.database = {
+          dsn: dsnInput.value.trim(),
+          enabled: true,
+        }
+        const saveResp = await authFetch("/api/admin/config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(currentConfig),
+        })
+        if (!saveResp.ok) {
+          const err = await saveResp.json().catch(() => ({}))
+          connStatusMsg.textContent = err.error || "Failed to save config"
+          connStatusMsg.style.color = "#c33"
+          return
+        }
+
+        // Connect.
+        const connResp = await authFetch("/api/admin/database/connect", { method: "POST" })
+        const connData = await connResp.json()
+        if (connData.success) {
+          connStatusMsg.textContent = "Connected!"
+          connStatusMsg.style.color = "#155724"
+          dot.style.background = "#40c057"
+          statusText.textContent = "Connected"
+          // Reload to show tables.
+          setTimeout(() => renderAdminDatabaseTab(container), 1000)
+        } else {
+          connStatusMsg.textContent = connData.error || "Connection failed"
+          connStatusMsg.style.color = "#c33"
+        }
+      } catch {
+        connStatusMsg.textContent = "Network error"
+        connStatusMsg.style.color = "#c33"
+      }
+    })
+
+    btnRow.appendChild(testBtn)
+    btnRow.appendChild(saveConnBtn)
+    btnRow.appendChild(connStatusMsg)
+    form.appendChild(btnRow)
+
+    // ── Tables Section (only if connected) ──
+    if (status.connected) {
+      const tablesHeading = document.createElement("h3")
+      tablesHeading.textContent = "Tables"
+      tablesHeading.style.marginTop = "24px"
+      form.appendChild(tablesHeading)
+
+      const tablesContainer = document.createElement("div")
+      form.appendChild(tablesContainer)
+
+      await renderDatabaseTables(tablesContainer)
+    }
+
+    container.appendChild(form)
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load database status.</div>'
+  }
+}
+
+async function renderDatabaseTables(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading tables...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/database/tables")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load tables.</div>'
+      return
+    }
+    const data = await resp.json()
+    const tables = data.tables || []
+
+    container.innerHTML = ""
+
+    // New Table button.
+    const newBtn = document.createElement("button")
+    newBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+    newBtn.textContent = "New Table"
+    newBtn.style.marginBottom = "12px"
+    newBtn.addEventListener("click", async () => {
+      const result = await showDatabaseTableModal(null)
+      if (result) await renderDatabaseTables(container)
+    })
+    container.appendChild(newBtn)
+
+    if (tables.length === 0) {
+      const empty = document.createElement("div")
+      empty.style.color = "#636e72"
+      empty.textContent = "No tables defined."
+      container.appendChild(empty)
+      return
+    }
+
+    // Table list.
+    const tbl = document.createElement("table")
+    tbl.className = "gowiki-admin-table"
+    tbl.innerHTML = `<thead><tr><th>Name</th><th>Label</th><th>Scope</th><th>Actions</th></tr></thead>`
+    const tbody = document.createElement("tbody")
+
+    for (const t of tables) {
+      const tr = document.createElement("tr")
+      tr.innerHTML = `<td><code>${t.name}</code></td><td>${t.label || ""}</td><td>${t.scope_regexp || ".*"}</td><td></td>`
+      const actionsTd = tr.querySelector("td:last-child")
+
+      const editBtn = document.createElement("button")
+      editBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm"
+      editBtn.textContent = "Edit"
+      editBtn.addEventListener("click", async () => {
+        const result = await showDatabaseTableModal(t)
+        if (result) await renderDatabaseTables(container)
+      })
+
+      const fieldsBtn = document.createElement("button")
+      fieldsBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm"
+      fieldsBtn.textContent = "Fields"
+      fieldsBtn.addEventListener("click", async () => {
+        await showDatabaseFieldsModal(t.id, t.name)
+        await renderDatabaseTables(container)
+      })
+
+      const dataBtn = document.createElement("button")
+      dataBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm"
+      dataBtn.textContent = "Data"
+      dataBtn.addEventListener("click", async () => {
+        await showDatabaseDataBrowser(t.name)
+      })
+
+      const deleteBtn = document.createElement("button")
+      deleteBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm gowiki-admin-btn-danger"
+      deleteBtn.textContent = "Delete"
+      deleteBtn.addEventListener("click", async () => {
+        if (!confirm(`Delete table "${t.name}" and all its data? This is irreversible.`)) return
+        const r = await authFetch(`/api/admin/database/tables/${t.id}`, { method: "DELETE" })
+        if (r.ok) await renderDatabaseTables(container)
+      })
+
+      actionsTd.appendChild(editBtn)
+      actionsTd.appendChild(fieldsBtn)
+      actionsTd.appendChild(dataBtn)
+      actionsTd.appendChild(deleteBtn)
+      tbody.appendChild(tr)
+    }
+    tbl.appendChild(tbody)
+    container.appendChild(tbl)
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load tables.</div>'
+  }
+}
+
+async function showDatabaseTableModal(existing) {
+  return showAdminModal(existing ? "Edit Table" : "New Table", (body, close, showError) => {
+    const nameInput = adminFormField(body, "Name (lowercase, underscores)", "text", existing ? existing.name : "")
+    if (existing) nameInput.readOnly = true
+    const labelInput = adminFormField(body, "Label", "text", existing ? existing.label : "")
+    const scopeInput = adminFormField(body, "Scope Regexp", "text", existing ? existing.scope_regexp : ".*")
+    const folderInput = adminFormField(body, "Page Folder", "text", existing ? existing.page_folder : "")
+    const indexInput = adminFormField(body, "Index Field", "text", existing ? existing.index_field : "")
+    const sortFieldInput = adminFormField(body, "Default Sort Field", "text", existing ? existing.default_sort_field : "")
+    const sortOrderSelect = adminFormSelect(body, "Default Sort Order", [
+      { value: "asc", label: "Ascending" },
+      { value: "desc", label: "Descending" },
+    ], existing ? existing.default_sort_order : "asc")
+    const templateInput = adminFormField(body, "Page Template Path", "text", existing ? existing.page_template_path : "")
+
+    adminModalActions(body, close, async () => {
+      const payload = {
+        name: nameInput.value.trim(),
+        label: labelInput.value.trim(),
+        scope_regexp: scopeInput.value.trim() || ".*",
+        page_folder: folderInput.value.trim(),
+        index_field: indexInput.value.trim(),
+        default_sort_field: sortFieldInput.value.trim(),
+        default_sort_order: sortOrderSelect.value,
+        page_template_path: templateInput.value.trim(),
+      }
+      if (!payload.name) { showError("Name is required"); return }
+
+      const url = existing ? `/api/admin/database/tables/${existing.id}` : "/api/admin/database/tables"
+      const method = existing ? "PUT" : "POST"
+      const r = await authFetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (r.ok) {
+        close(true)
+      } else {
+        const err = await r.json().catch(() => ({}))
+        showError(err.error || "Failed to save table")
+      }
+    }, existing ? "Save" : "Create")
+  })
+}
+
+async function showDatabaseFieldsModal(tableId, tableName) {
+  return showAdminModal(`Fields: ${tableName}`, async (body, close) => {
+    const resp = await authFetch(`/api/admin/database/tables/${tableId}`)
+    if (!resp.ok) {
+      body.innerHTML = '<div class="gowiki-admin-error">Failed to load table.</div>'
+      return
+    }
+    const table = await resp.json()
+    const fields = (table.fields || []).filter(f => !f.archived_at)
+
+    async function refreshFields() {
+      body.innerHTML = ""
+      const r = await authFetch(`/api/admin/database/tables/${tableId}`)
+      if (!r.ok) return
+      const t = await r.json()
+      renderFieldList(t.fields || [])
+    }
+
+    function renderFieldList(allFields) {
+      const active = allFields.filter(f => !f.archived_at)
+
+      if (active.length === 0) {
+        const empty = document.createElement("div")
+        empty.style.color = "#636e72"
+        empty.textContent = "No fields defined."
+        body.appendChild(empty)
+      } else {
+        const tbl = document.createElement("table")
+        tbl.className = "gowiki-admin-table"
+        tbl.innerHTML = `<thead><tr><th>Order</th><th>Name</th><th>Label</th><th>Type</th><th>Required</th><th>Actions</th></tr></thead>`
+        const tbody = document.createElement("tbody")
+
+        for (const f of active) {
+          const tr = document.createElement("tr")
+          tr.innerHTML = `<td>${f.display_order}</td><td><code>${f.name}</code></td><td>${f.label || ""}</td><td>${f.type}</td><td>${f.required ? "Yes" : "No"}</td><td></td>`
+          const actionsTd = tr.querySelector("td:last-child")
+
+          const editBtn = document.createElement("button")
+          editBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm"
+          editBtn.textContent = "Edit"
+          editBtn.addEventListener("click", async () => {
+            await showDatabaseFieldEditModal(tableId, f)
+            await refreshFields()
+          })
+
+          const archiveBtn = document.createElement("button")
+          archiveBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm gowiki-admin-btn-danger"
+          archiveBtn.textContent = "Archive"
+          archiveBtn.addEventListener("click", async () => {
+            if (!confirm(`Archive field "${f.name}"? The column will be preserved but hidden.`)) return
+            await authFetch(`/api/admin/database/tables/${tableId}/fields/${f.id}`, { method: "DELETE" })
+            await refreshFields()
+          })
+
+          actionsTd.appendChild(editBtn)
+          actionsTd.appendChild(archiveBtn)
+          tbody.appendChild(tr)
+        }
+        tbl.appendChild(tbody)
+        body.appendChild(tbl)
+      }
+
+      // Add Field button.
+      const addBtn = document.createElement("button")
+      addBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
+      addBtn.textContent = "Add Field"
+      addBtn.style.marginTop = "12px"
+      addBtn.addEventListener("click", async () => {
+        await showDatabaseFieldEditModal(tableId, null)
+        await refreshFields()
+      })
+      body.appendChild(addBtn)
+
+      // Close button.
+      const closeBtn = document.createElement("button")
+      closeBtn.className = "gowiki-admin-btn"
+      closeBtn.textContent = "Close"
+      closeBtn.style.marginTop = "12px"
+      closeBtn.style.marginLeft = "8px"
+      closeBtn.addEventListener("click", () => close())
+      body.appendChild(closeBtn)
+    }
+
+    renderFieldList(table.fields || [])
+  })
+}
+
+async function showDatabaseFieldEditModal(tableId, existing) {
+  const fieldTypes = [
+    { value: "text", label: "Text" },
+    { value: "integer", label: "Integer" },
+    { value: "float", label: "Float" },
+    { value: "boolean", label: "Boolean" },
+    { value: "date", label: "Date" },
+    { value: "datetime", label: "DateTime" },
+    { value: "page_link", label: "Page Link" },
+    { value: "enum", label: "Enum" },
+    { value: "multi_enum", label: "Multi Enum" },
+    { value: "auto_increment", label: "Auto Increment" },
+  ]
+
+  return showAdminModal(existing ? `Edit Field: ${existing.name}` : "Add Field", (body, close, showError) => {
+    const nameInput = adminFormField(body, "Name (lowercase, underscores)", "text", existing ? existing.name : "")
+    if (existing) nameInput.readOnly = true
+    const labelInput = adminFormField(body, "Label", "text", existing ? existing.label : "")
+    const typeSelect = adminFormSelect(body, "Type", fieldTypes, existing ? existing.type : "text")
+    if (existing) typeSelect.disabled = true
+    const requiredSelect = adminFormSelect(body, "Required", [
+      { value: "false", label: "No" },
+      { value: "true", label: "Yes" },
+    ], existing ? String(existing.required) : "false")
+    const defaultInput = adminFormField(body, "Default Value", "text", existing ? existing.default_value : "")
+    const orderInput = adminFormField(body, "Display Order", "number", existing ? String(existing.display_order) : "0")
+    const placeholderInput = adminFormField(body, "Placeholder", "text", existing ? existing.placeholder : "")
+
+    // Enum values section (shown for enum/multi_enum).
+    const enumSection = document.createElement("div")
+    enumSection.style.display = "none"
+    enumSection.style.marginTop = "8px"
+
+    const enumLabel = document.createElement("label")
+    enumLabel.textContent = "Enum Values (one per line)"
+    enumLabel.style.display = "block"
+    enumLabel.style.fontWeight = "500"
+    enumLabel.style.marginBottom = "4px"
+    enumSection.appendChild(enumLabel)
+
+    const enumArea = document.createElement("textarea")
+    enumArea.rows = 4
+    enumArea.style.width = "100%"
+    enumArea.style.fontFamily = "monospace"
+    if (existing && existing.enum_values) enumArea.value = existing.enum_values.join("\n")
+    enumSection.appendChild(enumArea)
+    body.appendChild(enumSection)
+
+    function updateEnumVisibility() {
+      const t = typeSelect.value
+      enumSection.style.display = (t === "enum" || t === "multi_enum") ? "block" : "none"
+    }
+    typeSelect.addEventListener("change", updateEnumVisibility)
+    updateEnumVisibility()
+
+    adminModalActions(body, close, async () => {
+      const payload = {
+        name: nameInput.value.trim(),
+        label: labelInput.value.trim(),
+        type: typeSelect.value,
+        required: requiredSelect.value === "true",
+        default_value: defaultInput.value.trim(),
+        display_order: parseInt(orderInput.value) || 0,
+        placeholder: placeholderInput.value.trim(),
+      }
+      if (!payload.name) { showError("Name is required"); return }
+
+      // Add enum values if applicable.
+      if (payload.type === "enum" || payload.type === "multi_enum") {
+        payload.enum_values = enumArea.value.split("\n").map(v => v.trim()).filter(Boolean)
+      }
+
+      const url = existing
+        ? `/api/admin/database/tables/${tableId}/fields/${existing.id}`
+        : `/api/admin/database/tables/${tableId}/fields`
+      const method = existing ? "PUT" : "POST"
+      const r = await authFetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (r.ok) {
+        close(true)
+      } else {
+        const err = await r.json().catch(() => ({}))
+        showError(err.error || "Failed to save field")
+      }
+    }, existing ? "Save" : "Add")
+  })
+}
+
+async function showDatabaseDataBrowser(tableName) {
+  return showAdminModal(`Data: ${tableName}`, async (body, close) => {
+    let currentOffset = 0
+    const limit = 50
+
+    async function loadData() {
+      body.innerHTML = '<div class="gowiki-admin-loading">Loading data...</div>'
+
+      try {
+        const schemaResp = await authFetch(`/api/database/${encodeURIComponent(tableName)}/schema`)
+        if (!schemaResp.ok) {
+          body.innerHTML = '<div class="gowiki-admin-error">Failed to load schema.</div>'
+          return
+        }
+        const schema = await schemaResp.json()
+        const fields = (schema.fields || []).filter(f => !f.archived_at)
+
+        const resp = await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${currentOffset}`)
+        if (!resp.ok) {
+          body.innerHTML = '<div class="gowiki-admin-error">Failed to load data.</div>'
+          return
+        }
+        const data = await resp.json()
+        const rows = data.rows || []
+        const total = data.total || 0
+
+        body.innerHTML = ""
+
+        // Export CSV button.
+        const exportBtn = document.createElement("button")
+        exportBtn.className = "gowiki-admin-btn"
+        exportBtn.textContent = "Export CSV"
+        exportBtn.style.marginBottom = "12px"
+        exportBtn.addEventListener("click", () => {
+          window.open(`/api/database/${encodeURIComponent(tableName)}/export/csv`, "_blank")
+        })
+        body.appendChild(exportBtn)
+
+        if (rows.length === 0) {
+          const empty = document.createElement("div")
+          empty.style.color = "#636e72"
+          empty.textContent = "No data."
+          body.appendChild(empty)
+        } else {
+          const tbl = document.createElement("table")
+          tbl.className = "gowiki-admin-table"
+
+          const thead = document.createElement("thead")
+          const headerRow = document.createElement("tr")
+          headerRow.innerHTML = "<th>ID</th><th>Page</th>"
+          for (const f of fields) {
+            const th = document.createElement("th")
+            th.textContent = f.label || f.name
+            headerRow.appendChild(th)
+          }
+          headerRow.innerHTML += "<th>Actions</th>"
+          thead.appendChild(headerRow)
+          tbl.appendChild(thead)
+
+          const tbody = document.createElement("tbody")
+          for (const row of rows) {
+            const tr = document.createElement("tr")
+            tr.innerHTML = `<td>${row.id}</td><td>${row.page_path || ""}</td>`
+            for (const f of fields) {
+              const td = document.createElement("td")
+              const val = row.fields?.[f.name]
+              td.textContent = Array.isArray(val) ? val.join(", ") : (val != null ? String(val) : "")
+              td.contentEditable = "true"
+              td.addEventListener("blur", async () => {
+                const newVal = td.textContent.trim()
+                await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows/${row.id}`, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fields: { [f.name]: newVal } }),
+                })
+              })
+              tr.appendChild(td)
+            }
+
+            const actionsTd = document.createElement("td")
+            const delBtn = document.createElement("button")
+            delBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm gowiki-admin-btn-danger"
+            delBtn.textContent = "Delete"
+            delBtn.addEventListener("click", async () => {
+              if (!confirm("Delete this row?")) return
+              await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows/${row.id}`, { method: "DELETE" })
+              await loadData()
+            })
+            actionsTd.appendChild(delBtn)
+            tr.appendChild(actionsTd)
+            tbody.appendChild(tr)
+          }
+          tbl.appendChild(tbody)
+          body.appendChild(tbl)
+        }
+
+        // Pagination.
+        if (total > limit) {
+          const pag = document.createElement("div")
+          pag.style.display = "flex"
+          pag.style.gap = "8px"
+          pag.style.alignItems = "center"
+          pag.style.marginTop = "8px"
+
+          const prevBtn = document.createElement("button")
+          prevBtn.className = "gowiki-admin-btn"
+          prevBtn.textContent = "Previous"
+          prevBtn.disabled = currentOffset === 0
+          prevBtn.addEventListener("click", () => { currentOffset = Math.max(0, currentOffset - limit); loadData() })
+          pag.appendChild(prevBtn)
+
+          const info = document.createElement("span")
+          info.textContent = `${currentOffset + 1}-${Math.min(currentOffset + limit, total)} of ${total}`
+          pag.appendChild(info)
+
+          const nextBtn = document.createElement("button")
+          nextBtn.className = "gowiki-admin-btn"
+          nextBtn.textContent = "Next"
+          nextBtn.disabled = currentOffset + limit >= total
+          nextBtn.addEventListener("click", () => { currentOffset += limit; loadData() })
+          pag.appendChild(nextBtn)
+
+          body.appendChild(pag)
+        }
+
+        // Close button.
+        const closeBtn = document.createElement("button")
+        closeBtn.className = "gowiki-admin-btn"
+        closeBtn.textContent = "Close"
+        closeBtn.style.marginTop = "12px"
+        closeBtn.addEventListener("click", () => close())
+        body.appendChild(closeBtn)
+      } catch {
+        body.innerHTML = '<div class="gowiki-admin-error">Failed to load data.</div>'
+      }
+    }
+
+    await loadData()
+  })
 }
 
 async function bootstrap() {
