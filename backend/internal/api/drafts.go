@@ -83,7 +83,7 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.draftManager.SaveDraft(pagePath, username, req.EditToken, req.Markdown)
-	if errors.Is(err, storage.ErrEditSuperseded) {
+	if errors.Is(err, storage.ErrEditSuperseded) || errors.Is(err, storage.ErrNoDraft) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "edit session superseded"})
 		return
 	}
@@ -113,12 +113,8 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	markdown, err := s.draftManager.Publish(pagePath, username, req.EditToken)
-	if errors.Is(err, storage.ErrEditSuperseded) {
+	if errors.Is(err, storage.ErrEditSuperseded) || errors.Is(err, storage.ErrNoDraft) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "edit session superseded"})
-		return
-	}
-	if errors.Is(err, storage.ErrNoDraft) {
-		writeError(w, http.StatusNotFound, "no draft to publish")
 		return
 	}
 	if err != nil {

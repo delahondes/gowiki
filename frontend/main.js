@@ -4074,6 +4074,106 @@ function getCurrentMarkdown() {
   return currentMarkdown
 }
 
+// Shows a modal when the edit session has been superseded by another tab.
+// Returns "force" if the user wants to retake editing, "discard" otherwise.
+function promptSupersededDialog() {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-link-modal-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-link-modal"
+
+    const title = document.createElement("div")
+    title.className = "gowiki-link-modal-title"
+    title.textContent = "Edit session superseded"
+
+    const msg = document.createElement("div")
+    msg.style.cssText = "margin: 8px 0 16px; color: #b00020;"
+    msg.textContent = "Another tab took over editing this page. Your changes here may be lost."
+
+    const buttons = document.createElement("div")
+    buttons.className = "gowiki-link-modal-actions"
+
+    const forceBtn = document.createElement("button")
+    forceBtn.type = "button"
+    forceBtn.className = "gowiki-link-modal-btn"
+    forceBtn.textContent = "Force save & continue"
+
+    const discardBtn = document.createElement("button")
+    discardBtn.type = "button"
+    discardBtn.className = "gowiki-link-modal-btn"
+    discardBtn.textContent = "Discard my changes"
+
+    function close(value) {
+      overlay.remove()
+      resolve(value)
+    }
+
+    forceBtn.addEventListener("click", () => close("force"))
+    discardBtn.addEventListener("click", () => close("discard"))
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay) close("discard")
+    })
+
+    buttons.appendChild(forceBtn)
+    buttons.appendChild(discardBtn)
+    dialog.appendChild(title)
+    dialog.appendChild(msg)
+    dialog.appendChild(buttons)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+  })
+}
+
+// Handles a 409 superseded response during editing.
+// If the user chooses to force, retakes the edit token and saves the current
+// editor content (without rebuilding the editor or losing unsaved work).
+// Returns true if the user forced and the save succeeded, false if discarded.
+async function handleSuperseded() {
+  stopAutoSave()
+  const choice = await promptSupersededDialog()
+  if (choice !== "force") {
+    editToken = null
+    stashedEditorState = null
+    await reloadPageContent()
+    setMode("view")
+    return false
+  }
+  // Force-retake the edit token via API — do NOT call enterEditMode()
+  // which would rebuild the editor and lose the current unsaved content.
+  const resp = await authFetch(`/api/edit/${encodePagePath(pagePath)}?force=true`, {
+    method: "POST",
+  })
+  if (!resp.ok) {
+    setStatus("Failed to retake edit session")
+    editToken = null
+    setMode("view")
+    return false
+  }
+  const data = await resp.json()
+  editToken = data.edit_token
+
+  // Save the current editor content with the new token.
+  const markdown = getCurrentMarkdown()
+  const saveResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ markdown, edit_token: editToken }),
+  })
+  if (!saveResp.ok) {
+    setStatus("Failed to save after retaking edit session")
+    editToken = null
+    setMode("view")
+    return false
+  }
+  draftSavedThisSession = true
+  lastSavedDraftMarkdown = markdown
+  startAutoSave()
+  setStatus(`Edit session retaken — draft saved ${new Date().toLocaleTimeString()}`)
+  return true
+}
+
 async function autoSaveDraft() {
   if (mode !== "edit" || !editToken) return
   const markdown = getCurrentMarkdown()
@@ -4084,10 +4184,7 @@ async function autoSaveDraft() {
       body: JSON.stringify({ markdown, edit_token: editToken }),
     })
     if (resp.status === 409) {
-      stopAutoSave()
-      editToken = null
-      setStatus("Edit session superseded — another session took over")
-      setMode("view")
+      await handleSuperseded()
       return
     }
     if (resp.ok) {
@@ -4121,17 +4218,17 @@ async function saveDraftExplicit() {
     body: JSON.stringify({ markdown, edit_token: editToken }),
   })
   if (resp.status === 409) {
-    stopAutoSave()
-    editToken = null
-    setStatus("Edit session superseded")
-    setMode("view")
+    await handleSuperseded()
     return
   }
-  if (resp.ok) {
-    draftSavedThisSession = true
-    lastSavedDraftMarkdown = markdown
-    setStatus(`Draft saved ${new Date().toLocaleTimeString()}`)
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}))
+    setStatus(body.error || "Save failed")
+    return
   }
+  draftSavedThisSession = true
+  lastSavedDraftMarkdown = markdown
+  setStatus(`Draft saved ${new Date().toLocaleTimeString()}`)
 }
 
 async function publishDraft() {
@@ -4156,10 +4253,12 @@ async function publishDraft() {
     body: JSON.stringify({ edit_token: editToken }),
   })
   if (resp.status === 409) {
-    stopAutoSave()
-    editToken = null
-    setStatus("Edit session superseded")
-    setMode("view")
+    // Retake token and retry publish if user chooses to force.
+    const retook = await handleSuperseded()
+    if (retook) {
+      // Token was retaken and content saved as draft — now retry publish.
+      await publishDraft()
+    }
     return
   }
   if (!resp.ok) {
