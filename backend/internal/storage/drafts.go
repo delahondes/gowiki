@@ -67,9 +67,11 @@ func (d *DraftStore) EnterEditMode(pagePath, username string, force bool, curren
 		return "", "", fmt.Errorf("%w: locked by %s", ErrPageLocked, lock.Owner)
 	}
 
-	// If the same user already owns the lock, allow resuming with a new token.
-	// This handles server restarts (old session dead, lock file persists)
-	// and "resume editing" from view mode.
+	// Same user already owns the lock with an active token — another tab
+	// is (or was) editing. Require force=true to supersede it.
+	if lock.Owner == username && lock.EditToken != "" && !force {
+		return "", "", ErrEditSuperseded
+	}
 
 	// Generate new edit token.
 	editToken = generateEditToken()
@@ -129,13 +131,27 @@ func (d *DraftStore) ReadDraft(pagePath, username string) (string, error) {
 }
 
 // DiscardDraft removes the draft file and clears the lock.
-func (d *DraftStore) DiscardDraft(pagePath, username string) error {
+// If editToken is non-empty, the token is validated against the lock.
+// If editToken is empty (e.g. discard from view mode), the lock must not
+// have an active edit token (which would mean another tab is editing).
+func (d *DraftStore) DiscardDraft(pagePath, username, editToken string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	lock, _ := d.readLock(pagePath)
 	if lock.Owner != "" && lock.Owner != username {
 		return ErrNotDraftOwner
+	}
+
+	if editToken != "" {
+		// Caller has a token — validate it.
+		if lock.EditToken != editToken {
+			return ErrEditSuperseded
+		}
+	} else if lock.Owner == username && lock.EditToken != "" {
+		// No token provided but a lock with a token exists — another tab
+		// holds the edit permission. Reject to avoid discarding its work.
+		return ErrEditSuperseded
 	}
 
 	os.Remove(d.draftPath(username, pagePath))

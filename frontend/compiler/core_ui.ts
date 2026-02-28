@@ -140,14 +140,28 @@ function buildPanel(
       : prop.options
     if (resolvedOptions && resolvedOptions.length > 0) {
       const select = document.createElement("select")
-      for (const opt of resolvedOptions) {
-        const option = document.createElement("option")
-        option.value = opt.value
-        option.textContent = opt.label
-        select.appendChild(option)
+      const populateOptions = (opts: typeof resolvedOptions, currentVal: string) => {
+        select.innerHTML = ""
+        for (const opt of opts) {
+          const option = document.createElement("option")
+          option.value = opt.value
+          option.textContent = opt.label
+          select.appendChild(option)
+        }
+        select.value = currentVal
       }
-      select.value = current ?? prop.default ?? ""
+      populateOptions(resolvedOptions, current ?? prop.default ?? "")
       select.addEventListener("change", () => dispatchChange(select.value))
+      // Re-populate options on focus to pick up cache changes (e.g. new media versions).
+      if (typeof prop.options === "function") {
+        const optionsFn = prop.options
+        select.addEventListener("focus", () => {
+          const liveNode = view.state.doc.nodeAt(pos)
+          if (!liveNode) return
+          const freshOptions = optionsFn(liveNode.attrs)
+          populateOptions(freshOptions, select.value)
+        })
+      }
       control = select
     } else {
       const input = document.createElement("input")

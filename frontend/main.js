@@ -3624,7 +3624,7 @@ function cancelEdit() {
   } else {
     // No save happened — draft is just a copy of published content, discard it.
     if (editToken) {
-      authFetch(`/api/draft/${encodePagePath(pagePath)}`, { method: "DELETE" }).catch(() => {})
+      authFetch(`/api/draft/${encodePagePath(pagePath)}?edit_token=${encodeURIComponent(editToken)}`, { method: "DELETE" }).catch(() => {})
     }
     editToken = null
     stashedEditorState = null
@@ -4188,9 +4188,14 @@ async function discardDraft() {
     ? "Discard draft and lose all unpublished changes?"
     : "The draft has no changes from the published version. Discard?"
   if (!confirm(msg)) return
-  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+  const tokenParam = editToken ? `?edit_token=${encodeURIComponent(editToken)}` : ""
+  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}${tokenParam}`, {
     method: "DELETE",
   })
+  if (resp.status === 409) {
+    setStatus("Another editing session is active — cannot discard")
+    return
+  }
   if (resp.ok) {
     editToken = null
     pageLockInfo = null
@@ -4249,9 +4254,14 @@ async function discardDraftFromHistory(hasChanges) {
     : "Discard draft and lose all unpublished changes?"
   if (!confirm(msg)) return
 
-  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+  const tokenParam = editToken ? `?edit_token=${encodeURIComponent(editToken)}` : ""
+  const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}${tokenParam}`, {
     method: "DELETE",
   })
+  if (resp.status === 409) {
+    setStatus("Another editing session is active — cannot discard")
+    return
+  }
   if (resp.ok) {
     editToken = null
     pageLockInfo = null

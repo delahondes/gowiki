@@ -1,3 +1,5 @@
+import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { EditorView } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 
@@ -66,6 +68,74 @@ const medialinkStyles = `
 
 function escapeMarkdownText(text: string): string {
   return String(text ?? "").replace(/[\[\]]/g, ch => "\\" + ch)
+}
+
+class MedialinkNodeView {
+  dom: HTMLElement
+  private node: PMNode
+  private outerView: EditorView
+  private getPos: () => number | undefined
+
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+    this.node = node
+    this.outerView = view
+    this.getPos = getPos
+
+    this.dom = document.createElement("a")
+    this.dom.className = "gowiki-media-link"
+    this.dom.addEventListener("click", this.onClick)
+    this.applyAttrs()
+  }
+
+  private applyAttrs() {
+    let href = this.node.attrs.href ?? ""
+    const version = this.node.attrs.version ?? null
+    if (version) {
+      href += (href.includes("?") ? "&" : "?") + "v=" + version
+    }
+    this.dom.setAttribute("href", href)
+    if (this.node.attrs.title) {
+      this.dom.setAttribute("title", this.node.attrs.title)
+    } else {
+      this.dom.removeAttribute("title")
+    }
+    this.dom.textContent = this.node.attrs.label || this.node.attrs.href || "file"
+  }
+
+  private onClick = (event: MouseEvent) => {
+    event.preventDefault()
+    if (!this.outerView.editable) {
+      // In view mode: navigate via /media/ prefix to avoid SPA routing
+      const href = this.dom.getAttribute("href") || ""
+      const resolved = new URL(href, window.location.href)
+      const mediaUrl = "/media/" + resolved.pathname.replace(/^\/+/, "") + resolved.search
+      window.open(mediaUrl, "_blank")
+    }
+    // In edit mode: ProseMirror handles selection
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    this.node = node
+    this.applyAttrs()
+    return true
+  }
+
+  selectNode() {
+    this.dom.classList.add("ProseMirror-selectednode")
+  }
+
+  deselectNode() {
+    this.dom.classList.remove("ProseMirror-selectednode")
+  }
+
+  ignoreMutation(): boolean {
+    return true
+  }
+
+  destroy() {
+    this.dom.removeEventListener("click", this.onClick)
+  }
 }
 
 export const medialinkPlugin: WikiPlugin = {
@@ -169,6 +239,20 @@ export const medialinkPlugin: WikiPlugin = {
         }
         return `[${escapedLabel}](${href})`
       },
+    })
+
+    // NodeView for proper click handling and selection in edit mode
+    reg.registerEditorPlugin(() => {
+      return new PMPlugin({
+        key: new PluginKey("gowiki.medialinkNodeView"),
+        props: {
+          nodeViews: {
+            medialink(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new MedialinkNodeView(node, view, getPos)
+            },
+          },
+        },
+      })
     })
 
     // Styles

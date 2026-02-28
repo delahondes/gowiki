@@ -15,7 +15,7 @@ type DraftManager interface {
 	EnterEditMode(pagePath, username string, force bool, currentPublished string) (markdown string, editToken string, err error)
 	SaveDraft(pagePath, username, editToken, markdown string) error
 	ReadDraft(pagePath, username string) (string, error)
-	DiscardDraft(pagePath, username string) error
+	DiscardDraft(pagePath, username, editToken string) error
 	Publish(pagePath, username, editToken string) (string, error)
 	GetLock(pagePath string) storage.DraftLock
 	ListLocks() []storage.LockInfo
@@ -144,9 +144,14 @@ func (s *Server) handleDiscardDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := UsernameFromContext(r.Context())
-	err := s.draftManager.DiscardDraft(pagePath, username)
+	editToken := r.URL.Query().Get("edit_token")
+	err := s.draftManager.DiscardDraft(pagePath, username, editToken)
 	if errors.Is(err, storage.ErrNotDraftOwner) {
 		writeError(w, http.StatusForbidden, "not the draft owner")
+		return
+	}
+	if errors.Is(err, storage.ErrEditSuperseded) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "another editing session is active"})
 		return
 	}
 	if err != nil {
