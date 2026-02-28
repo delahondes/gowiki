@@ -1,6 +1,7 @@
 package api
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -155,24 +156,14 @@ func (s *Server) serveVersionedMedia(w http.ResponseWriter, r *http.Request, med
 		return
 	}
 
-	ext := filepath.Ext(mediaPath)
-	ct := "application/octet-stream"
-	switch strings.ToLower(ext) {
-	case ".png":
-		ct = "image/png"
-	case ".jpg", ".jpeg":
-		ct = "image/jpeg"
-	case ".gif":
-		ct = "image/gif"
-	case ".svg":
-		ct = "image/svg+xml"
-	case ".webp":
-		ct = "image/webp"
-	case ".pdf":
-		ct = "application/pdf"
+	ct := mime.TypeByExtension(filepath.Ext(mediaPath))
+	if ct == "" {
+		ct = "application/octet-stream"
 	}
+	filename := path.Base(mediaPath)
 
 	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Disposition", "inline; filename=\""+filename+"\"")
 	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.WriteHeader(http.StatusOK)

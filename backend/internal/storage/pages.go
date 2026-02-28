@@ -152,11 +152,6 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, &CircularIncludeError{Cycle: cycle}
 	}
 
-	// Auto-expand bare media references to include ?v=N when version > 1.
-	if s.MediaVersionStore != nil {
-		markdownContent = markdown.ExpandMediaVersions(markdownContent, normalized, s.MediaVersionStore.GetVersion)
-	}
-
 	// --- Extract media refs ---
 	newMediaRefs := markdown.ExtractMediaRefs(markdownContent, normalized)
 	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)
