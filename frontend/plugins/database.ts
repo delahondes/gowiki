@@ -418,11 +418,28 @@ class DatabaseQueryNodeView {
     }
   }
 
+  private async saveInlineEdit(tableName: string, rowId: number, fieldName: string, newVal: string, force = false): Promise<boolean> {
+    const url = `/api/database/${encodeURIComponent(tableName)}/rows/${rowId}${force ? "?force=true" : ""}`
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: { [fieldName]: newVal } }),
+    })
+    if (resp.status === 409) {
+      const body = await resp.json().catch(() => ({}))
+      if (body.error === "page_draft_conflict") {
+        const ok = confirm(`A draft by "${body.draft_owner}" exists for this row's page. Force the edit?`)
+        if (ok) return this.saveInlineEdit(tableName, rowId, fieldName, newVal, true)
+        return false
+      }
+    }
+    return resp.ok
+  }
+
   private inlineEditCell(td: HTMLElement, tableName: string, rowId: number, field: any, currentValue: any) {
     const displayValue = Array.isArray(currentValue) ? currentValue.join(", ") : (currentValue != null ? String(currentValue) : "")
 
     if (field.type === "enum") {
-      // Dropdown for enum fields.
       const sel = document.createElement("select")
       sel.style.width = "100%"
       sel.style.fontSize = "inherit"
@@ -441,33 +458,23 @@ class DatabaseQueryNodeView {
       td.appendChild(sel)
       sel.focus()
 
-      const save = async () => {
+      sel.addEventListener("change", async () => {
         const newVal = sel.value
         td.textContent = newVal
         td.className = "gowiki-database-editable-value"
-        try {
-          await fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields: { [field.name]: newVal } }),
-          })
-        } catch { /* silent */ }
-      }
-      sel.addEventListener("change", save)
+        const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+        if (!ok) { td.textContent = displayValue }
+      })
       sel.addEventListener("blur", () => {
         if (td.contains(sel)) { td.textContent = displayValue; td.className = "gowiki-database-editable-value" }
       })
     } else if (field.type === "boolean") {
-      // Toggle boolean.
       const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
       td.textContent = newVal
-      fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: { [field.name]: newVal } }),
-      }).catch(() => { td.textContent = displayValue })
+      this.saveInlineEdit(tableName, rowId, field.name, newVal).then(ok => {
+        if (!ok) td.textContent = displayValue
+      })
     } else {
-      // Text input for everything else.
       const input = document.createElement("input")
       input.type = field.type === "date" ? "date" : field.type === "integer" || field.type === "float" ? "number" : "text"
       input.value = displayValue
@@ -485,17 +492,8 @@ class DatabaseQueryNodeView {
         const newVal = input.value
         td.textContent = newVal
         td.className = "gowiki-database-editable-value"
-        try {
-          const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields: { [field.name]: newVal } }),
-          })
-          if (!resp.ok) {
-            td.style.color = "#c33"
-            setTimeout(() => { td.style.color = "" }, 2000)
-          }
-        } catch {
+        const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+        if (!ok) {
           td.style.color = "#c33"
           setTimeout(() => { td.style.color = "" }, 2000)
         }
@@ -927,21 +925,33 @@ class DatabaseRowNodeView {
     const table = this.node.attrs.table
     if (!table) return
 
-    const saveToApi = async (newValue: string) => {
+    const saveToApi = async (newValue: string, force = false): Promise<boolean> => {
       try {
         const pagePath = window.location.pathname.replace(/^\/+/, "")
-        const resp = await fetch(`/api/database/${encodeURIComponent(table)}/page/${pagePath}`, {
+        const url = `/api/database/${encodeURIComponent(table)}/page/${pagePath}${force ? "?force=true" : ""}`
+        const resp = await fetch(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fields: { [fieldName]: newValue } }),
         })
+        if (resp.status === 409) {
+          const body = await resp.json().catch(() => ({}))
+          if (body.error === "page_draft_conflict") {
+            const ok = confirm(`A draft by "${body.draft_owner}" exists for this page. Force the edit?`)
+            if (ok) return saveToApi(newValue, true)
+            return false
+          }
+        }
         if (!resp.ok) {
           td.style.color = "#c33"
           setTimeout(() => { td.style.color = "" }, 2000)
+          return false
         }
+        return true
       } catch {
         td.style.color = "#c33"
         setTimeout(() => { td.style.color = "" }, 2000)
+        return false
       }
     }
 
@@ -969,7 +979,8 @@ class DatabaseRowNodeView {
         const newVal = sel.value
         td.textContent = newVal
         td.className = "gowiki-database-editable-value"
-        await saveToApi(newVal)
+        const ok = await saveToApi(newVal)
+        if (!ok) { td.textContent = currentValue }
       })
       sel.addEventListener("blur", () => {
         if (td.contains(sel)) {
@@ -978,12 +989,11 @@ class DatabaseRowNodeView {
         }
       })
     } else if (fieldDef && fieldDef.type === "boolean") {
-      // Toggle boolean.
       const newVal = currentValue === "true" ? "false" : "true"
       td.textContent = newVal
-      await saveToApi(newVal)
+      const ok = await saveToApi(newVal)
+      if (!ok) { td.textContent = currentValue }
     } else {
-      // Text input.
       const input = document.createElement("input")
       input.type = fieldDef?.type === "date" ? "date"
         : fieldDef?.type === "integer" || fieldDef?.type === "float" ? "number" : "text"
@@ -1002,7 +1012,8 @@ class DatabaseRowNodeView {
         const newVal = input.value
         td.textContent = newVal
         td.className = "gowiki-database-editable-value"
-        await saveToApi(newVal)
+        const ok = await saveToApi(newVal)
+        if (!ok) { td.textContent = currentValue }
       })
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); input.blur() }

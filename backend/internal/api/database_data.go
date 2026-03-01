@@ -159,6 +159,7 @@ func (s *Server) handleDatabaseGetRow(w http.ResponseWriter, r *http.Request) {
 
 // handleDatabaseUpdateRow updates fields of a row.
 // If the row is page-bound, also updates the page's {database-row} block.
+// Blocks the update if a draft exists for the page (unless ?force=true).
 // PUT /api/database/{table}/rows/{id}
 func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request) {
 	if s.dataStore == nil || s.schemaStore == nil {
@@ -189,6 +190,24 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 	if table.IndexField != "" {
 		if _, ok := body.Fields[table.IndexField]; ok {
 			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
+			return
+		}
+	}
+
+	// Check for draft lock on the page-bound row before modifying anything.
+	force := r.URL.Query().Get("force") == "true"
+	existingRow, err := s.dataStore.GetRow(r.Context(), tableName, rowID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if existingRow.PagePath != "" && !force {
+		lock := s.draftManager.GetLock(existingRow.PagePath)
+		if lock.Owner != "" {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":       "page_draft_conflict",
+				"draft_owner": lock.Owner,
+			})
 			return
 		}
 	}
@@ -257,6 +276,7 @@ func (s *Server) handleDatabaseGetRowByPage(w http.ResponseWriter, r *http.Reque
 
 // handleDatabaseUpsertRowByPage upserts a row by page path.
 // Rejects index field modifications and syncs changes to the page.
+// Blocks the update if a draft exists for the page (unless ?force=true).
 // PUT /api/database/{table}/page/*
 func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Request) {
 	if s.dataStore == nil || s.schemaStore == nil {
@@ -287,6 +307,19 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 	if table.IndexField != "" {
 		if _, ok := body.Fields[table.IndexField]; ok {
 			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
+			return
+		}
+	}
+
+	// Check for draft lock before modifying anything.
+	force := r.URL.Query().Get("force") == "true"
+	if !force {
+		lock := s.draftManager.GetLock(pagePath)
+		if lock.Owner != "" {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":       "page_draft_conflict",
+				"draft_owner": lock.Owner,
+			})
 			return
 		}
 	}

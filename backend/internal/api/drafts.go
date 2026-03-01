@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
 )
 
@@ -104,15 +105,36 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 
 	username := UsernameFromContext(r.Context())
 	var req struct {
-		EditToken string `json:"edit_token"`
-		Summary   string `json:"summary"`
+		EditToken    string `json:"edit_token"`
+		Summary      string `json:"summary"`
+		ForcePublish bool   `json:"force_publish"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
 
-	markdown, err := s.draftManager.Publish(pagePath, username, req.EditToken)
+	// Before publishing, check for database-row value conflicts.
+	// A forced inline edit may have changed the published page while the draft was open.
+	if !req.ForcePublish && s.schemaStore != nil {
+		draftContent, err := s.draftManager.ReadDraft(pagePath, username)
+		if err == nil {
+			page, err := s.store.Get(pagePath)
+			if err == nil {
+				if conflict := findDatabaseRowConflict(draftContent, page.Markdown); conflict != nil {
+					writeJSON(w, http.StatusConflict, map[string]any{
+						"error":            "database_row_conflict",
+						"table":            conflict.tableName,
+						"draft_values":     conflict.draftFields,
+						"published_values": conflict.publishedFields,
+					})
+					return
+				}
+			}
+		}
+	}
+
+	md, err := s.draftManager.Publish(pagePath, username, req.EditToken)
 	if errors.Is(err, storage.ErrEditSuperseded) || errors.Is(err, storage.ErrNoDraft) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "edit session superseded"})
 		return
@@ -123,13 +145,61 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write through the page store (which handles archiving, indexes, etc.)
-	result, err := s.store.Put(pagePath, markdown, username)
+	result, err := s.store.Put(pagePath, md, username)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+type databaseRowConflict struct {
+	tableName       string
+	draftFields     map[string]string
+	publishedFields map[string]string
+}
+
+// findDatabaseRowConflict compares {database-row} blocks between draft and published content.
+// Returns nil if no conflict.
+func findDatabaseRowConflict(draftContent, publishedContent string) *databaseRowConflict {
+	draftBlocks := markdown.ExtractDatabaseRows(draftContent)
+	pubBlocks := markdown.ExtractDatabaseRows(publishedContent)
+	if len(draftBlocks) == 0 || len(pubBlocks) == 0 {
+		return nil
+	}
+
+	pubMap := make(map[string]map[string]string)
+	for _, b := range pubBlocks {
+		pubMap[b.TableName] = b.Fields
+	}
+
+	for _, db := range draftBlocks {
+		pub, ok := pubMap[db.TableName]
+		if !ok {
+			continue
+		}
+		// Compare field values — any difference means a forced inline edit happened.
+		for k, dv := range db.Fields {
+			if pv, ok := pub[k]; ok && dv != pv {
+				return &databaseRowConflict{
+					tableName:       db.TableName,
+					draftFields:     db.Fields,
+					publishedFields: pub,
+				}
+			}
+		}
+		for k, pv := range pub {
+			if dv, ok := db.Fields[k]; ok && dv != pv {
+				return &databaseRowConflict{
+					tableName:       db.TableName,
+					draftFields:     db.Fields,
+					publishedFields: pub,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleDiscardDraft(w http.ResponseWriter, r *http.Request) {

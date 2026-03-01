@@ -4310,6 +4310,36 @@ async function publishDraft() {
     body: JSON.stringify({ edit_token: editToken }),
   })
   if (resp.status === 409) {
+    const body = await resp.json().catch(() => ({}))
+    if (body.error === "database_row_conflict") {
+      // A forced inline edit changed the published page while the draft was open.
+      const msg = `The database row (table: ${body.table}) was modified by an inline edit while you were editing.\n\nForce publish with your values?`
+      if (confirm(msg)) {
+        // Retry publish with force_publish flag.
+        const retryResp = await authFetch(`/api/publish/${encodePagePath(pagePath)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edit_token: editToken, force_publish: true }),
+        })
+        if (retryResp.ok) {
+          const result = await retryResp.json()
+          editToken = null
+          pageLockInfo = null
+          stashedEditorState = null
+          applyNormalizedEditState(normalized)
+          editBaselineMarkdown = normalized.markdown
+          isNewPage = false
+          setStatus(`Published (forced) ${new Date().toLocaleTimeString()}`)
+          if (result.orphaned_media && result.orphaned_media.length > 0) {
+            promptOrphanDeletion(result.orphaned_media)
+          }
+          setMode("view")
+        } else {
+          setStatus("Force publish failed")
+        }
+      }
+      return
+    }
     // Retake token and retry publish if user chooses to force.
     const retook = await handleSuperseded()
     if (retook) {
