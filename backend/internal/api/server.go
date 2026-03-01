@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -80,8 +81,11 @@ type Server struct {
 	dbPool            *database.Pool
 	schemaStore       *database.SchemaStore
 	dataStore         *database.DataStore
-	serveWeb          bool
-	webDirPath        string
+	// Tracks pages where a forced inline edit modified the published content
+	// while a draft was open. Checked at publish time to warn the user.
+	inlineEditConflicts sync.Map // map[pagePath string]tableName string
+	serveWeb            bool
+	webDirPath          string
 }
 
 func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, serveWeb bool, webDirPath string) http.Handler {

@@ -230,6 +230,122 @@ const databaseStyles = `
 }
 `
 
+// ── Helpers ──
+
+// Prevent ProseMirror from intercepting pointer/focus events on form inputs
+// within the ProseMirror DOM tree (used for edit-mode inputs that live inside
+// NodeViews and DON'T need cursor-click positioning — e.g. dropdowns).
+function isolateInput(el: HTMLElement) {
+  for (const evt of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const) {
+    el.addEventListener(evt, (e) => e.stopPropagation())
+  }
+}
+
+// Creates an inline edit overlay input OUTSIDE the ProseMirror DOM tree.
+// ProseMirror's DOMObserver registers a document-level selectionchange handler
+// that interferes with cursor positioning inside inputs that are descendants of
+// view.dom. Rendering the input on document.body avoids this entirely.
+function createOverlayInput(
+  anchor: HTMLElement,
+  opts: {
+    type?: string
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const input = document.createElement("input")
+  input.type = opts.type || "text"
+  input.value = opts.value
+  input.style.position = "fixed"
+  input.style.left = rect.left + "px"
+  input.style.top = rect.top + "px"
+  input.style.width = rect.width + "px"
+  input.style.height = rect.height + "px"
+  input.style.boxSizing = "border-box"
+  input.style.padding = "2px 4px"
+  input.style.fontSize = "13px"
+  input.style.border = "2px solid #228be6"
+  input.style.borderRadius = "2px"
+  input.style.outline = "none"
+  input.style.zIndex = "10000"
+  input.style.background = "#fff"
+
+  let saved = false
+  const cleanup = () => { if (input.parentNode) input.remove() }
+
+  input.addEventListener("blur", () => {
+    if (!saved) { saved = true; opts.onSave(input.value) }
+    cleanup()
+  })
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(input.value); cleanup(); input.blur() }
+    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup(); input.blur() }
+  })
+
+  document.body.appendChild(input)
+  input.focus()
+  input.select()
+  return input
+}
+
+// Creates an inline edit overlay select OUTSIDE the ProseMirror DOM tree.
+function createOverlaySelect(
+  anchor: HTMLElement,
+  opts: {
+    options: string[]
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const sel = document.createElement("select")
+  sel.style.position = "fixed"
+  sel.style.left = rect.left + "px"
+  sel.style.top = rect.top + "px"
+  sel.style.width = rect.width + "px"
+  sel.style.height = rect.height + "px"
+  sel.style.boxSizing = "border-box"
+  sel.style.fontSize = "13px"
+  sel.style.border = "2px solid #228be6"
+  sel.style.borderRadius = "2px"
+  sel.style.outline = "none"
+  sel.style.zIndex = "10000"
+  sel.style.background = "#fff"
+
+  const emptyOpt = document.createElement("option")
+  emptyOpt.value = ""
+  emptyOpt.textContent = "-- Select --"
+  sel.appendChild(emptyOpt)
+  for (const v of opts.options) {
+    const opt = document.createElement("option")
+    opt.value = v
+    opt.textContent = v
+    if (v === opts.value) opt.selected = true
+    sel.appendChild(opt)
+  }
+
+  const cleanup = () => { if (sel.parentNode) sel.remove() }
+
+  sel.addEventListener("change", () => {
+    opts.onSave(sel.value)
+    cleanup()
+  })
+  sel.addEventListener("blur", () => {
+    cleanup()
+    opts.onCancel()
+  })
+
+  document.body.appendChild(sel)
+  sel.focus()
+  return sel
+}
+
+// Custom event name for cross-NodeView communication.
+const DATABASE_ROW_CREATED = "gowiki-database-row-created"
+
 // ── NodeViews ──
 
 class DatabaseQueryNodeView {
@@ -238,6 +354,7 @@ class DatabaseQueryNodeView {
   private currentSort: string
   private currentOrder: string
   private currentOffset: number
+  private refreshHandler: ((e: Event) => void) | null = null
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
@@ -248,6 +365,15 @@ class DatabaseQueryNodeView {
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-database-query"
     this.dom.contentEditable = "false"
+
+    // Listen for row creation events from DatabaseNewRowNodeView.
+    this.refreshHandler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.table === this.node.attrs.table) {
+        this.fetchData()
+      }
+    }
+    document.addEventListener(DATABASE_ROW_CREATED, this.refreshHandler)
 
     this.render()
   }
@@ -440,33 +566,15 @@ class DatabaseQueryNodeView {
     const displayValue = Array.isArray(currentValue) ? currentValue.join(", ") : (currentValue != null ? String(currentValue) : "")
 
     if (field.type === "enum") {
-      const sel = document.createElement("select")
-      sel.style.width = "100%"
-      sel.style.fontSize = "inherit"
-      const emptyOpt = document.createElement("option")
-      emptyOpt.value = ""
-      emptyOpt.textContent = "-- Select --"
-      sel.appendChild(emptyOpt)
-      for (const v of (field.enum_values || [])) {
-        const opt = document.createElement("option")
-        opt.value = v
-        opt.textContent = v
-        if (v === displayValue) opt.selected = true
-        sel.appendChild(opt)
-      }
-      td.textContent = ""
-      td.appendChild(sel)
-      sel.focus()
-
-      sel.addEventListener("change", async () => {
-        const newVal = sel.value
-        td.textContent = newVal
-        td.className = "gowiki-database-editable-value"
-        const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
-        if (!ok) { td.textContent = displayValue }
-      })
-      sel.addEventListener("blur", () => {
-        if (td.contains(sel)) { td.textContent = displayValue; td.className = "gowiki-database-editable-value" }
+      createOverlaySelect(td, {
+        options: field.enum_values || [],
+        value: displayValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
+          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          if (!ok) { td.textContent = displayValue }
+        },
+        onCancel: () => {},
       })
     } else if (field.type === "boolean") {
       const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
@@ -475,37 +583,20 @@ class DatabaseQueryNodeView {
         if (!ok) td.textContent = displayValue
       })
     } else {
-      const input = document.createElement("input")
-      input.type = field.type === "date" ? "date" : field.type === "integer" || field.type === "float" ? "number" : "text"
-      input.value = displayValue
-      input.style.width = "100%"
-      input.style.boxSizing = "border-box"
-      input.style.padding = "2px 4px"
-      input.style.fontSize = "inherit"
-
-      td.textContent = ""
-      td.appendChild(input)
-      input.focus()
-      input.select()
-
-      const save = async () => {
-        const newVal = input.value
-        td.textContent = newVal
-        td.className = "gowiki-database-editable-value"
-        const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
-        if (!ok) {
-          td.style.color = "#c33"
-          setTimeout(() => { td.style.color = "" }, 2000)
-        }
-      }
-
-      input.addEventListener("blur", save)
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); input.blur() }
-        if (e.key === "Escape") {
-          td.textContent = displayValue
+      createOverlayInput(td, {
+        type: field.type === "date" ? "date" : field.type === "integer" || field.type === "float" ? "number" : "text",
+        value: displayValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
           td.className = "gowiki-database-editable-value"
-        }
+          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          if (!ok) {
+            td.textContent = displayValue
+            td.style.color = "#c33"
+            setTimeout(() => { td.style.color = "" }, 2000)
+          }
+        },
+        onCancel: () => {},
       })
     }
   }
@@ -539,7 +630,12 @@ class DatabaseQueryNodeView {
     return false
   }
   ignoreMutation(): boolean { return true }
-  destroy() {}
+  destroy() {
+    if (this.refreshHandler) {
+      document.removeEventListener(DATABASE_ROW_CREATED, this.refreshHandler)
+      this.refreshHandler = null
+    }
+  }
 }
 
 class DatabaseNewRowNodeView {
@@ -670,6 +766,10 @@ class DatabaseNewRowNodeView {
           // Clear form.
           for (const el of inputs.values()) el.value = ""
           setTimeout(() => { statusEl.textContent = "" }, 3000)
+          // Notify query NodeViews on the same page to refresh.
+          document.dispatchEvent(new CustomEvent(DATABASE_ROW_CREATED, {
+            detail: { table: this.node.attrs.table },
+          }))
         } else {
           const err = await resp.json().catch(() => ({}))
           statusEl.textContent = err.error || "Failed"
@@ -835,6 +935,7 @@ class DatabaseRowNodeView {
         if (v === value) opt.selected = true
         sel.appendChild(opt)
       }
+      isolateInput(sel)
       return sel
     }
     if (f && f.type === "boolean") {
@@ -852,6 +953,7 @@ class DatabaseRowNodeView {
         if (v.val === value) opt.selected = true
         sel.appendChild(opt)
       }
+      isolateInput(sel)
       return sel
     }
     const inp = document.createElement("input")
@@ -862,6 +964,7 @@ class DatabaseRowNodeView {
     inp.type = f?.type === "date" ? "date" : f?.type === "datetime" ? "datetime-local"
       : f?.type === "integer" || f?.type === "float" ? "number" : "text"
     inp.value = value
+    isolateInput(inp)
     return inp
   }
 
@@ -956,37 +1059,15 @@ class DatabaseRowNodeView {
     }
 
     if (fieldDef && fieldDef.type === "enum") {
-      // Dropdown for enum.
-      const sel = document.createElement("select")
-      sel.style.width = "100%"
-      sel.style.fontSize = "inherit"
-      const emptyOpt = document.createElement("option")
-      emptyOpt.value = ""
-      emptyOpt.textContent = "-- Select --"
-      sel.appendChild(emptyOpt)
-      for (const v of (fieldDef.enum_values || [])) {
-        const opt = document.createElement("option")
-        opt.value = v
-        opt.textContent = v
-        if (v === currentValue) opt.selected = true
-        sel.appendChild(opt)
-      }
-      td.textContent = ""
-      td.appendChild(sel)
-      sel.focus()
-
-      sel.addEventListener("change", async () => {
-        const newVal = sel.value
-        td.textContent = newVal
-        td.className = "gowiki-database-editable-value"
-        const ok = await saveToApi(newVal)
-        if (!ok) { td.textContent = currentValue }
-      })
-      sel.addEventListener("blur", () => {
-        if (td.contains(sel)) {
-          td.textContent = currentValue
+      createOverlaySelect(td, {
+        options: fieldDef.enum_values || [],
+        value: currentValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
           td.className = "gowiki-database-editable-value"
-        }
+          await saveToApi(newVal)
+        },
+        onCancel: () => {},
       })
     } else if (fieldDef && fieldDef.type === "boolean") {
       const newVal = currentValue === "true" ? "false" : "true"
@@ -994,33 +1075,20 @@ class DatabaseRowNodeView {
       const ok = await saveToApi(newVal)
       if (!ok) { td.textContent = currentValue }
     } else {
-      const input = document.createElement("input")
-      input.type = fieldDef?.type === "date" ? "date"
-        : fieldDef?.type === "integer" || fieldDef?.type === "float" ? "number" : "text"
-      input.value = currentValue
-      input.style.width = "100%"
-      input.style.boxSizing = "border-box"
-      input.style.padding = "2px 4px"
-      input.style.fontSize = "inherit"
-
-      td.textContent = ""
-      td.appendChild(input)
-      input.focus()
-      input.select()
-
-      input.addEventListener("blur", async () => {
-        const newVal = input.value
-        td.textContent = newVal
-        td.className = "gowiki-database-editable-value"
-        const ok = await saveToApi(newVal)
-        if (!ok) { td.textContent = currentValue }
-      })
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); input.blur() }
-        if (e.key === "Escape") {
+      createOverlayInput(td, {
+        type: fieldDef?.type === "date" ? "date"
+          : fieldDef?.type === "integer" || fieldDef?.type === "float" ? "number" : "text",
+        value: currentValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
+          td.className = "gowiki-database-editable-value"
+          const ok = await saveToApi(newVal)
+          if (!ok) { td.textContent = currentValue }
+        },
+        onCancel: () => {
           td.textContent = currentValue
           td.className = "gowiki-database-editable-value"
-        }
+        },
       })
     }
   }

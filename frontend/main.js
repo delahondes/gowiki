@@ -4048,6 +4048,26 @@ async function authFetch(url, options) {
 window.__gowikiAuthFetch = authFetch
 
 async function reloadPageContent() {
+  // Admin page is a virtual route — re-render it instead of fetching a wiki page.
+  if (pagePath === "admin") {
+    if (currentUser && currentUser.is_admin) {
+      renderAdminPage()
+    } else {
+      contentRoot.innerHTML = ""
+      actionsRoot.innerHTML = ""
+      const msg = document.createElement("div")
+      msg.style.padding = "40px 20px"
+      msg.style.textAlign = "center"
+      msg.style.color = "#666"
+      msg.style.fontSize = "16px"
+      msg.textContent = currentUser
+        ? "Access denied. Admin privileges required."
+        : "Please log in with an admin account to access this page."
+      contentRoot.appendChild(msg)
+    }
+    return
+  }
+
   const page = await fetchPage(pagePath)
   if (page) {
     currentMarkdown = page.markdown
@@ -4481,6 +4501,11 @@ async function saveDraftAndExit() {
   // Stash editor state so undo survives resume.
   stashEditorState()
   // Keep editToken — we'll reuse it on resume.
+  // Update currentMarkdown/currentDoc from editor so view mode shows latest content.
+  if (lastSavedDraftMarkdown) {
+    currentMarkdown = lastSavedDraftMarkdown
+    currentDoc = markdownToPM(currentMarkdown, registry)
+  }
   // Update lock info so the draft banner shows immediately.
   if (currentUser) {
     pageLockInfo = { locked_by: currentUser.username, is_draft: true }

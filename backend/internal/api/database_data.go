@@ -228,6 +228,10 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 	if row.PagePath != "" {
 		author := UsernameFromContext(r.Context())
 		s.syncRowToPage(table, row, author)
+		// If this was a forced edit (draft existed), record the conflict.
+		if force {
+			s.inlineEditConflicts.Store(row.PagePath, tableName)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, row)
@@ -333,6 +337,11 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 	// Sync changes to the page.
 	author := UsernameFromContext(r.Context())
 	s.syncRowToPage(table, row, author)
+
+	// If this was a forced edit (draft existed), record the conflict.
+	if force {
+		s.inlineEditConflicts.Store(pagePath, tableName)
+	}
 
 	writeJSON(w, http.StatusOK, row)
 }
