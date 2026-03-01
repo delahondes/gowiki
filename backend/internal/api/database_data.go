@@ -2,6 +2,8 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"gowiki/backend/internal/database"
+	"gowiki/backend/internal/markdown"
 )
 
 // handleDatabaseSchema returns the schema (fields) for a data table.
@@ -51,9 +54,10 @@ func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request)
 }
 
 // handleDatabaseInsertRow inserts a new row.
+// If the table has page_folder + index_field, also creates the wiki page.
 // POST /api/database/{table}/rows
 func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request) {
-	if s.dataStore == nil {
+	if s.dataStore == nil || s.schemaStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not connected")
 		return
 	}
@@ -69,7 +73,67 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// If this table has page_folder + index_field, auto-create the wiki page.
+	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
+	if err == nil && table.PageFolder != "" && table.IndexField != "" {
+		if indexVal, ok := row.Fields[table.IndexField]; ok && indexVal != nil {
+			pageFolder := strings.TrimSuffix(strings.TrimPrefix(table.PageFolder, "/"), "/")
+			pagePath := pageFolder + "/" + fmt.Sprintf("%v", indexVal)
+
+			// Update page_path on the row in the database.
+			row.PagePath = pagePath
+			if err := s.dataStore.UpdatePagePath(r.Context(), tableName, row.ID, pagePath); err != nil {
+				log.Printf("database: failed to set page_path for row %d: %v", row.ID, err)
+			}
+
+			// Build page markdown content.
+			markdown := s.buildPageContent(table, &row)
+
+			// Create the wiki page on disk.
+			author := UsernameFromContext(r.Context())
+			if _, err := s.store.Put(pagePath, markdown, author); err != nil {
+				log.Printf("database: failed to create page %s: %v", pagePath, err)
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, row)
+}
+
+// buildPageContent generates the markdown for an auto-created page-bound row.
+func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) string {
+	// If a page template is configured, try to use it.
+	if table.PageTemplatePath != "" {
+		tmpl, err := s.store.Get(table.PageTemplatePath)
+		if err == nil {
+			return tmpl.Markdown
+		}
+	}
+
+	// Default: heading + {database-row} block with field values.
+	title := row.PagePath
+	if idx := strings.LastIndex(title, "/"); idx >= 0 {
+		title = title[idx+1:]
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
+	sb.WriteString(fmt.Sprintf("{database-row table=%s}\n", table.Name))
+	sb.WriteString("| Field | Value |\n")
+	sb.WriteString("| --- | --- |\n")
+	for _, f := range table.Fields {
+		if f.ArchivedAt != nil {
+			continue
+		}
+		val := ""
+		if v, ok := row.Fields[f.Name]; ok && v != nil {
+			val = fmt.Sprintf("%v", v)
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %s |\n", f.Name, val))
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // handleDatabaseGetRow returns a single row by ID.
@@ -94,9 +158,10 @@ func (s *Server) handleDatabaseGetRow(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDatabaseUpdateRow updates fields of a row.
+// If the row is page-bound, also updates the page's {database-row} block.
 // PUT /api/database/{table}/rows/{id}
 func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request) {
-	if s.dataStore == nil {
+	if s.dataStore == nil || s.schemaStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not connected")
 		return
 	}
@@ -115,6 +180,19 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Reject updates to the index field.
+	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if table.IndexField != "" {
+		if _, ok := body.Fields[table.IndexField]; ok {
+			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
+			return
+		}
+	}
+
 	if err := s.dataStore.UpdateRow(r.Context(), tableName, rowID, body.Fields); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -126,6 +204,13 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Sync changes to the page if this row is page-bound.
+	if row.PagePath != "" {
+		author := UsernameFromContext(r.Context())
+		s.syncRowToPage(table, row, author)
+	}
+
 	writeJSON(w, http.StatusOK, row)
 }
 
@@ -171,9 +256,10 @@ func (s *Server) handleDatabaseGetRowByPage(w http.ResponseWriter, r *http.Reque
 }
 
 // handleDatabaseUpsertRowByPage upserts a row by page path.
+// Rejects index field modifications and syncs changes to the page.
 // PUT /api/database/{table}/page/*
 func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Request) {
-	if s.dataStore == nil {
+	if s.dataStore == nil || s.schemaStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not connected")
 		return
 	}
@@ -192,12 +278,67 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Reject updates to the index field.
+	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if table.IndexField != "" {
+		if _, ok := body.Fields[table.IndexField]; ok {
+			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
+			return
+		}
+	}
+
 	row, err := s.dataStore.UpsertPageRow(r.Context(), tableName, pagePath, body.Fields)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// Sync changes to the page.
+	author := UsernameFromContext(r.Context())
+	s.syncRowToPage(table, row, author)
+
 	writeJSON(w, http.StatusOK, row)
+}
+
+// syncRowToPage updates the {database-row} block in the page bound to this row.
+func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, author string) {
+	if row.PagePath == "" {
+		return
+	}
+
+	page, err := s.store.Get(row.PagePath)
+	if err != nil {
+		log.Printf("database sync→page: cannot read page %s: %v", row.PagePath, err)
+		return
+	}
+
+	// Build ordered field names and string values from the row.
+	var fieldNames []string
+	values := make(map[string]string)
+	for _, f := range table.Fields {
+		if f.ArchivedAt != nil {
+			continue
+		}
+		fieldNames = append(fieldNames, f.Name)
+		if v, ok := row.Fields[f.Name]; ok && v != nil {
+			values[f.Name] = fmt.Sprintf("%v", v)
+		} else {
+			values[f.Name] = ""
+		}
+	}
+
+	updated := markdown.ReplaceDatabaseRowBlock(page.Markdown, table.Name, fieldNames, values)
+	if updated == page.Markdown {
+		return // no change
+	}
+
+	if _, err := s.store.Put(row.PagePath, updated, author); err != nil {
+		log.Printf("database sync→page: cannot save page %s: %v", row.PagePath, err)
+	}
 }
 
 // handleDatabaseExportCSV exports all rows as CSV.

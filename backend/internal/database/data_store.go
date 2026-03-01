@@ -242,10 +242,13 @@ func (ds *DataStore) GetRowByPagePath(ctx context.Context, tableName, pagePath s
 }
 
 // UpsertPageRow inserts or updates a row based on page_path.
+// If fields is nil, an existing row is left unchanged; a new row is created with defaults.
 func (ds *DataStore) UpsertPageRow(ctx context.Context, tableName, pagePath string, fields map[string]any) (*Row, error) {
 	existing, err := ds.GetRowByPagePath(ctx, tableName, pagePath)
 	if err == nil && existing != nil {
-		// Update.
+		if len(fields) == 0 {
+			return existing, nil // nothing to update
+		}
 		if err := ds.UpdateRow(ctx, tableName, existing.ID, fields); err != nil {
 			return nil, err
 		}
@@ -256,6 +259,9 @@ func (ds *DataStore) UpsertPageRow(ctx context.Context, tableName, pagePath stri
 	row := &Row{
 		PagePath: pagePath,
 		Fields:   fields,
+	}
+	if row.Fields == nil {
+		row.Fields = make(map[string]any)
 	}
 	if err := ds.InsertRow(ctx, tableName, row); err != nil {
 		return nil, err
@@ -372,6 +378,20 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 	}
 
 	return results, total, nil
+}
+
+// UpdatePagePath sets the page_path for a row.
+func (ds *DataStore) UpdatePagePath(ctx context.Context, tableName string, rowID int, pagePath string) error {
+	p := ds.pool.GetPool()
+	if p == nil {
+		return fmt.Errorf("database not connected")
+	}
+	dtName := dataTableName(tableName)
+	_, err := p.Exec(ctx, fmt.Sprintf("UPDATE %s SET page_path = $1, updated_at = NOW() WHERE id = $2", quoteIdent(dtName)), pagePath, rowID)
+	if err != nil {
+		return fmt.Errorf("update page path: %w", err)
+	}
+	return nil
 }
 
 // DeleteRowsByPagePath deletes all rows for a given page path.

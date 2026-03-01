@@ -20,6 +20,86 @@ var tableRowRe = regexp.MustCompile(`^\s*\|(.+)\|(.+)\|\s*$`)
 // dbTableSepRe matches | --- | --- | separator rows.
 var dbTableSepRe = regexp.MustCompile(`^\s*\|[\s-]+\|[\s-]+\|\s*$`)
 
+// ReplaceDatabaseRowBlock replaces the field/value table inside a {database-row table=tableName}
+// block with new values. fieldNames controls the output order; values maps name→value.
+// If the block is not found, the content is returned unchanged.
+func ReplaceDatabaseRowBlock(content, tableName string, fieldNames []string, values map[string]string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+
+	inCodeBlock := false
+	i := 0
+	for i < len(lines) {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			result = append(result, lines[i])
+			i++
+			continue
+		}
+		if inCodeBlock {
+			result = append(result, lines[i])
+			i++
+			continue
+		}
+
+		match := databaseRowRe.FindStringSubmatch(lines[i])
+		if match == nil {
+			result = append(result, lines[i])
+			i++
+			continue
+		}
+
+		var matchedTable string
+		if match[1] != "" {
+			matchedTable = match[1]
+		} else if match[2] != "" {
+			matchedTable = match[2]
+		} else {
+			matchedTable = match[3]
+		}
+
+		if matchedTable != tableName {
+			result = append(result, lines[i])
+			i++
+			continue
+		}
+
+		// Keep the directive line.
+		result = append(result, lines[i])
+		i++
+
+		// Skip blank lines between directive and table.
+		for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+			result = append(result, lines[i])
+			i++
+		}
+
+		// Skip old header, separator, and data rows.
+		if i < len(lines) && tableRowRe.MatchString(lines[i]) {
+			i++ // skip header
+		}
+		if i < len(lines) && dbTableSepRe.MatchString(lines[i]) {
+			i++ // skip separator
+		}
+		for i < len(lines) && tableRowRe.MatchString(lines[i]) {
+			i++ // skip data rows
+		}
+
+		// Write new table with updated values.
+		result = append(result, "| Field | Value |")
+		result = append(result, "| --- | --- |")
+		for _, name := range fieldNames {
+			val := values[name]
+			result = append(result, "| "+name+" | "+val+" |")
+		}
+
+		continue
+	}
+
+	return strings.Join(result, "\n")
+}
+
 // ExtractDatabaseRows parses markdown content for {database-row table=...} blocks.
 // Each block consists of the directive line followed by a 2-column table (Field | Value).
 func ExtractDatabaseRows(content string) []DatabaseRowBlock {

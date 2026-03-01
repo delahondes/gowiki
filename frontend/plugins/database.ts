@@ -343,28 +343,41 @@ class DatabaseQueryNodeView {
     tbl.appendChild(thead)
 
     // Body.
+    const tableName = this.node.attrs.table
     const tbody = document.createElement("tbody")
     for (const row of rows) {
       const rtr = document.createElement("tr")
       for (const f of fields) {
         const td = document.createElement("td")
         const val = row.fields?.[f.name]
-        if (f.type === "page_link" && val && schema.index_field) {
+        const isIndexField = schema.index_field && f.name === schema.index_field && row.page_path
+        if (isIndexField) {
+          // Index field links to the page.
+          const a = document.createElement("a")
+          a.className = "gowiki-database-page-link"
+          a.textContent = val != null ? String(val) : row.page_path
+          a.href = "/" + row.page_path
+          td.appendChild(a)
+        } else if (f.type === "page_link" && val) {
           const a = document.createElement("a")
           a.className = "gowiki-database-page-link"
           a.textContent = String(val)
           a.href = "/" + String(val)
-          a.addEventListener("click", (e: Event) => {
-            e.preventDefault()
-            window.history.pushState({}, "", "/" + String(val))
-            window.dispatchEvent(new PopStateEvent("popstate"))
-          })
           td.appendChild(a)
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")
         } else {
           td.textContent = val != null ? String(val) : ""
         }
+
+        // Double-click inline editing — forbidden for auto_increment and index fields.
+        if (f.type !== "auto_increment" && !(schema.index_field && f.name === schema.index_field)) {
+          td.className = "gowiki-database-editable-value"
+          td.addEventListener("dblclick", () => {
+            this.inlineEditCell(td, tableName, row.id, f, val)
+          })
+        }
+
         rtr.appendChild(td)
       }
       tbody.appendChild(rtr)
@@ -405,6 +418,100 @@ class DatabaseQueryNodeView {
     }
   }
 
+  private inlineEditCell(td: HTMLElement, tableName: string, rowId: number, field: any, currentValue: any) {
+    const displayValue = Array.isArray(currentValue) ? currentValue.join(", ") : (currentValue != null ? String(currentValue) : "")
+
+    if (field.type === "enum") {
+      // Dropdown for enum fields.
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      for (const v of (field.enum_values || [])) {
+        const opt = document.createElement("option")
+        opt.value = v
+        opt.textContent = v
+        if (v === displayValue) opt.selected = true
+        sel.appendChild(opt)
+      }
+      td.textContent = ""
+      td.appendChild(sel)
+      sel.focus()
+
+      const save = async () => {
+        const newVal = sel.value
+        td.textContent = newVal
+        td.className = "gowiki-database-editable-value"
+        try {
+          await fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fields: { [field.name]: newVal } }),
+          })
+        } catch { /* silent */ }
+      }
+      sel.addEventListener("change", save)
+      sel.addEventListener("blur", () => {
+        if (td.contains(sel)) { td.textContent = displayValue; td.className = "gowiki-database-editable-value" }
+      })
+    } else if (field.type === "boolean") {
+      // Toggle boolean.
+      const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
+      td.textContent = newVal
+      fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: { [field.name]: newVal } }),
+      }).catch(() => { td.textContent = displayValue })
+    } else {
+      // Text input for everything else.
+      const input = document.createElement("input")
+      input.type = field.type === "date" ? "date" : field.type === "integer" || field.type === "float" ? "number" : "text"
+      input.value = displayValue
+      input.style.width = "100%"
+      input.style.boxSizing = "border-box"
+      input.style.padding = "2px 4px"
+      input.style.fontSize = "inherit"
+
+      td.textContent = ""
+      td.appendChild(input)
+      input.focus()
+      input.select()
+
+      const save = async () => {
+        const newVal = input.value
+        td.textContent = newVal
+        td.className = "gowiki-database-editable-value"
+        try {
+          const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows/${rowId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fields: { [field.name]: newVal } }),
+          })
+          if (!resp.ok) {
+            td.style.color = "#c33"
+            setTimeout(() => { td.style.color = "" }, 2000)
+          }
+        } catch {
+          td.style.color = "#c33"
+          setTimeout(() => { td.style.color = "" }, 2000)
+        }
+      }
+
+      input.addEventListener("blur", save)
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur() }
+        if (e.key === "Escape") {
+          td.textContent = displayValue
+          td.className = "gowiki-database-editable-value"
+        }
+      })
+    }
+  }
+
   private showError(message: string) {
     const el = document.createElement("div")
     el.className = "gowiki-database-error"
@@ -427,7 +534,12 @@ class DatabaseQueryNodeView {
     return true
   }
 
-  stopEvent(): boolean { return true }
+  stopEvent(event: Event): boolean {
+    // If the event targets an input/select, stop ProseMirror from stealing focus.
+    const tag = (event.target as HTMLElement)?.tagName
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true
+    return false
+  }
   ignoreMutation(): boolean { return true }
   destroy() {}
 }
@@ -603,10 +715,17 @@ class DatabaseNewRowNodeView {
 class DatabaseRowNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
+  private getPos: () => number | undefined
   private registry: Registry
+  private indexField: string = ""
+  private schemaFields: any[] = []
+  private selfUpdate = false // flag to skip re-render on our own attr changes
 
-  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined, registry: Registry) {
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined, registry: Registry) {
     this.node = node
+    this.view = view
+    this.getPos = getPos
     this.registry = registry
 
     this.dom = document.createElement("div")
@@ -629,34 +748,64 @@ class DatabaseRowNodeView {
     label.textContent = `Row: ${table}`
     this.dom.appendChild(label)
 
-    // Render the field/value table from the node's content if we have it.
-    this.renderFieldTable()
+    this.fetchSchemaAndRender()
   }
 
-  private renderFieldTable() {
-    // In view mode: render field/value pairs as a table.
-    // The actual data comes from the markdown table content that follows the directive.
-    // Since database_row is an atom in edit mode, we show a summary.
+  private async fetchSchemaAndRender() {
+    const table = this.node.attrs.table
+    try {
+      const resp = await fetch(`/api/database/${encodeURIComponent(table)}/schema`)
+      if (resp.ok) {
+        const schema = await resp.json()
+        this.indexField = schema.index_field || ""
+        this.schemaFields = (schema.fields || []).filter((f: any) => !f.archived_at)
+      }
+    } catch { /* ignore */ }
+
+    if (this.view.editable) {
+      this.renderEditMode()
+    } else {
+      this.renderViewMode()
+    }
+  }
+
+  // ── Edit mode: inputs that update node attrs (synced to DB on publish) ──
+
+  private renderEditMode() {
     const tbl = document.createElement("table")
     tbl.className = "gowiki-database-table"
 
     const fields = this.node.attrs._fields || {}
+    const fieldMap = new Map<string, any>()
+    for (const f of this.schemaFields) fieldMap.set(f.name, f)
+
     for (const [key, val] of Object.entries(fields)) {
       const tr = document.createElement("tr")
+      const f = fieldMap.get(key)
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = String(key)
+      tdKey.textContent = f?.label || key
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
-      tdVal.className = "gowiki-database-editable-value"
-      tdVal.textContent = String(val)
 
-      // Double-click inline editing.
-      tdVal.addEventListener("dblclick", () => {
-        this.inlineEdit(tdVal, String(key), String(val))
-      })
+      if (key === this.indexField || (f && f.type === "auto_increment")) {
+        // Index / auto_increment: read-only.
+        tdVal.textContent = String(val)
+      } else {
+        // Editable input, type-aware.
+        const input = this.createFieldInput(f, String(val))
+        const commitChange = () => {
+          const newVal = input instanceof HTMLSelectElement ? input.value : (input as HTMLInputElement).value
+          this.updateField(key, newVal)
+        }
+        input.addEventListener("change", commitChange)
+        if (input instanceof HTMLInputElement) {
+          input.addEventListener("blur", commitChange)
+        }
+        tdVal.appendChild(input)
+      }
 
       tr.appendChild(tdVal)
       tbl.appendChild(tr)
@@ -672,31 +821,116 @@ class DatabaseRowNodeView {
     }
   }
 
-  private async inlineEdit(td: HTMLElement, fieldName: string, currentValue: string) {
+  private createFieldInput(f: any, value: string): HTMLInputElement | HTMLSelectElement {
+    if (f && (f.type === "enum" || f.type === "multi_enum")) {
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      for (const v of (f.enum_values || [])) {
+        const opt = document.createElement("option")
+        opt.value = v
+        opt.textContent = v
+        if (v === value) opt.selected = true
+        sel.appendChild(opt)
+      }
+      return sel
+    }
+    if (f && f.type === "boolean") {
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      for (const v of [
+        { val: "", label: "-- Select --" },
+        { val: "true", label: "Yes" },
+        { val: "false", label: "No" },
+      ]) {
+        const opt = document.createElement("option")
+        opt.value = v.val
+        opt.textContent = v.label
+        if (v.val === value) opt.selected = true
+        sel.appendChild(opt)
+      }
+      return sel
+    }
+    const inp = document.createElement("input")
+    inp.style.width = "100%"
+    inp.style.boxSizing = "border-box"
+    inp.style.padding = "2px 4px"
+    inp.style.fontSize = "inherit"
+    inp.type = f?.type === "date" ? "date" : f?.type === "datetime" ? "datetime-local"
+      : f?.type === "integer" || f?.type === "float" ? "number" : "text"
+    inp.value = value
+    return inp
+  }
+
+  private updateField(fieldName: string, newValue: string) {
+    const pos = this.getPos()
+    if (pos === undefined) return
+    const newFields = { ...this.node.attrs._fields, [fieldName]: newValue }
+    this.selfUpdate = true
+    const tr = this.view.state.tr.setNodeMarkup(pos, null, {
+      ...this.node.attrs,
+      _fields: newFields,
+    })
+    this.view.dispatch(tr)
+  }
+
+  // ── View mode: static text with dblclick inline edit (immediate API sync) ──
+
+  private renderViewMode() {
+    const tbl = document.createElement("table")
+    tbl.className = "gowiki-database-table"
+
+    const fields = this.node.attrs._fields || {}
+    const fieldMap = new Map<string, any>()
+    for (const f of this.schemaFields) fieldMap.set(f.name, f)
+
+    for (const [key, val] of Object.entries(fields)) {
+      const tr = document.createElement("tr")
+      const f = fieldMap.get(key)
+
+      const tdKey = document.createElement("td")
+      tdKey.style.fontWeight = "600"
+      tdKey.textContent = f?.label || key
+      tr.appendChild(tdKey)
+
+      const tdVal = document.createElement("td")
+      tdVal.textContent = String(val)
+
+      // Inline editing forbidden for index and auto_increment fields.
+      if (key !== this.indexField && !(f && f.type === "auto_increment")) {
+        tdVal.className = "gowiki-database-editable-value"
+        tdVal.addEventListener("dblclick", () => {
+          this.inlineEdit(tdVal, f, String(key), String(val))
+        })
+      }
+
+      tr.appendChild(tdVal)
+      tbl.appendChild(tr)
+    }
+
+    if (Object.keys(fields).length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-database-loading"
+      empty.textContent = "No fields"
+      this.dom.appendChild(empty)
+    } else {
+      this.dom.appendChild(tbl)
+    }
+  }
+
+  private async inlineEdit(td: HTMLElement, fieldDef: any, fieldName: string, currentValue: string) {
     const table = this.node.attrs.table
     if (!table) return
 
-    const input = document.createElement("input")
-    input.type = "text"
-    input.value = currentValue
-    input.style.width = "100%"
-    input.style.boxSizing = "border-box"
-    input.style.padding = "2px 4px"
-    input.style.fontSize = "inherit"
-
-    td.textContent = ""
-    td.appendChild(input)
-    input.focus()
-
-    const save = async () => {
-      const newValue = input.value
-      td.textContent = newValue
-
-      // Try to update via API if we have a row ID.
+    const saveToApi = async (newValue: string) => {
       try {
-        // Get the row by page path (current page).
         const pagePath = window.location.pathname.replace(/^\/+/, "")
-        const resp = await fetch(`/api/database/${encodeURIComponent(table)}/page/${encodeURIComponent(pagePath)}`, {
+        const resp = await fetch(`/api/database/${encodeURIComponent(table)}/page/${pagePath}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fields: { [fieldName]: newValue } }),
@@ -706,35 +940,97 @@ class DatabaseRowNodeView {
           setTimeout(() => { td.style.color = "" }, 2000)
         }
       } catch {
-        // Silently fail — data will be synced on next page save.
+        td.style.color = "#c33"
+        setTimeout(() => { td.style.color = "" }, 2000)
       }
     }
 
-    input.addEventListener("blur", save)
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault()
-        input.blur()
+    if (fieldDef && fieldDef.type === "enum") {
+      // Dropdown for enum.
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      for (const v of (fieldDef.enum_values || [])) {
+        const opt = document.createElement("option")
+        opt.value = v
+        opt.textContent = v
+        if (v === currentValue) opt.selected = true
+        sel.appendChild(opt)
       }
-      if (e.key === "Escape") {
-        td.textContent = currentValue
-      }
-    })
+      td.textContent = ""
+      td.appendChild(sel)
+      sel.focus()
+
+      sel.addEventListener("change", async () => {
+        const newVal = sel.value
+        td.textContent = newVal
+        td.className = "gowiki-database-editable-value"
+        await saveToApi(newVal)
+      })
+      sel.addEventListener("blur", () => {
+        if (td.contains(sel)) {
+          td.textContent = currentValue
+          td.className = "gowiki-database-editable-value"
+        }
+      })
+    } else if (fieldDef && fieldDef.type === "boolean") {
+      // Toggle boolean.
+      const newVal = currentValue === "true" ? "false" : "true"
+      td.textContent = newVal
+      await saveToApi(newVal)
+    } else {
+      // Text input.
+      const input = document.createElement("input")
+      input.type = fieldDef?.type === "date" ? "date"
+        : fieldDef?.type === "integer" || fieldDef?.type === "float" ? "number" : "text"
+      input.value = currentValue
+      input.style.width = "100%"
+      input.style.boxSizing = "border-box"
+      input.style.padding = "2px 4px"
+      input.style.fontSize = "inherit"
+
+      td.textContent = ""
+      td.appendChild(input)
+      input.focus()
+      input.select()
+
+      input.addEventListener("blur", async () => {
+        const newVal = input.value
+        td.textContent = newVal
+        td.className = "gowiki-database-editable-value"
+        await saveToApi(newVal)
+      })
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.blur() }
+        if (e.key === "Escape") {
+          td.textContent = currentValue
+          td.className = "gowiki-database-editable-value"
+        }
+      })
+    }
   }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
+    if (this.selfUpdate) {
+      // Our own attr change — don't re-render (would destroy inputs).
+      this.selfUpdate = false
+      return true
+    }
     this.render()
     return true
   }
 
   stopEvent(event: Event): boolean {
-    const type = event.type
-    if (type === "mousedown" || type === "mouseup" || type === "click" || type === "dblclick") {
-      return false
-    }
-    return true
+    // If the event targets an input/select, stop ProseMirror from stealing focus.
+    const tag = (event.target as HTMLElement)?.tagName
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true
+    return false
   }
 
   ignoreMutation(): boolean { return true }

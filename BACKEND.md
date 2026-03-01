@@ -367,7 +367,7 @@ Each field has:
 For page-bound tables, field values are stored explicitly in the page Markdown so they appear in version history and diffs. The canonical representation is a `database` directive followed immediately by a two-column field/value table:
 
 ```
-{database row table=qms_deviation}
+{database-row table=qms_deviation}
 | Field | Value |
 | --- | --- |
 | title | My deviation |
@@ -392,7 +392,7 @@ Replacement variables keep their generic form in the stored Markdown and are res
 Database data can be embedded in any wiki page within the table's scope using a query block:
 
 ```
-{database table=qms_deviation filter="status=open" sort=severity order=asc limit=20}
+{database-query table=qms_deviation filter="status=open" sort=severity order=asc limit=20}
 ```
 
 - `table`: table name (required)
@@ -405,10 +405,10 @@ Columns in the rendered query result are sortable. For page-bound tables, the in
 
 ### Adding a new row
 
-A new row is inserted via a `database new-row` block embedded in any page within the table's scope:
+A new row is inserted via a `database-newrow` block embedded in any page within the table's scope:
 
 ```
-{database new-row table=qms_deviation}
+{database-newrow table=qms_deviation}
 ```
 
 This renders as a form pre-populated with default values. On submission:
