@@ -3746,11 +3746,20 @@ async function restoreVersion(version) {
     if (ok) {
       // Overwrite draft with restored content.
       const markdown = data.markdown
-      await fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      const draftResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ markdown, edit_token: editToken }),
       })
+      if (!draftResp.ok) {
+        setStatus("Failed to save restored version as draft")
+        return
+      }
+      // Update baseline to restored content so database-row validation
+      // compares against the restored version, not the previously published one.
+      editBaselineMarkdown = markdown
+      currentMarkdown = markdown
+      currentDoc = markdownToPM(markdown, registry)
       // Update editor with restored content.
       if (editorView) {
         const doc = markdownToPM(markdown, registry)
