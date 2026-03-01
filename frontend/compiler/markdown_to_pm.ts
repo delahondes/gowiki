@@ -274,7 +274,7 @@ function convertMediaLinkTokens(tokens: any[]) {
   return tokens
 }
 
-const templateVarRe = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}/
+const templateVarRe = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)?\}\}/
 
 function convertTemplateVarChildren(children: any[]): any[] {
   const out: any[] = []
@@ -283,8 +283,8 @@ function convertTemplateVarChildren(children: any[]): any[] {
       out.push(tok)
       continue
     }
-    // Split text around {{varname}} occurrences
-    const re = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}/g
+    // Split text around {{varname}} or {{}} occurrences
+    const re = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)?\}\}/g
     let lastIndex = 0
     let m: RegExpExecArray | null
     while ((m = re.exec(tok.content)) !== null) {
@@ -294,7 +294,7 @@ function convertTemplateVarChildren(children: any[]): any[] {
       out.push({
         type: "template_var",
         content: "",
-        meta: { name: m[1] },
+        meta: { name: m[1] ?? "" },
       })
       lastIndex = re.lastIndex
     }

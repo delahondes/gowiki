@@ -229,7 +229,7 @@ const databaseStyles = `
   text-decoration: underline;
 }
 
-/* Template variables — only styled in edit mode */
+/* Template variables — resolved styled in edit mode only */
 #app.gowiki-editing .gowiki-template-var {
   background: #f0f4ff;
   border-radius: 3px;
@@ -237,9 +237,12 @@ const databaseStyles = `
   font-style: normal;
 }
 
-#app.gowiki-editing .gowiki-template-var-unresolved {
+/* Unresolved always visible (error state) */
+.gowiki-template-var-unresolved {
   background: #fff3cd;
   color: #856404;
+  border-radius: 3px;
+  padding: 0 3px;
 }
 `
 

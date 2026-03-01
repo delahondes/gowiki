@@ -4682,7 +4682,13 @@ async function saveDraftAndExit() {
   // Update currentMarkdown/currentDoc from editor so view mode shows latest content.
   if (lastSavedDraftMarkdown) {
     currentMarkdown = lastSavedDraftMarkdown
-    currentDoc = markdownToPM(currentMarkdown, registry)
+    try {
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    } catch (err) {
+      console.error("saveDraftAndExit: markdown parse failed", err)
+      setStatus("Invalid Markdown in draft — " + (err.message || err))
+      return
+    }
   }
   // Update lock info so the draft banner shows immediately.
   if (currentUser) {
