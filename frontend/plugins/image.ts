@@ -176,11 +176,20 @@ class ImageNodeView {
       this.imgEl.removeAttribute("title")
     }
     const size = this.node.attrs.size ?? null
-    const sizeStyle = styleFromImageSize(size)
-    // Explicit size: apply it directly, allow exceeding container.
-    // No size: constrain to container with max-width.
-    this.imgEl.style.cssText = sizeStyle ?? "max-width: 100%; height: auto;"
-    this.dom.style.maxWidth = size ? "none" : ""
+    const isPercent = size && /^\d+%$/.test(size)
+    if (isPercent) {
+      // Percentage: set width on wrapper, image fills it.
+      this.dom.style.width = size
+      this.dom.style.maxWidth = "none"
+      this.imgEl.style.cssText = "width: 100%; height: auto;"
+    } else {
+      const sizeStyle = styleFromImageSize(size)
+      // Explicit size: apply it directly, allow exceeding container.
+      // No size: constrain to container with max-width.
+      this.imgEl.style.cssText = sizeStyle ?? "max-width: 100%; height: auto;"
+      this.dom.style.width = ""
+      this.dom.style.maxWidth = size ? "none" : ""
+    }
   }
 
   update(node: PMNode): boolean {

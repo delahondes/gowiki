@@ -77,13 +77,18 @@ function buildPanel(
         const after = pos + node.nodeSize
         const $pos = view.state.doc.resolve(Math.min(after, view.state.doc.content.size))
         const sel = Selection.near($pos)
-        view.dispatch(view.state.tr.setSelection(sel).setMeta(panelKey, { enabled: false }))
+        view.dispatch(view.state.tr.setSelection(sel))
         view.focus()
       }
     } else {
-      // Backward: previous field
+      // Backward: previous field, or move before node
       if (idx > 0) {
         focusable[idx - 1].focus()
+      } else {
+        const $pos = view.state.doc.resolve(Math.max(0, pos))
+        const sel = Selection.near($pos, -1)
+        view.dispatch(view.state.tr.setSelection(sel))
+        view.focus()
       }
     }
   })
@@ -247,7 +252,25 @@ function panelDecorationKey(target: any): string {
   return `gowiki-props-panel-${target.anchorPos}-${values}`
 }
 
-function propertiesPlugin(registry: Registry) {
+function shiftTabToPanel(view: any, event: KeyboardEvent): boolean {
+  if (event.key !== "Tab" || !event.shiftKey) return false
+  const pluginState = panelKey.getState(view.state)
+  if (!pluginState?.enabled) return false
+  const target = findPropertyNode(view.state, registry)
+  if (!target) return false
+  const panel = view.dom.parentElement?.querySelector(".gowiki-props-panel")
+  if (!panel) return false
+  const first = panel.querySelector<HTMLElement>("input, select")
+  if (!first) return false
+  event.preventDefault()
+  first.focus()
+  return true
+}
+
+let registry: Registry
+
+function propertiesPlugin(reg: Registry) {
+  registry = reg
   return new Plugin<PanelState>({
     key: panelKey,
     state: {
@@ -263,6 +286,11 @@ function propertiesPlugin(registry: Registry) {
       },
     },
     props: {
+      handleDOMEvents: {
+        keydown(view: any, event: KeyboardEvent) {
+          return shiftTabToPanel(view, event)
+        },
+      },
       decorations(state) {
         const pluginState = panelKey.getState(state)
         if (!pluginState?.enabled) return null
