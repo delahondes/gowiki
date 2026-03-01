@@ -228,6 +228,19 @@ const databaseStyles = `
 .gowiki-database-page-link:hover {
   text-decoration: underline;
 }
+
+/* Template variables — only styled in edit mode */
+#app.gowiki-editing .gowiki-template-var {
+  background: #f0f4ff;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-style: normal;
+}
+
+#app.gowiki-editing .gowiki-template-var-unresolved {
+  background: #fff3cd;
+  color: #856404;
+}
 `
 
 // ── Helpers ──
@@ -1116,6 +1129,56 @@ class DatabaseRowNodeView {
   destroy() {}
 }
 
+// ── Template Variable NodeView ──
+
+function resolveTemplateFields(state: EditorState): Record<string, string> {
+  const fields: Record<string, string> = {}
+  state.doc.descendants((node) => {
+    if (node.type.name === "database_row" && node.attrs._fields) {
+      for (const [k, v] of Object.entries(node.attrs._fields as Record<string, any>)) {
+        if (!(k in fields)) fields[k] = String(v)
+      }
+    }
+  })
+  return fields
+}
+
+class TemplateVarNodeView {
+  dom: HTMLElement
+  private node: PMNode
+
+  constructor(node: PMNode, view: EditorView, _getPos: () => number | undefined) {
+    this.node = node
+    this.dom = document.createElement("span")
+    this.dom.contentEditable = "false"
+    this.renderResolved(resolveTemplateFields(view.state))
+  }
+
+  private renderResolved(fields: Record<string, string>) {
+    const name = this.node.attrs.name
+    const resolved = fields[name]
+    if (resolved !== undefined) {
+      this.dom.className = "gowiki-template-var"
+      this.dom.textContent = resolved
+      this.dom.title = `{{${name}}}`
+    } else {
+      this.dom.className = "gowiki-template-var gowiki-template-var-unresolved"
+      this.dom.textContent = `{{${name}}}`
+    }
+  }
+
+  update(node: PMNode, _decorations: any, _innerDecorations: any, view?: EditorView): boolean {
+    if (node.type !== this.node.type) return false
+    this.node = node
+    // view is not passed by ProseMirror's standard update(), so we may not
+    // be able to re-resolve here. The editor plugin below handles re-renders.
+    return true
+  }
+
+  ignoreMutation(): boolean { return true }
+  destroy() {}
+}
+
 // ── Plugin Registration ──
 
 export const databasePlugin: WikiPlugin = {
@@ -1200,6 +1263,32 @@ export const databasePlugin: WikiPlugin = {
               tag: "div.gowiki-database-row",
               getAttrs(dom: HTMLElement) {
                 return { table: dom.getAttribute("data-table") || "" }
+              },
+            },
+          ],
+        },
+        template_var: {
+          group: "inline",
+          inline: true,
+          atom: true,
+          attrs: {
+            name: { default: "" },
+          },
+          toDOM(node: PMNode) {
+            return [
+              "span",
+              {
+                class: "gowiki-template-var",
+                "data-var": node.attrs.name,
+              },
+              `{{${node.attrs.name}}}`,
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "span.gowiki-template-var",
+              getAttrs(dom: HTMLElement) {
+                return { name: dom.getAttribute("data-var") || "" }
               },
             },
           ],
@@ -1332,6 +1421,14 @@ export const databasePlugin: WikiPlugin = {
       },
     })
 
+    reg.registerText("template_var", {
+      run(ctx, tok) {
+        ctx.push(
+          ctx.schema.nodes.template_var.create({ name: tok.meta?.name ?? "" })
+        )
+      },
+    })
+
     // ── PM → Markdown: serialize back ──
 
     reg.registerPMNode("database_query", {
@@ -1378,6 +1475,12 @@ export const databasePlugin: WikiPlugin = {
       },
     })
 
+    reg.registerPMNode("template_var", {
+      print(node) {
+        return `{{${node.attrs.name}}}`
+      },
+    })
+
     // ── Editor plugin: NodeViews ──
 
     reg.registerEditorPlugin((_schema: Schema) => {
@@ -1403,7 +1506,47 @@ export const databasePlugin: WikiPlugin = {
             database_row(node: PMNode, view: EditorView, getPos: () => number | undefined) {
               return new DatabaseRowNodeView(node, view, getPos, reg)
             },
+            template_var(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new TemplateVarNodeView(node, view, getPos)
+            },
           },
+        },
+      })
+    })
+
+    // Refresh all template_var NodeViews when database_row fields change.
+    reg.registerEditorPlugin((_schema: Schema) => {
+      let lastFields: Record<string, string> = {}
+      return new PMPlugin({
+        key: new PluginKey("gowiki.templateVarRefresh"),
+        view() {
+          return {
+            update(view: EditorView) {
+              const fields = resolveTemplateFields(view.state)
+              const changed = Object.keys(fields).length !== Object.keys(lastFields).length ||
+                Object.entries(fields).some(([k, v]) => lastFields[k] !== v)
+              if (!changed) return
+              lastFields = fields
+              // Re-render all template_var NodeViews by updating their DOM
+              view.state.doc.descendants((node, pos) => {
+                if (node.type.name === "template_var") {
+                  const domNode = view.nodeDOM(pos)
+                  if (domNode instanceof HTMLElement) {
+                    const name = node.attrs.name
+                    const resolved = fields[name]
+                    if (resolved !== undefined) {
+                      domNode.className = "gowiki-template-var"
+                      domNode.textContent = resolved
+                      domNode.title = `{{${name}}}`
+                    } else {
+                      domNode.className = "gowiki-template-var gowiki-template-var-unresolved"
+                      domNode.textContent = `{{${name}}}`
+                    }
+                  }
+                }
+              })
+            },
+          }
         },
       })
     })
