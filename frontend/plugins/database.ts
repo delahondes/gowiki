@@ -1160,9 +1160,11 @@ function resolveTemplateFields(state: EditorState): Record<string, string> {
 class TemplateVarNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
 
   constructor(node: PMNode, view: EditorView, _getPos: () => number | undefined) {
     this.node = node
+    this.view = view
     this.dom = document.createElement("span")
     this.dom.contentEditable = "false"
     this.renderResolved(resolveTemplateFields(view.state))
@@ -1181,11 +1183,10 @@ class TemplateVarNodeView {
     }
   }
 
-  update(node: PMNode, _decorations: any, _innerDecorations: any, view?: EditorView): boolean {
+  update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
-    // view is not passed by ProseMirror's standard update(), so we may not
-    // be able to re-resolve here. The editor plugin below handles re-renders.
+    this.renderResolved(resolveTemplateFields(this.view.state))
     return true
   }
 
@@ -1668,14 +1669,19 @@ export const databasePlugin: WikiPlugin = {
         const node = type.create({ name: "" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
+        // Find the freshly inserted node: it has name="" which is unique to a new insert.
         let insertedAt: number | null = null
+        let bestDist = Infinity
         tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
+          Math.max(0, approxPos - 10),
+          Math.min(tr.doc.content.size, approxPos + 10),
           (n, pos) => {
-            if (n.type === type && insertedAt === null) {
-              insertedAt = pos
-              return false
+            if (n.type === type && n.attrs.name === "") {
+              const dist = Math.abs(pos - approxPos)
+              if (dist < bestDist) {
+                bestDist = dist
+                insertedAt = pos
+              }
             }
           }
         )
