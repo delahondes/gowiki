@@ -382,10 +382,10 @@ For multi-enum fields, values are stored as a comma-separated list in the Value 
 Page templates for page-bound tables may use replacement variables referencing field values. Syntax uses double curly braces (unambiguous since `{` is escaped as `\{` in the dialect):
 
 ```
-{{table.field}}
+{{field}}
 ```
 
-Replacement variables keep their generic form in the stored Markdown and are resolved at render time.
+Replacement variables keep their generic form in the stored Markdown and are resolved at render time. Future global variables will use the same syntax but use uppercase.
 
 ### Query blocks
 
