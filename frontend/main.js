@@ -2596,7 +2596,7 @@ function buildMenubar() {
 
   // Database Query
   if (databaseInsertQueryCommand) {
-    addImgButton("/icons/include.svg", "Database Query", () => {
+    addImgButton("/icons/database-query.svg", "Database Query", () => {
       if (editMode === "visual" && editorView) {
         databaseInsertQueryCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
@@ -2613,7 +2613,7 @@ function buildMenubar() {
 
   // Database New Row
   if (databaseInsertNewRowCommand) {
-    addImgButton("/icons/include.svg", "Database New Row", () => {
+    addImgButton("/icons/database-newrow.svg", "Database New Row", () => {
       if (editMode === "visual" && editorView) {
         databaseInsertNewRowCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
