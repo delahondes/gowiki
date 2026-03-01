@@ -1,4 +1,4 @@
-import { NodeSelection, Plugin, PluginKey } from "prosemirror-state"
+import { NodeSelection, Selection, Plugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Registry, NodePropertySpec } from "./registry"
@@ -58,6 +58,35 @@ function buildPanel(
 ) {
   const wrap = document.createElement("div")
   wrap.className = "gowiki-props-panel"
+
+  wrap.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Tab") return
+    e.preventDefault()
+    e.stopPropagation()
+
+    const focusable = Array.from(wrap.querySelectorAll<HTMLElement>("input, select"))
+    const current = document.activeElement as HTMLElement
+    const idx = focusable.indexOf(current)
+
+    if (!e.shiftKey) {
+      // Forward: next field, or leave node
+      if (idx >= 0 && idx < focusable.length - 1) {
+        focusable[idx + 1].focus()
+      } else {
+        // Move cursor to just after the node
+        const after = pos + node.nodeSize
+        const $pos = view.state.doc.resolve(Math.min(after, view.state.doc.content.size))
+        const sel = Selection.near($pos)
+        view.dispatch(view.state.tr.setSelection(sel).setMeta(panelKey, { enabled: false }))
+        view.focus()
+      }
+    } else {
+      // Backward: previous field
+      if (idx > 0) {
+        focusable[idx - 1].focus()
+      }
+    }
+  })
 
   for (const prop of properties) {
     if (prop.visible && !prop.visible(node.attrs)) continue

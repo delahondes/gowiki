@@ -402,8 +402,12 @@ mark.search-highlight {
 }
 
 .gowiki-view .ProseMirror {
-  border: 1px solid #b6b6b6;
+  border: none;
   min-height: 0;
+}
+
+#app.gowiki-editing .ProseMirror {
+  border: 1px solid #ddd;
 }
 
 .gowiki-view .ProseMirror p:empty {
