@@ -1037,6 +1037,19 @@ class DatabaseRowNodeView {
     }
   }
 
+  /** Update _fields in PM state so template_var refresh plugin picks it up. */
+  private syncFieldToState(fieldName: string, newValue: string) {
+    const pos = this.getPos()
+    if (pos === undefined) return
+    const newFields = { ...this.node.attrs._fields, [fieldName]: newValue }
+    this.selfUpdate = true
+    const tr = this.view.state.tr.setNodeMarkup(pos, null, {
+      ...this.node.attrs,
+      _fields: newFields,
+    })
+    this.view.dispatch(tr)
+  }
+
   private async inlineEdit(td: HTMLElement, fieldDef: any, fieldName: string, currentValue: string) {
     const table = this.node.attrs.table
     if (!table) return
@@ -1063,6 +1076,7 @@ class DatabaseRowNodeView {
           setTimeout(() => { td.style.color = "" }, 2000)
           return false
         }
+        this.syncFieldToState(fieldName, newValue)
         return true
       } catch {
         td.style.color = "#c33"
@@ -1488,12 +1502,13 @@ export const databasePlugin: WikiPlugin = {
         key: new PluginKey("gowiki.database"),
         filterTransaction(tr, state) {
           if (!tr.docChanged) return true
-          let oldCount = 0
-          state.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) oldCount++ })
-          if (oldCount === 0) return true
-          let newCount = 0
-          tr.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) newCount++ })
-          return newCount >= oldCount
+          let oldBound = 0
+          state.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) oldBound++ })
+          if (oldBound === 0) return true
+          // A bound row can become a placeholder (table cleared), but must not be deleted.
+          let newTotal = 0
+          tr.doc.descendants(n => { if (n.type.name === "database_row") newTotal++ })
+          return newTotal >= oldBound
         },
         props: {
           nodeViews: {
@@ -1611,12 +1626,86 @@ export const databasePlugin: WikiPlugin = {
       return true
     })
 
+    reg.registerCommand("database", "insertRow", (state, dispatch) => {
+      const type = reg.schema.nodes.database_row
+      if (!type) return false
+      // Disallow if a bound database_row (with table attr) already exists.
+      let hasBoundRow = false
+      state.doc.descendants(n => {
+        if (n.type.name === "database_row" && n.attrs.table) hasBoundRow = true
+      })
+      if (hasBoundRow) return false
+      if (dispatch) {
+        const node = type.create({ table: "", _fields: {} })
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 5),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === type && insertedAt === null) {
+              insertedAt = pos
+              return false
+            }
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch {}
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
+
+    reg.registerCommand("database", "insertVar", (state, dispatch) => {
+      const type = reg.schema.nodes.template_var
+      if (!type) return false
+      if (dispatch) {
+        const node = type.create({ name: "" })
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 5),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === type && insertedAt === null) {
+              insertedAt = pos
+              return false
+            }
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch {}
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
+
     // ── Node properties ──
 
     // database_query and database_newrow properties are already registered
     // by registerSelfContainedDirective above. Only database_row needs
     // explicit registration since it uses a custom markdown-it block rule.
     reg.registerNodeProperties("database_row", databaseRowProperties)
+
+    reg.registerNodeProperties("template_var", [
+      {
+        name: "name",
+        label: "Variable",
+        default: "",
+        parse: (raw: string) => raw.trim() || null,
+        serialize: (value: string | null) => String(value ?? ""),
+      },
+    ])
 
     // ── Styles ──
 

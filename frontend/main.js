@@ -83,6 +83,8 @@ let togglePropertiesCommand = null
 let includeInsertCommand = null
 let databaseInsertQueryCommand = null
 let databaseInsertNewRowCommand = null
+let databaseInsertRowCommand = null
+let databaseInsertVarCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -103,6 +105,8 @@ registry.onCommand((namespace, name, cmd) => {
   if (namespace === "database") {
     if (name === "insertQuery") databaseInsertQueryCommand = cmd
     if (name === "insertNewRow") databaseInsertNewRowCommand = cmd
+    if (name === "insertRow") databaseInsertRowCommand = cmd
+    if (name === "insertVar") databaseInsertVarCommand = cmd
     return
   }
 
@@ -945,9 +949,17 @@ async function getDatabaseSchema(tableName) {
 async function validateDatabaseRows(markdown) {
   const errors = []
   const baselineBlocks = extractDatabaseRowBlocks(editBaselineMarkdown)
-  if (baselineBlocks.length === 0) return { valid: true, errors }
-
   const currentBlocks = extractDatabaseRowBlocks(markdown)
+
+  // Reject multiple bound database-row blocks
+  if (currentBlocks.length > 1) {
+    errors.push("A page cannot contain more than one bound database-row block")
+  }
+
+  // On non-row-bound pages, reject any bound database-row block
+  if (baselineBlocks.length === 0 && currentBlocks.length > 0) {
+    errors.push("Cannot add a bound database-row block to a non-row-bound page — only the {database-row} placeholder is allowed here")
+  }
 
   // Check that every baseline block still exists
   for (const base of baselineBlocks) {
@@ -2697,7 +2709,7 @@ function buildMenubar() {
 
   // Database Query
   if (databaseInsertQueryCommand) {
-    addImgButton("/icons/database-query.svg", "Database Query", () => {
+    const btn = addImgButton("/icons/database-query.svg", "Database Query", () => {
       if (editMode === "visual" && editorView) {
         databaseInsertQueryCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
@@ -2710,11 +2722,12 @@ function buildMenubar() {
         rawEditor.setSelectionRange(cursorPos, cursorPos)
       }
     })
+    btn.querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
   }
 
   // Database New Row
   if (databaseInsertNewRowCommand) {
-    addImgButton("/icons/database-newrow.svg", "Database New Row", () => {
+    const btn = addImgButton("/icons/database-newrow.svg", "Database New Row", () => {
       if (editMode === "visual" && editorView) {
         databaseInsertNewRowCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
@@ -2724,6 +2737,42 @@ function buildMenubar() {
         rawEditor.focus()
         rawInsertText(rawEditor, snippet + "\n\n")
         const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+    btn.querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
+  }
+
+  // Database Row
+  if (databaseInsertRowCommand) {
+    const btn = addImgButton("/icons/database-row.svg", "Database Row", () => {
+      if (editMode === "visual" && editorView) {
+        databaseInsertRowCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{database-row table=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+    btn.querySelector(".gowiki-menu-icon").classList.add("gowiki-menu-icon--lg")
+  }
+
+  // Template Variable
+  if (databaseInsertVarCommand) {
+    addImgButton("/icons/variable.svg", "Template Variable", () => {
+      if (editMode === "visual" && editorView) {
+        databaseInsertVarCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{{}}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet)
+        const cursorPos = start + 2
         rawEditor.setSelectionRange(cursorPos, cursorPos)
       }
     })
@@ -4430,7 +4479,13 @@ async function publishDraft() {
   if (mode !== "edit" || !editToken) return
   // Save draft content first
   const markdown = getCurrentMarkdown()
-  const normalized = normalizeMarkdownForStorage(markdown)
+  let normalized
+  try {
+    normalized = normalizeMarkdownForStorage(markdown)
+  } catch (err) {
+    setStatus("Invalid Markdown — cannot publish: " + (err.message || err))
+    return
+  }
   if (normalized.roundTripError) {
     setStatus("Document failed round-trip validation — cannot publish.")
     return
