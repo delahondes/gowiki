@@ -3572,6 +3572,7 @@ async function viewVersion(version) {
     actions.style.marginTop = "16px"
     actions.style.display = "flex"
     actions.style.gap = "8px"
+    actions.style.flexShrink = "0"
 
     const backBtn = document.createElement("button")
     backBtn.textContent = "Back to history"

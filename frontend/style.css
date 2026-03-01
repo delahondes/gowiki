@@ -203,6 +203,14 @@ mark.search-highlight {
   padding: 0;
 }
 
+#content:has(.gowiki-version-view) {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 #footer {
   width: 99%;
   min-width: 0;
@@ -918,6 +926,14 @@ mark.search-highlight {
 
 /* ── Version view ─────────────────────────────────── */
 
+.gowiki-version-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
 .gowiki-version-header {
   background: #e8f0fe;
   padding: 10px 14px;
@@ -925,6 +941,7 @@ mark.search-highlight {
   margin-bottom: 16px;
   font-weight: 600;
   font-size: 14px;
+  flex-shrink: 0;
 }
 
 .gowiki-version-content {
@@ -932,6 +949,9 @@ mark.search-highlight {
   border-radius: 4px;
   padding: 16px;
   background: white;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* ── Diff viewer ──────────────────────────────────── */
