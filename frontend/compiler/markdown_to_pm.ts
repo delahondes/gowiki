@@ -12,6 +12,8 @@ type DirectiveToken = {
 function parseDirective(line: string): DirectiveToken | null {
   const trimmed = line.trim()
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null
+  // {{...}} is template variable syntax, not a directive
+  if (trimmed.startsWith("{{")) return null
 
   const inner = trimmed.slice(1, -1).trim()
   if (!inner) throw new Error("Empty directive")

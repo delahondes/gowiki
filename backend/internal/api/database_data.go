@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -101,24 +102,9 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, row)
 }
 
-// buildPageContent generates the markdown for an auto-created page-bound row.
-func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) string {
-	// If a page template is configured, try to use it.
-	if table.PageTemplatePath != "" {
-		tmpl, err := s.store.Get(table.PageTemplatePath)
-		if err == nil {
-			return tmpl.Markdown
-		}
-	}
-
-	// Default: heading + {database-row} block with field values.
-	title := row.PagePath
-	if idx := strings.LastIndex(title, "/"); idx >= 0 {
-		title = title[idx+1:]
-	}
-
+// buildDatabaseRowBlock generates the {database-row table=...} block with field/value table.
+func (s *Server) buildDatabaseRowBlock(table *database.TableDef, row *database.Row) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
 	sb.WriteString(fmt.Sprintf("{database-row table=%s}\n", table.Name))
 	sb.WriteString("| Field | Value |\n")
 	sb.WriteString("| --- | --- |\n")
@@ -134,6 +120,41 @@ func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) s
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// buildPageContent generates the markdown for an auto-created page-bound row.
+func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) string {
+	dbRowBlock := s.buildDatabaseRowBlock(table, row)
+
+	// If a page template is configured, try to use it.
+	if table.PageTemplatePath != "" {
+		tmpl, err := s.store.Get(table.PageTemplatePath)
+		if err == nil {
+			return applyTemplate(tmpl.Markdown, dbRowBlock)
+		}
+	}
+
+	// Default: heading + {database-row} block with field values.
+	title := row.PagePath
+	if idx := strings.LastIndex(title, "/"); idx >= 0 {
+		title = title[idx+1:]
+	}
+
+	return fmt.Sprintf("# %s\n\n%s", title, dbRowBlock)
+}
+
+var databaseRowPlaceholderRe = regexp.MustCompile(`(?m)^\s*\{database-row\}\s*$`)
+
+// applyTemplate processes a template markdown:
+// - Replaces a bare {database-row} placeholder with the full block
+// - Appends the database-row block if no placeholder is found
+// Template variables like {{field_name}} are left as-is for render-time resolution.
+func applyTemplate(tmpl string, dbRowBlock string) string {
+	if databaseRowPlaceholderRe.MatchString(tmpl) {
+		return databaseRowPlaceholderRe.ReplaceAllString(tmpl, dbRowBlock)
+	}
+	// No placeholder found — append at the end.
+	return strings.TrimRight(tmpl, "\n") + "\n\n" + dbRowBlock
 }
 
 // handleDatabaseGetRow returns a single row by ID.

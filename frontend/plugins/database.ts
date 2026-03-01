@@ -1232,12 +1232,23 @@ export const databasePlugin: WikiPlugin = {
         const max = state.eMarks[startLine]
         const line = state.src.slice(start, max).trim()
 
-        // Must match {database-row table=...}
-        const directiveMatch = line.match(/^\{database-row\s+table=(?:"([^"]+)"|'([^']+)'|(\S+?))\s*\}$/)
-        if (!directiveMatch) return false
+        // Match {database-row table=...} or bare {database-row} (template placeholder)
+        const fullMatch = line.match(/^\{database-row\s+table=(?:"([^"]+)"|'([^']+)'|(\S+?))\s*\}$/)
+        const bareMatch = !fullMatch && /^\{database-row\s*\}$/.test(line)
+        if (!fullMatch && !bareMatch) return false
         if (silent) return true
 
-        const tableName = directiveMatch[1] || directiveMatch[2] || directiveMatch[3]
+        const tableName = fullMatch ? (fullMatch[1] || fullMatch[2] || fullMatch[3]) : ""
+
+        // Bare placeholder — just emit the node, don't consume a following table.
+        if (bareMatch) {
+          const token = state.push("database_row_block", "", 0)
+          token.block = true
+          token.map = [startLine, startLine + 1]
+          token.meta = { tableName: "", fields: {} }
+          state.line = startLine + 1
+          return true
+        }
 
         // Look ahead for a 2-column table (Field | Value).
         let nextLine = startLine + 1
@@ -1349,6 +1360,11 @@ export const databasePlugin: WikiPlugin = {
         const fields = node.attrs._fields || {}
         const entries = Object.entries(fields)
 
+        // Bare placeholder (template) — no table attribute, no field table
+        if (!table) {
+          return `{database-row}\n\n`
+        }
+
         let md = `{database-row table=${table}}\n`
         if (entries.length > 0) {
           md += `| Field | Value |\n`
@@ -1370,10 +1386,10 @@ export const databasePlugin: WikiPlugin = {
         filterTransaction(tr, state) {
           if (!tr.docChanged) return true
           let oldCount = 0
-          state.doc.descendants(n => { if (n.type.name === "database_row") oldCount++ })
+          state.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) oldCount++ })
           if (oldCount === 0) return true
           let newCount = 0
-          tr.doc.descendants(n => { if (n.type.name === "database_row") newCount++ })
+          tr.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) newCount++ })
           return newCount >= oldCount
         },
         props: {
