@@ -899,6 +899,98 @@ function normalizeMarkdownForStorage(markdown) {
   }
 }
 
+// ── Database-row raw-mode validation ──
+
+function extractDatabaseRowBlocks(markdown) {
+  const lines = markdown.split("\n")
+  const blocks = []
+  const directiveRe = /^\{database-row\s+table=(?:"([^"]+)"|'([^']+)'|(\S+?))\s*\}$/
+  const rowRe = /^\|(.+)\|(.+)\|$/
+  const sepRe = /^\|[\s-]+\|[\s-]+\|$/
+  let inCode = false
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trimStart().startsWith("```")) { inCode = !inCode; continue }
+    if (inCode) continue
+    const m = lines[i].trim().match(directiveRe)
+    if (!m) continue
+    const table = m[1] || m[2] || m[3]
+    const fields = {}
+    i++
+    while (i < lines.length && lines[i].trim() === "") i++
+    if (i < lines.length && rowRe.test(lines[i])) i++ // header
+    if (i < lines.length && sepRe.test(lines[i])) i++ // separator
+    while (i < lines.length && rowRe.test(lines[i])) {
+      const rm = lines[i].match(rowRe)
+      if (rm) fields[rm[1].trim()] = rm[2].trim()
+      i++
+    }
+    i--
+    blocks.push({ table, fields })
+  }
+  return blocks
+}
+
+const databaseSchemaCache = new Map()
+
+async function getDatabaseSchema(tableName) {
+  const cached = databaseSchemaCache.get(tableName)
+  if (cached && Date.now() - cached.fetchedAt < 60000) return cached.schema
+  const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/schema`)
+  if (!resp.ok) return null
+  const schema = await resp.json()
+  databaseSchemaCache.set(tableName, { schema, fetchedAt: Date.now() })
+  return schema
+}
+
+async function validateDatabaseRows(markdown) {
+  const errors = []
+  const baselineBlocks = extractDatabaseRowBlocks(editBaselineMarkdown)
+  if (baselineBlocks.length === 0) return { valid: true, errors }
+
+  const currentBlocks = extractDatabaseRowBlocks(markdown)
+
+  // Check that every baseline block still exists
+  for (const base of baselineBlocks) {
+    const match = currentBlocks.find(b => b.table === base.table)
+    if (!match) {
+      errors.push(`Cannot remove database-row block (table: ${base.table})`)
+      continue
+    }
+    // Check that every baseline field still exists
+    for (const fieldName of Object.keys(base.fields)) {
+      if (!(fieldName in match.fields)) {
+        errors.push(`Cannot remove field '${fieldName}' from database-row (table: ${base.table})`)
+      }
+    }
+  }
+
+  // Validate enum values against schema
+  for (const block of currentBlocks) {
+    const tableSchema = await getDatabaseSchema(block.table)
+    if (!tableSchema || !tableSchema.fields) continue
+    for (const field of tableSchema.fields) {
+      if (!(field.name in block.fields)) continue
+      const value = block.fields[field.name]
+      if (field.type === "enum" && field.enum_values) {
+        if (value !== "" && !field.enum_values.includes(value)) {
+          errors.push(`Invalid value '${value}' for enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
+        }
+      } else if (field.type === "multi_enum" && field.enum_values) {
+        if (value !== "") {
+          const tokens = value.split(",").map(t => t.trim()).filter(Boolean)
+          for (const token of tokens) {
+            if (!field.enum_values.includes(token)) {
+              errors.push(`Invalid value '${token}' in multi-enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors }
+}
+
 function applyNormalizedEditState(normalized) {
   currentMarkdown = normalized.markdown
   currentDoc = normalized.doc
@@ -948,7 +1040,7 @@ function setMode(nextMode) {
   renderActions()
 }
 
-function setEditMode(nextEditMode) {
+async function setEditMode(nextEditMode) {
   if (mode !== "edit") return
   if (nextEditMode === editMode) return
 
@@ -957,6 +1049,15 @@ function setEditMode(nextEditMode) {
     markdown = pmToMarkdown(editorView.state.doc, registry)
   } else if (editMode === "raw" && rawEditor) {
     markdown = rawEditor.value
+  }
+
+  // Validate database-row blocks when leaving raw mode
+  if (editMode === "raw") {
+    const dbValidation = await validateDatabaseRows(markdown)
+    if (!dbValidation.valid) {
+      setStatus(dbValidation.errors.join("; "))
+      return
+    }
   }
 
   try {
@@ -2755,6 +2856,9 @@ function renderEdit(nextEditMode) {
       } catch {
         // Keep invalid in-progress raw text unchanged.
       }
+      validateDatabaseRows(editorEl.value).then(result => {
+        if (!result.valid) setStatus(result.errors.join("; "))
+      })
     })
 
     wrapper.appendChild(editorEl)
@@ -4289,6 +4393,11 @@ function stopAutoSave() {
 async function saveDraftExplicit() {
   if (mode !== "edit" || !editToken) return
   const markdown = getCurrentMarkdown()
+  const dbValidation = await validateDatabaseRows(markdown)
+  if (!dbValidation.valid) {
+    setStatus(dbValidation.errors.join("; "))
+    return
+  }
   const resp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -4315,6 +4424,11 @@ async function publishDraft() {
   const normalized = normalizeMarkdownForStorage(markdown)
   if (normalized.roundTripError) {
     setStatus("Document failed round-trip validation — cannot publish.")
+    return
+  }
+  const dbValidation = await validateDatabaseRows(normalized.markdown)
+  if (!dbValidation.valid) {
+    setStatus(dbValidation.errors.join("; "))
     return
   }
   // Save draft with latest content

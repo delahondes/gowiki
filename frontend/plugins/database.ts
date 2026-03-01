@@ -1367,6 +1367,15 @@ export const databasePlugin: WikiPlugin = {
     reg.registerEditorPlugin((_schema: Schema) => {
       return new PMPlugin({
         key: new PluginKey("gowiki.database"),
+        filterTransaction(tr, state) {
+          if (!tr.docChanged) return true
+          let oldCount = 0
+          state.doc.descendants(n => { if (n.type.name === "database_row") oldCount++ })
+          if (oldCount === 0) return true
+          let newCount = 0
+          tr.doc.descendants(n => { if (n.type.name === "database_row") newCount++ })
+          return newCount >= oldCount
+        },
         props: {
           nodeViews: {
             database_query(node: PMNode, view: EditorView, getPos: () => number | undefined) {
