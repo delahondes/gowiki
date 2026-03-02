@@ -397,6 +397,19 @@ function aggregateTableAttrs(raw: Record<string, any>): Record<string, any> {
         columns[colKey] = columns[colKey] ?? {}
         ;(columns[colKey] as any)[prop] = value
       }
+    } else if (key.startsWith("_colrange.")) {
+      const m = key.match(/^_colrange\.(\d+)\.(\d+)\.(\w+)$/)
+      if (m) {
+        columns = columns ?? {}
+        const start = parseInt(m[1])
+        const end = parseInt(m[2])
+        const prop = m[3]
+        for (let i = start; i <= end; i++) {
+          const colKey = String(i)
+          columns[colKey] = columns[colKey] ?? {}
+          ;(columns[colKey] as any)[prop] = value
+        }
+      }
     } else {
       clean[key] = value
     }
@@ -472,6 +485,68 @@ function addStyleToDOM(spec: any, style: string): any {
   const newAttrs = { ...attrs, style: newStyle }
   const children = hasAttrs ? rest : [maybeAttrs, ...rest]
   return [tag, newAttrs, ...children]
+}
+
+// ─── Column spec serialization with range collapsing ─────
+
+function serializeColumnSpecs(columns: ColumnProps): string[] {
+  const parts: string[] = []
+  const sortedKeys = Object.keys(columns)
+    .map(Number)
+    .sort((a, b) => a - b)
+
+  // Group by property type, collecting which columns have each (prop, value) pair
+  const propGroups: Record<string, { col: number; value: string }[]> = {}
+
+  for (const col of sortedKeys) {
+    const props = columns[String(col)]
+    for (const prop of ["align", "width", "color"] as const) {
+      const value = props[prop]
+      if (value) {
+        const key = prop
+        propGroups[key] = propGroups[key] ?? []
+        propGroups[key].push({ col, value })
+      }
+    }
+  }
+
+  // For each property type, group consecutive columns with identical values into ranges
+  for (const prop of ["align", "width", "color"]) {
+    const entries = propGroups[prop]
+    if (!entries) continue
+
+    // Group by value, preserving order
+    const byValue: { value: string; cols: number[] }[] = []
+    const valueMap = new Map<string, number[]>()
+    for (const e of entries) {
+      if (!valueMap.has(e.value)) {
+        const cols: number[] = []
+        valueMap.set(e.value, cols)
+        byValue.push({ value: e.value, cols })
+      }
+      valueMap.get(e.value)!.push(e.col)
+    }
+
+    for (const { value, cols } of byValue) {
+      cols.sort((a, b) => a - b)
+      // Find runs of consecutive columns
+      let i = 0
+      while (i < cols.length) {
+        let j = i
+        while (j + 1 < cols.length && cols[j + 1] === cols[j] + 1) j++
+        const runLen = j - i + 1
+        const formatted = prop === "color" ? `"${value}"` : value
+        if (runLen >= 2) {
+          parts.push(`col${cols[i]}-${cols[j]}.${prop}=${formatted}`)
+        } else {
+          parts.push(`col${cols[i]}.${prop}=${formatted}`)
+        }
+        i = j + 1
+      }
+    }
+  }
+
+  return parts
 }
 
 // ─── Serialization grid ──────────────────────────────────
@@ -824,6 +899,39 @@ export function adjustFormula(
   )
 }
 
+/**
+ * Adjust column specs when columns are inserted or deleted.
+ * changeIdx is 0-based column index.
+ */
+export function adjustColumnSpecs(
+  columns: ColumnProps | null,
+  changeType: "insertCol" | "deleteCol",
+  changeIdx: number
+): ColumnProps | null {
+  if (!columns) return null
+
+  const oneBasedIdx = changeIdx + 1
+  const isInsert = changeType === "insertCol"
+  const result: ColumnProps = {}
+
+  for (const [keyStr, props] of Object.entries(columns)) {
+    const key = parseInt(keyStr)
+    if (isNaN(key)) continue
+
+    if (isInsert) {
+      const newKey = key >= oneBasedIdx ? key + 1 : key
+      result[String(newKey)] = props
+    } else {
+      // Delete
+      if (key === oneBasedIdx) continue // drop this column's spec
+      const newKey = key > oneBasedIdx ? key - 1 : key
+      result[String(newKey)] = props
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : null
+}
+
 function tableHasFormulas(tableNode: Node): boolean {
   let found = false
   tableNode.descendants(node => {
@@ -901,45 +1009,68 @@ function wrapTableCmd(
     if (!info) return cmd(state, dispatch, view)
 
     const hasFormulas = tableHasFormulas(info.tableNode)
-    if (!hasFormulas) return cmd(state, dispatch, view)
+    const isColChange = changeType === "insertCol" || changeType === "deleteCol"
+    const hasColumns = !!info.tableNode.attrs.columns
+
+    if (!hasFormulas && !(isColChange && hasColumns))
+      return cmd(state, dispatch, view)
 
     const isRow = changeType === "insertRow" || changeType === "deleteRow"
     const changeIndex = isRow
       ? info.rowIndex + indexOffset
       : info.colIndex + indexOffset
 
-    // Intercept dispatch to inject formula adjustments into the same
+    // Intercept dispatch to inject formula + column spec adjustments into the same
     // transaction, so we don't need `view` and it's a single undo step.
     const augmentedDispatch = (tr: any) => {
-      // Scan the post-change document for formula cells
-      tr.doc.descendants((node: Node, pos: number) => {
-        if (node.type !== state.schema.nodes.table) return true
+      // Pass 1: adjust formula references
+      if (hasFormulas) {
+        tr.doc.descendants((node: Node, pos: number) => {
+          if (node.type !== state.schema.nodes.table) return true
 
-        let rowIdx = 0
-        node.content.forEach((row: Node, rowOffset: number) => {
-          const rowPos = pos + 1 + rowOffset
-          let cellStart = rowPos + 1
-          let visualCol = 0
+          node.content.forEach((row: Node, rowOffset: number) => {
+            const rowPos = pos + 1 + rowOffset
+            let cellStart = rowPos + 1
 
-          row.content.forEach((cell: Node) => {
-            const formula = cell.attrs.formula
-            if (formula) {
-              const adjusted = adjustFormula(formula, changeType, changeIndex)
-              if (adjusted !== formula) {
-                tr.setNodeMarkup(cellStart, undefined, {
-                  ...cell.attrs,
-                  formula: adjusted,
-                })
+            row.content.forEach((cell: Node) => {
+              const formula = cell.attrs.formula
+              if (formula) {
+                const adjusted = adjustFormula(formula, changeType, changeIndex)
+                if (adjusted !== formula) {
+                  tr.setNodeMarkup(cellStart, undefined, {
+                    ...cell.attrs,
+                    formula: adjusted,
+                  })
+                }
               }
-            }
-            cellStart += cell.nodeSize
-            visualCol += cell.attrs.colspan ?? 1
+              cellStart += cell.nodeSize
+            })
           })
-          rowIdx++
-        })
 
-        return false
-      })
+          return false
+        })
+      }
+
+      // Pass 2: adjust column specs on column insert/delete
+      if (isColChange && hasColumns) {
+        tr.doc.descendants((node: Node, pos: number) => {
+          if (node.type !== state.schema.nodes.table) return true
+
+          const newColumns = adjustColumnSpecs(
+            node.attrs.columns,
+            changeType as "insertCol" | "deleteCol",
+            changeIndex
+          )
+          if (newColumns !== node.attrs.columns) {
+            tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              columns: newColumns,
+            })
+          }
+
+          return false
+        })
+      }
 
       dispatch(tr)
     }
@@ -1065,9 +1196,13 @@ export const tablePlugin: GowikiPlugin = {
       appliesTo: ["table_open"],
       properties: tableProperties,
       parseUnknownAttr(key, value) {
+        // Single column: col3.align
         const m = key.match(/^col(\d+)\.(align|width|color)$/)
-        if (!m) return null
-        return [`_col.${m[1]}.${m[2]}`, value]
+        if (m) return [`_col.${m[1]}.${m[2]}`, value]
+        // Range: col2-10.align
+        const mr = key.match(/^col(\d+)-(\d+)\.(align|width|color)$/)
+        if (mr) return [`_colrange.${mr[1]}.${mr[2]}.${mr[3]}`, value]
+        return null
       },
     })
 
@@ -1163,19 +1298,7 @@ export const tablePlugin: GowikiPlugin = {
 
         const columns: ColumnProps | null = node.attrs.columns
         if (columns) {
-          // Sort by column number for deterministic output
-          const sortedKeys = Object.keys(columns).sort(
-            (a, b) => Number(a) - Number(b)
-          )
-          for (const colKey of sortedKeys) {
-            const props = columns[colKey]
-            if (props.align)
-              directiveParts.push(`col${colKey}.align=${props.align}`)
-            if (props.width)
-              directiveParts.push(`col${colKey}.width=${props.width}`)
-            if (props.color)
-              directiveParts.push(`col${colKey}.color="${props.color}"`)
-          }
+          directiveParts.push(...serializeColumnSpecs(columns))
         }
 
         let out = ""

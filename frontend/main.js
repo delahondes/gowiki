@@ -1983,6 +1983,68 @@ function rawAdjustFormulas(ctx, changeType, changeIndex) {
   }
 }
 
+// Adjust column specs (col1.align, col2-5.width, etc.) in the {table ...} directive line
+function rawAdjustColumnSpecs(ctx, changeType, changeIndex) {
+  const directiveLine = ctx.lines[ctx.tableFirstLine]
+  if (!/^\s*\{table\s/.test(directiveLine)) return
+
+  // changeIndex is 0-based column index; col specs use 1-based numbering
+  const oneBasedIdx = changeIndex + 1
+  const isInsert = changeType === "insertCol"
+
+  const adjusted = directiveLine.replace(
+    /col(\d+)(?:-(\d+))?\.(align|width|color)/g,
+    (match, startStr, endStr) => {
+      const start = parseInt(startStr)
+      if (endStr !== undefined) {
+        // Range: col3-8.prop
+        let end = parseInt(endStr)
+        let newStart = start
+        let newEnd = end
+        if (isInsert) {
+          if (newStart >= oneBasedIdx) newStart++
+          if (newEnd >= oneBasedIdx) newEnd++
+        } else {
+          // Delete
+          if (start === end && start === oneBasedIdx) return "\x00REMOVE\x00"
+          if (oneBasedIdx >= start && oneBasedIdx <= end) {
+            newEnd--
+          } else {
+            if (newStart > oneBasedIdx) newStart--
+            if (newEnd > oneBasedIdx) newEnd--
+          }
+        }
+        if (newStart === newEnd) {
+          return match.replace(/col\d+-\d+\./, `col${newStart}.`)
+        }
+        return match.replace(/col\d+-\d+\./, `col${newStart}-${newEnd}.`)
+      } else {
+        // Single: col3.prop
+        if (isInsert) {
+          const newIdx = start >= oneBasedIdx ? start + 1 : start
+          return match.replace(/col\d+\./, `col${newIdx}.`)
+        } else {
+          if (start === oneBasedIdx) return "\x00REMOVE\x00"
+          const newIdx = start > oneBasedIdx ? start - 1 : start
+          return match.replace(/col\d+\./, `col${newIdx}.`)
+        }
+      }
+    }
+  )
+
+  // Remove sentinel-marked specs and clean up (handles both unquoted and quoted values)
+  let cleaned = adjusted.replace(/\s*\x00REMOVE\x00=(?:"[^"]*"|\S+)/g, "")
+  // If directive is now empty (only "{table }"), remove the line
+  if (/^\s*\{table\s*\}\s*$/.test(cleaned)) {
+    ctx.lines.splice(ctx.tableFirstLine, 1)
+    ctx.tableLastLine--
+  } else {
+    // Collapse multiple spaces
+    cleaned = cleaned.replace(/  +/g, " ")
+    ctx.lines[ctx.tableFirstLine] = cleaned
+  }
+}
+
 function rawTableColCount(ctx) {
   for (let i = ctx.tableFirstLine; i <= ctx.tableLastLine; i++) {
     const cells = rawParsePipeRow(ctx.lines[i])
@@ -2114,17 +2176,19 @@ function rawTableAddColumnRight(textarea) {
   const cols = rawTableColCount(ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
 
+  const insertIdx = coords.col + 1
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
     const row = rawParsePipeRow(ctx.lines[i])
     if (!row) continue
     if (rawIsSeparatorRow(ctx.lines[i])) {
-      row.push("---")
+      row.splice(insertIdx, 0, "---")
     } else {
-      row.push("")
+      row.splice(insertIdx, 0, "")
     }
     ctx.lines[i] = rawBuildPipeRow(row)
   }
-  rawAdjustFormulas(ctx, "insertCol", cols)
+  rawAdjustFormulas(ctx, "insertCol", insertIdx)
+  rawAdjustColumnSpecs(ctx, "insertCol", insertIdx)
   rawReplaceLines(textarea, ctx)
   rawFocusCell(textarea, ctx, coords.row, coords.col)
 }
@@ -2135,17 +2199,19 @@ function rawTableAddColumnLeft(textarea) {
   const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
 
+  const insertIdx = coords.col
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
     const row = rawParsePipeRow(ctx.lines[i])
     if (!row) continue
     if (rawIsSeparatorRow(ctx.lines[i])) {
-      row.unshift("---")
+      row.splice(insertIdx, 0, "---")
     } else {
-      row.unshift("")
+      row.splice(insertIdx, 0, "")
     }
     ctx.lines[i] = rawBuildPipeRow(row)
   }
-  rawAdjustFormulas(ctx, "insertCol", 0)
+  rawAdjustFormulas(ctx, "insertCol", insertIdx)
+  rawAdjustColumnSpecs(ctx, "insertCol", insertIdx)
   rawReplaceLines(textarea, ctx)
   // Column shifted right by 1 due to insertion at left
   rawFocusCell(textarea, ctx, coords.row, coords.col + 1)
@@ -2176,14 +2242,15 @@ function rawTableDeleteColumn(textarea) {
   const cols = rawTableColCount(ctx)
   if (cols <= 1) return
 
-  // Remove the last column
+  // Remove the column at cursor position
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
     const row = rawParsePipeRow(ctx.lines[i])
     if (!row || row.length <= 1) continue
-    row.pop()
+    row.splice(coords.col, 1)
     ctx.lines[i] = rawBuildPipeRow(row)
   }
-  rawAdjustFormulas(ctx, "deleteCol", cols - 1)
+  rawAdjustFormulas(ctx, "deleteCol", coords.col)
+  rawAdjustColumnSpecs(ctx, "deleteCol", coords.col)
   rawReplaceLines(textarea, ctx)
   // Focus cell to the right (same col), or left if was last column
   const targetCol = Math.min(coords.col, cols - 2)
