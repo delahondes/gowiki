@@ -373,6 +373,19 @@ function shiftTabToPanel(view: any, event: KeyboardEvent): boolean {
   const hasShowing = targets.some(t => pluginState?.enabled || t.autoShow)
   if (!hasShowing) return false
 
+  // In a table: only intercept Shift-Tab on the first cell (A1).
+  // Other cells should use normal Shift-Tab navigation (previous cell).
+  const $from = view.state.selection.$from
+  for (let d = $from.depth; d > 0; d--) {
+    const name = $from.node(d).type.name
+    if (name === "table_cell" || name === "table_header") {
+      if ($from.index(d - 1) !== 0 || $from.index(d - 2) !== 0) {
+        return false
+      }
+      break
+    }
+  }
+
   const panel = view.dom.parentElement?.querySelector(".gowiki-props-panel")
   if (!panel) return false
   const first = panel.querySelector<HTMLElement>("input, select, textarea")

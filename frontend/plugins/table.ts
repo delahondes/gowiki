@@ -13,7 +13,7 @@ import {
 } from "prosemirror-tables"
 import { Node, Schema } from "prosemirror-model"
 import type { Command } from "prosemirror-state"
-import { Plugin as PMPlugin, Transaction, NodeSelection, TextSelection } from "prosemirror-state"
+import { Plugin as PMPlugin, Transaction, NodeSelection, TextSelection, Selection } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { keymap } from "prosemirror-keymap"
 import markdownItMultiMdTable from "markdown-it-multimd-table"
@@ -933,7 +933,9 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
   return new PMPlugin({
     // When Tab (or any navigation) lands in a paragraph whose only child
     // is a formula_display atom, convert the TextSelection to NodeSelection.
-    appendTransaction(_transactions, _oldState, newState) {
+    // But if the old state already had a NodeSelection on the same atom,
+    // the user is navigating away — don't snap back.
+    appendTransaction(_transactions, oldState, newState) {
       if (!(newState.selection instanceof TextSelection)) return null
       const $from = newState.selection.$from
       const para = $from.parent
@@ -941,37 +943,19 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
       if (para.childCount !== 1) return null
       if (para.child(0).type !== schema.nodes.formula_display) return null
       const atomPos = $from.start() // position of first inline child
+
+      // If old state had NodeSelection on the same formula atom, user is
+      // navigating away (e.g. arrow keys) — let them leave.
+      if (oldState.selection instanceof NodeSelection &&
+          oldState.selection.node.type === schema.nodes.formula_display &&
+          oldState.selection.from === atomPos) {
+        return null
+      }
+
       return newState.tr.setSelection(NodeSelection.create(newState.doc, atomPos))
     },
 
     props: {
-      handleKeyDown(view, event) {
-        const sel = view.state.selection
-        if (!(sel instanceof NodeSelection)) return false
-        if (sel.node.type !== schema.nodes.formula_display) return false
-
-        // Backspace / Delete → remove formula
-        if (event.key === "Backspace" || event.key === "Delete") {
-          clearFormula(view, sel)
-          return true
-        }
-
-        // "=" → open properties panel with formula input focused
-        if (event.key === "=") {
-          let tr = enablePropertiesPanel(view.state.tr)
-          requestInputFocus("formula")
-          view.dispatch(tr)
-          return true
-        }
-
-        // Other printable chars → consume (don't replace the atom with text)
-        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-          return true
-        }
-
-        return false
-      },
-
       // Copy → put "=formula_expression" on clipboard
       clipboardTextSerializer(slice, view) {
         const node = slice.content.firstChild
@@ -985,37 +969,109 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
         return undefined as any
       },
 
-      // Paste "=formula" into a table cell → set formula attr
-      handlePaste(view, event, _slice) {
-        const text = event.clipboardData?.getData("text/plain")
-        if (!text || !text.startsWith("=")) return false
+      // All DOM event handlers run BEFORE handleKeyDown / handlePaste from
+      // any plugin, so they take priority over baseKeymap's deleteSelection.
+      handleDOMEvents: {
+        keydown(view, event) {
+          const sel = view.state.selection
+          if (!(sel instanceof NodeSelection)) return false
+          if (sel.node.type !== schema.nodes.formula_display) return false
 
-        const $from = view.state.selection.$from
-        for (let d = $from.depth; d > 0; d--) {
-          const node = $from.node(d)
-          if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
-            const cellPos = $from.before(d)
-            const formula = text.slice(1) // remove "=" prefix
-            let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
-              ...node.attrs,
-              formula,
-            })
-            // Clear any existing text in the paragraph
-            const para = node.child(0)
-            const paraContentStart = cellPos + 2
-            if (para.content.size > 0) {
-              const mappedStart = tr.mapping.map(paraContentStart)
-              const mappedEnd = tr.mapping.map(paraContentStart + para.content.size)
-              tr.delete(mappedStart, mappedEnd)
-            }
-            view.dispatch(tr)
+          // Backspace / Delete → remove formula
+          if (event.key === "Backspace" || event.key === "Delete") {
+            event.preventDefault()
+            clearFormula(view, sel)
             return true
           }
-        }
-        return false
-      },
 
-      handleDOMEvents: {
+          // "=" → open properties panel with formula input focused
+          if (event.key === "=") {
+            event.preventDefault()
+            view.dispatch(enablePropertiesPanel(view.state.tr))
+            // Focus the Formula input (works whether panel was just opened or already visible)
+            requestAnimationFrame(() => {
+              const panels = view.dom.parentElement?.querySelectorAll(".gowiki-props-panel")
+              if (!panels) return
+              for (const panel of panels) {
+                const labels = panel.querySelectorAll(".gowiki-props-label")
+                for (const label of labels) {
+                  if (label.textContent === "Formula") {
+                    const input = label.nextElementSibling as HTMLElement
+                    if (input) { input.focus(); return }
+                  }
+                }
+              }
+            })
+            return true
+          }
+
+          // ArrowLeft → move to previous cell
+          if (event.key === "ArrowLeft") {
+            event.preventDefault()
+            const parent = findParentCell(view.state, sel.from)
+            if (!parent) return true
+            const $cell = view.state.doc.resolve(parent.cellPos)
+            const newSel = Selection.near($cell, -1)
+            view.dispatch(view.state.tr.setSelection(newSel))
+            return true
+          }
+
+          // ArrowRight → move to next cell
+          if (event.key === "ArrowRight") {
+            event.preventDefault()
+            const parent = findParentCell(view.state, sel.from)
+            if (!parent) return true
+            const afterCell = parent.cellPos + parent.cellNode.nodeSize
+            const $after = view.state.doc.resolve(
+              Math.min(afterCell, view.state.doc.content.size)
+            )
+            const newSel = Selection.near($after, 1)
+            view.dispatch(view.state.tr.setSelection(newSel))
+            return true
+          }
+
+          // Other printable chars → consume (don't replace the atom with text)
+          if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault()
+            return true
+          }
+
+          return false
+        },
+
+        // Paste "=formula" into a table cell → set formula attr.
+        // Using handleDOMEvents.paste so it fires before other plugins'
+        // handlePaste (e.g. prosemirror-tables).
+        paste(view, event) {
+          const text = event.clipboardData?.getData("text/plain")
+          if (!text || !text.startsWith("=")) return false
+
+          const $from = view.state.selection.$from
+          for (let d = $from.depth; d > 0; d--) {
+            const node = $from.node(d)
+            if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
+              event.preventDefault()
+              const cellPos = $from.before(d)
+              const formula = text.slice(1) // remove "=" prefix
+              let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
+                ...node.attrs,
+                formula,
+              })
+              // Clear any existing text in the paragraph
+              const para = node.child(0)
+              const paraContentStart = cellPos + 2
+              if (para.content.size > 0) {
+                const mappedStart = tr.mapping.map(paraContentStart)
+                const mappedEnd = tr.mapping.map(paraContentStart + para.content.size)
+                tr.delete(mappedStart, mappedEnd)
+              }
+              view.dispatch(tr)
+              return true
+            }
+          }
+          return false
+        },
+
         // Cut → put "=formula_expression" on clipboard, then clear formula
         cut(view, event) {
           const sel = view.state.selection
