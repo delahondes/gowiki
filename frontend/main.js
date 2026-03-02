@@ -1993,17 +1993,25 @@ function rawAdjustColumnSpecs(ctx, changeType, changeIndex) {
   const isInsert = changeType === "insertCol"
 
   const adjusted = directiveLine.replace(
-    /col(\d+)(?:-(\d+))?\.(align|width|color)/g,
-    (match, startStr, endStr) => {
-      const start = parseInt(startStr)
-      if (endStr !== undefined) {
+    /col(\d+)(\+|-(?=\.))?\.(align|width|color)|col(\d+)-(\d+)\.(align|width|color)|col\.(align|width|color)/g,
+    (match, singleNum, singleSuffix, _singleProp, rangeStart, rangeEnd, _rangeProp, _allProp) => {
+      // col.prop — never changes
+      if (match.startsWith("col.")) return match
+
+      if (rangeStart !== undefined) {
         // Range: col3-8.prop
-        let end = parseInt(endStr)
+        let start = parseInt(rangeStart)
+        let end = parseInt(rangeEnd)
         let newStart = start
         let newEnd = end
         if (isInsert) {
-          if (newStart >= oneBasedIdx) newStart++
-          if (newEnd >= oneBasedIdx) newEnd++
+          // Extend range when insert is strictly inside
+          if (oneBasedIdx > start && oneBasedIdx <= end) {
+            newEnd++
+          } else {
+            if (newStart >= oneBasedIdx) newStart++
+            if (newEnd >= oneBasedIdx) newEnd++
+          }
         } else {
           // Delete
           if (start === end && start === oneBasedIdx) return "\x00REMOVE\x00"
@@ -2018,16 +2026,45 @@ function rawAdjustColumnSpecs(ctx, changeType, changeIndex) {
           return match.replace(/col\d+-\d+\./, `col${newStart}.`)
         }
         return match.replace(/col\d+-\d+\./, `col${newStart}-${newEnd}.`)
-      } else {
-        // Single: col3.prop
+      }
+
+      const num = parseInt(singleNum)
+      if (singleSuffix === "+") {
+        // col3+.prop — shift N when insert/delete strictly before N
         if (isInsert) {
-          const newIdx = start >= oneBasedIdx ? start + 1 : start
-          return match.replace(/col\d+\./, `col${newIdx}.`)
+          const newN = oneBasedIdx < num ? num + 1 : num
+          return match.replace(/col\d+\+\./, `col${newN}+.`)
         } else {
-          if (start === oneBasedIdx) return "\x00REMOVE\x00"
-          const newIdx = start > oneBasedIdx ? start - 1 : start
-          return match.replace(/col\d+\./, `col${newIdx}.`)
+          if (oneBasedIdx < num) {
+            return match.replace(/col\d+\+\./, `col${num - 1}+.`)
+          }
+          return match
         }
+      }
+
+      if (singleSuffix === "-") {
+        // col3-.prop — shift N when insert/delete at or before N
+        if (isInsert) {
+          const newN = oneBasedIdx <= num ? num + 1 : num
+          return match.replace(/col\d+-\./, `col${newN}-.`)
+        } else {
+          if (oneBasedIdx <= num) {
+            const newN = num - 1
+            if (newN < 1) return "\x00REMOVE\x00"
+            return match.replace(/col\d+-\./, `col${newN}-.`)
+          }
+          return match
+        }
+      }
+
+      // Single: col3.prop
+      if (isInsert) {
+        const newIdx = num >= oneBasedIdx ? num + 1 : num
+        return match.replace(/col\d+\./, `col${newIdx}.`)
+      } else {
+        if (num === oneBasedIdx) return "\x00REMOVE\x00"
+        const newIdx = num > oneBasedIdx ? num - 1 : num
+        return match.replace(/col\d+\./, `col${newIdx}.`)
       }
     }
   )

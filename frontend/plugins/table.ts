@@ -383,12 +383,94 @@ export type ColumnPropEntry = {
 }
 export type ColumnProps = Record<string, ColumnPropEntry>
 
+/**
+ * Resolve column properties for a given column number (1-based).
+ * Priority: "*" (lowest) < "N-" < "N+" < exact "N" (highest).
+ */
+export function resolveColumnProps(
+  columns: ColumnProps,
+  colNum: number
+): ColumnPropEntry | null {
+  const merged: ColumnPropEntry = {}
+  let found = false
+
+  // 1. "*" — all columns (lowest priority)
+  const star = columns["*"]
+  if (star) {
+    if (star.align) merged.align = star.align
+    if (star.width) merged.width = star.width
+    if (star.color) merged.color = star.color
+    found = true
+  }
+
+  // 2. "N-" where colNum <= N
+  for (const key of Object.keys(columns)) {
+    const m = key.match(/^(\d+)-$/)
+    if (m && colNum <= parseInt(m[1])) {
+      const props = columns[key]
+      if (props.align) merged.align = props.align
+      if (props.width) merged.width = props.width
+      if (props.color) merged.color = props.color
+      found = true
+    }
+  }
+
+  // 3. "N+" where colNum >= N
+  for (const key of Object.keys(columns)) {
+    const m = key.match(/^(\d+)\+$/)
+    if (m && colNum >= parseInt(m[1])) {
+      const props = columns[key]
+      if (props.align) merged.align = props.align
+      if (props.width) merged.width = props.width
+      if (props.color) merged.color = props.color
+      found = true
+    }
+  }
+
+  // 4. Exact "N" (highest priority)
+  const exact = columns[String(colNum)]
+  if (exact) {
+    if (exact.align) merged.align = exact.align
+    if (exact.width) merged.width = exact.width
+    if (exact.color) merged.color = exact.color
+    found = true
+  }
+
+  return found ? merged : null
+}
+
 function aggregateTableAttrs(raw: Record<string, any>): Record<string, any> {
   const clean: Record<string, any> = {}
   let columns: ColumnProps | null = null
 
   for (const [key, value] of Object.entries(raw)) {
-    if (key.startsWith("_col.")) {
+    if (key.startsWith("_colge.")) {
+      const m = key.match(/^_colge\.(\d+)\.(\w+)$/)
+      if (m) {
+        columns = columns ?? {}
+        const colKey = `${m[1]}+`
+        const prop = m[2]
+        columns[colKey] = columns[colKey] ?? {}
+        ;(columns[colKey] as any)[prop] = value
+      }
+    } else if (key.startsWith("_colle.")) {
+      const m = key.match(/^_colle\.(\d+)\.(\w+)$/)
+      if (m) {
+        columns = columns ?? {}
+        const colKey = `${m[1]}-`
+        const prop = m[2]
+        columns[colKey] = columns[colKey] ?? {}
+        ;(columns[colKey] as any)[prop] = value
+      }
+    } else if (key.startsWith("_colall.")) {
+      const m = key.match(/^_colall\.(\w+)$/)
+      if (m) {
+        columns = columns ?? {}
+        const prop = m[1]
+        columns["*"] = columns["*"] ?? {}
+        ;(columns["*"] as any)[prop] = value
+      }
+    } else if (key.startsWith("_col.")) {
       const m = key.match(/^_col\.(\d+)\.(\w+)$/)
       if (m) {
         columns = columns ?? {}
@@ -491,7 +573,35 @@ function addStyleToDOM(spec: any, style: string): any {
 
 function serializeColumnSpecs(columns: ColumnProps): string[] {
   const parts: string[] = []
+
+  // Serialize special keys first
+  for (const prop of ["align", "width", "color"] as const) {
+    // "*" → col.prop
+    if (columns["*"]?.[prop]) {
+      const formatted = prop === "color" ? `"${columns["*"][prop]}"` : columns["*"][prop]
+      parts.push(`col.${prop}=${formatted}`)
+    }
+    // "N-" → colN-.prop
+    for (const key of Object.keys(columns)) {
+      const mle = key.match(/^(\d+)-$/)
+      if (mle && columns[key][prop]) {
+        const formatted = prop === "color" ? `"${columns[key][prop]}"` : columns[key][prop]
+        parts.push(`col${mle[1]}-.${prop}=${formatted}`)
+      }
+    }
+    // "N+" → colN+.prop
+    for (const key of Object.keys(columns)) {
+      const mge = key.match(/^(\d+)\+$/)
+      if (mge && columns[key][prop]) {
+        const formatted = prop === "color" ? `"${columns[key][prop]}"` : columns[key][prop]
+        parts.push(`col${mge[1]}+.${prop}=${formatted}`)
+      }
+    }
+  }
+
+  // Numeric keys — existing range-collapsing logic
   const sortedKeys = Object.keys(columns)
+    .filter(k => /^\d+$/.test(k))
     .map(Number)
     .sort((a, b) => a - b)
 
@@ -721,14 +831,6 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
           const columns: ColumnProps | null = node.attrs.columns
           if (!columns) return true
 
-          // Pre-parse color rules
-          const colorRules: Record<string, ColorRule[]> = {}
-          for (const [colKey, props] of Object.entries(columns)) {
-            if (props.color) {
-              colorRules[colKey] = parseColorRules(props.color)
-            }
-          }
-
           // Walk rows and cells
           node.content.forEach((row, rowOffset) => {
             const rowPos = pos + 1 + rowOffset
@@ -736,8 +838,8 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
 
             row.content.forEach((cell, cellOffset) => {
               const cellPos = rowPos + 1 + cellOffset
-              const colKey = String(colIdx + 1)
-              const props = columns[colKey]
+              const colNum = colIdx + 1
+              const props = resolveColumnProps(columns, colNum)
 
               if (props) {
                 let style = ""
@@ -745,9 +847,10 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                 if (props.width) style += `width: ${props.width}; `
 
                 // Column color (only if cell doesn't have its own color)
-                if (colorRules[colKey] && !cell.attrs.cellColor) {
+                if (props.color && !cell.attrs.cellColor) {
+                  const rules = parseColorRules(props.color)
                   const text = getCellText(cell)
-                  const bg = evaluateColorRules(colorRules[colKey], text)
+                  const bg = evaluateColorRules(rules, text)
                   if (bg) style += `background: ${bg}; `
                 }
 
@@ -837,7 +940,7 @@ export function adjustFormula(
             // Expand range when insert is inside the range or right after
             // the end. This supports the common "total on last line" pattern:
             // =SUM(B2:B4) with insert at row 4 → =SUM(B2:B5).
-            if (changeIdx > sRow && changeIdx <= eRow + 1) {
+            if (changeIdx > sRow && changeIdx <= eRow) {
               eRow++
             } else {
               if (sRow >= changeIdx) sRow++
@@ -856,7 +959,7 @@ export function adjustFormula(
         } else {
           // Column operations — same logic on col axis
           if (isInsert) {
-            if (changeIdx > sCol && changeIdx <= eCol + 1) {
+            if (changeIdx > sCol && changeIdx <= eCol) {
               eCol++
             } else {
               if (sCol >= changeIdx) sCol++
@@ -915,8 +1018,12 @@ export function adjustColumnSpecs(
   const result: ColumnProps = {}
 
   for (const [keyStr, props] of Object.entries(columns)) {
+    // Skip special keys ("*", "N+", "N-") — handled in the special-key section below
+    if (!/^\d+$/.test(keyStr)) {
+      result[keyStr] = props
+      continue
+    }
     const key = parseInt(keyStr)
-    if (isNaN(key)) continue
 
     if (isInsert) {
       const newKey = key >= oneBasedIdx ? key + 1 : key
@@ -927,6 +1034,68 @@ export function adjustColumnSpecs(
       const newKey = key > oneBasedIdx ? key - 1 : key
       result[String(newKey)] = props
     }
+  }
+
+  // On insert: fill gap at oneBasedIdx if both neighbors have matching properties
+  if (isInsert) {
+    const leftKey = String(oneBasedIdx - 1)
+    const rightKey = String(oneBasedIdx + 1)
+    const left = result[leftKey]
+    const right = result[rightKey]
+    if (left && right) {
+      const fill: ColumnPropEntry = {}
+      for (const prop of ["align", "width", "color"] as const) {
+        if (left[prop] && left[prop] === right[prop]) {
+          fill[prop] = left[prop]
+        }
+      }
+      if (fill.align || fill.width || fill.color) {
+        result[String(oneBasedIdx)] = fill
+      }
+    }
+  }
+
+  // Adjust special keys ("N+", "N-")
+  for (const keyStr of Object.keys(result)) {
+    const geMatch = keyStr.match(/^(\d+)\+$/)
+    if (geMatch) {
+      const n = parseInt(geMatch[1])
+      if (isInsert) {
+        if (oneBasedIdx < n) {
+          result[`${n + 1}+`] = result[keyStr]
+          delete result[keyStr]
+        }
+      } else {
+        if (oneBasedIdx < n) {
+          result[`${n - 1}+`] = result[keyStr]
+          delete result[keyStr]
+        } else if (oneBasedIdx === n) {
+          // Deleted exactly the boundary column — keep same N
+        }
+      }
+      continue
+    }
+    const leMatch = keyStr.match(/^(\d+)-$/)
+    if (leMatch) {
+      const n = parseInt(leMatch[1])
+      if (isInsert) {
+        if (oneBasedIdx <= n) {
+          result[`${n + 1}-`] = result[keyStr]
+          delete result[keyStr]
+        }
+      } else {
+        if (oneBasedIdx <= n) {
+          const newN = n - 1
+          if (newN < 1) {
+            delete result[keyStr]
+          } else {
+            result[`${newN}-`] = result[keyStr]
+            delete result[keyStr]
+          }
+        }
+      }
+    }
+    // "*" never changes — no action needed
   }
 
   return Object.keys(result).length > 0 ? result : null
@@ -1196,6 +1365,15 @@ export const tablePlugin: GowikiPlugin = {
       appliesTo: ["table_open"],
       properties: tableProperties,
       parseUnknownAttr(key, value) {
+        // Open-ended: col2+.align (>= N)
+        const mge = key.match(/^col(\d+)\+\.(align|width|color)$/)
+        if (mge) return [`_colge.${mge[1]}.${mge[2]}`, value]
+        // Open-ended: col2-.align (<= N) — note: `-\.` distinguishes from range `col2-5.`
+        const mle = key.match(/^col(\d+)-\.(align|width|color)$/)
+        if (mle) return [`_colle.${mle[1]}.${mle[2]}`, value]
+        // All columns: col.align
+        const mall = key.match(/^col\.(align|width|color)$/)
+        if (mall) return [`_colall.${mall[1]}`, value]
         // Single column: col3.align
         const m = key.match(/^col(\d+)\.(align|width|color)$/)
         if (m) return [`_col.${m[1]}.${m[2]}`, value]

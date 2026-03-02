@@ -5,8 +5,8 @@ import {
   getCellText,
   evaluateColorRules,
   parseColorRules,
+  resolveColumnProps,
   type ColumnProps,
-  type ColorRule,
 } from "./table"
 
 // ─── Cell reference parsing ─────────────────────────────
@@ -150,6 +150,7 @@ type ASTNode =
   | { kind: "number"; value: number }
   | { kind: "ref"; ref: string }
   | { kind: "range"; range: string }
+  | { kind: "relative"; direction: "ABOVE" | "LEFT" }
   | { kind: "binop"; op: string; left: ASTNode; right: ASTNode }
   | { kind: "unary"; op: string; operand: ASTNode }
   | { kind: "call"; func: string; args: ASTNode[] }
@@ -239,6 +240,9 @@ class Parser {
 
     if (tok.type === "ref") {
       this.consume()
+      if (tok.value === "ABOVE" || tok.value === "LEFT") {
+        return { kind: "relative", direction: tok.value }
+      }
       return { kind: "ref", ref: tok.value }
     }
 
@@ -327,6 +331,71 @@ function extractRefs(ast: ASTNode): CellRef[] {
   return refs
 }
 
+// ─── Relative range expansion ────────────────────────────
+
+function indexToColLetter(index: number): string {
+  let letter = ""
+  let n = index + 1
+  while (n > 0) {
+    n--
+    letter = String.fromCharCode(65 + (n % 26)) + letter
+    n = Math.floor(n / 26)
+  }
+  return letter
+}
+
+function expandRelatives(
+  ast: ASTNode,
+  cellRow: number,
+  cellCol: number,
+  dataRowStart: number,
+  dataColStart: number
+): ASTNode {
+  switch (ast.kind) {
+    case "relative": {
+      if (ast.direction === "ABOVE") {
+        if (cellRow <= dataRowStart) {
+          return { kind: "range", range: "" }
+        }
+        const colLetter = indexToColLetter(cellCol)
+        const startRow = dataRowStart + 1 // 1-based
+        const endRow = cellRow // 1-based (row before current)
+        return { kind: "range", range: `${colLetter}${startRow}:${colLetter}${endRow}` }
+      } else {
+        // LEFT
+        if (cellCol <= dataColStart) {
+          return { kind: "range", range: "" }
+        }
+        const startCol = indexToColLetter(dataColStart)
+        const endCol = indexToColLetter(cellCol - 1)
+        const row = cellRow + 1 // 1-based
+        return { kind: "range", range: `${startCol}${row}:${endCol}${row}` }
+      }
+    }
+    case "binop":
+      return {
+        kind: "binop",
+        op: ast.op,
+        left: expandRelatives(ast.left, cellRow, cellCol, dataRowStart, dataColStart),
+        right: expandRelatives(ast.right, cellRow, cellCol, dataRowStart, dataColStart),
+      }
+    case "unary":
+      return {
+        kind: "unary",
+        op: ast.op,
+        operand: expandRelatives(ast.operand, cellRow, cellCol, dataRowStart, dataColStart),
+      }
+    case "call":
+      return {
+        kind: "call",
+        func: ast.func,
+        args: ast.args.map(a => expandRelatives(a, cellRow, cellCol, dataRowStart, dataColStart)),
+      }
+    default:
+      return ast
+  }
+}
+
 // ─── Evaluator ──────────────────────────────────────────
 
 type CellValueGetter = (col: number, row: number) => number | string
@@ -353,6 +422,9 @@ function evaluateAST(
 
     case "range":
       return "#ERR" // ranges only valid as function arguments
+
+    case "relative":
+      return "#ERR" // should be expanded before evaluation
 
     case "unary": {
       const operand = evaluateAST(ast.operand, getValue)
@@ -557,7 +629,9 @@ function collectTableCells(
 }
 
 function evaluateTableFormulas(
-  cells: CellInfo[]
+  cells: CellInfo[],
+  dataRowStart: number,
+  dataColStart: number
 ): Map<string, number | string> {
   // Build cell map
   const cellMap = new Map<string, CellInfo>()
@@ -570,7 +644,9 @@ function evaluateTableFormulas(
   for (const cell of cells) {
     if (!cell.formula) continue
     try {
-      const ast = parseFormula(cell.formula)
+      let ast = parseFormula(cell.formula)
+      // Expand ABOVE/LEFT relative references to concrete ranges
+      ast = expandRelatives(ast, cell.row, cell.col, dataRowStart, dataColStart)
       formulaCells.push({ cell, ast })
     } catch {
       // Parse error — will show #ERR
@@ -667,18 +743,27 @@ export function formulaDecoPlugin(schema: Schema): PMPlugin {
           const hasFormulas = cells.some(c => c.formula)
           if (!hasFormulas) return false
 
-          const results = evaluateTableFormulas(cells)
+          // Compute header boundaries for ABOVE/LEFT expansion
+          const headers: string = node.attrs.headers ?? "1st_row"
+          let dataRowStart = 0
+          let dataColStart = 0
+          switch (headers) {
+            case "1st_row":
+              dataRowStart = 1; dataColStart = 0; break
+            case "2_rows":
+              dataRowStart = 2; dataColStart = 0; break
+            case "1st_col":
+              dataRowStart = 0; dataColStart = 1; break
+            case "2_cols":
+              dataRowStart = 0; dataColStart = 2; break
+            case "both":
+              dataRowStart = 1; dataColStart = 1; break
+          }
+
+          const results = evaluateTableFormulas(cells, dataRowStart, dataColStart)
 
           // Column color rules for applying to computed results
           const columns: ColumnProps | null = node.attrs.columns
-          const colorRules: Record<string, ColorRule[]> = {}
-          if (columns) {
-            for (const [colKey, props] of Object.entries(columns)) {
-              if (props.color) {
-                colorRules[colKey] = parseColorRules(props.color)
-              }
-            }
-          }
 
           for (const cell of cells) {
             if (!cell.formula) continue
@@ -707,20 +792,20 @@ export function formulaDecoPlugin(schema: Schema): PMPlugin {
             decos.push(widget)
 
             // Apply column color to formula cell based on computed result
-            const colKey = String(cell.col + 1)
-            if (colorRules[colKey] && !isError) {
-              const bg = evaluateColorRules(
-                colorRules[colKey],
-                resultStr
-              )
-              if (bg) {
-                decos.push(
-                  Decoration.node(
-                    cell.pos,
-                    cell.pos + cell.nodeSize,
-                    { style: `background: ${bg}; ` }
+            if (columns && !isError) {
+              const colProps = resolveColumnProps(columns, cell.col + 1)
+              if (colProps?.color) {
+                const rules = parseColorRules(colProps.color)
+                const bg = evaluateColorRules(rules, resultStr)
+                if (bg) {
+                  decos.push(
+                    Decoration.node(
+                      cell.pos,
+                      cell.pos + cell.nodeSize,
+                      { style: `background: ${bg}; ` }
+                    )
                   )
-                )
+                }
               }
             }
           }

@@ -76,6 +76,14 @@ Supported per-column properties:
 - `colN.width` — CSS width value (e.g. `100px`, `20%`)
 - `colN.color` — comma-separated color rules (see below), always quoted
 
+We also support column ranges (replacing `colN` above with the range below):
+- `col1-3`, columns 1 to 3,
+- `col2+`, columns 2, 3 and anything above
+- `col2-`, columns 2 and 1 (but support extension of zone when inserting a new column left of 1, unlike `col1-2`)
+- `col`, all columns.
+
+Column ranges extend if a column is added strictly inside. Column definition or range shift when a column is added on its left.
+
 **Color rules syntax:**
 
 Rules are evaluated left to right, first match wins. The `else` clause is optional and defaults to `none` (no color) when absent. Color applies to the cell background. Supported operators:
@@ -131,7 +139,9 @@ A cell beginning with `=` is a formula cell. The formula is stored in the Markdo
 | `IF(cond, a, b)` | Returns `a` if condition is true, `b` otherwise |
 | `ROUND(n, d)` | Rounds `n` to `d` decimal places |
 
-**Range syntax:** `A1:B3` — rectangular range from top-left to bottom-right cell.
+**Range syntax:** `A1:B3` — rectangular range from top-left to bottom-right cell. There are also two special ranges, `ABOVE`, meaning the cells in the column located above the cell where the formula is, excluding headers, `LEFT` meaning cells in the row left of the cell where the formula is, excluding headers.
+
+Similarly to column ranges, range in formula extended if a column or row is added strictly inside, and shifted if added above or left.
 
 **Evaluation rules:**
 - Formulas are evaluated at render time, not stored as results.
