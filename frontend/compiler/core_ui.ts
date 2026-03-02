@@ -1,4 +1,4 @@
-import { NodeSelection, Selection, Plugin, PluginKey } from "prosemirror-state"
+import { NodeSelection, TextSelection, Selection, Plugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Registry, NodePropertySpec } from "./registry"
@@ -222,6 +222,17 @@ function buildPanel(
         if (e.key === "Tab") {
           // Let the panel-level handler deal with it
         }
+        if (e.key === "Backspace" && textarea.value === "" && prop.backspaceEmpty !== undefined) {
+          e.preventDefault()
+          e.stopPropagation()
+          const live = view.state.doc.nodeAt(pos)
+          if (!live) return
+          const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
+          let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
+          view.dispatch(tr)
+          view.focus()
+        }
       })
 
       control = textarea
@@ -252,6 +263,19 @@ function buildPanel(
           end: input.selectionEnd,
         }
         dispatchChange(input.value)
+      })
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Backspace" && input.value === "" && prop.backspaceEmpty !== undefined) {
+          e.preventDefault()
+          e.stopPropagation()
+          const live = view.state.doc.nodeAt(pos)
+          if (!live) return
+          const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
+          let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
+          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
+          view.dispatch(tr)
+          view.focus()
+        }
       })
       control = input
     }
@@ -293,14 +317,17 @@ function findPropertyNodes(state: any, registry: Registry): PropertyTarget[] {
         $from.parent?.type?.name === "paragraph" &&
         $from.parent.childCount === 1
 
+      const isTableCell =
+        node.type.name === "table_cell" || node.type.name === "table_header"
+
       const anchorPos =
         isStandaloneImageParagraph && $from.depth > 0
           ? $from.before($from.depth)
+          : isTableCell
+          ? nodePos + 1
           : nodePos
 
-      const isAutoShow =
-        node.attrs.formula != null || !!node.attrs.cellColor
-      targets.push({ node, pos: nodePos, anchorPos, props, autoShow: isAutoShow })
+      targets.push({ node, pos: nodePos, anchorPos, props, autoShow: false })
     }
   }
 
@@ -319,8 +346,7 @@ function findPropertyNodes(state: any, registry: Registry): PropertyTarget[] {
       node.type.name === "table_cell" || node.type.name === "table_header"
     const anchorPos = isTableCell ? pos + 1 : pos
 
-    const isAutoShow =
-      node.attrs.formula != null || !!node.attrs.cellColor
+    const isAutoShow = false
 
     // For auto-show targets, filter to only visible props
     // For toggled-on targets, include all props (buildPanel filters by visible)

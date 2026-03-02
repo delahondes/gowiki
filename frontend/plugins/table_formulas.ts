@@ -1,5 +1,5 @@
 import { Node, Schema } from "prosemirror-model"
-import { Plugin as PMPlugin } from "prosemirror-state"
+import { Plugin as PMPlugin, Transaction } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import {
   getCellText,
@@ -728,87 +728,157 @@ function isErrorResult(result: number | string): boolean {
   return typeof result === "string" && result.startsWith("#")
 }
 
-// ─── Decoration plugin ──────────────────────────────────
+// ─── Header boundary helpers ─────────────────────────────
 
-export function formulaDecoPlugin(schema: Schema): PMPlugin {
+function getDataBoundaries(headers: string): { dataRowStart: number; dataColStart: number } {
+  let dataRowStart = 0
+  let dataColStart = 0
+  switch (headers) {
+    case "1st_row":
+      dataRowStart = 1; dataColStart = 0; break
+    case "2_rows":
+      dataRowStart = 2; dataColStart = 0; break
+    case "1st_col":
+      dataRowStart = 0; dataColStart = 1; break
+    case "2_cols":
+      dataRowStart = 0; dataColStart = 2; break
+    case "both":
+      dataRowStart = 1; dataColStart = 1; break
+  }
+  return { dataRowStart, dataColStart }
+}
+
+// ─── Formula sync logic ──────────────────────────────────
+//
+// Manages formula_display inline atom nodes inside formula cells.
+// - Cells with formula attr: paragraph contains exactly one formula_display atom
+// - Cells without formula attr: no formula_display atoms
+
+function runFormulaSync(state: any, schema: Schema): Transaction | null {
+  let tr: Transaction | null = null
+
+  state.doc.descendants((tableNode: Node, tablePos: number) => {
+    if (tableNode.type !== schema.nodes.table) return true
+
+    const { cells } = collectTableCells(tableNode, tablePos, schema)
+    const hasFormulas = cells.some(c => c.formula != null)
+
+    const { dataRowStart, dataColStart } = hasFormulas
+      ? getDataBoundaries(tableNode.attrs.headers ?? "1st_row")
+      : { dataRowStart: 0, dataColStart: 0 }
+
+    const results = hasFormulas
+      ? evaluateTableFormulas(cells, dataRowStart, dataColStart)
+      : new Map<string, number | string>()
+
+    for (const cell of cells) {
+      const cellNode = state.doc.nodeAt(cell.pos)
+      if (!cellNode || cellNode.childCount === 0) continue
+
+      const para = cellNode.child(0)
+      const paraContentStart = cell.pos + 2 // cell open + para open
+      const firstChild = para.childCount > 0 ? para.child(0) : null
+      const hasDisplay = firstChild?.type === schema.nodes.formula_display
+
+      if (cell.formula != null) {
+        const key = `${cell.col},${cell.row}`
+        const result = formatResult(results.get(key) ?? "#ERR")
+
+        if (hasDisplay && para.childCount === 1 && firstChild!.attrs.result === result) {
+          continue // already correct
+        }
+
+        if (!tr) tr = state.tr
+        const displayAtom = schema.nodes.formula_display.create({ result })
+        const mappedStart = tr.mapping.map(paraContentStart)
+        const mappedEnd = tr.mapping.map(paraContentStart + para.content.size)
+        tr.replaceWith(mappedStart, mappedEnd, displayAtom)
+      } else {
+        // No formula: remove formula_display if present
+        if (hasDisplay) {
+          if (!tr) tr = state.tr
+          const mappedStart = tr.mapping.map(paraContentStart)
+          const mappedEnd = tr.mapping.map(paraContentStart + para.content.size)
+          tr.delete(mappedStart, mappedEnd)
+        }
+      }
+    }
+
+    return false
+  })
+
+  return tr
+}
+
+// ─── Formula sync plugin ─────────────────────────────────
+
+export function formulaSyncPlugin(schema: Schema): PMPlugin {
+  return new PMPlugin({
+    view(editorView) {
+      // Run initial sync on mount — appendTransaction doesn't fire
+      // until the first user transaction, so formulas would be blank.
+      requestAnimationFrame(() => {
+        const tr = runFormulaSync(editorView.state, schema)
+        if (tr) editorView.dispatch(tr)
+      })
+      return {}
+    },
+    appendTransaction(_transactions, _oldState, newState) {
+      return runFormulaSync(newState, schema)
+    },
+  })
+}
+
+// ─── Formula color decoration plugin ────────────────────
+//
+// Applies column color rules to formula cells based on their
+// computed results (read from formula_display atom attrs).
+
+export function formulaColorPlugin(schema: Schema): PMPlugin {
   return new PMPlugin({
     props: {
       decorations(state) {
         const decos: Decoration[] = []
 
-        state.doc.descendants((node, pos) => {
-          if (node.type !== schema.nodes.table) return true
+        state.doc.descendants((tableNode, tablePos) => {
+          if (tableNode.type !== schema.nodes.table) return true
 
-          const { cells } = collectTableCells(node, pos, schema)
-          const hasFormulas = cells.some(c => c.formula)
-          if (!hasFormulas) return false
+          const columns: ColumnProps | null = tableNode.attrs.columns
+          if (!columns) return false
 
-          // Compute header boundaries for ABOVE/LEFT expansion
-          const headers: string = node.attrs.headers ?? "1st_row"
-          let dataRowStart = 0
-          let dataColStart = 0
-          switch (headers) {
-            case "1st_row":
-              dataRowStart = 1; dataColStart = 0; break
-            case "2_rows":
-              dataRowStart = 2; dataColStart = 0; break
-            case "1st_col":
-              dataRowStart = 0; dataColStart = 1; break
-            case "2_cols":
-              dataRowStart = 0; dataColStart = 2; break
-            case "both":
-              dataRowStart = 1; dataColStart = 1; break
-          }
+          tableNode.content.forEach((row, rowOffset) => {
+            const rowPos = tablePos + 1 + rowOffset
+            let colIdx = 0
 
-          const results = evaluateTableFormulas(cells, dataRowStart, dataColStart)
+            row.content.forEach((cell, cellOffset) => {
+              const cellPos = rowPos + 1 + cellOffset
 
-          // Column color rules for applying to computed results
-          const columns: ColumnProps | null = node.attrs.columns
+              if (cell.attrs.formula != null) {
+                const para = cell.child(0)
+                if (para.childCount > 0 && para.child(0).type === schema.nodes.formula_display) {
+                  const result = String(para.child(0).attrs.result ?? "")
+                  const isError = result.startsWith("#")
 
-          for (const cell of cells) {
-            if (!cell.formula) continue
-            const key = `${cell.col},${cell.row}`
-            const result = results.get(key)
-            if (result === undefined) continue
-
-            const resultStr = formatResult(result)
-            const isError = isErrorResult(result)
-
-            // Widget showing the computed result, placed before the
-            // (hidden) paragraph inside the cell
-            const widget = Decoration.widget(
-              cell.pos + 1,
-              () => {
-                const span = document.createElement("span")
-                span.className = isError
-                  ? "formula-display formula-display-error"
-                  : "formula-display"
-                span.textContent = resultStr
-                span.contentEditable = "false"
-                return span
-              },
-              { side: -1, key: `formula-${cell.pos}` }
-            )
-            decos.push(widget)
-
-            // Apply column color to formula cell based on computed result
-            if (columns && !isError) {
-              const colProps = resolveColumnProps(columns, cell.col + 1)
-              if (colProps?.color) {
-                const rules = parseColorRules(colProps.color)
-                const bg = evaluateColorRules(rules, resultStr)
-                if (bg) {
-                  decos.push(
-                    Decoration.node(
-                      cell.pos,
-                      cell.pos + cell.nodeSize,
-                      { style: `background: ${bg}; ` }
-                    )
-                  )
+                  if (!isError && !cell.attrs.cellColor) {
+                    const colProps = resolveColumnProps(columns, colIdx + 1)
+                    if (colProps?.color) {
+                      const rules = parseColorRules(colProps.color)
+                      const bg = evaluateColorRules(rules, result)
+                      if (bg) {
+                        decos.push(
+                          Decoration.node(cellPos, cellPos + cell.nodeSize, {
+                            style: `background: ${bg}; `,
+                          })
+                        )
+                      }
+                    }
+                  }
                 }
               }
-            }
-          }
+
+              colIdx += cell.attrs.colspan ?? 1
+            })
+          })
 
           return false
         })

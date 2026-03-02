@@ -2775,6 +2775,7 @@ function buildMenubar() {
     { name: "column.addAfter", label: "Add column right" },
     { name: "row.delete", label: "Delete row" },
     { name: "column.delete", label: "Delete column" },
+    { name: "cell.properties", label: "Cell properties" },
   ]
   const rawTableFns = {
     insert: rawInsertTable,
@@ -2797,7 +2798,8 @@ function buildMenubar() {
         if (cmd) cmd(editorView.state, editorView.dispatch)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        rawTableFns[action.name](rawEditor)
+        const fn = rawTableFns[action.name]
+        if (fn) fn(rawEditor)
       }
     })
     tableDropMenu.appendChild(item)

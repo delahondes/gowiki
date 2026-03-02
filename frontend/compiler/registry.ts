@@ -79,6 +79,7 @@ export type NodePropertySpec = {
   visible?: (attrs: Record<string, any>) => boolean
   multiline?: boolean
   helpText?: string
+  backspaceEmpty?: string | null
 }
 
 export type DirectiveSpec = {

@@ -13,11 +13,11 @@ import {
 } from "prosemirror-tables"
 import { Node, Schema } from "prosemirror-model"
 import type { Command } from "prosemirror-state"
-import { Plugin as PMPlugin, Transaction } from "prosemirror-state"
+import { Plugin as PMPlugin, Transaction, NodeSelection, TextSelection } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { keymap } from "prosemirror-keymap"
 import markdownItMultiMdTable from "markdown-it-multimd-table"
-import { formulaDecoPlugin } from "./table_formulas"
+import { formulaSyncPlugin, formulaColorPlugin } from "./table_formulas"
 import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // ─── Named color presets ─────────────────────────────────
@@ -134,7 +134,13 @@ export function evaluateColorRules(rules: ColorRule[], text: string): string | n
 export function getCellText(cell: Node): string {
   let text = ""
   cell.content.forEach(block => {
-    text += block.textContent
+    block.content.forEach(inline => {
+      if (inline.isText) {
+        text += inline.text
+      } else if (inline.type.name === "formula_display") {
+        text += inline.attrs.result ?? ""
+      }
+    })
   })
   return text
 }
@@ -865,18 +871,9 @@ const tableStyles = `
   background: #cce5ff;
 }
 
-/* Formula cells: hide the empty paragraph, show the computed result */
-.ProseMirror td[data-formula] > p,
-.ProseMirror th[data-formula] > p {
-  height: 0;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-  line-height: 0;
-}
-
+/* Formula display atom — inline result shown in formula cells */
 .ProseMirror .formula-display {
-  display: block;
+  display: inline;
   margin: 0;
   padding: 0;
 }
@@ -894,9 +891,157 @@ const tableStyles = `
   color: #856404;
   border-radius: 3px;
   padding: 0 3px;
-  display: inline-block;
 }
 `
+
+// ─── Formula display keyboard / clipboard plugin ────────
+
+function formulaDisplayPlugin(schema: Schema): PMPlugin {
+  function findParentCell(state: any, atomPos: number) {
+    const $pos = state.doc.resolve(atomPos)
+    for (let d = $pos.depth; d > 0; d--) {
+      const n = $pos.node(d)
+      if (n.type === schema.nodes.table_cell || n.type === schema.nodes.table_header) {
+        return { cellNode: n, cellPos: $pos.before(d) }
+      }
+    }
+    return null
+  }
+
+  function getFormulaText(state: any, atomPos: number): string {
+    const parent = findParentCell(state, atomPos)
+    if (!parent) return ""
+    const formula = parent.cellNode.attrs.formula
+    return formula != null ? `=${formula}` : ""
+  }
+
+  function clearFormula(view: any, sel: NodeSelection) {
+    const parent = findParentCell(view.state, sel.from)
+    if (!parent) return
+    // Delete the atom, then clear formula attr
+    let tr = view.state.tr.delete(sel.from, sel.from + sel.node.nodeSize)
+    const mappedCellPos = tr.mapping.map(parent.cellPos)
+    const liveCell = tr.doc.nodeAt(mappedCellPos)
+    if (liveCell) {
+      tr.setNodeMarkup(mappedCellPos, undefined, { ...liveCell.attrs, formula: null })
+    }
+    const cursorPos = tr.mapping.map(sel.from)
+    tr.setSelection(TextSelection.near(tr.doc.resolve(cursorPos)))
+    view.dispatch(tr)
+  }
+
+  return new PMPlugin({
+    // When Tab (or any navigation) lands in a paragraph whose only child
+    // is a formula_display atom, convert the TextSelection to NodeSelection.
+    appendTransaction(_transactions, _oldState, newState) {
+      if (!(newState.selection instanceof TextSelection)) return null
+      const $from = newState.selection.$from
+      const para = $from.parent
+      if (para.type !== schema.nodes.paragraph) return null
+      if (para.childCount !== 1) return null
+      if (para.child(0).type !== schema.nodes.formula_display) return null
+      const atomPos = $from.start() // position of first inline child
+      return newState.tr.setSelection(NodeSelection.create(newState.doc, atomPos))
+    },
+
+    props: {
+      handleKeyDown(view, event) {
+        const sel = view.state.selection
+        if (!(sel instanceof NodeSelection)) return false
+        if (sel.node.type !== schema.nodes.formula_display) return false
+
+        // Backspace / Delete → remove formula
+        if (event.key === "Backspace" || event.key === "Delete") {
+          clearFormula(view, sel)
+          return true
+        }
+
+        // "=" → open properties panel with formula input focused
+        if (event.key === "=") {
+          let tr = enablePropertiesPanel(view.state.tr)
+          requestInputFocus("formula")
+          view.dispatch(tr)
+          return true
+        }
+
+        // Other printable chars → consume (don't replace the atom with text)
+        if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+          return true
+        }
+
+        return false
+      },
+
+      // Copy → put "=formula_expression" on clipboard
+      clipboardTextSerializer(slice, view) {
+        const node = slice.content.firstChild
+        if (node?.type === schema.nodes.formula_display) {
+          const sel = view.state.selection
+          if (sel instanceof NodeSelection && sel.node.type === schema.nodes.formula_display) {
+            return getFormulaText(view.state, sel.from)
+          }
+          return String(node.attrs.result ?? "")
+        }
+        return undefined as any
+      },
+
+      // Paste "=formula" into a table cell → set formula attr
+      handlePaste(view, event, _slice) {
+        const text = event.clipboardData?.getData("text/plain")
+        if (!text || !text.startsWith("=")) return false
+
+        const $from = view.state.selection.$from
+        for (let d = $from.depth; d > 0; d--) {
+          const node = $from.node(d)
+          if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
+            const cellPos = $from.before(d)
+            const formula = text.slice(1) // remove "=" prefix
+            let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
+              ...node.attrs,
+              formula,
+            })
+            // Clear any existing text in the paragraph
+            const para = node.child(0)
+            const paraContentStart = cellPos + 2
+            if (para.content.size > 0) {
+              const mappedStart = tr.mapping.map(paraContentStart)
+              const mappedEnd = tr.mapping.map(paraContentStart + para.content.size)
+              tr.delete(mappedStart, mappedEnd)
+            }
+            view.dispatch(tr)
+            return true
+          }
+        }
+        return false
+      },
+
+      handleDOMEvents: {
+        // Cut → put "=formula_expression" on clipboard, then clear formula
+        cut(view, event) {
+          const sel = view.state.selection
+          if (!(sel instanceof NodeSelection)) return false
+          if (sel.node.type !== schema.nodes.formula_display) return false
+
+          event.preventDefault()
+          event.clipboardData?.setData("text/plain", getFormulaText(view.state, sel.from))
+          clearFormula(view, sel)
+          return true
+        },
+
+        // Copy via DOM event → put "=formula_expression" on clipboard
+        copy(view, event) {
+          const sel = view.state.selection
+          if (!(sel instanceof NodeSelection)) return false
+          if (sel.node.type !== schema.nodes.formula_display) return false
+
+          event.preventDefault()
+          event.clipboardData?.setData("text/plain", getFormulaText(view.state, sel.from))
+          return true
+        },
+      },
+    },
+  })
+}
 
 // ─── Column decoration plugin ────────────────────────────
 
@@ -946,6 +1091,45 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
 
               colIdx += cell.attrs.colspan ?? 1
             })
+          })
+
+          return false
+        })
+
+        return DecorationSet.create(state.doc, decos)
+      },
+    },
+  })
+}
+
+// ─── Cell coordinate tooltip plugin ──────────────────────
+
+function cellTooltipPlugin(schema: Schema): PMPlugin {
+  return new PMPlugin({
+    props: {
+      decorations(state) {
+        const decos: Decoration[] = []
+
+        state.doc.descendants((node, pos) => {
+          if (node.type !== schema.nodes.table) return true
+
+          let rowIdx = 0
+          node.content.forEach((row, rowOffset) => {
+            const rowPos = pos + 1 + rowOffset
+            let colIdx = 0
+
+            row.content.forEach((cell, cellOffset) => {
+              const cellPos = rowPos + 1 + cellOffset
+              const label = `cell ${indexToColLetter(colIdx)}${rowIdx + 1}`
+              decos.push(
+                Decoration.node(cellPos, cellPos + cell.nodeSize, {
+                  title: label,
+                })
+              )
+              colIdx += cell.attrs.colspan ?? 1
+            })
+
+            rowIdx++
           })
 
           return false
@@ -1368,7 +1552,7 @@ export const tablePlugin: GowikiPlugin = {
       })
     })
 
-    const nodes = tableNodes({
+    const nodes: Record<string, any> = tableNodes({
       tableGroup: "block",
       cellContent: "block+",
       cellAttributes: {
@@ -1409,6 +1593,31 @@ export const tablePlugin: GowikiPlugin = {
       },
     })
 
+    // Inline atom for displaying formula results (like template_var)
+    nodes["formula_display"] = {
+      inline: true,
+      atom: true,
+      selectable: true,
+      group: "inline",
+      attrs: {
+        result: { default: "" },
+      },
+      toDOM(node: Node) {
+        const r = String(node.attrs.result ?? "")
+        const isError = r.startsWith("#")
+        return ["span", {
+          class: isError ? "formula-display formula-display-error" : "formula-display",
+          contenteditable: "false",
+        }, r]
+      },
+      parseDOM: [{
+        tag: "span.formula-display",
+        getAttrs(dom: HTMLElement) {
+          return { result: dom.textContent || "" }
+        },
+      }],
+    }
+
     const baseTable = nodes.table
     nodes.table = {
       ...baseTable,
@@ -1418,7 +1627,7 @@ export const tablePlugin: GowikiPlugin = {
         headers: { default: "1st_row" },
         columns: { default: null },
       },
-      toDOM(node) {
+      toDOM(node: Node) {
         const domSpec = baseTable.toDOM
           ? baseTable.toDOM(node)
           : ["table", ["tbody", 0]]
@@ -1433,10 +1642,11 @@ export const tablePlugin: GowikiPlugin = {
     const formulaProperty: NodePropertySpec = {
       name: "formula",
       label: "Formula",
-      default: null as string | null,
-      parse: (raw: string) => raw.trim() || null,
+      default: "",
+      parse: (raw: string) => raw.trim(),
       serialize: (value: string | null) => String(value ?? ""),
       visible: (attrs: Record<string, any>) => attrs.formula != null,
+      backspaceEmpty: null,
     }
     const cellColorProperty: NodePropertySpec = {
       name: "cellColor",
@@ -1607,6 +1817,13 @@ export const tablePlugin: GowikiPlugin = {
       },
     })
 
+    // formula_display is ephemeral (managed by appendTransaction), not serialized
+    reg.registerPMNode("formula_display", {
+      print() {
+        return ""
+      },
+    })
+
     /* ----------------------------
      * Editor integration
      * ---------------------------- */
@@ -1632,11 +1849,20 @@ export const tablePlugin: GowikiPlugin = {
 
     reg.registerEditorPlugin(() => tableEditing())
 
+    // Formula display keyboard/clipboard (Backspace, =, copy, cut)
+    reg.registerEditorPlugin(schema => formulaDisplayPlugin(schema))
+
     // Column property decorations
     reg.registerEditorPlugin(schema => columnDecoPlugin(schema))
 
-    // Formula evaluation decorations
-    reg.registerEditorPlugin(schema => formulaDecoPlugin(schema))
+    // Formula sync (manages formula_display atoms via appendTransaction)
+    reg.registerEditorPlugin(schema => formulaSyncPlugin(schema))
+
+    // Formula color decorations (column colors on formula cells)
+    reg.registerEditorPlugin(schema => formulaColorPlugin(schema))
+
+    // Cell coordinate tooltips
+    reg.registerEditorPlugin(schema => cellTooltipPlugin(schema))
 
     // Dynamic headers: reactively convert cells to th/td when headers attr changes
     reg.registerEditorPlugin(schema => new PMPlugin({
@@ -1669,12 +1895,19 @@ export const tablePlugin: GowikiPlugin = {
           for (let depth = $from.depth; depth > 0; depth--) {
             const node = $from.node(depth)
             if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
+              // If cell already has a formula, just open the panel
+              if (node.attrs.formula != null) {
+                let tr = enablePropertiesPanel(view.state.tr)
+                requestInputFocus("formula")
+                view.dispatch(tr)
+                return true
+              }
+
               // Check: cell has exactly one paragraph child with no content
               if (node.childCount !== 1) return false
               const para = node.child(0)
               if (para.type !== schema.nodes.paragraph) return false
               if (para.content.size !== 0) return false
-              if (node.attrs.formula != null) return false
 
               const cellPos = $from.before(depth)
               let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
@@ -1717,5 +1950,27 @@ export const tablePlugin: GowikiPlugin = {
     reg.registerCommand("table", "column.addAfter", wrapTableCmd(addColumnAfter, "insertCol", 1))
     reg.registerCommand("table", "row.delete", wrapTableCmd(deleteRow, "deleteRow", 0))
     reg.registerCommand("table", "column.delete", wrapTableCmd(deleteColumn, "deleteCol", 0))
+
+    // Add cell property — sets cellColor to a default value so the panel shows it
+    reg.registerCommand("table", "cell.properties", (state, dispatch) => {
+      const $from = state.selection.$from
+      for (let depth = $from.depth; depth > 0; depth--) {
+        const node = $from.node(depth)
+        if (node.type === reg.schema.nodes.table_cell || node.type === reg.schema.nodes.table_header) {
+          if (dispatch) {
+            const cellPos = $from.before(depth)
+            // Set a default cellColor to make the property visible
+            let tr = state.tr.setNodeMarkup(cellPos, undefined, {
+              ...node.attrs,
+              cellColor: node.attrs.cellColor || "none",
+            })
+            tr = enablePropertiesPanel(tr)
+            dispatch(tr)
+          }
+          return true
+        }
+      }
+      return false
+    })
   },
 }
