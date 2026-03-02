@@ -76,6 +76,14 @@ export class CompileContext {
     else this.output.push(node)
   }
 
+  popLast(): PMNode | null {
+    const top = this.stack[this.stack.length - 1]
+    if (top) {
+      return top.children.pop() ?? null
+    }
+    return this.output.pop() ?? null
+  }
+
   /* -----------------------------
    * Token ancestry helpers
    * ----------------------------- */

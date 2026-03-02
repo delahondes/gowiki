@@ -83,6 +83,7 @@ export type DirectiveSpec = {
   appliesTo: string[]
   nodeType: string
   properties: NodePropertySpec[]
+  parseUnknownAttr?: (key: string, value: string) => [attrName: string, parsed: any] | null
 }
 
 export type SelfContainedDirectiveSpec = {

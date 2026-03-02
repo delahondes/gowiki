@@ -37,6 +37,130 @@ Tables follow standard Markdown rules with the following clarifications:
 - Real newlines are not allowed inside table cells.
 - No column alignment syntax (`:`) is supported.
 
+### Table header variants
+
+The `headers` property controls which cells are rendered as header cells. It is set via the table directive:
+
+```
+{table headers=1st_col}
+| Label | Value |
+```
+
+Supported values:
+
+| Value | Meaning |
+| -- | -- |
+| `1st_row` | First row is the header (default) |
+| `2_rows` | First two rows are headers (useful for grouped column headers) |
+| `1st_col` | First column is the header (useful for comparison or spec tables) |
+| `2_cols` | First two columns are headers (useful for matrix-style tables) |
+| `both` | First row and first column are both headers simultaneously |
+
+In `both` mode, the top-left corner cell is rendered as a plain header cell with no special treatment (typically left empty by convention).
+
+When `headers=1st_row` (the default), the directive may be omitted entirely — the serializer does not emit it.
+
+### Column properties
+
+Per-column properties are expressed in the table directive using a `colN.` prefix (1-based, always referring to the Nth column regardless of header status):
+
+```
+{table col1.align=center col1.width=100px col1.color=">5 red, <=2 yellow, else green" col2.align=right col3.color="~[Ww]arning red, else none"}
+| Header | Value | Status |
+| ...    | ...   | ...    |
+```
+
+Supported per-column properties:
+
+- `colN.align` — `left`, `center`, `right`
+- `colN.width` — CSS width value (e.g. `100px`, `20%`)
+- `colN.color` — comma-separated color rules (see below), always quoted
+
+**Color rules syntax:**
+
+Rules are evaluated left to right, first match wins. The `else` clause is optional and defaults to `none` (no color) when absent. Color applies to the cell background. Supported operators:
+
+| Operator | Example | Meaning |
+| -- | -- | -- |
+| `>`, `>=`, `<`, `<=` | `>5 red` | Numeric comparison |
+| `=` | `=open green` | Equality |
+| `!=` | `!=closed yellow` | Inequality |
+| `~` | `~[Ww]arning red` | Regexp match |
+| `empty` | `empty grey` | Cell is empty |
+| `!empty` | `!empty green` | Cell is non-empty |
+| `else` | `else none` | Default fallback |
+
+Color values are either named presets (`red`, `green`, `yellow`, `orange`, `grey`, `blue`, `none`) or hex values (`#ff0000`).
+
+### Individual cell color
+
+A cell-level color directive placed as the first token inside a cell overrides any column color rule for that cell:
+
+```
+| {color=#00f} cell content | normal cell |
+```
+
+- `color` sets the cell background color (hex or named preset).
+- `text-color` sets the text color: `{color=#00f text-color=#fff}`.
+- Cell color always takes precedence over column color rules (most specific wins).
+- The directive must be the sole property block at the start of the cell, before any other content.
+
+### Cell formulas
+
+A cell beginning with `=` is a formula cell. The formula is stored in the Markdown as-is and evaluated at render time in a sandboxed JavaScript context.
+
+```
+| Item    | Qty | Price | Total    |
+| --      | --  | --    | --       |
+| Widget  | 3   | 10    | =C2*B2   |
+| Gadget  | 5   | 20    | =C3*B3   |
+|         |     | **Total** | =SUM(D2:D3) |
+```
+
+**Cell references:** column letter (A, B, C...) + row number (1-based, including header rows). References are local to the table — cross-table references are not supported.
+
+**Supported functions:**
+
+| Function | Meaning |
+| -- | -- |
+| `SUM(range)` | Sum of cells in range |
+| `AVG(range)` | Average of cells in range |
+| `MIN(range)` | Minimum value in range |
+| `MAX(range)` | Maximum value in range |
+| `COUNT(range)` | Count of non-empty cells in range |
+| `IF(cond, a, b)` | Returns `a` if condition is true, `b` otherwise |
+| `ROUND(n, d)` | Rounds `n` to `d` decimal places |
+
+**Range syntax:** `A1:B3` — rectangular range from top-left to bottom-right cell.
+
+**Evaluation rules:**
+- Formulas are evaluated at render time, not stored as results.
+- Column color rules apply to the computed result, not the raw formula string.
+- Circular references (direct or transitive) render as `#CIRC`.
+- References to empty cells are treated as `0` for numeric contexts and `""` for string contexts.
+- Division by zero renders as `#DIV/0`.
+- Type errors (e.g. `SUM` on non-numeric cells) render as `#ERR`.
+
+Cell merging uses chevron tokens placed in the cell to be merged:
+
+- `<<` merges the cell with the cell to its left (colspan).
+- `^^` merges the cell with the cell above (rowspan).
+- Corner merges (both left and up simultaneously) are not supported.
+
+Example — colspan:
+```
+| a large cell | << |
+| normal       | normal |
+```
+
+Example — rowspan:
+```
+| a high cell | other |
+| ^^          | other |
+```
+
+The `<<` and `^^` tokens must be the sole content of the cell (no other text). A literal `<<` or `^^` in cell content must be escaped: `\<\<` or `\^\^`.
+
 ## Properties
 
 Object properties are represented between curly braces `{}`, the first word that appears in the curly braces is the name of the plugin / object, attributes take the form `variable=value` like in:
@@ -209,6 +333,11 @@ Status legend:
 | Lists (ordered) | `1. item` (CommonMark) | `implemented` | Standard ordered-list syntax is canonical. Optional raw-mode helpers may auto-renumber without changing stored syntax. |
 | Numbered headings | directive/property-based (`{heading numbered=true}`) | `planned` | Avoid a different syntax for numbered headers. Allows numbering to start below top-level title and be disabled at deeper levels with explicit properties. |
 | Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
+| Table header variants | `{table headers=...}` with 1st_row, 2_rows, 1st_col, 2_cols, both | `planned` | Default 1st_row requires no directive. |
+| Table column properties | `{table colN.align colN.width colN.color=...}` | `planned` | Per-column alignment, width, and color rules. |
+| Table cell color | `{color=...}` as first token in cell | `planned` | Overrides column color rule. Supports background and text-color. |
+| Table cell formulas | `=FUNC(...)` leading `=` in cell | `planned` | Evaluated at render time, sandboxed JS. Errors: #CIRC, #DIV/0, #ERR. |
+| Table cell merging | `<<` colspan, `^^` rowspan | `planned` | Chevron tokens as sole cell content. Corner merges not supported. |
 | Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
 | Include directive | `{include path=/path/to/page}` self-contained | `implemented` | Self-contained directive that renders included page content as a read-only zone. |

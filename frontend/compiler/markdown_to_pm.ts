@@ -27,7 +27,7 @@ function parseDirective(line: string): DirectiveToken | null {
   const attrs: Record<string, string> = {}
   // Parse attributes, supporting quoted values: key="value with spaces or ="
   const attrStr = inner.slice(parts[0].length).trim()
-  const attrRe = /([A-Za-z_][A-Za-z0-9_-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g
+  const attrRe = /([A-Za-z_][A-Za-z0-9_.-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g
   let m: RegExpExecArray | null
   while ((m = attrRe.exec(attrStr)) !== null) {
     const key = m[1]
@@ -130,10 +130,17 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
         pending = null
         pendingSpec = null
       } else {
-        const parsedAttrs: Record<string, string | null> = {}
+        const parsedAttrs: Record<string, any> = {}
         for (const [key, raw] of Object.entries(pending.attrs)) {
           const prop = pendingSpec.properties.find(p => p.name === key)
           if (!prop) {
+            if (pendingSpec.parseUnknownAttr) {
+              const result = pendingSpec.parseUnknownAttr(key, raw)
+              if (result) {
+                parsedAttrs[result[0]] = result[1]
+                continue
+              }
+            }
             if (strict) {
               throw new Error(
                 `Unknown property "${key}" for directive "${pending.name}"`
