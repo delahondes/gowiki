@@ -13,11 +13,12 @@ import {
 } from "prosemirror-tables"
 import { Node, Schema } from "prosemirror-model"
 import type { Command } from "prosemirror-state"
-import { Plugin as PMPlugin } from "prosemirror-state"
+import { Plugin as PMPlugin, Transaction } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { keymap } from "prosemirror-keymap"
 import markdownItMultiMdTable from "markdown-it-multimd-table"
 import { formulaDecoPlugin } from "./table_formulas"
+import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // ─── Named color presets ─────────────────────────────────
 
@@ -524,6 +525,77 @@ function normalizeTableWidth(raw: string): string | null {
   throw new Error(`Invalid table width "${raw}". Expected 80% or 800px.`)
 }
 
+// ─── Column rules text serialization/parsing ─────────────
+
+function serializeColumnRulesText(columns: ColumnProps | null): string {
+  if (!columns) return ""
+  return serializeColumnSpecs(columns).join("\n")
+}
+
+function parseColumnRulesText(raw: string): ColumnProps | null {
+  const text = raw.trim()
+  if (!text) return null
+
+  const lines = text.split("\n")
+  const flatAttrs: Record<string, any> = {}
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+
+    // Match: col[spec].[prop]=[value]
+    const m = line.match(/^col(\d+(?:-\d+)?|\d+[+-]|)\.(align|width|color)=(.+)$/)
+    if (!m) {
+      throw new Error(`Line ${i + 1}: invalid syntax`)
+    }
+
+    const spec = m[1]
+    const prop = m[2]
+    let value = m[3]
+
+    // Unquote value if quoted
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1)
+    }
+
+    // Validate prop values
+    if (prop === "align" && !["left", "center", "right"].includes(value)) {
+      throw new Error(`Line ${i + 1}: align must be left, center, or right`)
+    }
+    if (prop === "width" && !/^\d+(%|px)$/.test(value)) {
+      throw new Error(`Line ${i + 1}: width must be Npx or N%`)
+    }
+    if (prop === "color" && !value) {
+      throw new Error(`Line ${i + 1}: color must be non-empty`)
+    }
+
+    // Convert to internal flat attr keys
+    if (spec === "") {
+      // col.prop → all columns
+      flatAttrs[`_colall.${prop}`] = value
+    } else if (spec.endsWith("+")) {
+      // colN+.prop → >= N
+      const n = spec.slice(0, -1)
+      flatAttrs[`_colge.${n}.${prop}`] = value
+    } else if (spec.endsWith("-") && !/^\d+-\d+$/.test(spec)) {
+      // colN-.prop → <= N (but not colN-M range)
+      const n = spec.slice(0, -1)
+      flatAttrs[`_colle.${n}.${prop}`] = value
+    } else if (/^\d+-\d+$/.test(spec)) {
+      // colN-M.prop → range
+      const [start, end] = spec.split("-")
+      flatAttrs[`_colrange.${start}.${end}.${prop}`] = value
+    } else if (/^\d+$/.test(spec)) {
+      // colN.prop → single
+      flatAttrs[`_col.${spec}.${prop}`] = value
+    } else {
+      throw new Error(`Line ${i + 1}: invalid column spec "${spec}"`)
+    }
+  }
+
+  return aggregateTableAttrs(flatAttrs).columns ?? null
+}
+
 // ─── Table properties ────────────────────────────────────
 
 const tableProperties: NodePropertySpec[] = [
@@ -549,6 +621,15 @@ const tableProperties: NodePropertySpec[] = [
       { value: "2_cols", label: "2 columns" },
       { value: "both", label: "Both" },
     ],
+  },
+  {
+    name: "columns",
+    label: "Column rules",
+    default: null,
+    multiline: true,
+    helpText: "col2.align=center  col2-5.width=100px  col2+.color=\"rule\"  col.align=left",
+    parse: (raw: string) => parseColumnRulesText(raw) as any,
+    serialize: (value: any) => serializeColumnRulesText(value as ColumnProps | null),
   },
 ]
 
@@ -1355,10 +1436,26 @@ export const tablePlugin: GowikiPlugin = {
       default: null as string | null,
       parse: (raw: string) => raw.trim() || null,
       serialize: (value: string | null) => String(value ?? ""),
-      visible: (attrs: Record<string, any>) => !!attrs.formula,
+      visible: (attrs: Record<string, any>) => attrs.formula != null,
     }
-    reg.registerNodeProperties("table_cell", [formulaProperty])
-    reg.registerNodeProperties("table_header", [formulaProperty])
+    const cellColorProperty: NodePropertySpec = {
+      name: "cellColor",
+      label: "Color",
+      default: null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: (attrs: Record<string, any>) => !!attrs.cellColor,
+    }
+    const cellTextColorProperty: NodePropertySpec = {
+      name: "cellTextColor",
+      label: "Text color",
+      default: null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: (attrs: Record<string, any>) => !!attrs.cellTextColor,
+    }
+    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty])
+    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty])
 
     reg.registerDirective("table", {
       nodeType: "table",
@@ -1540,6 +1637,60 @@ export const tablePlugin: GowikiPlugin = {
 
     // Formula evaluation decorations
     reg.registerEditorPlugin(schema => formulaDecoPlugin(schema))
+
+    // Dynamic headers: reactively convert cells to th/td when headers attr changes
+    reg.registerEditorPlugin(schema => new PMPlugin({
+      appendTransaction(_trs, _oldState, newState) {
+        let tr: Transaction | null = null
+
+        newState.doc.descendants((node, pos) => {
+          if (node.type !== schema.nodes.table) return true
+
+          const fixed = applyHeaderVariant(node, schema)
+          if (!fixed.eq(node)) {
+            if (!tr) tr = newState.tr
+            tr.replaceWith(pos, pos + node.nodeSize, fixed)
+          }
+
+          return false
+        })
+
+        return tr
+      },
+    }))
+
+    // Formula creation via "=" in empty cell
+    reg.registerEditorPlugin(schema => new PMPlugin({
+      props: {
+        handleTextInput(view, _from, _to, text) {
+          if (text !== "=") return false
+
+          const $from = view.state.selection.$from
+          for (let depth = $from.depth; depth > 0; depth--) {
+            const node = $from.node(depth)
+            if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
+              // Check: cell has exactly one paragraph child with no content
+              if (node.childCount !== 1) return false
+              const para = node.child(0)
+              if (para.type !== schema.nodes.paragraph) return false
+              if (para.content.size !== 0) return false
+              if (node.attrs.formula != null) return false
+
+              const cellPos = $from.before(depth)
+              let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
+                ...node.attrs,
+                formula: "",
+              })
+              tr = enablePropertiesPanel(tr)
+              requestInputFocus("formula")
+              view.dispatch(tr)
+              return true
+            }
+          }
+          return false
+        },
+      },
+    }))
 
     /* ----------------------------
      * Styles

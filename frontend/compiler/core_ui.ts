@@ -15,6 +15,10 @@ let pendingInputRefocus: {
   end: number | null
 } | null = null
 
+export function requestInputFocus(propName: string) {
+  pendingInputRefocus = { propName, start: null, end: null }
+}
+
 const panelStyles = `
 .gowiki-props-panel {
   display: inline-flex;
@@ -35,6 +39,15 @@ const panelStyles = `
   font-size: 0.95em;
 }
 
+.gowiki-props-panel textarea {
+  font-family: monospace;
+  font-size: 0.9em;
+  width: 25em;
+  min-height: 4em;
+  resize: vertical;
+  padding: 2px 4px;
+}
+
 .gowiki-props-label {
   color: #444;
 }
@@ -42,6 +55,14 @@ const panelStyles = `
 .gowiki-props-error {
   color: #a03a00;
   font-size: 0.9em;
+}
+
+.gowiki-props-help {
+  color: #888;
+  font-size: 0.8em;
+  display: block;
+  margin-top: 2px;
+  white-space: pre-line;
 }
 
 .gowiki-props-panel--block {
@@ -65,7 +86,7 @@ function buildPanel(
     e.preventDefault()
     e.stopPropagation()
 
-    const focusable = Array.from(wrap.querySelectorAll<HTMLElement>("input, select"))
+    const focusable = Array.from(wrap.querySelectorAll<HTMLElement>("input, select, textarea"))
     const current = document.activeElement as HTMLElement
     const idx = focusable.indexOf(current)
 
@@ -135,6 +156,10 @@ function buildPanel(
       view.dispatch(tr)
     }
 
+    const displayValue = prop.serialize
+      ? prop.serialize(current)
+      : String(current ?? prop.default ?? "")
+
     let control: HTMLElement
     const resolvedOptions = typeof prop.options === "function"
       ? prop.options(node.attrs)
@@ -164,10 +189,46 @@ function buildPanel(
         })
       }
       control = select
+    } else if (prop.multiline) {
+      const textarea = document.createElement("textarea")
+      textarea.value = displayValue
+
+      if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
+        const focus = pendingInputRefocus
+        pendingInputRefocus = null
+        requestAnimationFrame(() => {
+          textarea.focus()
+          if (focus.start !== null && focus.end !== null) {
+            try {
+              textarea.setSelectionRange(focus.start, focus.end)
+            } catch {
+              // Ignore browsers that reject range restoration.
+            }
+          }
+        })
+      }
+
+      textarea.addEventListener("input", () => {
+        pendingInputRefocus = {
+          propName: prop.name,
+          start: textarea.selectionStart,
+          end: textarea.selectionEnd,
+        }
+        dispatchChange(textarea.value)
+      })
+
+      // Prevent Tab from leaving textarea — allow normal tab behavior
+      textarea.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Tab") {
+          // Let the panel-level handler deal with it
+        }
+      })
+
+      control = textarea
     } else {
       const input = document.createElement("input")
       input.type = "text"
-      input.value = current ?? prop.default ?? ""
+      input.value = displayValue
 
       if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
         const focus = pendingInputRefocus
@@ -198,12 +259,29 @@ function buildPanel(
     wrap.appendChild(label)
     wrap.appendChild(control)
     wrap.appendChild(error)
+
+    if (prop.helpText) {
+      const help = document.createElement("span")
+      help.className = "gowiki-props-help"
+      help.textContent = prop.helpText
+      wrap.appendChild(help)
+    }
   }
 
   return wrap
 }
 
-function findPropertyNode(state: any, registry: Registry) {
+type PropertyTarget = {
+  node: PMNode
+  pos: number
+  anchorPos: number
+  props: NodePropertySpec[]
+  autoShow: boolean
+}
+
+function findPropertyNodes(state: any, registry: Registry): PropertyTarget[] {
+  const targets: PropertyTarget[] = []
+
   if (state.selection instanceof NodeSelection) {
     const node = state.selection.node
     const props = registry.getNodeProperties(node.type.name)
@@ -220,12 +298,9 @@ function findPropertyNode(state: any, registry: Registry) {
           ? $from.before($from.depth)
           : nodePos
 
-      return {
-        node,
-        pos: nodePos,
-        anchorPos,
-        props,
-      }
+      const isAutoShow =
+        node.attrs.formula != null || !!node.attrs.cellColor
+      targets.push({ node, pos: nodePos, anchorPos, props, autoShow: isAutoShow })
     }
   }
 
@@ -233,41 +308,48 @@ function findPropertyNode(state: any, registry: Registry) {
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth)
     const allProps = registry.getNodeProperties(node.type.name)
-    const props = allProps.filter(p => !p.visible || p.visible(node.attrs))
-    if (props.length > 0) {
-      const pos = $from.before(depth)
-      // For table cells, place the panel inside the cell (pos+1) rather than
-      // before it in the row (pos), so it renders as inline content.
-      const isTableCell =
-        node.type.name === "table_cell" || node.type.name === "table_header"
-      const anchorPos = isTableCell ? pos + 1 : pos
-      return {
-        node,
-        pos,
-        anchorPos,
-        props,
-      }
-    }
+    if (allProps.length === 0) continue
+
+    const pos = $from.before(depth)
+
+    // Skip if we already have a target at this position (from NodeSelection above)
+    if (targets.some(t => t.pos === pos)) continue
+
+    const isTableCell =
+      node.type.name === "table_cell" || node.type.name === "table_header"
+    const anchorPos = isTableCell ? pos + 1 : pos
+
+    const isAutoShow =
+      node.attrs.formula != null || !!node.attrs.cellColor
+
+    // For auto-show targets, filter to only visible props
+    // For toggled-on targets, include all props (buildPanel filters by visible)
+    targets.push({ node, pos, anchorPos, props: allProps, autoShow: isAutoShow })
   }
-  return null
+
+  return targets
 }
 
-function panelDecorationKey(target: any): string {
+function panelDecorationKey(target: PropertyTarget): string {
   const values = target.props
     .map((prop: NodePropertySpec) => `${prop.name}:${String(target.node.attrs[prop.name] ?? "")}`)
     .join("|")
-  return `gowiki-props-panel-${target.anchorPos}-${values}`
+  return `gowiki-props-panel-${target.pos}-${values}`
 }
 
 function shiftTabToPanel(view: any, event: KeyboardEvent): boolean {
   if (event.key !== "Tab" || !event.shiftKey) return false
   const pluginState = panelKey.getState(view.state)
-  if (!pluginState?.enabled) return false
-  const target = findPropertyNode(view.state, registry)
-  if (!target) return false
+  const targets = findPropertyNodes(view.state, registry)
+  if (targets.length === 0) return false
+
+  // Only respond if at least one panel is actually showing
+  const hasShowing = targets.some(t => pluginState?.enabled || t.autoShow)
+  if (!hasShowing) return false
+
   const panel = view.dom.parentElement?.querySelector(".gowiki-props-panel")
   if (!panel) return false
-  const first = panel.querySelector<HTMLElement>("input, select")
+  const first = panel.querySelector<HTMLElement>("input, select, textarea")
   if (!first) return false
   event.preventDefault()
   first.focus()
@@ -300,25 +382,40 @@ function propertiesPlugin(reg: Registry) {
       },
       decorations(state) {
         const pluginState = panelKey.getState(state)
-        if (!pluginState?.enabled) return null
-        const target = findPropertyNode(state, registry)
-        if (!target) return null
-        const deco = Decoration.widget(
-          target.anchorPos,
-          view => {
-            const panel = buildPanel(view, target.node, target.pos, target.props)
-            if (target.anchorPos !== target.pos) {
-              panel.classList.add("gowiki-props-panel--block")
+        const targets = findPropertyNodes(state, registry)
+        if (targets.length === 0) return null
+
+        const decos: Decoration[] = []
+
+        for (const target of targets) {
+          // Auto-show: formula cells and colored cells show panel without toggle
+          const isAutoShow = target.autoShow
+          if (!pluginState?.enabled && !isAutoShow) continue
+
+          // For auto-show targets, filter to visible props only
+          const visibleProps = target.props.filter(p => !p.visible || p.visible(target.node.attrs))
+          if (visibleProps.length === 0) continue
+
+          const deco = Decoration.widget(
+            target.anchorPos,
+            view => {
+              const panel = buildPanel(view, target.node, target.pos, target.props)
+              if (target.anchorPos !== target.pos) {
+                panel.classList.add("gowiki-props-panel--block")
+              }
+              return panel
+            },
+            {
+              side: -1,
+              key: panelDecorationKey(target),
+              stopEvent: () => true,
             }
-            return panel
-          },
-          {
-            side: -1,
-            key: panelDecorationKey(target),
-            stopEvent: () => true,
-          }
-        )
-        return DecorationSet.create(state.doc, [deco])
+          )
+          decos.push(deco)
+        }
+
+        if (decos.length === 0) return null
+        return DecorationSet.create(state.doc, decos)
       },
     },
   })

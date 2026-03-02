@@ -77,6 +77,8 @@ export type NodePropertySpec = {
   serialize?: (value: string | null) => string
   options?: NodePropertyOption[] | ((attrs: Record<string, any>) => NodePropertyOption[])
   visible?: (attrs: Record<string, any>) => boolean
+  multiline?: boolean
+  helpText?: string
 }
 
 export type DirectiveSpec = {
