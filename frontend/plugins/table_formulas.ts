@@ -1,7 +1,6 @@
 import { Node, Schema } from "prosemirror-model"
 import { Plugin as PMPlugin } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
-import type { Registry } from "../compiler/registry"
 import {
   getCellText,
   evaluateColorRules,
@@ -636,6 +635,23 @@ function evaluateTableFormulas(
   return results
 }
 
+// ─── Result formatting ──────────────────────────────────
+
+function formatResult(result: number | string): string {
+  if (typeof result === "number") {
+    if (Number.isInteger(result)) return String(result)
+    return result
+      .toFixed(4)
+      .replace(/0+$/, "")
+      .replace(/\.$/, "")
+  }
+  return String(result)
+}
+
+function isErrorResult(result: number | string): boolean {
+  return typeof result === "string" && result.startsWith("#")
+}
+
 // ─── Decoration plugin ──────────────────────────────────
 
 export function formulaDecoPlugin(schema: Schema): PMPlugin {
@@ -653,7 +669,7 @@ export function formulaDecoPlugin(schema: Schema): PMPlugin {
 
           const results = evaluateTableFormulas(cells)
 
-          // Column color rules
+          // Column color rules for applying to computed results
           const columns: ColumnProps | null = node.attrs.columns
           const colorRules: Record<string, ColorRule[]> = {}
           if (columns) {
@@ -670,28 +686,29 @@ export function formulaDecoPlugin(schema: Schema): PMPlugin {
             const result = results.get(key)
             if (result === undefined) continue
 
-            const resultStr = typeof result === "number"
-              ? (Number.isInteger(result) ? String(result) : result.toFixed(4).replace(/0+$/, "").replace(/\.$/, ""))
-              : String(result)
+            const resultStr = formatResult(result)
+            const isError = isErrorResult(result)
 
-            // Create a widget decoration to show the result
+            // Widget showing the computed result, placed before the
+            // (hidden) paragraph inside the cell
             const widget = Decoration.widget(
-              cell.pos + 1, // inside the cell
+              cell.pos + 1,
               () => {
                 const span = document.createElement("span")
-                span.className = "formula-result"
-                span.textContent = ` → ${resultStr}`
-                span.style.pointerEvents = "none"
-                span.style.userSelect = "none"
+                span.className = isError
+                  ? "formula-display formula-display-error"
+                  : "formula-display"
+                span.textContent = resultStr
+                span.contentEditable = "false"
                 return span
               },
-              { side: 1 }
+              { side: -1, key: `formula-${cell.pos}` }
             )
             decos.push(widget)
 
             // Apply column color to formula cell based on computed result
             const colKey = String(cell.col + 1)
-            if (colorRules[colKey]) {
+            if (colorRules[colKey] && !isError) {
               const bg = evaluateColorRules(
                 colorRules[colKey],
                 resultStr

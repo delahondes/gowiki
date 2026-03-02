@@ -48,6 +48,7 @@ const panelStyles = `
   display: flex;
   width: max-content;
 }
+
 `
 
 function buildPanel(
@@ -231,13 +232,19 @@ function findPropertyNode(state: any, registry: Registry) {
   const $from = state.selection.$from
   for (let depth = $from.depth; depth > 0; depth--) {
     const node = $from.node(depth)
-    const props = registry.getNodeProperties(node.type.name)
+    const allProps = registry.getNodeProperties(node.type.name)
+    const props = allProps.filter(p => !p.visible || p.visible(node.attrs))
     if (props.length > 0) {
       const pos = $from.before(depth)
+      // For table cells, place the panel inside the cell (pos+1) rather than
+      // before it in the row (pos), so it renders as inline content.
+      const isTableCell =
+        node.type.name === "table_cell" || node.type.name === "table_header"
+      const anchorPos = isTableCell ? pos + 1 : pos
       return {
         node,
         pos,
-        anchorPos: pos,
+        anchorPos,
         props,
       }
     }

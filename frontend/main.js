@@ -13,6 +13,7 @@ import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
+import { adjustFormula } from "./plugins/table.ts"
 import "highlight.js/styles/github.css"
 
 const registry = buildRegistry(basicSchema)
@@ -1942,6 +1943,46 @@ function rawIsSeparatorRow(line) {
   return cells.length > 0 && cells.every(c => /^\s*:?-+:?\s*$/.test(c))
 }
 
+// Convert a table line index to a 0-based formula row (skipping separator)
+function rawLineToFormulaRow(ctx, lineIdx) {
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+  let formulaRow = 0
+  for (let i = firstData; i <= ctx.tableLastLine; i++) {
+    if (rawIsSeparatorRow(ctx.lines[i])) continue
+    if (i === lineIdx) return formulaRow
+    formulaRow++
+  }
+  return formulaRow
+}
+
+// Scan all cells in the table for formulas and adjust their references
+function rawAdjustFormulas(ctx, changeType, changeIndex) {
+  const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
+
+  for (let i = firstData; i <= ctx.tableLastLine; i++) {
+    if (rawIsSeparatorRow(ctx.lines[i])) continue
+    const cells = rawParsePipeRow(ctx.lines[i])
+    if (!cells) continue
+
+    let changed = false
+    for (let c = 0; c < cells.length; c++) {
+      const cell = cells[c].trim()
+      if (cell.startsWith("=") && cell.length > 1) {
+        const formula = cell.slice(1)
+        const adjusted = adjustFormula(formula, changeType, changeIndex)
+        if (adjusted !== formula) {
+          cells[c] = "=" + adjusted
+          changed = true
+        }
+      }
+    }
+
+    if (changed) {
+      ctx.lines[i] = rawBuildPipeRow(cells)
+    }
+  }
+}
+
 function rawTableColCount(ctx) {
   for (let i = ctx.tableFirstLine; i <= ctx.tableLastLine; i++) {
     const cells = rawParsePipeRow(ctx.lines[i])
@@ -2037,10 +2078,12 @@ function rawTableAddRowBelow(textarea) {
   const coords = rawGetCellCoords(textarea, ctx)
   const cols = rawTableColCount(ctx)
   if (cols === 0) return
+  const changeIndex = rawLineToFormulaRow(ctx, ctx.curLineIdx) + 1
   const origLast = ctx.tableLastLine
   const newRow = rawBuildPipeRow(Array(cols).fill(""))
   ctx.lines.splice(ctx.curLineIdx + 1, 0, newRow)
   ctx.tableLastLine++
+  rawAdjustFormulas(ctx, "insertRow", changeIndex)
   rawReplaceLines(textarea, ctx, origLast)
   rawFocusCell(textarea, ctx, coords.row, coords.col)
 }
@@ -2053,10 +2096,12 @@ function rawTableAddRowAbove(textarea) {
   if (cols === 0) return
   const firstDataLine = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
   if (ctx.curLineIdx <= firstDataLine + 1) return
+  const changeIndex = rawLineToFormulaRow(ctx, ctx.curLineIdx)
   const origLast = ctx.tableLastLine
   const newRow = rawBuildPipeRow(Array(cols).fill(""))
   ctx.lines.splice(ctx.curLineIdx, 0, newRow)
   ctx.tableLastLine++
+  rawAdjustFormulas(ctx, "insertRow", changeIndex)
   rawReplaceLines(textarea, ctx, origLast)
   // Cursor row shifted down by 1 due to insertion above
   rawFocusCell(textarea, ctx, coords.row + 1, coords.col)
@@ -2066,6 +2111,7 @@ function rawTableAddColumnRight(textarea) {
   const ctx = rawGetTableContext(textarea)
   if (!ctx) return
   const coords = rawGetCellCoords(textarea, ctx)
+  const cols = rawTableColCount(ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
 
   for (let i = firstData; i <= ctx.tableLastLine; i++) {
@@ -2078,6 +2124,7 @@ function rawTableAddColumnRight(textarea) {
     }
     ctx.lines[i] = rawBuildPipeRow(row)
   }
+  rawAdjustFormulas(ctx, "insertCol", cols)
   rawReplaceLines(textarea, ctx)
   rawFocusCell(textarea, ctx, coords.row, coords.col)
 }
@@ -2098,6 +2145,7 @@ function rawTableAddColumnLeft(textarea) {
     }
     ctx.lines[i] = rawBuildPipeRow(row)
   }
+  rawAdjustFormulas(ctx, "insertCol", 0)
   rawReplaceLines(textarea, ctx)
   // Column shifted right by 1 due to insertion at left
   rawFocusCell(textarea, ctx, coords.row, coords.col + 1)
@@ -2109,9 +2157,11 @@ function rawTableDeleteRow(textarea) {
   const coords = rawGetCellCoords(textarea, ctx)
   const firstData = ctx.tableFirstLine + (/^\s*\{table\s/.test(ctx.lines[ctx.tableFirstLine]) ? 1 : 0)
   if (ctx.curLineIdx <= firstData + 1) return
+  const changeIndex = rawLineToFormulaRow(ctx, ctx.curLineIdx)
   const origLast = ctx.tableLastLine
   ctx.lines.splice(ctx.curLineIdx, 1)
   ctx.tableLastLine--
+  rawAdjustFormulas(ctx, "deleteRow", changeIndex)
   rawReplaceLines(textarea, ctx, origLast)
   // Focus cell below (same row index, since rows shifted up), or above if was last row
   const targetRow = Math.min(coords.row, ctx.tableLastLine)
@@ -2133,6 +2183,7 @@ function rawTableDeleteColumn(textarea) {
     row.pop()
     ctx.lines[i] = rawBuildPipeRow(row)
   }
+  rawAdjustFormulas(ctx, "deleteCol", cols - 1)
   rawReplaceLines(textarea, ctx)
   // Focus cell to the right (same col), or left if was last column
   const targetCol = Math.min(coords.col, cols - 2)

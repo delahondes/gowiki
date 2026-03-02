@@ -11,7 +11,8 @@ import {
   deleteColumn,
   deleteRow,
 } from "prosemirror-tables"
-import { Node, Fragment, Schema } from "prosemirror-model"
+import { Node, Schema } from "prosemirror-model"
+import type { Command } from "prosemirror-state"
 import { Plugin as PMPlugin } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { keymap } from "prosemirror-keymap"
@@ -334,9 +335,10 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
     changed = true
   }
 
-  // Formula detection
+  // Formula detection — store formula in attr, empty cell text
   if (newText.trimStart().startsWith("=") && newText.trim().length > 1) {
     newAttrs.formula = newText.trim().slice(1)
+    newText = ""
     changed = true
   }
 
@@ -597,9 +599,36 @@ const tableStyles = `
   background: #cce5ff;
 }
 
-.ProseMirror .formula-result {
-  color: #666;
-  font-style: italic;
+/* Formula cells: hide the empty paragraph, show the computed result */
+.ProseMirror td[data-formula] > p,
+.ProseMirror th[data-formula] > p {
+  height: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+}
+
+.ProseMirror .formula-display {
+  display: block;
+  margin: 0;
+  padding: 0;
+}
+
+/* In edit mode, show a subtle indicator on formula display text */
+#app.gowiki-editing .ProseMirror .formula-display {
+  background: #f0f4ff;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* Error values styled like unresolved template variables */
+.ProseMirror .formula-display-error {
+  background: #fff3cd;
+  color: #856404;
+  border-radius: 3px;
+  padding: 0 3px;
+  display: inline-block;
 }
 `
 
@@ -667,6 +696,256 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
       },
     },
   })
+}
+
+// ─── Formula reference adjustment ────────────────────────
+
+function colLetterToIndex(letter: string): number {
+  let index = 0
+  for (const ch of letter.toUpperCase()) {
+    index = index * 26 + (ch.charCodeAt(0) - 64)
+  }
+  return index - 1
+}
+
+function indexToColLetter(index: number): string {
+  let letter = ""
+  let n = index + 1
+  while (n > 0) {
+    n--
+    letter = String.fromCharCode(65 + (n % 26)) + letter
+    n = Math.floor(n / 26)
+  }
+  return letter
+}
+
+/**
+ * Adjust a single cell reference (0-based row/col) for a structural change.
+ * Returns the adjusted index, or -1 if the ref is deleted (#REF).
+ */
+function adjustIndex(
+  idx: number,
+  changeType: "insert" | "delete",
+  changeIdx: number
+): number {
+  if (changeType === "insert") {
+    return idx >= changeIdx ? idx + 1 : idx
+  } else {
+    if (idx === changeIdx) return -1 // deleted
+    return idx > changeIdx ? idx - 1 : idx
+  }
+}
+
+export function adjustFormula(
+  formula: string,
+  changeType: "insertRow" | "deleteRow" | "insertCol" | "deleteCol",
+  changeIdx: number // 0-based row/col where the change occurs
+): string {
+  const isRow = changeType === "insertRow" || changeType === "deleteRow"
+  const isInsert = changeType === "insertRow" || changeType === "insertCol"
+  const op = isInsert ? "insert" : "delete"
+
+  // Match ranges (A1:B3) and individual refs (A1).
+  // Ranges are matched first by the alternation order.
+  return formula.replace(
+    /([A-Z]+)(\d+):([A-Z]+)(\d+)|([A-Z]+)(\d+)/g,
+    (_full, rC1, rR1, rC2, rR2, sC, sR) => {
+      if (rC1 !== undefined) {
+        // Range match: rC1+rR1 : rC2+rR2
+        let sCol = colLetterToIndex(rC1)
+        let sRow = parseInt(rR1) - 1
+        let eCol = colLetterToIndex(rC2)
+        let eRow = parseInt(rR2) - 1
+
+        if (isRow) {
+          if (isInsert) {
+            // Expand range when insert is inside the range or right after
+            // the end. This supports the common "total on last line" pattern:
+            // =SUM(B2:B4) with insert at row 4 → =SUM(B2:B5).
+            if (changeIdx > sRow && changeIdx <= eRow + 1) {
+              eRow++
+            } else {
+              if (sRow >= changeIdx) sRow++
+              if (eRow >= changeIdx) eRow++
+            }
+          } else {
+            // Delete inside range → shrink
+            if (changeIdx >= sRow && changeIdx <= eRow) {
+              if (sRow === eRow) return "#REF"
+              eRow--
+            } else {
+              if (sRow > changeIdx) sRow--
+              if (eRow > changeIdx) eRow--
+            }
+          }
+        } else {
+          // Column operations — same logic on col axis
+          if (isInsert) {
+            if (changeIdx > sCol && changeIdx <= eCol + 1) {
+              eCol++
+            } else {
+              if (sCol >= changeIdx) sCol++
+              if (eCol >= changeIdx) eCol++
+            }
+          } else {
+            if (changeIdx >= sCol && changeIdx <= eCol) {
+              if (sCol === eCol) return "#REF"
+              eCol--
+            } else {
+              if (sCol > changeIdx) sCol--
+              if (eCol > changeIdx) eCol--
+            }
+          }
+        }
+
+        return (
+          indexToColLetter(sCol) + String(sRow + 1) +
+          ":" +
+          indexToColLetter(eCol) + String(eRow + 1)
+        )
+      } else {
+        // Single ref: sC + sR
+        let col = colLetterToIndex(sC)
+        let row = parseInt(sR) - 1
+
+        if (isRow) {
+          const newRow = adjustIndex(row, op, changeIdx)
+          if (newRow < 0) return "#REF"
+          row = newRow
+        } else {
+          const newCol = adjustIndex(col, op, changeIdx)
+          if (newCol < 0) return "#REF"
+          col = newCol
+        }
+
+        return indexToColLetter(col) + String(row + 1)
+      }
+    }
+  )
+}
+
+function tableHasFormulas(tableNode: Node): boolean {
+  let found = false
+  tableNode.descendants(node => {
+    if (found) return false
+    if (
+      (node.type.name === "table_cell" || node.type.name === "table_header") &&
+      node.attrs.formula
+    ) {
+      found = true
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+function getTableAndSelection(
+  state: any,
+  schema: Schema
+): {
+  tablePos: number
+  tableNode: Node
+  rowIndex: number
+  colIndex: number
+} | null {
+  const $from = state.selection.$from
+  for (let depth = $from.depth; depth >= 0; depth--) {
+    if ($from.node(depth).type === schema.nodes.table) {
+      const tableNode = $from.node(depth)
+      const tablePos = $from.before(depth)
+
+      let rowIndex = 0
+      let colIndex = 0
+      let rowStart = tablePos + 1
+
+      for (let r = 0; r < tableNode.childCount; r++) {
+        const row = tableNode.child(r)
+        const rowEnd = rowStart + row.nodeSize
+
+        if ($from.pos >= rowStart && $from.pos < rowEnd) {
+          rowIndex = r
+
+          let cellStart = rowStart + 1
+          let visualCol = 0
+          for (let c = 0; c < row.childCount; c++) {
+            const cell = row.child(c)
+            const cellEnd = cellStart + cell.nodeSize
+            if ($from.pos >= cellStart && $from.pos < cellEnd) {
+              colIndex = visualCol
+              break
+            }
+            cellStart = cellEnd
+            visualCol += cell.attrs.colspan ?? 1
+          }
+          break
+        }
+        rowStart = rowEnd
+      }
+
+      return { tablePos, tableNode, rowIndex, colIndex }
+    }
+  }
+  return null
+}
+
+function wrapTableCmd(
+  cmd: Command,
+  changeType: "insertRow" | "deleteRow" | "insertCol" | "deleteCol",
+  indexOffset: number
+): Command {
+  return (state, dispatch, view) => {
+    if (!dispatch) return cmd(state, undefined, view)
+
+    const info = getTableAndSelection(state, state.schema)
+    if (!info) return cmd(state, dispatch, view)
+
+    const hasFormulas = tableHasFormulas(info.tableNode)
+    if (!hasFormulas) return cmd(state, dispatch, view)
+
+    const isRow = changeType === "insertRow" || changeType === "deleteRow"
+    const changeIndex = isRow
+      ? info.rowIndex + indexOffset
+      : info.colIndex + indexOffset
+
+    // Intercept dispatch to inject formula adjustments into the same
+    // transaction, so we don't need `view` and it's a single undo step.
+    const augmentedDispatch = (tr: any) => {
+      // Scan the post-change document for formula cells
+      tr.doc.descendants((node: Node, pos: number) => {
+        if (node.type !== state.schema.nodes.table) return true
+
+        let rowIdx = 0
+        node.content.forEach((row: Node, rowOffset: number) => {
+          const rowPos = pos + 1 + rowOffset
+          let cellStart = rowPos + 1
+          let visualCol = 0
+
+          row.content.forEach((cell: Node) => {
+            const formula = cell.attrs.formula
+            if (formula) {
+              const adjusted = adjustFormula(formula, changeType, changeIndex)
+              if (adjusted !== formula) {
+                tr.setNodeMarkup(cellStart, undefined, {
+                  ...cell.attrs,
+                  formula: adjusted,
+                })
+              }
+            }
+            cellStart += cell.nodeSize
+            visualCol += cell.attrs.colspan ?? 1
+          })
+          rowIdx++
+        })
+
+        return false
+      })
+
+      dispatch(tr)
+    }
+
+    return cmd(state, augmentedDispatch, view)
+  }
 }
 
 // ─── Public API ──────────────────────────────────────────
@@ -769,6 +1048,18 @@ export const tablePlugin: GowikiPlugin = {
 
     reg.registerSchema({ nodes })
 
+    // Register formula property for cell types (visible in property panel)
+    const formulaProperty: NodePropertySpec = {
+      name: "formula",
+      label: "Formula",
+      default: null as string | null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: (attrs: Record<string, any>) => !!attrs.formula,
+    }
+    reg.registerNodeProperties("table_cell", [formulaProperty])
+    reg.registerNodeProperties("table_header", [formulaProperty])
+
     reg.registerDirective("table", {
       nodeType: "table",
       appliesTo: ["table_open"],
@@ -853,7 +1144,7 @@ export const tablePlugin: GowikiPlugin = {
      * ---------------------------- */
 
     reg.registerPMNode("table", {
-      print(node, ctx, recurse) {
+      print(node, _ctx, recurse) {
         const { grid, totalCols } = buildSerializationGrid(node)
         if (grid.length === 0) return ""
 
@@ -968,11 +1259,11 @@ export const tablePlugin: GowikiPlugin = {
       return true
     })
 
-    reg.registerCommand("table", "row.addBefore", addRowBefore)
-    reg.registerCommand("table", "row.addAfter", addRowAfter)
-    reg.registerCommand("table", "column.addBefore", addColumnBefore)
-    reg.registerCommand("table", "column.addAfter", addColumnAfter)
-    reg.registerCommand("table", "row.delete", deleteRow)
-    reg.registerCommand("table", "column.delete", deleteColumn)
+    reg.registerCommand("table", "row.addBefore", wrapTableCmd(addRowBefore, "insertRow", 0))
+    reg.registerCommand("table", "row.addAfter", wrapTableCmd(addRowAfter, "insertRow", 1))
+    reg.registerCommand("table", "column.addBefore", wrapTableCmd(addColumnBefore, "insertCol", 0))
+    reg.registerCommand("table", "column.addAfter", wrapTableCmd(addColumnAfter, "insertCol", 1))
+    reg.registerCommand("table", "row.delete", wrapTableCmd(deleteRow, "deleteRow", 0))
+    reg.registerCommand("table", "column.delete", wrapTableCmd(deleteColumn, "deleteCol", 0))
   },
 }
