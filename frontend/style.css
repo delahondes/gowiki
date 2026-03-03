@@ -510,6 +510,12 @@ mark.search-highlight {
   background: #eee;
 }
 
+.gowiki-raw-dropdown-item--disabled {
+  color: #aaa;
+  cursor: default;
+  pointer-events: none;
+}
+
 .gowiki-link-modal-overlay {
   position: fixed;
   inset: 0;

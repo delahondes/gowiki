@@ -2776,6 +2776,8 @@ function buildMenubar() {
     { name: "row.delete", label: "Delete row" },
     { name: "column.delete", label: "Delete column" },
     { name: "cell.properties", label: "Cell properties" },
+    { name: "cell.merge", label: "Merge cells" },
+    { name: "cell.split", label: "Unmerge cell" },
   ]
   const rawTableFns = {
     insert: rawInsertTable,
@@ -2786,12 +2788,15 @@ function buildMenubar() {
     "row.delete": rawTableDeleteRow,
     "column.delete": rawTableDeleteColumn,
   }
+  const visualOnlyActions = new Set(["cell.merge", "cell.split"])
   for (const action of tableActions) {
     const item = document.createElement("div")
     item.className = "gowiki-raw-dropdown-item"
     item.textContent = action.label
+    if (visualOnlyActions.has(action.name)) item.dataset.visualOnly = "1"
     item.addEventListener("mousedown", e => {
       e.preventDefault()
+      if (item.classList.contains("gowiki-raw-dropdown-item--disabled")) return
       tableDropMenu.style.display = "none"
       if (editMode === "visual" && editorView) {
         const cmd = tableCommands.get(action.name)
@@ -2808,6 +2813,11 @@ function buildMenubar() {
   tableWrap.addEventListener("mousedown", e => {
     e.preventDefault()
     const isOpen = tableDropMenu.style.display === "block"
+    if (!isOpen) {
+      for (const el of tableDropMenu.querySelectorAll("[data-visual-only]")) {
+        el.classList.toggle("gowiki-raw-dropdown-item--disabled", editMode !== "visual")
+      }
+    }
     tableDropMenu.style.display = isOpen ? "none" : "block"
   })
   bar.appendChild(tableWrap)
