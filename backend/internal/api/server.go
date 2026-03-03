@@ -27,6 +27,7 @@ type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
 	Delete(pagePath, author string) (storage.DeleteResult, error)
+	CheckNamespaceConflict(pagePath string) error
 }
 
 type OrphanDetector interface {

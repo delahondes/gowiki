@@ -148,6 +148,50 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 	}, nil
 }
 
+// CheckNamespaceConflict checks whether creating or writing a page at the given
+// path would violate namespace constraints, without performing any write.
+// Returns ErrNamespaceConflict if the path is forbidden, nil otherwise.
+func (s *FileStore) CheckNamespaceConflict(pagePath string) error {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return err
+	}
+
+	contentPath, _, err := s.resolveWritableContentPath(normalized)
+	if err != nil {
+		return err
+	}
+
+	return s.checkNamespaceConstraints(contentPath)
+}
+
+// checkNamespaceConstraints performs both forward and reverse namespace checks
+// on a resolved content path.
+func (s *FileStore) checkNamespaceConstraints(contentPath string) error {
+	// Forward: if the resolved content path is a non-index page file (e.g. ns.md),
+	// check that a directory ns/ does not already exist.
+	if !strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
+		dirPath := strings.TrimSuffix(contentPath, ".md")
+		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
+			return ErrNamespaceConflict
+		}
+	}
+
+	// Reverse: creating ns/child.md is forbidden if ns.md exists.
+	// Walk up from the content file's parent directory toward contentRoot, checking
+	// that no .md page file conflicts with any directory that must exist.
+	dir := filepath.Dir(contentPath)
+	for dir != s.contentRoot && len(dir) > len(s.contentRoot) {
+		conflictFile := dir + ".md"
+		if info, statErr := os.Stat(conflictFile); statErr == nil && !info.IsDir() {
+			return ErrNamespaceConflict
+		}
+		dir = filepath.Dir(dir)
+	}
+
+	return nil
+}
+
 func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, error) {
 	normalized, err := normalizePagePath(pagePath)
 	if err != nil {
@@ -159,25 +203,8 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, err
 	}
 
-	// Namespace constraint: if the resolved content path is a non-index page
-	// file (e.g. ns.md), check that a directory ns/ does not already exist.
-	if !strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
-		dirPath := strings.TrimSuffix(contentPath, ".md")
-		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
-			return PutResult{}, ErrNamespaceConflict
-		}
-	}
-
-	// Reverse namespace constraint: creating ns/child.md is forbidden if ns.md exists.
-	// Walk up from the content file's parent directory toward contentRoot, checking
-	// that no .md page file conflicts with any directory that must exist.
-	dir := filepath.Dir(contentPath)
-	for dir != s.contentRoot && len(dir) > len(s.contentRoot) {
-		conflictFile := dir + ".md"
-		if info, statErr := os.Stat(conflictFile); statErr == nil && !info.IsDir() {
-			return PutResult{}, ErrNamespaceConflict
-		}
-		dir = filepath.Dir(dir)
+	if err := s.checkNamespaceConstraints(contentPath); err != nil {
+		return PutResult{}, err
 	}
 
 	// --- Include cycle detection (before writing) ---

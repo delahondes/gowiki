@@ -4594,6 +4594,11 @@ async function enterEditMode(force) {
     return false
   }
   if (resp.status === 409) {
+    const body = await resp.json().catch(() => ({}))
+    if (body.error && body.error.includes("conflict")) {
+      setStatus(body.error)
+      return false
+    }
     const ok = confirm("You already have this page open in another session. Force edit?")
     if (ok) return enterEditMode(true)
     return false

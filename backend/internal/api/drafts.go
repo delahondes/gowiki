@@ -37,6 +37,12 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 	page, err := s.store.Get(pagePath)
 	if err == nil {
 		published = page.Markdown
+	} else if errors.Is(err, storage.ErrPageNotFound) {
+		// New page — check namespace constraints before allowing edit.
+		if nsErr := s.store.CheckNamespaceConflict(pagePath); errors.Is(nsErr, storage.ErrNamespaceConflict) {
+			writeError(w, http.StatusConflict, "a page exists at a parent path that conflicts with this namespace")
+			return
+		}
 	}
 
 	markdown, editToken, err := s.draftManager.EnterEditMode(pagePath, username, force, published)
