@@ -595,7 +595,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.configStore.Get()
-	writeJSON(w, http.StatusOK, map[string]string{"title": cfg.Site.Title})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"title":         cfg.Site.Title,
+		"toc_max_level": cfg.Site.TOCMaxLevel,
+	})
 }
 
 func (s *Server) handleSiteLogo(w http.ResponseWriter, _ *http.Request) {

@@ -29,6 +29,7 @@ type SiteConfig struct {
 	Title       string `yaml:"title" json:"title"`
 	FooterPage  string `yaml:"footer_page" json:"footer_page"`
 	SidebarPage string `yaml:"sidebar_page" json:"sidebar_page"`
+	TOCMaxLevel int    `yaml:"toc_max_level" json:"toc_max_level"` // 0 = disabled, 1-6 = show headings up to this level
 }
 
 // AuthConfig holds authentication settings.
@@ -49,6 +50,7 @@ func DefaultConfig() Config {
 			Title:       "Gowiki",
 			FooterPage:  "footer",
 			SidebarPage: "sidebar",
+			TOCMaxLevel: 3,
 		},
 		Auth: AuthConfig{
 			SessionTTL: "24h",

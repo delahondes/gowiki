@@ -80,6 +80,7 @@ let rawEditor = null
 let statusText = ""
 let isNewPage = false
 let siteTitle = "Gowiki"
+let tocMaxLevel = 3
 let viewView = null
 let sidebarView = null
 let footerView = null
@@ -178,13 +179,14 @@ function classifyLinkTarget(rawTarget) {
   }
   // Encode spaces as %20 so users can type paths with spaces.
   const normalized = target.replace(/ /g, "%20")
-  if (/^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(normalized)) {
+  // Accept #fragment (same-page anchor) or internal paths starting with /, ./, ../
+  if (/^(#\S+|(\/(?!\/)|\.\/|\.\.\/)\S*)$/.test(normalized)) {
     return { ok: true, normalized, kind: "internal" }
   }
   return {
     ok: false,
     error:
-      "Use http://, https://, or an internal path starting with '/', './', or '../'.",
+      "Use http://, https://, #anchor, or an internal path starting with '/', './', or '../'.",
   }
 }
 
@@ -1394,7 +1396,10 @@ async function fetchAndMountZone(path, container, className) {
 }
 
 function buildTOC(container) {
-  const headings = container.querySelectorAll("h1, h2, h3, h4, h5, h6")
+  if (tocMaxLevel <= 0) return
+
+  const selector = Array.from({ length: tocMaxLevel }, (_, i) => `h${i + 1}`).join(", ")
+  const headings = container.querySelectorAll(selector)
   if (headings.length <= 1) return
 
   const toc = document.createElement("div")
@@ -1404,13 +1409,15 @@ function buildTOC(container) {
   title.textContent = "Contents"
   toc.appendChild(title)
 
+  const minLevel = Math.min(...Array.from(headings, h => parseInt(h.tagName.slice(1), 10)))
+
   const list = document.createElement("ul")
   for (const h of headings) {
     const level = parseInt(h.tagName.slice(1), 10)
     const id = h.id
     if (!id) continue
     const li = document.createElement("li")
-    li.className = `gowiki-toc-level-${level}`
+    li.className = `gowiki-toc-level-${level - minLevel}`
     const a = document.createElement("a")
     a.href = `#${id}`
     a.textContent = h.textContent
@@ -3217,7 +3224,7 @@ function renderEdit(nextEditMode) {
       void saveDraftExplicit()
       return true
     },
-    "Mod-Shift-p": () => {
+    "Mod-Shift-s": () => {
       void publishDraft()
       return true
     },
@@ -3506,7 +3513,7 @@ function renderActions() {
     const publishBtn = makeActionButton("Publish", () => {
       void publishDraft()
     })
-    publishBtn.title = isMac ? "Publish (\u21E7\u2318P)" : "Publish (Ctrl+Shift+P)"
+    publishBtn.title = isMac ? "Publish (\u21E7\u2318S)" : "Publish (Ctrl+Shift+S)"
     actionsRoot.appendChild(publishBtn)
     actionsRoot.appendChild(
       makeActionButton("Cancel", () => {
@@ -4167,6 +4174,9 @@ async function resolveSiteInfo() {
         siteTitle = data.title
         document.getElementById("banner-title").textContent = siteTitle
         updatePageTitle()
+      }
+      if (typeof data.toc_max_level === "number") {
+        tocMaxLevel = data.toc_max_level
       }
     }
   } catch { /* keep default */ }
@@ -5914,6 +5924,9 @@ async function renderAdminConfigTab(container) {
     const titleInput = adminFormField(form, "Site Title", "text", (config.site && config.site.title) || "")
     const sidebarInput = adminFormField(form, "Sidebar Page", "text", (config.site && config.site.sidebar_page) || "")
     const footerInput = adminFormField(form, "Footer Page", "text", (config.site && config.site.footer_page) || "")
+    const tocMaxLevelInput = adminFormField(form, "TOC max heading level (0 = disabled, 1-6)", "number", String((config.site && config.site.toc_max_level) ?? 3))
+    tocMaxLevelInput.min = "0"
+    tocMaxLevelInput.max = "6"
 
     // Auth section
     const authHeading = document.createElement("h3")
@@ -5947,6 +5960,7 @@ async function renderAdminConfigTab(container) {
           title: titleInput.value.trim(),
           sidebar_page: sidebarInput.value.trim(),
           footer_page: footerInput.value.trim(),
+          toc_max_level: parseInt(tocMaxLevelInput.value, 10) || 3,
         },
         auth: {
           session_ttl: sessionTtlInput.value.trim(),

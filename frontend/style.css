@@ -1430,16 +1430,20 @@ mark.search-highlight {
 
 .gowiki-toc {
   float: right;
-  max-width: 250px;
-  margin: 0 0 16px 24px;
+  position: relative;
+  z-index: 1;
+  margin: 0 0 16px 20px;
   padding: 12px 16px;
+  max-width: 250px;
   background: #f8f9fa;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   font-size: 13px;
   line-height: 1.5;
-  position: sticky;
-  top: 64px;
+}
+
+@media (max-width: 768px) {
+  .gowiki-toc { float: none; max-width: 100%; margin: 0 0 16px 0; }
 }
 
 .gowiki-toc-title {
@@ -1465,15 +1469,11 @@ mark.search-highlight {
   text-decoration: underline;
 }
 
-.gowiki-toc-level-2 { padding-left: 12px; }
-.gowiki-toc-level-3 { padding-left: 24px; }
-.gowiki-toc-level-4 { padding-left: 36px; }
-.gowiki-toc-level-5 { padding-left: 48px; }
-.gowiki-toc-level-6 { padding-left: 60px; }
-
-@media (max-width: 900px) {
-  .gowiki-toc { display: none; }
-}
+.gowiki-toc-level-1 { padding-left: 16px; }
+.gowiki-toc-level-2 { padding-left: 32px; }
+.gowiki-toc-level-3 { padding-left: 48px; }
+.gowiki-toc-level-4 { padding-left: 64px; }
+.gowiki-toc-level-5 { padding-left: 80px; }
 
 /* ── Site Map ──────────────────────────────────────── */
 

@@ -142,6 +142,24 @@ class TagQueryNodeView {
     this.fetchAndRender()
   }
 
+  private resolvePathPrefix(raw: string): string {
+    if (!raw) return ""
+    // Resolve relative paths (./ or ../) against the current page's namespace.
+    if (raw.startsWith("./") || raw.startsWith("../")) {
+      const loc = window.location.pathname.replace(/^\//, "").replace(/\/$/, "")
+      const ns = loc.includes("/") ? loc.split("/").slice(0, -1).join("/") : ""
+      const parts = ns ? ns.split("/") : []
+      for (const seg of raw.split("/")) {
+        if (seg === ".") continue
+        else if (seg === "..") parts.pop()
+        else if (seg) parts.push(seg)
+      }
+      return parts.join("/")
+    }
+    // Strip leading slash — backend paths don't use them.
+    return raw.replace(/^\/+/, "")
+  }
+
   private async fetchAndRender() {
     const tag = this.node.attrs.tag
     if (!tag) {
@@ -153,7 +171,7 @@ class TagQueryNodeView {
 
     try {
       const params = new URLSearchParams({ tag })
-      const path = this.node.attrs.path
+      const path = this.resolvePathPrefix(this.node.attrs.path)
       if (path) params.set("path", path)
 
       const resp = await fetch(`/api/tags?${params}`)
@@ -175,7 +193,7 @@ class TagQueryNodeView {
           const li = document.createElement("li")
           const a = document.createElement("a")
           a.href = "/" + p.path
-          a.textContent = p.title || p.path
+          a.textContent = p.title || ("/" + p.path)
           li.appendChild(a)
           ul.appendChild(li)
         }
@@ -198,7 +216,7 @@ class TagQueryNodeView {
           const tdTitle = document.createElement("td")
           const a = document.createElement("a")
           a.href = "/" + p.path
-          a.textContent = p.title || p.path
+          a.textContent = p.title || ("/" + p.path)
           tdTitle.appendChild(a)
           row.appendChild(tdTitle)
 
