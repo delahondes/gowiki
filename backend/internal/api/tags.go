@@ -16,6 +16,8 @@ type tagQueryPage struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Extract string `json:"extract"`
+	Version int64  `json:"version"`
+	Author  string `json:"author"`
 }
 
 func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
@@ -35,13 +37,13 @@ func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
 
 	pages := make([]tagQueryPage, 0, len(entries))
 	for _, e := range entries {
-		// Try to read page content for extract.
 		extract := ""
+		var version int64
+		var author string
 		page, err := s.store.Get(e.Path)
 		if err == nil {
 			plain := markdown.StripMarkdown(page.Markdown)
 			if len(plain) > 150 {
-				// Truncate at a word boundary.
 				cut := 150
 				for cut > 0 && plain[cut] != ' ' {
 					cut--
@@ -53,11 +55,15 @@ func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
 			} else {
 				extract = plain
 			}
+			version = page.Meta.Version
+			author = page.Meta.Author
 		}
 		pages = append(pages, tagQueryPage{
 			Path:    e.Path,
 			Title:   e.Title,
 			Extract: extract,
+			Version: version,
+			Author:  author,
 		})
 	}
 
