@@ -51,9 +51,10 @@ type PageMetadata struct {
 }
 
 type Page struct {
-	Path     string       `json:"path"`
-	Markdown string       `json:"markdown"`
-	Meta     PageMetadata `json:"meta"`
+	Path             string       `json:"path"`
+	Markdown         string       `json:"markdown"`
+	Meta             PageMetadata `json:"meta"`
+	IsNamespaceIndex bool         `json:"-"` // not serialized directly; API handler includes it
 }
 
 // DatabaseSyncer is an optional hook for syncing page content to the database.
@@ -105,12 +106,24 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 		return Page{}, err
 	}
 
-	contentPath, _, err := s.resolveExistingContentPath(normalized)
+	contentPath, isIndex, err := s.resolveExistingContentPath(normalized)
 	if errors.Is(err, os.ErrNotExist) {
 		return Page{}, ErrPageNotFound
 	}
 	if err != nil {
 		return Page{}, err
+	}
+
+	// If the resolved content path is an index.md, it is a namespace index
+	// regardless of how the path was resolved (e.g. "test/index" resolves
+	// via contentPagePath but is still a namespace index file).
+	if strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
+		isIndex = true
+	}
+
+	// Normalize path: strip trailing /index so the returned path is canonical.
+	if isIndex && strings.HasSuffix(normalized, "/index") {
+		normalized = strings.TrimSuffix(normalized, "/index")
 	}
 
 	content, err := os.ReadFile(contentPath)
@@ -128,9 +141,10 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 	}
 
 	return Page{
-		Path:     normalized,
-		Markdown: string(content),
-		Meta:     meta,
+		Path:             normalized,
+		Markdown:         string(content),
+		Meta:             meta,
+		IsNamespaceIndex: isIndex,
 	}, nil
 }
 
@@ -152,6 +166,18 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
 			return PutResult{}, ErrNamespaceConflict
 		}
+	}
+
+	// Reverse namespace constraint: creating ns/child.md is forbidden if ns.md exists.
+	// Walk up from the content file's parent directory toward contentRoot, checking
+	// that no .md page file conflicts with any directory that must exist.
+	dir := filepath.Dir(contentPath)
+	for dir != s.contentRoot && len(dir) > len(s.contentRoot) {
+		conflictFile := dir + ".md"
+		if info, statErr := os.Stat(conflictFile); statErr == nil && !info.IsDir() {
+			return PutResult{}, ErrNamespaceConflict
+		}
+		dir = filepath.Dir(dir)
 	}
 
 	// --- Include cycle detection (before writing) ---

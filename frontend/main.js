@@ -29,14 +29,17 @@ function shortcutHint(label, key) {
 function resolvePagePathFromLocation(loc) {
   const path = decodeURIComponent(loc.pathname || "/")
   if (path === "/") return "index"
-  const trimmed = path.replace(/^\/+|\/+$/g, "")
+  let trimmed = path.replace(/^\/+|\/+$/g, "")
   if (!trimmed) return "index"
+  // Canonical: /foo/index → foo (namespace index page)
+  if (trimmed.endsWith("/index")) trimmed = trimmed.slice(0, -6)
+  else if (trimmed === "index") return "index"
   return trimmed
 }
 
 const pagePath = resolvePagePathFromLocation(window.location)
 const pageDisplayPath = pagePath === "index" ? "/" : `/${pagePath}`
-const pageNamespace = pagePath.includes("/")
+let pageNamespace = pagePath.includes("/")
   ? pagePath.split("/").slice(0, -1).join("/")
   : ""
 const defaultMarkdown = `
@@ -1426,7 +1429,7 @@ function buildTOC(container) {
       const target = document.getElementById(id)
       if (target) {
         target.scrollIntoView({ behavior: "smooth" })
-        history.replaceState(null, "", `#${id}`)
+        window.history.replaceState(null, "", `#${id}`)
       }
     })
     li.appendChild(a)
@@ -4554,6 +4557,12 @@ async function reloadPageContent() {
     isNewPage = true
     pageLockInfo = null
   }
+
+  // If page is a namespace index, update pageNamespace so relative links resolve correctly.
+  if (page && page.is_namespace_index) {
+    pageNamespace = pagePath
+  }
+
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
 }
@@ -6768,6 +6777,25 @@ async function bootstrap() {
     isNewPage = true
     pageLockInfo = null
   }
+
+  // Normalize URL: strip /index suffix and ensure namespace index pages end with /
+  const rawPathname = window.location.pathname
+  if (rawPathname === "/index" || rawPathname === "/index/") {
+    window.history.replaceState(null, "", "/" + window.location.search + window.location.hash)
+  } else if (/\/index\/?$/.test(rawPathname)) {
+    const canonical = rawPathname.replace(/\/index\/?$/, "/")
+    window.history.replaceState(null, "", canonical + window.location.search + window.location.hash)
+  }
+
+  // If page is a namespace index, ensure URL ends with / so relative links resolve correctly.
+  if (page && page.is_namespace_index) {
+    pageNamespace = pagePath
+    const currentPathname = window.location.pathname
+    if (!currentPathname.endsWith("/")) {
+      window.history.replaceState(null, "", "/" + pagePath + "/" + window.location.search + window.location.hash)
+    }
+  }
+
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
 

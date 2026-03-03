@@ -283,9 +283,10 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 	lock := s.draftManager.GetLock(pagePath)
 
 	resp := map[string]any{
-		"path":     page.Path,
-		"markdown": page.Markdown,
-		"meta":     page.Meta,
+		"path":               page.Path,
+		"markdown":           page.Markdown,
+		"meta":               page.Meta,
+		"is_namespace_index": page.IsNamespaceIndex,
 	}
 
 	// Include current version numbers for all referenced media files.
