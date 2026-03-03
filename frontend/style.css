@@ -1488,7 +1488,7 @@ mark.search-highlight {
 .gowiki-sitemap ul {
   list-style: none;
   padding-left: 20px;
-  margin: 4px 0;
+  margin: 2px 0;
 }
 
 .gowiki-sitemap > ul {
@@ -1496,22 +1496,61 @@ mark.search-highlight {
 }
 
 .gowiki-sitemap li {
-  margin: 4px 0;
+  margin: 2px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
 }
 
-.gowiki-sitemap a {
-  color: #1e3f72;
-  text-decoration: none;
-}
-
-.gowiki-sitemap a:hover {
-  text-decoration: underline;
+.gowiki-sitemap li > ul {
+  flex-basis: 100%;
 }
 
 .gowiki-sitemap .gowiki-sitemap-toggle {
   cursor: pointer;
   user-select: none;
-  margin-right: 4px;
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.gowiki-sitemap .gowiki-sitemap-spacer {
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.gowiki-sitemap .gowiki-sitemap-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.gowiki-sitemap .gowiki-sitemap-path {
+  color: #1e3f72;
+  text-decoration: none;
+  font-family: monospace;
+  font-size: 0.9em;
+  white-space: nowrap;
+  min-width: var(--path-width, auto);
+  display: inline-block;
+}
+
+.gowiki-sitemap a.gowiki-sitemap-path:hover {
+  text-decoration: underline;
+}
+
+.gowiki-sitemap .gowiki-sitemap-phantom {
+  color: #aaa;
+  cursor: default;
+}
+
+.gowiki-sitemap .gowiki-sitemap-title {
+  color: #666;
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Export ─────────────────────────────────────────── */

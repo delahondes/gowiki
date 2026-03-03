@@ -15,9 +15,11 @@ type SitemapLister interface {
 }
 
 type sitemapTreeNode struct {
-	Path     string             `json:"path"`
-	Title    string             `json:"title"`
-	Children []*sitemapTreeNode `json:"children,omitempty"`
+	Path             string             `json:"path"`
+	Title            string             `json:"title"`
+	IsNamespaceIndex bool               `json:"is_namespace_index,omitempty"`
+	HasPage          bool               `json:"has_page"`
+	Children         []*sitemapTreeNode `json:"children,omitempty"`
 }
 
 func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +66,8 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 		// Check if a tree node already exists for this path (namespace node created earlier).
 		if existing, ok := nodeMap[p.Path]; ok {
 			existing.Title = p.Title
+			existing.IsNamespaceIndex = p.IsNamespaceIndex
+			existing.HasPage = true
 			if existing.Title == "" {
 				existing.Title = parts[len(parts)-1]
 			}
@@ -73,8 +77,10 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 				title = parts[len(parts)-1]
 			}
 			node := &sitemapTreeNode{
-				Path:  p.Path,
-				Title: title,
+				Path:             p.Path,
+				Title:            title,
+				IsNamespaceIndex: p.IsNamespaceIndex,
+				HasPage:          true,
 			}
 			parent.Children = append(parent.Children, node)
 			nodeMap[p.Path] = node

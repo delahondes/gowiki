@@ -540,8 +540,9 @@ func (s *FileStore) RebuildIndexes() error {
 
 // PageEntry is a summary for sitemap / listing purposes.
 type PageEntry struct {
-	Path  string `json:"path"`
-	Title string `json:"title"`
+	Path             string `json:"path"`
+	Title            string `json:"title"`
+	IsNamespaceIndex bool   `json:"is_namespace_index"`
 }
 
 // ListAllPages walks content/ and returns all pages with titles.
@@ -562,6 +563,7 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 		}
 		rel = filepath.ToSlash(rel)
 
+		isNsIndex := strings.HasSuffix(rel, "/index.md")
 		pagePath := strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
 
@@ -570,8 +572,10 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 			return readErr
 		}
 
-		title := markdown.ExtractTitle(string(content))
-		pages = append(pages, PageEntry{Path: pagePath, Title: title})
+		contentStr := string(content)
+		title := markdown.ExtractTitle(contentStr)
+		title = markdown.ResolveTemplateVars(title, contentStr)
+		pages = append(pages, PageEntry{Path: pagePath, Title: title, IsNamespaceIndex: isNsIndex})
 		return nil
 	})
 	if err != nil {

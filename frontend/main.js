@@ -5033,15 +5033,36 @@ async function renderSitemapPage() {
     const data = await resp.json()
     const pages = data.pages || []
 
-    function buildTree(nodes, parentUl) {
+    function nodeUrl(node) {
+      if (node.path === "index") return "/"
+      const hasChildren = node.children && node.children.length > 0
+      if (node.is_namespace_index || hasChildren) return "/" + node.path + "/"
+      return "/" + node.path
+    }
+
+    function leafName(node) {
+      if (node.path === "index") return "/"
+      const leaf = node.path.split("/").pop()
+      const hasChildren = node.children && node.children.length > 0
+      if (node.is_namespace_index || hasChildren) return leaf + "/"
+      return leaf
+    }
+
+    function buildTree(nodes, parentUl, depth) {
+      // First pass: build all items, collect path elements for alignment.
+      const pathElements = []
+
       for (const node of nodes) {
         const li = document.createElement("li")
-        if (node.children && node.children.length > 0) {
+        const hasChildren = node.children && node.children.length > 0
+        const isPhantom = !node.has_page
+
+        if (hasChildren) {
           const toggle = document.createElement("span")
           toggle.className = "gowiki-sitemap-toggle"
-          toggle.textContent = "\u25BE"
+          toggle.textContent = "\u25B8"
           toggle.addEventListener("click", () => {
-            const childUl = li.querySelector("ul")
+            const childUl = li.querySelector(":scope > ul")
             if (childUl) {
               const hidden = childUl.style.display === "none"
               childUl.style.display = hidden ? "" : "none"
@@ -5049,26 +5070,65 @@ async function renderSitemapPage() {
             }
           })
           li.appendChild(toggle)
+        } else {
+          const spacer = document.createElement("span")
+          spacer.className = "gowiki-sitemap-spacer"
+          li.appendChild(spacer)
         }
-        const a = document.createElement("a")
-        a.href = "/" + node.path
-        a.textContent = node.title || node.path
-        a.addEventListener("click", e => {
-          e.preventDefault()
-          window.location.href = "/" + node.path
-        })
-        li.appendChild(a)
-        if (node.children && node.children.length > 0) {
+
+        const row = document.createElement("span")
+        row.className = "gowiki-sitemap-row"
+
+        const label = leafName(node)
+        if (isPhantom) {
+          const span = document.createElement("span")
+          span.className = "gowiki-sitemap-path gowiki-sitemap-phantom"
+          span.textContent = label
+          pathElements.push(span)
+          row.appendChild(span)
+        } else {
+          const url = nodeUrl(node)
+          const a = document.createElement("a")
+          a.href = url
+          a.className = "gowiki-sitemap-path"
+          a.textContent = label
+          a.addEventListener("click", e => {
+            e.preventDefault()
+            window.location.href = url
+          })
+          pathElements.push(a)
+          row.appendChild(a)
+        }
+
+        const displayTitle = node.title || ""
+        if (!isPhantom && displayTitle) {
+          const titleSpan = document.createElement("span")
+          titleSpan.className = "gowiki-sitemap-title"
+          titleSpan.textContent = displayTitle
+          row.appendChild(titleSpan)
+        }
+
+        li.appendChild(row)
+
+        if (hasChildren) {
           const childUl = document.createElement("ul")
-          buildTree(node.children, childUl)
+          childUl.style.display = "none"
+          buildTree(node.children, childUl, depth + 1)
           li.appendChild(childUl)
         }
         parentUl.appendChild(li)
       }
+
+      // Second pass: align path column within this level.
+      if (pathElements.length > 0) {
+        let maxLen = 0
+        for (const el of pathElements) maxLen = Math.max(maxLen, el.textContent.length)
+        parentUl.style.setProperty("--path-width", (maxLen + 2) + "ch")
+      }
     }
 
     const ul = document.createElement("ul")
-    buildTree(pages, ul)
+    buildTree(pages, ul, 0)
     container.appendChild(ul)
   } catch (err) {
     const msg = document.createElement("div")

@@ -175,3 +175,35 @@ func ExtractDatabaseRows(content string) []DatabaseRowBlock {
 	}
 	return results
 }
+
+// templateVarRe matches {{fieldname}} template expressions.
+var templateVarRe = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_.]*)\}\}`)
+
+// ResolveTemplateVars replaces {{field}} expressions in text using the first
+// database-row block's fields found in content. Returns the original text
+// unchanged if no database-row block exists or no substitutions match.
+func ResolveTemplateVars(text, content string) string {
+	if !strings.Contains(text, "{{") {
+		return text
+	}
+	rows := ExtractDatabaseRows(content)
+	if len(rows) == 0 {
+		return text
+	}
+	// Merge all row fields (first block wins for duplicates).
+	fields := make(map[string]string)
+	for _, row := range rows {
+		for k, v := range row.Fields {
+			if _, exists := fields[k]; !exists {
+				fields[k] = v
+			}
+		}
+	}
+	return templateVarRe.ReplaceAllStringFunc(text, func(match string) string {
+		name := match[2 : len(match)-2]
+		if val, ok := fields[name]; ok {
+			return val
+		}
+		return match
+	})
+}
