@@ -29,10 +29,24 @@ function parseDirective(line: string): DirectiveToken | null {
   const attrStr = inner.slice(parts[0].length).trim()
   const attrRe = /([A-Za-z_][A-Za-z0-9_.+-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g
   let m: RegExpExecArray | null
+  // Track which parts of attrStr are consumed by key=value pairs
+  const consumed = new Set<number>()
   while ((m = attrRe.exec(attrStr)) !== null) {
     const key = m[1]
     const value = m[2] ?? m[3] ?? m[4]
     attrs[key] = value
+    for (let ci = m.index; ci < m.index + m[0].length; ci++) consumed.add(ci)
+  }
+
+  // Capture remaining text not matched by key=value as positional _args.
+  const remaining = attrStr
+    .split("")
+    .map((ch, i) => (consumed.has(i) ? " " : ch))
+    .join("")
+    .trim()
+    .replace(/\s+/g, " ")
+  if (remaining) {
+    attrs._args = remaining
   }
 
   return { name, attrs }
@@ -84,6 +98,11 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
       if (selfContained) {
         const parsedAttrs: Record<string, string | null> = {}
         for (const [key, raw] of Object.entries(meta.attrs)) {
+          // _args is a synthetic positional-arguments key, always passed through
+          if (key === "_args") {
+            parsedAttrs[key] = raw
+            continue
+          }
           const prop = selfContained.properties.find(p => p.name === key)
           if (!prop) {
             if (strict) {

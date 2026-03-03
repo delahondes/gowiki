@@ -68,6 +68,7 @@ type FileStore struct {
 	dataDir           string
 	RefIndex          *RefIndex
 	IncludeIndex      *IncludeIndex
+	TagIndex          *TagIndex
 	SearchIndex       *SearchIndex
 	Attic             *Attic
 	Changelog         *Changelog
@@ -245,6 +246,13 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	s.RefIndex.UpdatePage(normalized, newMediaRefs)
 	s.IncludeIndex.UpdatePage(normalized, newIncludes)
 
+	// --- Update tag index ---
+	if s.TagIndex != nil {
+		tags := markdown.ExtractTags(markdownContent)
+		title := markdown.ExtractTitle(markdownContent)
+		s.TagIndex.UpdatePage(normalized, tags, title)
+	}
+
 	// --- Update search index ---
 	if s.SearchIndex != nil {
 		title := markdown.ExtractTitle(markdownContent)
@@ -255,6 +263,9 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	// Persist indexes (best effort — indexes are rebuilt on startup anyway).
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
+	if s.TagIndex != nil {
+		_ = s.TagIndex.Save()
+	}
 
 	// --- Sync database rows if configured ---
 	if s.DatabaseSync != nil {
@@ -353,6 +364,11 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	includedBy := s.IncludeIndex.GetIncluders(normalized)
 	s.IncludeIndex.RemovePage(normalized)
 
+	// Update TagIndex: remove this page.
+	if s.TagIndex != nil {
+		s.TagIndex.RemovePage(normalized)
+	}
+
 	// Update SearchIndex: remove this page.
 	if s.SearchIndex != nil {
 		_ = s.SearchIndex.DeletePage(normalized)
@@ -361,6 +377,9 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// Persist indexes (best effort).
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
+	if s.TagIndex != nil {
+		_ = s.TagIndex.Save()
+	}
 
 	// Compute newly orphaned media: all old refs that now have zero references.
 	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, nil)
@@ -397,6 +416,7 @@ func (s *FileStore) GetReferencingPages(mediaPath string) []string {
 func (s *FileStore) RebuildIndexes() error {
 	refIdx := NewRefIndex(s.metaRoot)
 	incIdx := NewIncludeIndex(s.metaRoot)
+	tagIdx := NewTagIndex(s.metaRoot)
 
 	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -424,11 +444,16 @@ func (s *FileStore) RebuildIndexes() error {
 			return readErr
 		}
 
-		mediaRefs := markdown.ExtractMediaRefs(string(content), pagePath)
+		contentStr := string(content)
+		mediaRefs := markdown.ExtractMediaRefs(contentStr, pagePath)
 		refIdx.UpdatePage(pagePath, mediaRefs)
 
-		includes := markdown.ExtractIncludes(string(content), pagePath)
+		includes := markdown.ExtractIncludes(contentStr, pagePath)
 		incIdx.UpdatePage(pagePath, includes)
+
+		tags := markdown.ExtractTags(contentStr)
+		title := markdown.ExtractTitle(contentStr)
+		tagIdx.UpdatePage(pagePath, tags, title)
 
 		return nil
 	})
@@ -438,12 +463,16 @@ func (s *FileStore) RebuildIndexes() error {
 
 	s.RefIndex = refIdx
 	s.IncludeIndex = incIdx
+	s.TagIndex = tagIdx
 
 	if err := s.RefIndex.Save(); err != nil {
 		return fmt.Errorf("save ref index: %w", err)
 	}
 	if err := s.IncludeIndex.Save(); err != nil {
 		return fmt.Errorf("save include index: %w", err)
+	}
+	if err := s.TagIndex.Save(); err != nil {
+		return fmt.Errorf("save tag index: %w", err)
 	}
 
 	// Rebuild search index if available.
@@ -454,6 +483,48 @@ func (s *FileStore) RebuildIndexes() error {
 	}
 
 	return nil
+}
+
+// PageEntry is a summary for sitemap / listing purposes.
+type PageEntry struct {
+	Path  string `json:"path"`
+	Title string `json:"title"`
+}
+
+// ListAllPages walks content/ and returns all pages with titles.
+func (s *FileStore) ListAllPages() ([]PageEntry, error) {
+	var pages []PageEntry
+
+	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(s.contentRoot, absPath)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+
+		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath = strings.TrimSuffix(pagePath, "/index")
+
+		content, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			return readErr
+		}
+
+		title := markdown.ExtractTitle(string(content))
+		pages = append(pages, PageEntry{Path: pagePath, Title: title})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pages, nil
 }
 
 func (s *FileStore) readOrInitMeta(pagePath, contentPath, metaPath string) (PageMetadata, error) {

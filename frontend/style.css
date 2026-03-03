@@ -1425,3 +1425,105 @@ mark.search-highlight {
   padding-top: 16px;
   border-top: 1px solid #eee;
 }
+
+/* ── Table of Contents ─────────────────────────────── */
+
+.gowiki-toc {
+  float: right;
+  max-width: 250px;
+  margin: 0 0 16px 24px;
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  position: sticky;
+  top: 64px;
+}
+
+.gowiki-toc-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.gowiki-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gowiki-toc li a {
+  color: #1e3f72;
+  text-decoration: none;
+  display: block;
+  padding: 2px 0;
+}
+
+.gowiki-toc li a:hover {
+  text-decoration: underline;
+}
+
+.gowiki-toc-level-2 { padding-left: 12px; }
+.gowiki-toc-level-3 { padding-left: 24px; }
+.gowiki-toc-level-4 { padding-left: 36px; }
+.gowiki-toc-level-5 { padding-left: 48px; }
+.gowiki-toc-level-6 { padding-left: 60px; }
+
+@media (max-width: 900px) {
+  .gowiki-toc { display: none; }
+}
+
+/* ── Site Map ──────────────────────────────────────── */
+
+.gowiki-sitemap {
+  padding: 16px 0;
+}
+
+.gowiki-sitemap h2 {
+  margin-top: 0;
+}
+
+.gowiki-sitemap ul {
+  list-style: none;
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.gowiki-sitemap > ul {
+  padding-left: 0;
+}
+
+.gowiki-sitemap li {
+  margin: 4px 0;
+}
+
+.gowiki-sitemap a {
+  color: #1e3f72;
+  text-decoration: none;
+}
+
+.gowiki-sitemap a:hover {
+  text-decoration: underline;
+}
+
+.gowiki-sitemap .gowiki-sitemap-toggle {
+  cursor: pointer;
+  user-select: none;
+  margin-right: 4px;
+}
+
+/* ── Export ─────────────────────────────────────────── */
+
+.gowiki-export {
+  max-width: 100%;
+  font-size: 12pt;
+}
+
+@media print {
+  #banner, #left, #footer, #actions { display: none !important; }
+  .gowiki-toc { display: none !important; }
+  h1, h2, h3 { page-break-after: avoid; }
+  table, img { page-break-inside: avoid; }
+}

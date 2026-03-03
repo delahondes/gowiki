@@ -20,6 +20,12 @@ const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
 registry.bindSchema(schema)
 
+const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+function shortcutHint(label, key) {
+  const mod = isMac ? "\u2318" : "Ctrl+"
+  return `${label} (${mod}${key})`
+}
+
 function resolvePagePathFromLocation(loc) {
   const path = decodeURIComponent(loc.pathname || "/")
   if (path === "/") return "index"
@@ -86,6 +92,8 @@ let databaseInsertQueryCommand = null
 let databaseInsertNewRowCommand = null
 let databaseInsertRowCommand = null
 let databaseInsertVarCommand = null
+let tagInsertCommand = null
+let tagQueryInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -108,6 +116,16 @@ registry.onCommand((namespace, name, cmd) => {
     if (name === "insertNewRow") databaseInsertNewRowCommand = cmd
     if (name === "insertRow") databaseInsertRowCommand = cmd
     if (name === "insertVar") databaseInsertVarCommand = cmd
+    return
+  }
+
+  if (namespace === "tag") {
+    if (name === "insert") tagInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "tag-query") {
+    if (name === "insert") tagQueryInsertCommand = cmd
     return
   }
 
@@ -1375,6 +1393,42 @@ async function fetchAndMountZone(path, container, className) {
   }
 }
 
+function buildTOC(container) {
+  const headings = container.querySelectorAll("h1, h2, h3, h4, h5, h6")
+  if (headings.length <= 1) return
+
+  const toc = document.createElement("div")
+  toc.className = "gowiki-toc"
+  const title = document.createElement("div")
+  title.className = "gowiki-toc-title"
+  title.textContent = "Contents"
+  toc.appendChild(title)
+
+  const list = document.createElement("ul")
+  for (const h of headings) {
+    const level = parseInt(h.tagName.slice(1), 10)
+    const id = h.id
+    if (!id) continue
+    const li = document.createElement("li")
+    li.className = `gowiki-toc-level-${level}`
+    const a = document.createElement("a")
+    a.href = `#${id}`
+    a.textContent = h.textContent
+    a.addEventListener("click", e => {
+      e.preventDefault()
+      const target = document.getElementById(id)
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth" })
+        history.replaceState(null, "", `#${id}`)
+      }
+    })
+    li.appendChild(a)
+    list.appendChild(li)
+  }
+  toc.appendChild(list)
+  container.insertBefore(toc, container.firstChild)
+}
+
 function renderView() {
   clearContent()
 
@@ -1392,6 +1446,18 @@ function renderView() {
   const highlight = new URLSearchParams(window.location.search).get("highlight")
   if (highlight) {
     highlightTermsInView(contentRoot, highlight)
+  }
+
+  // Build table of contents for view mode.
+  buildTOC(contentRoot)
+
+  // Scroll to fragment anchor if present.
+  if (window.location.hash) {
+    const id = window.location.hash.slice(1)
+    if (id) {
+      const el = document.getElementById(id)
+      if (el) el.scrollIntoView({ behavior: "smooth" })
+    }
   }
 
   updatePageTitle()
@@ -2687,7 +2753,7 @@ function buildMenubar() {
   addSeparator()
 
   // Bold
-  addButton("B", "Bold", () => {
+  addButton("B", shortcutHint("Bold", "B"), () => {
     if (editMode === "visual" && editorView) {
       toggleMark(schema.marks.strong)(editorView.state, editorView.dispatch)
       editorView.focus()
@@ -2697,7 +2763,7 @@ function buildMenubar() {
   }, "bold").style.fontWeight = "700"
 
   // Italic
-  addButton("I", "Italic", () => {
+  addButton("I", shortcutHint("Italic", "I"), () => {
     if (editMode === "visual" && editorView) {
       toggleMark(schema.marks.em)(editorView.state, editorView.dispatch)
       editorView.focus()
@@ -2707,7 +2773,7 @@ function buildMenubar() {
   }, "italic").style.fontStyle = "italic"
 
   // Inline code
-  addButton("</>", "Inline code", () => {
+  addButton("</>", shortcutHint("Inline code", "E"), () => {
     if (editMode === "visual" && editorView) {
       toggleMark(schema.marks.code)(editorView.state, editorView.dispatch)
       editorView.focus()
@@ -2719,7 +2785,7 @@ function buildMenubar() {
   addSeparator()
 
   // Link
-  addIconButton(icons.link, "Set or edit link", () => {
+  addIconButton(icons.link, shortcutHint("Set or edit link", "K"), () => {
     if (editMode === "visual" && editorView) {
       setExternalLinkCommand()(editorView.state, editorView.dispatch, editorView)
     } else if (editMode === "raw" && rawEditor) {
@@ -2955,6 +3021,40 @@ function buildMenubar() {
     }
   })
 
+  // Tag
+  if (tagInsertCommand) {
+    addButton("#", "Insert tag", () => {
+      if (editMode === "visual" && editorView) {
+        tagInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{tag }"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Tag query
+  if (tagQueryInsertCommand) {
+    addButton("Q#", "Insert tag query", () => {
+      if (editMode === "visual" && editorView) {
+        tagQueryInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{tag-query tag=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
   // Paragraph below
   addImgButton("/icons/paragraphdown.svg", "Add paragraph below", () => {
     if (editMode === "visual" && editorView) {
@@ -3105,7 +3205,26 @@ function renderEdit(nextEditMode) {
     "Alt-Enter": insertHardBreakCommand(),
   })
 
+  const shortcutKeymap = keymap({
+    "Mod-b": toggleMark(schema.marks.strong),
+    "Mod-i": toggleMark(schema.marks.em),
+    "Mod-e": toggleMark(schema.marks.code),
+    "Mod-k": (state, dispatch, view) => {
+      setExternalLinkCommand()(state, dispatch, view)
+      return true
+    },
+    "Mod-s": () => {
+      void saveDraftExplicit()
+      return true
+    },
+    "Mod-Shift-p": () => {
+      void publishDraft()
+      return true
+    },
+  })
+
   const plugins = [
+    shortcutKeymap,
     listKeymap,
     history(),
     keymap(baseKeymap),
@@ -3375,21 +3494,20 @@ function renderActions() {
     }
 
     // Draft-based save actions.
-    actionsRoot.appendChild(
-      makeActionButton("Save & continue", () => {
-        void saveDraftExplicit()
-      })
-    )
+    const saveContinueBtn = makeActionButton(shortcutHint("Save & continue", "S"), () => {
+      void saveDraftExplicit()
+    })
+    actionsRoot.appendChild(saveContinueBtn)
     actionsRoot.appendChild(
       makeActionButton("Save to draft", () => {
         void saveDraftAndExit()
       })
     )
-    actionsRoot.appendChild(
-      makeActionButton("Publish", () => {
-        void publishDraft()
-      })
-    )
+    const publishBtn = makeActionButton("Publish", () => {
+      void publishDraft()
+    })
+    publishBtn.title = isMac ? "Publish (\u21E7\u2318P)" : "Publish (Ctrl+Shift+P)"
+    actionsRoot.appendChild(publishBtn)
     actionsRoot.appendChild(
       makeActionButton("Cancel", () => {
         cancelEdit()
@@ -3451,6 +3569,16 @@ function renderActions() {
     actionsRoot.appendChild(
       makeActionButton("New page", () => {
         void promptNewPage()
+      })
+    )
+    actionsRoot.appendChild(
+      makeActionButton("Site map", () => {
+        window.location.href = "/_sitemap"
+      })
+    )
+    actionsRoot.appendChild(
+      makeActionButton("Export PDF", () => {
+        window.open(`/api/export/pdf/${pagePath}`, "_blank")
       })
     )
 
@@ -4246,10 +4374,10 @@ function renderBannerUser() {
     if (currentUser.is_admin) {
       const adminLink = document.createElement("a")
       adminLink.textContent = "Admin"
-      adminLink.href = "/admin"
+      adminLink.href = "/_admin"
       adminLink.addEventListener("click", (e) => {
         e.preventDefault()
-        window.location.href = "/admin"
+        window.location.href = "/_admin"
       })
       el.appendChild(adminLink)
     }
@@ -4378,7 +4506,7 @@ window.__gowikiAuthFetch = authFetch
 
 async function reloadPageContent() {
   // Admin page is a virtual route — re-render it instead of fetching a wiki page.
-  if (pagePath === "admin") {
+  if (pagePath === "_admin") {
     if (currentUser && currentUser.is_admin) {
       renderAdminPage()
     } else {
@@ -4865,6 +4993,68 @@ async function saveDraftAndExit() {
 }
 
 // ── Admin Page ────────────────────────────────────────
+
+async function renderSitemapPage() {
+  clearContent()
+  const container = document.createElement("div")
+  container.className = "gowiki-sitemap"
+
+  const title = document.createElement("h2")
+  title.textContent = "Site map"
+  container.appendChild(title)
+
+  try {
+    const resp = await fetch("/api/sitemap")
+    if (!resp.ok) throw new Error("Failed to load sitemap")
+    const data = await resp.json()
+    const pages = data.pages || []
+
+    function buildTree(nodes, parentUl) {
+      for (const node of nodes) {
+        const li = document.createElement("li")
+        if (node.children && node.children.length > 0) {
+          const toggle = document.createElement("span")
+          toggle.className = "gowiki-sitemap-toggle"
+          toggle.textContent = "\u25BE"
+          toggle.addEventListener("click", () => {
+            const childUl = li.querySelector("ul")
+            if (childUl) {
+              const hidden = childUl.style.display === "none"
+              childUl.style.display = hidden ? "" : "none"
+              toggle.textContent = hidden ? "\u25BE" : "\u25B8"
+            }
+          })
+          li.appendChild(toggle)
+        }
+        const a = document.createElement("a")
+        a.href = "/" + node.path
+        a.textContent = node.title || node.path
+        a.addEventListener("click", e => {
+          e.preventDefault()
+          window.location.href = "/" + node.path
+        })
+        li.appendChild(a)
+        if (node.children && node.children.length > 0) {
+          const childUl = document.createElement("ul")
+          buildTree(node.children, childUl)
+          li.appendChild(childUl)
+        }
+        parentUl.appendChild(li)
+      }
+    }
+
+    const ul = document.createElement("ul")
+    buildTree(pages, ul)
+    container.appendChild(ul)
+  } catch (err) {
+    const msg = document.createElement("div")
+    msg.style.color = "#d63031"
+    msg.textContent = "Failed to load sitemap."
+    container.appendChild(msg)
+  }
+
+  contentRoot.appendChild(container)
+}
 
 function renderAdminPage() {
   contentRoot.innerHTML = ""
@@ -6414,6 +6604,33 @@ async function showDatabaseDataBrowser(tableName) {
 
 async function bootstrap() {
   applyStyles(registry.getStyles())
+
+  // Export mode: render page cleanly for PDF generation.
+  const isExportMode = new URLSearchParams(window.location.search).get("export") === "pdf"
+  if (isExportMode) {
+    // Hide chrome, render page in view mode.
+    document.getElementById("banner")?.remove()
+    document.getElementById("left")?.remove()
+    document.getElementById("footer")?.remove()
+    actionsRoot.style.display = "none"
+    document.body.classList.add("gowiki-export")
+
+    let page
+    try {
+      page = await fetchPage(pagePath)
+    } catch {
+      document.body.setAttribute("data-export-ready", "true")
+      return
+    }
+    if (page) {
+      currentMarkdown = page.markdown
+      currentDoc = markdownToPM(currentMarkdown, registry)
+      mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view")
+    }
+    document.body.setAttribute("data-export-ready", "true")
+    return
+  }
+
   renderActions()
 
   // Non-blocking banner setup
@@ -6421,8 +6638,20 @@ async function bootstrap() {
   resolveLogo()
   initSearch()
 
+  // Sitemap page: virtual route
+  if (pagePath === "_sitemap") {
+    await renderSitemapPage()
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+      sidebarView = v
+    })
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+      footerView = v
+    })
+    return
+  }
+
   // Admin page: must await auth before rendering
-  if (pagePath === "admin") {
+  if (pagePath === "_admin") {
     await checkAuth()
     if (!currentUser || !currentUser.is_admin) {
       contentRoot.innerHTML = ""

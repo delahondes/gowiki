@@ -104,7 +104,18 @@ func main() {
 		cancel()
 	}
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, *serveWeb, filepath.Clean(*webDir))
+	// Initialize tag index.
+	tagIndex := storage.NewTagIndex(metaRoot)
+	if err := tagIndex.Load(); err != nil {
+		log.Printf("WARNING: tag index load failed: %v", err)
+	}
+	store.TagIndex = tagIndex
+
+	// Initialize headless Chrome for PDF export.
+	browserCtx, browserCancel := api.InitBrowser()
+	defer browserCancel()
+
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir))
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

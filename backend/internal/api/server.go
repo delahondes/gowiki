@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -81,6 +82,10 @@ type Server struct {
 	dbPool            *database.Pool
 	schemaStore       *database.SchemaStore
 	dataStore         *database.DataStore
+	tagIndex            *storage.TagIndex
+	// Persistent browser context for PDF export (nil if Chrome not available).
+	browserAllocCtx    context.Context
+	browserAllocCancel context.CancelFunc
 	// Tracks pages where a forced inline edit modified the published content
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
@@ -88,7 +93,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -105,6 +110,9 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		sessionStore:      sessionStore,
 		aclStore:          aclStore,
 		changelog:         changelog,
+		tagIndex:           tagIndex,
+		browserAllocCtx:    browserAllocCtx,
+		browserAllocCancel: browserAllocCancel,
 		dbPool:   dbPool,
 		serveWeb: serveWeb,
 		webDirPath: webDirPath,
@@ -142,12 +150,15 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/media/*", s.handleListMedia)
 		r.Get("/api/media-orphans", s.handleMediaOrphans)
 		r.Get("/api/media-version/*", s.handleServeMediaVersion)
+		r.Get("/api/export/pdf/*", s.handleExportPDF)
 	})
 
-	// Public read endpoints — no ACL check (search, logo, site info).
+	// Public read endpoints — no ACL check (search, logo, site info, sitemap).
 	r.Group(func(r chi.Router) {
 		r.Use(s.optionalAuth)
 		r.Get("/api/search", s.handleSearch)
+		r.Get("/api/sitemap", s.handleSitemap)
+		r.Get("/api/tags", s.handleTagQuery)
 		r.Get("/api/site/logo", s.handleSiteLogo)
 		r.Get("/api/site/info", s.handleSiteInfo)
 	})

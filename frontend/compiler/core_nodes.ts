@@ -3,7 +3,10 @@ import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import type { NodeSpec, MarkSpec } from "prosemirror-model"
+import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { Decoration, DecorationSet } from "prosemirror-view"
 import { highlightPlugin, isKnownLanguage } from "../highlight"
+import { slugify } from "./slugify"
 
 /**
  * Core semantic nodes for the document language.
@@ -75,6 +78,7 @@ export function registerCoreNodes(reg: Registry) {
   registerHorizontalRule(reg)
 
   registerMarkdownPrinters(reg)
+  registerHeadingAnchors(reg)
 }
 
 /* --------------------------------------------------
@@ -143,7 +147,8 @@ function registerParagraph(reg: Registry) {
 function registerEmphasis(reg: Registry) {
   function isAllowedLinkTarget(href: string): boolean {
     if (/^https?:\/\//i.test(href)) return true
-    return /^(\/(?!\/)|\.\/|\.\.\/)\S*$/.test(href)
+    // Allow #fragment (same-page anchor), and internal paths with optional fragment
+    return /^(#\S+|(\/(?!\/)|\.\/|\.\.\/)\S*)$/.test(href)
   }
 
   reg.registerMark("em_open", {
@@ -495,4 +500,53 @@ function registerMarkdownPrinters(reg: Registry) {
       return "---\n\n"
     },
   })
+}
+
+/* --------------------------------------------------
+ * Heading anchor IDs via decorations
+ * -------------------------------------------------- */
+
+const headingAnchorKey = new PluginKey("gowiki.headingAnchors")
+
+function registerHeadingAnchors(reg: Registry) {
+  reg.registerEditorPlugin(() => {
+    return new PMPlugin({
+      key: headingAnchorKey,
+      state: {
+        init(_, state) {
+          return buildHeadingDecorations(state.doc)
+        },
+        apply(tr, old) {
+          if (tr.docChanged) {
+            return buildHeadingDecorations(tr.doc)
+          }
+          return old
+        },
+      },
+      props: {
+        decorations(state) {
+          return headingAnchorKey.getState(state)
+        },
+      },
+    })
+  })
+}
+
+function buildHeadingDecorations(doc: any): DecorationSet {
+  const decorations: Decoration[] = []
+  const slugCounts = new Map<string, number>()
+
+  doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "heading") {
+      const text = node.textContent
+      const base = slugify(text)
+      const count = slugCounts.get(base) ?? 0
+      slugCounts.set(base, count + 1)
+      const id = count === 0 ? base : `${base}-${count}`
+      decorations.push(Decoration.node(pos, pos + node.nodeSize, { id }))
+      return false
+    }
+  })
+
+  return DecorationSet.create(doc, decorations)
 }
