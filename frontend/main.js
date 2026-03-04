@@ -1437,7 +1437,8 @@ function buildTOC(container) {
     li.className = `gowiki-toc-level-${level - minLevel}`
     const a = document.createElement("a")
     a.href = `#${id}`
-    a.textContent = h.textContent
+    const num = h.getAttribute("data-heading-number")
+    a.textContent = (num ? num + " " : "") + h.textContent
     a.addEventListener("click", e => {
       e.preventDefault()
       const target = document.getElementById(id)
