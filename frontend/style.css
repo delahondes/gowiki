@@ -516,6 +516,17 @@ mark.search-highlight {
   pointer-events: none;
 }
 
+.gowiki-raw-dropdown-item--hint {
+  color: #888;
+  font-style: italic;
+  font-size: 12px;
+  cursor: default;
+  pointer-events: none;
+  border-top: 1px solid #eee;
+  padding-top: 5px;
+  margin-top: 2px;
+}
+
 .gowiki-link-modal-overlay {
   position: fixed;
   inset: 0;
@@ -1551,6 +1562,12 @@ mark.search-highlight {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Numbered headings ────────────────────────────── */
+
+[data-heading-number]::before {
+  content: attr(data-heading-number) " ";
 }
 
 /* ── Export ─────────────────────────────────────────── */

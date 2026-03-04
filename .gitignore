@@ -19,3 +19,6 @@ backend/server
 
 # data
 backend/data/
+
+# other codes for reference
+reference_code/

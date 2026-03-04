@@ -1272,6 +1272,20 @@ function tabKeyCommand(direction) {
       return codeIndent(state, dispatch)
     }
 
+    // In headings, Tab/Shift-Tab adjusts heading level.
+    const { $from } = state.selection
+    if ($from.parent.type === state.schema.nodes.heading) {
+      const node = $from.parent
+      const level = node.attrs.level
+      const newLevel = direction === "in" ? Math.min(level + 1, 6) : Math.max(level - 1, 1)
+      if (newLevel !== level) {
+        return setBlockType(state.schema.nodes.heading, {
+          level: newLevel, numbered: node.attrs.numbered,
+        })(state, dispatch)
+      }
+      return true
+    }
+
     const itemType = state.schema.nodes.list_item
     if (itemType) {
       const listCmd = direction === "in" ? sinkListItem(itemType) : liftListItem(itemType)
@@ -1610,18 +1624,19 @@ function rawToggleLinePrefix(textarea, prefix) {
   }
 }
 
-function rawSetHeadingLevel(textarea, level) {
+function rawSetHeadingLevel(textarea, level, numbered) {
   const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
   const val = textarea.value
   const line = val.substring(lineStart, lineEnd)
 
-  // Strip any existing heading prefix
-  const stripped = line.replace(/^#{1,6}\s*/, "")
-  const newPrefix = "#".repeat(level) + " "
+  // Strip any existing heading prefix (including optional `1. ` numbered marker)
+  const stripped = line.replace(/^#{1,6}\s*(?:1\.\s)?/, "")
+  const numPrefix = numbered ? "1. " : ""
+  const newPrefix = "#".repeat(level) + " " + numPrefix
 
-  // If line already has this exact heading level, toggle it off
+  // If line already has this exact heading level (ignoring numbered), toggle it off
   const existingMatch = line.match(/^(#{1,6})\s/)
-  const alreadyThisLevel = existingMatch && existingMatch[1].length === level
+  const alreadyThisLevel = existingMatch && existingMatch[1].length === level && !numbered
 
   textarea.focus()
   textarea.setSelectionRange(lineStart, lineEnd)
@@ -2715,27 +2730,52 @@ function buildMenubar() {
   headingWrap.textContent = "H#"
   const headingMenu = document.createElement("div")
   headingMenu.className = "gowiki-raw-dropdown-menu"
+  const headingItems = []
   for (let level = 1; level <= 5; level++) {
     const item = document.createElement("div")
     item.className = "gowiki-raw-dropdown-item"
     item.textContent = `H${level}`
+    item.dataset.level = String(level)
     item.addEventListener("mousedown", e => {
       e.preventDefault()
       headingMenu.style.display = "none"
+      const numbered = e.shiftKey
       if (editMode === "visual" && editorView) {
-        setBlockType(schema.nodes.heading, { level })(editorView.state, editorView.dispatch)
+        setBlockType(schema.nodes.heading, { level, numbered })(editorView.state, editorView.dispatch)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        rawSetHeadingLevel(rawEditor, level)
+        rawSetHeadingLevel(rawEditor, level, numbered)
       }
     })
     headingMenu.appendChild(item)
+    headingItems.push(item)
   }
+  const headingHint = document.createElement("div")
+  headingHint.className = "gowiki-raw-dropdown-item gowiki-raw-dropdown-item--hint"
+  headingHint.textContent = "Hold shift for numbered"
+  headingMenu.appendChild(headingHint)
+
+  function updateHeadingMenuShift(shift) {
+    for (const item of headingItems) {
+      const level = item.dataset.level
+      item.textContent = shift ? `H${level} numbered` : `H${level}`
+    }
+  }
+  headingMenu.addEventListener("keydown", e => { if (e.key === "Shift") updateHeadingMenuShift(true) })
+  headingMenu.addEventListener("keyup", e => { if (e.key === "Shift") updateHeadingMenuShift(false) })
+  document.addEventListener("keydown", e => {
+    if (e.key === "Shift" && headingMenu.style.display === "block") updateHeadingMenuShift(true)
+  })
+  document.addEventListener("keyup", e => {
+    if (e.key === "Shift" && headingMenu.style.display === "block") updateHeadingMenuShift(false)
+  })
+
   headingWrap.appendChild(headingMenu)
   headingWrap.addEventListener("mousedown", e => {
     e.preventDefault()
     const isOpen = headingMenu.style.display === "block"
     headingMenu.style.display = isOpen ? "none" : "block"
+    if (!isOpen) updateHeadingMenuShift(false)
   })
   bar.appendChild(headingWrap)
 
@@ -3128,13 +3168,54 @@ function renderEdit(nextEditMode) {
     editorEl.value = currentMarkdown
 
     editorEl.addEventListener("keydown", e => {
-      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      const isMod = e.metaKey || e.ctrlKey
+      if (e.key === "Enter" && !e.shiftKey && !isMod) {
         if (rawHandleEnterInList(editorEl)) {
           e.preventDefault()
           autoResizeRawEditor(editorEl)
         }
+      } else if (e.key === "h" && isMod && !e.altKey) {
+        e.preventDefault()
+        const { lineStart, lineEnd } = rawGetCurrentLineRange(editorEl)
+        const line = editorEl.value.substring(lineStart, lineEnd)
+        const headMatch = line.match(/^(#{1,6})\s/)
+        if (e.shiftKey) {
+          // Shift+Cmd+H: toggle numbered
+          if (headMatch) {
+            const level = headMatch[1].length
+            const isNumbered = /^#{1,6}\s+1\.\s/.test(line)
+            rawSetHeadingLevel(editorEl, level, !isNumbered)
+          } else {
+            rawSetHeadingLevel(editorEl, 2, true)
+          }
+        } else {
+          // Cmd+H: toggle heading
+          if (headMatch) {
+            // Remove heading entirely
+            const stripped = line.replace(/^#{1,6}\s*(?:1\.\s)?/, "")
+            editorEl.focus()
+            editorEl.setSelectionRange(lineStart, lineEnd)
+            rawInsertText(editorEl, stripped)
+          } else {
+            rawSetHeadingLevel(editorEl, 2, false)
+          }
+        }
+        autoResizeRawEditor(editorEl)
       } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
-        if (rawHandleTabInTable(editorEl, e.shiftKey ? -1 : 1)) {
+        // Tab on heading lines adjusts level
+        const { lineStart, lineEnd } = rawGetCurrentLineRange(editorEl)
+        const line = editorEl.value.substring(lineStart, lineEnd)
+        const headMatch = line.match(/^(#{1,6})\s/)
+        if (headMatch) {
+          const level = headMatch[1].length
+          const newLevel = e.shiftKey ? Math.max(level - 1, 1) : Math.min(level + 1, 6)
+          if (newLevel !== level) {
+            const isNumbered = /^#{1,6}\s+1\.\s/.test(line)
+            rawSetHeadingLevel(editorEl, newLevel, isNumbered)
+          }
+          e.preventDefault()
+          autoResizeRawEditor(editorEl)
+        } else if (rawHandleTabInTable(editorEl, e.shiftKey ? -1 : 1)) {
           e.preventDefault()
           autoResizeRawEditor(editorEl)
         } else if (rawHandleTabInList(editorEl, e.shiftKey ? "out" : "in")) {
@@ -3222,6 +3303,23 @@ function renderEdit(nextEditMode) {
     "Mod-k": (state, dispatch, view) => {
       setExternalLinkCommand()(state, dispatch, view)
       return true
+    },
+    "Mod-h": (state, dispatch) => {
+      const node = state.selection.$from.parent
+      if (node.type === schema.nodes.heading) {
+        return setBlockType(schema.nodes.paragraph)(state, dispatch)
+      }
+      return setBlockType(schema.nodes.heading, { level: 2 })(state, dispatch)
+    },
+    "Mod-Shift-h": (state, dispatch) => {
+      const node = state.selection.$from.parent
+      if (node.type === schema.nodes.heading) {
+        return setBlockType(schema.nodes.heading, {
+          level: node.attrs.level,
+          numbered: !node.attrs.numbered,
+        })(state, dispatch)
+      }
+      return setBlockType(schema.nodes.heading, { level: 2, numbered: true })(state, dispatch)
     },
     "Mod-s": () => {
       void saveDraftExplicit()

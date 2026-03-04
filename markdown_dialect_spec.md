@@ -21,7 +21,8 @@ In the following syntax `\n` is meant to be interpreted as a new line contained 
 | > Blockquote | `> Blockquote` | `<blockquote>Blockquote</blockquote>` | 
 | - Unnumbered List | `- Unnumbered List` | `<ul><li>Unnumbered List</li></ul>` | `* Unnumbered List` | We reject alternative syntax only for the bijective principle, we might transform it upon import |
 | 1. Numbered List | `1. Numbered List` | `<ol><li>Numbered List</li></ol>` | `. Numbered List` | We keep CommonMark ordered-list syntax for interoperability. In raw mode, helpers may still auto-renumber or generate list numbering ergonomically. |
-| Numbered heading (property-based) | `{heading numbered=true}` then `## Heading 2` | `<h2 class="numbered">Heading 2</h2>` | `## . Numbered heading 2` | Numbering is controlled by heading properties, not punctuation syntax. Typical use: skip top-level title (`#`), start numbering at `##`, and optionally disable numbering below a chosen level with `{heading numbered=false}`. |
+| Numbered heading | `## 1. Heading 2` | `<h2>1. Heading 2</h2>` | `{heading numbered=true}` | A heading prefixed with `1.` is a numbered heading. The stored number is always `1.` at every nesting level; the editor renumbers on save to maintain correct sequence within each level. In the editor, `Shift+H2` (etc.) creates a numbered heading; `H2` creates a plain one. Mixed documents (some headings numbered, some not) are supported naturally since numbering is per-heading. |
+| Numbered heading (rendered label) | *(render-time only)* | `<h2>1. Introduction</h2>`, `<h3>1.1 Concepts</h3>` | | The full hierarchical label (`1.`, `1.1`, `1.1.1`) is computed at render time from the heading's position in the tree. The rendering scheme (`1/a/i` etc.) may be configurable in future. The stored markdown always uses `1.` at every level regardless of depth, consistent with how ordered lists are stored. |
 | --- | `---` | `<hr/>` | `***` | 
 | `Inline code` | \`Inline code\` | <code>Inline code</code> |
 | ```\nCode block\n``` | \`\`\`\nCode block\n\`\`\` | <code>Code block</code> |
@@ -177,11 +178,6 @@ Object properties are represented between curly braces `{}`, the first word that
 
 `{table width=1000px}`
 
-Examples:
-
-- `{heading numbered=true}` before a heading starts/marks numbering at that level.
-- `{heading numbered=false}` before a heading disables numbering for that heading (useful to stop numbering below a certain depth).
-
 ## Include directive
 
 The include directive embeds the content of another page as a read-only zone. It is a **self-contained directive** (not a prefix to another block):
@@ -273,7 +269,7 @@ and start a new one.
 
 Trailing whitespace is ignored everywhere.
 
-The “two spaces = line break” rule does not exist.
+The "two spaces = line break" rule does not exist.
 
 
 ### 6. Literal \n = explicit hard line break
@@ -341,7 +337,7 @@ Status legend:
 | Headings | ATX headings (`#` .. `######`) | `implemented` | Setext headings are not implemented by custom handlers. |
 | Lists (unordered) | `- item` | `implemented` | Core list handlers support this form. |
 | Lists (ordered) | `1. item` (CommonMark) | `implemented` | Standard ordered-list syntax is canonical. Optional raw-mode helpers may auto-renumber without changing stored syntax. |
-| Numbered headings | directive/property-based (`{heading numbered=true}`) | `planned` | Avoid a different syntax for numbered headers. Allows numbering to start below top-level title and be disabled at deeper levels with explicit properties. |
+| Numbered headings | `## 1. Heading` prefix syntax; editor renumbers on save; hierarchical label computed at render time | `planned` | Per-heading numbering: a heading is numbered or not by presence of the `1.` prefix. Stored markdown always uses `1.` at every level; rendered label (`1.`, `1.1`, `1.1.1`) computed at render time. Consistent with ordered list handling. DokuWiki numbered heading import maps to this syntax. In the editor, `Shift+HN` creates a numbered heading. |
 | Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
 | Table header variants | `{table headers=...}` with 1st_row, 2_rows, 1st_col, 2_cols, both | `planned` | Default 1st_row requires no directive. |
 | Table column properties | `{table colN.align colN.width colN.color=...}` | `planned` | Per-column alignment, width, and color rules. |

@@ -26,6 +26,15 @@ export function registerCoreNodes(reg: Registry) {
     nodes[name] = spec
   })
 
+  // Extend heading to carry a `numbered` attribute.
+  nodes.heading = {
+    ...nodes.heading,
+    attrs: { level: { default: 1 }, numbered: { default: false } },
+    toDOM(node) {
+      return ["h" + node.attrs.level, node.attrs.numbered ? { class: "gowiki-heading-numbered" } : {}, 0]
+    },
+  }
+
   const marks: Record<string, MarkSpec> = {}
   basicSchema.spec.marks.forEach((name: string, spec: MarkSpec) => {
     marks[name] = spec
@@ -79,6 +88,7 @@ export function registerCoreNodes(reg: Registry) {
 
   registerMarkdownPrinters(reg)
   registerHeadingAnchors(reg)
+  registerHeadingNumbers(reg)
 }
 
 /* --------------------------------------------------
@@ -213,6 +223,28 @@ function registerEmphasis(reg: Registry) {
  * -------------------------------------------------- */
 
 function registerHeading(reg: Registry) {
+  // markdown-it core rule: detect `1. ` prefix in heading inline content
+  // and transfer it to the heading_open token as meta.numbered.
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.core.ruler.push("gowiki_numbered_heading", (state: any) => {
+      for (let i = 0; i < state.tokens.length; i++) {
+        if (state.tokens[i].type === "heading_open" && i + 1 < state.tokens.length) {
+          const inline = state.tokens[i + 1]
+          if (inline.type === "inline" && inline.content.startsWith("1. ")) {
+            state.tokens[i].meta = { ...(state.tokens[i].meta || {}), numbered: true }
+            inline.content = inline.content.slice(3)
+            if (inline.children?.length > 0 && inline.children[0].type === "text") {
+              const t = inline.children[0]
+              if (t.content.startsWith("1. ")) {
+                t.content = t.content.slice(3)
+              }
+            }
+          }
+        }
+      }
+    })
+  })
+
   reg.registerNode("heading_open", {
     open(ctx) {
       const tag = ctx.token.tag
@@ -220,7 +252,8 @@ function registerHeading(reg: Registry) {
       if (!level || level < 1 || level > 6) {
         throw new Error(`Invalid heading token: ${tag}`)
       }
-      ctx.open(ctx.schema.nodes.heading.create({ level }))
+      const numbered = !!ctx.token.meta?.numbered
+      ctx.open(ctx.schema.nodes.heading.create({ level, numbered }))
     },
   })
 
@@ -412,11 +445,12 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMNode("heading", {
     print(node, ctx, recurse) {
       const level = node.attrs.level
+      const numbered = node.attrs.numbered
       let out = ""
       node.content.forEach((child) => {
         out += recurse(child)
       })
-      return "#".repeat(level) + " " + out + "\n\n"
+      return "#".repeat(level) + " " + (numbered ? "1. " : "") + out + "\n\n"
     },
   })
 
@@ -544,6 +578,68 @@ function buildHeadingDecorations(doc: any): DecorationSet {
       slugCounts.set(base, count + 1)
       const id = count === 0 ? base : `${base}-${count}`
       decorations.push(Decoration.node(pos, pos + node.nodeSize, { id }))
+      return false
+    }
+  })
+
+  return DecorationSet.create(doc, decorations)
+}
+
+/* --------------------------------------------------
+ * Heading numbering decorations
+ * -------------------------------------------------- */
+
+const headingNumberKey = new PluginKey("gowiki.headingNumbers")
+
+function registerHeadingNumbers(reg: Registry) {
+  reg.registerEditorPlugin(() => {
+    return new PMPlugin({
+      key: headingNumberKey,
+      state: {
+        init(_, state) {
+          return computeHeadingNumbers(state.doc)
+        },
+        apply(tr, old) {
+          if (tr.docChanged) {
+            return computeHeadingNumbers(tr.doc)
+          }
+          return old
+        },
+      },
+      props: {
+        decorations(state) {
+          return headingNumberKey.getState(state)
+        },
+      },
+    })
+  })
+}
+
+function computeHeadingNumbers(doc: any): DecorationSet {
+  const counters = [0, 0, 0, 0, 0, 0]
+  const decorations: Decoration[] = []
+
+  doc.descendants((node: any, pos: number) => {
+    if (node.type.name === "heading") {
+      const level: number = node.attrs.level
+      if (node.attrs.numbered) {
+        counters[level - 1]++
+        for (let i = level; i < 6; i++) counters[i] = 0
+        // Build label: collect all active ancestor counters up to this level
+        const parts: number[] = []
+        for (let i = 0; i < level; i++) {
+          if (counters[i] > 0) parts.push(counters[i])
+        }
+        const label = parts.join(".") + "."
+        decorations.push(
+          Decoration.node(pos, pos + node.nodeSize, {
+            "data-heading-number": label,
+          })
+        )
+      } else {
+        // Non-numbered heading resets deeper counters
+        for (let i = level; i < 6; i++) counters[i] = 0
+      }
       return false
     }
   })
