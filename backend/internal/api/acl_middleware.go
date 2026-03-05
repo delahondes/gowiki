@@ -65,7 +65,7 @@ func extractPagePath(r *http.Request) string {
 func (s *Server) getUserGroups(username string) []string {
 	user, err := s.userStore.Get(username)
 	if err == nil {
-		return user.Groups
+		return user.EffectiveGroups()
 	}
 	return nil
 }

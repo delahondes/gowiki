@@ -4,7 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -56,7 +60,7 @@ func NewOAuthClient(ctx context.Context, cfg OAuthConfig) (*OAuthClient, error) 
 		ClientSecret: cfg.ClientSecret,
 		RedirectURL:  cfg.RedirectURL,
 		Endpoint:     provider.Endpoint(),
-		Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+		Scopes:       []string{oidc.ScopeOpenID, "email", "profile", "GroupMember.Read.All"},
 	}
 
 	verifier := provider.Verifier(&oidc.Config{
@@ -89,38 +93,44 @@ func (c *OAuthClient) SetRedirectURL(u string) {
 	c.config.RedirectURL = u
 }
 
+// OAuthResult holds the result of a successful token exchange.
+type OAuthResult struct {
+	Claims      *OAuthClaims
+	Origin      string // The origin URL the user started from.
+	AccessToken string // For calling Microsoft Graph API.
+}
+
 // ExchangeAndVerify exchanges the authorization code for tokens,
 // verifies the ID token, and extracts the user claims.
-// Returns claims and the origin URL stored during AuthorizationURL.
-func (c *OAuthClient) ExchangeAndVerify(ctx context.Context, code, state string) (*OAuthClaims, string, error) {
+func (c *OAuthClient) ExchangeAndVerify(ctx context.Context, code, state string) (*OAuthResult, error) {
 	// Verify state to prevent CSRF.
 	originVal, ok := c.states.LoadAndDelete(state)
 	if !ok {
-		return nil, "", fmt.Errorf("invalid or expired state token")
+		return nil, fmt.Errorf("invalid or expired state token")
 	}
 	origin, _ := originVal.(string)
 
 	// Exchange code for tokens.
 	token, err := c.config.Exchange(ctx, code)
 	if err != nil {
-		return nil, "", fmt.Errorf("code exchange: %w", err)
+		return nil, fmt.Errorf("code exchange: %w", err)
 	}
 
 	// Extract and verify the ID token.
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
-		return nil, "", fmt.Errorf("no id_token in token response")
+		return nil, fmt.Errorf("no id_token in token response")
 	}
 
 	idToken, err := c.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, "", fmt.Errorf("verify id_token: %w", err)
+		return nil, fmt.Errorf("verify id_token: %w", err)
 	}
 
 	// Extract claims.
 	var claims OAuthClaims
 	if err := idToken.Claims(&claims); err != nil {
-		return nil, "", fmt.Errorf("extract claims: %w", err)
+		return nil, fmt.Errorf("extract claims: %w", err)
 	}
 
 	// Azure sometimes puts the email in preferred_username or upn instead of email.
@@ -133,10 +143,53 @@ func (c *OAuthClient) ExchangeAndVerify(ctx context.Context, code, state string)
 	}
 
 	if claims.Email == "" {
-		return nil, "", fmt.Errorf("no email claim in ID token (checked email, preferred_username, upn)")
+		return nil, fmt.Errorf("no email claim in ID token (checked email, preferred_username, upn)")
 	}
 
-	return &claims, origin, nil
+	return &OAuthResult{
+		Claims:      &claims,
+		Origin:      origin,
+		AccessToken: token.AccessToken,
+	}, nil
+}
+
+// FetchGroups calls Microsoft Graph API to get the user's group display names.
+func FetchGroups(ctx context.Context, accessToken string) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		"https://graph.microsoft.com/v1.0/me/memberOf", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("graph request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("graph returned %d: %s", resp.StatusCode, body)
+	}
+
+	var result struct {
+		Value []struct {
+			ODataType   string `json:"@odata.type"`
+			DisplayName string `json:"displayName"`
+		} `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode graph response: %w", err)
+	}
+
+	var groups []string
+	for _, v := range result.Value {
+		if v.ODataType == "#microsoft.graph.group" && v.DisplayName != "" {
+			groups = append(groups, strings.ToLower(v.DisplayName))
+		}
+	}
+	return groups, nil
 }
 
 func generateState() string {

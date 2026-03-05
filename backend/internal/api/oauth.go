@@ -78,11 +78,33 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	claims, origin, err := s.oauthClient.ExchangeAndVerify(ctx, code, state)
+	result, err := s.oauthClient.ExchangeAndVerify(ctx, code, state)
 	if err != nil {
 		log.Printf("oauth exchange error: %v", err)
 		serveOAuthError(w, "Authentication failed. Please try again.")
 		return
+	}
+
+	claims := result.Claims
+
+	// Fetch Azure AD groups via Graph API.
+	var azureGroups []string
+	if result.AccessToken != "" {
+		groups, gErr := auth.FetchGroups(ctx, result.AccessToken)
+		if gErr != nil {
+			log.Printf("oauth: failed to fetch groups for %q: %v (continuing without group sync)", claims.Email, gErr)
+		} else {
+			azureGroups = groups
+			log.Printf("oauth: fetched %d groups for %q: %v", len(groups), claims.Email, groups)
+
+			// Ensure Azure groups exist in the GroupStore so they appear in the Groups tab.
+			for _, g := range groups {
+				_ = s.groupStore.Create(auth.Group{
+					Name:        g,
+					Description: "Imported from Azure AD",
+				})
+			}
+		}
 	}
 
 	// Look up user by email.
@@ -110,28 +132,37 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 			displayName = claims.Email
 		}
 
-		groups := cfg.Auth.OAuth.DefaultGroups
-		if groups == nil {
-			groups = []string{}
+		defaultGroups := cfg.Auth.OAuth.DefaultGroups
+		if defaultGroups == nil {
+			defaultGroups = []string{}
 		}
 
 		newUser := auth.User{
 			Username:    username,
 			Email:       claims.Email,
 			DisplayName: displayName,
-			Groups:      groups,
+			Groups:      defaultGroups,
+			OAuthGroups: azureGroups,
 		}
 		if createErr := s.userStore.Create(newUser, ""); createErr != nil {
 			log.Printf("oauth: failed to auto-create user for %q: %v", claims.Email, createErr)
 			serveOAuthError(w, "Failed to create account. Contact an administrator.")
 			return
 		}
-		log.Printf("oauth: auto-created user %q for email %q", username, claims.Email)
+		log.Printf("oauth: auto-created user %q for email %q (local groups: %v, oauth groups: %v)", username, claims.Email, defaultGroups, azureGroups)
 		user = newUser
 	} else if err != nil {
 		log.Printf("oauth: user lookup error for %q: %v", claims.Email, err)
 		serveOAuthError(w, "Internal error. Please try again.")
 		return
+	} else if len(azureGroups) > 0 {
+		// Existing user — sync only OAuthGroups, leave local Groups untouched.
+		if err := s.userStore.Update(user.Username, auth.UserUpdate{OAuthGroups: &azureGroups}); err != nil {
+			log.Printf("oauth: failed to sync oauth groups for %q: %v", user.Username, err)
+		} else {
+			log.Printf("oauth: synced oauth groups for %q: %v (local groups preserved: %v)", user.Username, azureGroups, user.Groups)
+			user.OAuthGroups = azureGroups
+		}
 	}
 
 	if user.Disabled {
@@ -146,8 +177,8 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Redirect back to the origin the user started from.
 	redirectTo := "/"
-	if origin != "" {
-		redirectTo = origin + "/"
+	if result.Origin != "" {
+		redirectTo = result.Origin + "/"
 	}
 	http.Redirect(w, r, redirectTo, http.StatusFound)
 }

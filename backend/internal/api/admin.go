@@ -33,11 +33,16 @@ func (s *Server) handleListUsers(w http.ResponseWriter, _ *http.Request) {
 	// Strip password hashes before returning.
 	safe := make([]map[string]any, len(users))
 	for i, u := range users {
+		oauthGroups := u.OAuthGroups
+		if oauthGroups == nil {
+			oauthGroups = []string{}
+		}
 		safe[i] = map[string]any{
 			"username":     u.Username,
 			"email":        u.Email,
 			"display_name": u.DisplayName,
 			"groups":       u.Groups,
+			"oauth_groups": oauthGroups,
 			"disabled":     u.Disabled,
 			"created_at":   u.CreatedAt,
 			"last_login":   u.LastLogin,

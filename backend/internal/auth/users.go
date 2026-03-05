@@ -27,9 +27,32 @@ type User struct {
 	Email        string   `json:"email"`
 	DisplayName  string   `json:"display_name"`
 	Groups       []string `json:"groups"`
+	OAuthGroups  []string `json:"oauth_groups,omitempty"` // Synced from external provider (Azure AD, etc.)
 	Disabled     bool     `json:"disabled"`
 	CreatedAt    string   `json:"created_at"`
 	LastLogin    string   `json:"last_login,omitempty"`
+}
+
+// EffectiveGroups returns the union of local Groups and OAuthGroups.
+func (u User) EffectiveGroups() []string {
+	seen := make(map[string]bool, len(u.Groups)+len(u.OAuthGroups))
+	var result []string
+	for _, g := range u.Groups {
+		if !seen[g] {
+			seen[g] = true
+			result = append(result, g)
+		}
+	}
+	for _, g := range u.OAuthGroups {
+		if !seen[g] {
+			seen[g] = true
+			result = append(result, g)
+		}
+	}
+	if result == nil {
+		return []string{}
+	}
+	return result
 }
 
 type UserStore struct {
@@ -160,13 +183,13 @@ func (s *UserStore) Verify(username, password string) error {
 	return ErrInvalidCredentials
 }
 
-// IsAdmin returns true if the user belongs to the "admin" group.
+// IsAdmin returns true if the user belongs to the "admin" group (local or OAuth).
 func (s *UserStore) IsAdmin(username string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, u := range s.users {
 		if u.Username == username {
-			for _, g := range u.Groups {
+			for _, g := range u.EffectiveGroups() {
 				if g == "admin" {
 					return true
 				}
@@ -254,6 +277,7 @@ type UserUpdate struct {
 	Email       *string   `json:"email"`
 	DisplayName *string   `json:"display_name"`
 	Groups      *[]string `json:"groups"`
+	OAuthGroups *[]string `json:"oauth_groups"`
 	Disabled    *bool     `json:"disabled"`
 }
 
@@ -272,6 +296,9 @@ func (s *UserStore) Update(username string, updates UserUpdate) error {
 			}
 			if updates.Groups != nil {
 				s.users[i].Groups = *updates.Groups
+			}
+			if updates.OAuthGroups != nil {
+				s.users[i].OAuthGroups = *updates.OAuthGroups
 			}
 			if updates.Disabled != nil {
 				s.users[i].Disabled = *updates.Disabled

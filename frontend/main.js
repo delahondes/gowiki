@@ -5481,7 +5481,12 @@ async function renderAdminUsersTab(container) {
       tr.appendChild(tdEmail)
 
       const tdGroups = document.createElement("td")
-      tdGroups.textContent = (user.groups || []).join(", ")
+      const localGroups = user.groups || []
+      const oauthGroups = user.oauth_groups || []
+      const allGroupParts = []
+      if (localGroups.length > 0) allGroupParts.push(localGroups.join(", "))
+      if (oauthGroups.length > 0) allGroupParts.push(oauthGroups.map(g => g + " (Azure)").join(", "))
+      tdGroups.textContent = allGroupParts.join(", ") || ""
       tr.appendChild(tdGroups)
 
       const tdStatus = document.createElement("td")
@@ -5586,7 +5591,14 @@ async function showEditUserModal(user) {
   return showAdminModal("Edit User: " + user.username, (body, close, showError) => {
     const emailInput = adminFormField(body, "Email", "email", user.email || "")
     const displayInput = adminFormField(body, "Display Name", "text", user.display_name || "")
-    const groupsInput = adminFormField(body, "Groups (comma-separated)", "text", (user.groups || []).join(", "))
+    const groupsInput = adminFormField(body, "Local groups (comma-separated)", "text", (user.groups || []).join(", "))
+
+    const oauthGroups = user.oauth_groups || []
+    if (oauthGroups.length > 0) {
+      const oauthField = adminFormField(body, "Azure AD groups (synced on login)", "text", oauthGroups.join(", "))
+      oauthField.disabled = true
+      oauthField.style.opacity = "0.6"
+    }
 
     const disabledLabel = document.createElement("label")
     disabledLabel.className = "gowiki-admin-checkbox-label"
