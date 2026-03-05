@@ -13,6 +13,7 @@ import (
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/storage"
+	"gowiki/backend/internal/todo"
 )
 
 func main() {
@@ -104,6 +105,27 @@ func main() {
 		cancel()
 	}
 
+	// Initialize todo plugin: auto-enabled when database is connected,
+	// unless explicitly disabled via todo.disabled config flag.
+	var todoService *todo.TodoService
+	todoEnabled := dbPool.IsConnected() && (cfg.Todo.Enabled || !cfg.Todo.Disabled)
+	if todoEnabled {
+		todoCtx, todoCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := todo.RunMigrations(todoCtx, dbPool); err != nil {
+			log.Printf("WARNING: todo migration failed: %v", err)
+		} else {
+			log.Printf("todo plugin: migrations applied")
+			todoStore := todo.NewTodoStore(dbPool)
+			todoHub := todo.NewHub()
+			dispatcher := todo.NewDispatcher(cfg.Todo.Notify, cfg.Site.Title)
+			todoService = todo.NewService(todoStore, todoHub, dispatcher)
+			store.TodoSync = todo.NewTodoSyncer(todoStore, todoHub, dispatcher)
+			go todo.RunScheduler(context.Background(), todoStore, dispatcher, cfg.Todo.ReminderHours)
+			log.Printf("todo plugin: active")
+		}
+		todoCancel()
+	}
+
 	// Initialize tag index.
 	tagIndex := storage.NewTagIndex(metaRoot)
 	if err := tagIndex.Load(); err != nil {
@@ -115,7 +137,7 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir))
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService)
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

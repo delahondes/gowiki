@@ -146,8 +146,8 @@ func TestSearchIndex_RebuildFromDir(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("expected result for 'documentation'")
 	}
-	if results[0].Path != "docs" {
-		t.Errorf("expected path 'docs' for namespace index, got %q", results[0].Path)
+	if results[0].Path != "/docs" {
+		t.Errorf("expected path '/docs' for namespace index, got %q", results[0].Path)
 	}
 	if results[0].Title != "Documentation" {
 		t.Errorf("expected title 'Documentation', got %q", results[0].Title)

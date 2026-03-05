@@ -22,6 +22,7 @@ import (
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
+	"gowiki/backend/internal/todo"
 )
 
 type PageStore interface {
@@ -92,11 +93,12 @@ type Server struct {
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
 	oauthClient         *auth.OAuthClient
+	todoService         *todo.TodoService
 	serveWeb            bool
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -116,9 +118,10 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		tagIndex:           tagIndex,
 		browserAllocCtx:    browserAllocCtx,
 		browserAllocCancel: browserAllocCancel,
-		dbPool:   dbPool,
-		serveWeb: serveWeb,
-		webDirPath: webDirPath,
+		dbPool:      dbPool,
+		todoService: todoService,
+		serveWeb:    serveWeb,
+		webDirPath:  webDirPath,
 	}
 
 	// If database pool is already connected, initialize stores.
@@ -260,6 +263,17 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Put("/api/database/{table}/page/*", s.handleDatabaseUpsertRowByPage)
 	})
 
+	// Todo plugin endpoints.
+	if s.todoService != nil {
+		r.Route("/api/plugin/todo/v1", func(r chi.Router) {
+			r.Use(s.requireAuth)
+			extractUsername := func(r *http.Request) string {
+				return UsernameFromContext(r.Context())
+			}
+			todo.RegisterRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+		})
+	}
+
 	r.Get("/media/*", s.handleServeMedia)
 	r.Get(`/{path:.*\..*}`, s.handleFilePath)
 
@@ -329,6 +343,14 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Auto-complete "read" wiki action tasks.
+	if s.todoService != nil {
+		username := UsernameFromContext(r.Context())
+		if username != "" {
+			go s.todoService.AutoCompleteWikiAction(context.Background(), "read", page.Path, username)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -367,6 +389,11 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Auto-complete "edit" wiki action tasks.
+	if s.todoService != nil {
+		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, author)
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -504,7 +531,6 @@ func (s *Server) handleServeMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cleaned := path.Clean("/" + raw)
-	cleaned = strings.TrimPrefix(cleaned, "/")
 
 	s.serveMediaWithVersioning(w, r, cleaned)
 }
@@ -517,7 +543,6 @@ func (s *Server) handleServeMediaVersion(w http.ResponseWriter, r *http.Request)
 	}
 
 	cleaned := path.Clean("/" + mediaPath)
-	cleaned = strings.TrimPrefix(cleaned, "/")
 
 	vStr := r.URL.Query().Get("v")
 	version, err := strconv.ParseInt(vStr, 10, 64)

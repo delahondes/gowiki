@@ -18,9 +18,9 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pagePath := strings.TrimPrefix(r.URL.Path, "/api/export/pdf/")
-	if pagePath == "" {
-		pagePath = "index"
+	pagePath := "/" + strings.TrimPrefix(r.URL.Path, "/api/export/pdf/")
+	if pagePath == "/" {
+		pagePath = "/index"
 	}
 
 	// Determine the base URL for the wiki.

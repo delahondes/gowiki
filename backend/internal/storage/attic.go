@@ -172,7 +172,7 @@ func (a *Attic) MigrateExistingPages(contentRoot, metaRoot string, changelog *Ch
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
-		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath := "/" + strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
 
 		// Skip if attic already has entries.

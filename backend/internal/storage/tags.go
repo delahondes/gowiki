@@ -154,7 +154,7 @@ func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string) []PageEntry {
 		}
 		title := idx.PageTitles[p]
 		if title == "" {
-			title = "/" + p
+			title = p
 		}
 		result = append(result, PageEntry{Path: p, Title: title})
 	}
@@ -166,15 +166,15 @@ func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string) []PageEntry {
 
 func hasPathPrefix(pagePath, prefix string) bool {
 	clean := prefix
-	// Strip leading slash — internal paths are stored without it.
-	for len(clean) > 0 && clean[0] == '/' {
-		clean = clean[1:]
-	}
 	// Strip trailing slash.
 	for len(clean) > 0 && clean[len(clean)-1] == '/' {
 		clean = clean[:len(clean)-1]
 	}
-	if clean == "" {
+	// Ensure leading slash for consistency with /-prefixed paths.
+	if len(clean) > 0 && clean[0] != '/' {
+		clean = "/" + clean
+	}
+	if clean == "" || clean == "/" {
 		return true // empty prefix matches everything
 	}
 	if pagePath == clean {

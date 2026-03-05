@@ -5157,10 +5157,10 @@ async function renderSitemapPage() {
     const pages = data.pages || []
 
     function nodeUrl(node) {
-      if (node.path === "index") return "/"
+      if (node.path === "/index" || node.path === "index") return "/"
       const hasChildren = node.children && node.children.length > 0
-      if (node.is_namespace_index || hasChildren) return "/" + node.path + "/"
-      return "/" + node.path
+      if (node.is_namespace_index || hasChildren) return node.path + "/"
+      return node.path
     }
 
     function leafName(node) {

@@ -192,8 +192,8 @@ class TagQueryNodeView {
         for (const p of pages) {
           const li = document.createElement("li")
           const a = document.createElement("a")
-          a.href = "/" + p.path
-          a.textContent = p.title || ("/" + p.path)
+          a.href = p.path
+          a.textContent = p.title || p.path
           li.appendChild(a)
           ul.appendChild(li)
         }
@@ -215,8 +215,8 @@ class TagQueryNodeView {
           const row = document.createElement("tr")
           const tdTitle = document.createElement("td")
           const a = document.createElement("a")
-          a.href = "/" + p.path
-          a.textContent = p.title || ("/" + p.path)
+          a.href = p.path
+          a.textContent = p.title || p.path
           tdTitle.appendChild(a)
           row.appendChild(tdTitle)
 

@@ -1,0 +1,265 @@
+package todo
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"gowiki/backend/internal/auth"
+)
+
+// UsernameExtractor is a function that extracts the username from an HTTP request context.
+// This avoids a circular import between the todo and api packages.
+type UsernameExtractor func(r *http.Request) string
+
+// RegisterRoutes mounts the todo API routes on the given chi router.
+// All routes are under /api/plugin/todo/v1/.
+func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername}
+
+	r.Get("/tasks", h.handleList)
+	r.Post("/tasks", h.handleCreate)
+	r.Get("/tasks/mine", h.handleMine)
+	r.Get("/tasks/page/*", h.handleByPage)
+	r.Get("/tasks/{id}", h.handleGet)
+	r.Patch("/tasks/{id}", h.handlePatch)
+	r.Delete("/tasks/{id}", h.handleDelete)
+	r.Post("/tasks/{id}/complete", h.handleComplete)
+	r.Post("/tasks/{id}/reopen", h.handleReopen)
+	r.Get("/stream", h.handleStream)
+}
+
+type handlers struct {
+	svc             *TodoService
+	userStore       *auth.UserStore
+	groupStore      *auth.GroupStore
+	extractUsername UsernameExtractor
+}
+
+func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
+	page := r.URL.Query().Get("page")
+	if page != "" && !strings.HasPrefix(page, "/") {
+		page = "/" + page
+	}
+	opts := ListOptions{
+		Status:   Status(r.URL.Query().Get("status")),
+		Assignee: r.URL.Query().Get("assignee"),
+		Page:     page,
+		Tag:      r.URL.Query().Get("tag"),
+		Priority: Priority(r.URL.Query().Get("priority")),
+		Cursor:   r.URL.Query().Get("cursor"),
+		Limit:    parseInt(r.URL.Query().Get("limit")),
+	}
+
+	tasks, cursor, err := h.svc.Store().List(r.Context(), opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tasks == nil {
+		tasks = []*Task{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tasks":  tasks,
+		"cursor": cursor,
+	})
+}
+
+func (h *handlers) handleCreate(w http.ResponseWriter, r *http.Request) {
+	var req CreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	if req.Title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+
+	req.CreatedBy = h.extractUsername(r)
+
+	task, err := h.svc.CreateTask(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, task)
+}
+
+func (h *handlers) handleGet(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	task, err := h.svc.Store().Get(r.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *handlers) handlePatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var patch Patch
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	task, err := h.svc.Store().Update(r.Context(), id, patch)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.svc.Hub().Publish(task.Assignee.Target, Event{Type: "task.updated", Task: task})
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *handlers) handleDelete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.svc.Store().Delete(r.Context(), id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": id})
+}
+
+func (h *handlers) handleComplete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	userID := h.extractUsername(r)
+
+	var resolver GroupResolver
+	if h.groupStore != nil && h.userStore != nil {
+		resolver = &authGroupResolver{groupStore: h.groupStore, userStore: h.userStore}
+	}
+
+	task, err := h.svc.CompleteTask(r.Context(), id, userID, resolver)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *handlers) handleReopen(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	task, err := h.svc.ReopenTask(r.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *handlers) handleMine(w http.ResponseWriter, r *http.Request) {
+	userID := h.extractUsername(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	// Get user's groups.
+	var groups []string
+	if h.userStore != nil {
+		user, err := h.userStore.Get(userID)
+		if err == nil {
+			groups = user.EffectiveGroups()
+		}
+	}
+
+	tasks, err := h.svc.Store().ListMine(r.Context(), userID, groups)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tasks == nil {
+		tasks = []*Task{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (h *handlers) handleByPage(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+	// Chi URL params don't include leading "/"; canonical internal paths are "/"-prefixed.
+	if !strings.HasPrefix(pagePath, "/") {
+		pagePath = "/" + pagePath
+	}
+
+	tasks, err := h.svc.Store().ListForPage(r.Context(), pagePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if tasks == nil {
+		tasks = []*Task{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (h *handlers) handleStream(w http.ResponseWriter, r *http.Request) {
+	userID := h.extractUsername(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	h.svc.Hub().HandleStream(w, r, userID)
+}
+
+// --- Helpers ---
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+
+// authGroupResolver resolves group membership using the auth stores.
+type authGroupResolver struct {
+	groupStore *auth.GroupStore
+	userStore  *auth.UserStore
+}
+
+func (r *authGroupResolver) GroupMembers(groupName string) []string {
+	users := r.userStore.List()
+	var members []string
+	for _, u := range users {
+		for _, g := range u.EffectiveGroups() {
+			if g == groupName {
+				members = append(members, u.Username)
+				break
+			}
+		}
+	}
+	return members
+}

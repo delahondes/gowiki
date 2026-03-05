@@ -76,6 +76,7 @@ type FileStore struct {
 	Drafts            *DraftStore
 	MediaVersionStore *MediaVersionStore
 	DatabaseSync      DatabaseSyncer
+	TodoSync          DatabaseSyncer
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -325,6 +326,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		s.DatabaseSync.SyncPageRows(normalized, markdownContent)
 	}
 
+	// --- Sync todo tasks if configured ---
+	if s.TodoSync != nil {
+		s.TodoSync.SyncPageRows(normalized, markdownContent)
+	}
+
 	// --- Compute newly orphaned media ---
 	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, newMediaRefs)
 
@@ -405,6 +411,11 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// Sync database: remove rows for deleted page.
 	if s.DatabaseSync != nil {
 		s.DatabaseSync.RemovePageRows(normalized)
+	}
+
+	// Sync todo: cancel tasks for deleted page.
+	if s.TodoSync != nil {
+		s.TodoSync.RemovePageRows(normalized)
 	}
 
 	// Snapshot old media refs before removing from index.
@@ -489,7 +500,7 @@ func (s *FileStore) RebuildIndexes() error {
 		rel = filepath.ToSlash(rel)
 
 		// Derive the logical page path from the file path.
-		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath := "/" + strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
 
 		content, readErr := os.ReadFile(absPath)
@@ -564,7 +575,7 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 		rel = filepath.ToSlash(rel)
 
 		isNsIndex := strings.HasSuffix(rel, "/index.md")
-		pagePath := strings.TrimSuffix(rel, ".md")
+		pagePath := "/" + strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
 
 		content, readErr := os.ReadFile(absPath)
@@ -735,8 +746,7 @@ func normalizePagePath(raw string) (string, error) {
 		return "", fmt.Errorf("page path cannot be empty")
 	}
 	cleaned := path.Clean("/" + trimmed)
-	cleaned = strings.TrimPrefix(cleaned, "/")
-	if cleaned == "." || cleaned == "" {
+	if cleaned == "." || cleaned == "/" {
 		return "", fmt.Errorf("invalid page path")
 	}
 	return cleaned, nil

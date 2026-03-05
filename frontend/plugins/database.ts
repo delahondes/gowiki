@@ -498,13 +498,13 @@ class DatabaseQueryNodeView {
           const a = document.createElement("a")
           a.className = "gowiki-database-page-link"
           a.textContent = val != null ? String(val) : row.page_path
-          a.href = "/" + row.page_path
+          a.href = row.page_path
           td.appendChild(a)
         } else if (f.type === "page_link" && val) {
           const a = document.createElement("a")
           a.className = "gowiki-database-page-link"
           a.textContent = String(val)
-          a.href = "/" + String(val)
+          a.href = String(val)
           td.appendChild(a)
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")

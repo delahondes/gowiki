@@ -44,12 +44,14 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 	nodeMap := map[string]*sitemapTreeNode{"": root}
 
 	for _, p := range pages {
-		parts := strings.Split(p.Path, "/")
+		// Strip leading "/" for splitting; the path in the node keeps it.
+		trimmed := strings.TrimPrefix(p.Path, "/")
+		parts := strings.Split(trimmed, "/")
 		parent := root
 
 		// Ensure all intermediate namespace nodes exist.
 		for i := 0; i < len(parts)-1; i++ {
-			prefix := strings.Join(parts[:i+1], "/")
+			prefix := "/" + strings.Join(parts[:i+1], "/")
 			if existing, ok := nodeMap[prefix]; ok {
 				parent = existing
 			} else {

@@ -255,11 +255,7 @@ func normalizeMediaPath(raw string) (string, error) {
 		return "", fmt.Errorf("media path cannot be empty")
 	}
 	cleaned := path.Clean("/" + trimmed)
-	cleaned = strings.TrimPrefix(cleaned, "/")
-	if cleaned == "." || cleaned == "" {
-		return "", fmt.Errorf("invalid media path")
-	}
-	if strings.HasPrefix(cleaned, "../") || cleaned == ".." {
+	if cleaned == "." || cleaned == "/" {
 		return "", fmt.Errorf("invalid media path")
 	}
 	return cleaned, nil

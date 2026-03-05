@@ -112,8 +112,12 @@ func (ds *DatabaseSync) RemovePageRows(pagePath string) {
 // e.g. pagePath="deviations/sub/page", folder="deviations" → true
 // e.g. pagePath="other/page", folder="deviations" → false
 func pageIsInFolder(pagePath, folder string) bool {
-	folder = strings.TrimSuffix(strings.TrimPrefix(folder, "/"), "/")
-	if folder == "" {
+	// Ensure folder has leading slash and no trailing slash, matching /-prefixed pagePath.
+	if len(folder) > 0 && folder[0] != '/' {
+		folder = "/" + folder
+	}
+	folder = strings.TrimSuffix(folder, "/")
+	if folder == "" || folder == "/" {
 		return true // empty folder matches everything
 	}
 	return pagePath == folder || strings.HasPrefix(pagePath, folder+"/")

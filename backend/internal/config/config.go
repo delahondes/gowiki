@@ -16,6 +16,43 @@ type Config struct {
 	Auth     AuthConfig     `yaml:"auth" json:"auth"`
 	Drafts   DraftsConfig   `yaml:"drafts" json:"drafts"`
 	Database DatabaseConfig `yaml:"database" json:"database"`
+	Todo     TodoConfig     `yaml:"todo" json:"todo"`
+}
+
+// TodoConfig holds task management plugin settings.
+// Todo is automatically enabled when a database connection is active,
+// unless explicitly disabled via the "disabled" flag.
+type TodoConfig struct {
+	Enabled       bool             `yaml:"enabled" json:"enabled"`
+	Disabled      bool             `yaml:"disabled" json:"disabled"`
+	ReminderHours []int            `yaml:"reminder_hours" json:"reminder_hours"`
+	Notify        TodoNotifyConfig `yaml:"notify" json:"notify"`
+}
+
+// TodoNotifyConfig holds notification channel settings.
+type TodoNotifyConfig struct {
+	Email    TodoEmailConfig     `yaml:"email" json:"email"`
+	Webhooks []TodoWebhookConfig `yaml:"webhook" json:"webhook"`
+}
+
+// TodoEmailConfig holds SMTP email notification settings.
+type TodoEmailConfig struct {
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
+	From     string `yaml:"from" json:"from"`
+	SMTPHost string `yaml:"smtp_host" json:"smtp_host"`
+	SMTPPort int    `yaml:"smtp_port" json:"smtp_port"`
+	SMTPUser string `yaml:"smtp_user" json:"smtp_user"`
+	SMTPPass string `yaml:"smtp_pass" json:"smtp_pass"`
+}
+
+// TodoWebhookConfig holds a single outbound webhook configuration.
+type TodoWebhookConfig struct {
+	Name        string `yaml:"name" json:"name"`
+	Enabled     bool   `yaml:"enabled" json:"enabled"`
+	URL         string `yaml:"url" json:"url"`
+	ContentType string `yaml:"content_type" json:"content_type"`
+	PayloadTmpl string `yaml:"payload_tmpl" json:"payload_tmpl"`
+	HMACSecret  string `yaml:"hmac_secret" json:"hmac_secret"`
 }
 
 // DatabaseConfig holds PostgreSQL connection settings.

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -148,6 +149,11 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Auto-complete "edit" wiki action tasks.
+	if s.todoService != nil {
+		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, username)
 	}
 
 	writeJSON(w, http.StatusOK, result)

@@ -79,7 +79,10 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
 	if err == nil && table.PageFolder != "" && table.IndexField != "" {
 		if indexVal, ok := row.Fields[table.IndexField]; ok && indexVal != nil {
-			pageFolder := strings.TrimSuffix(strings.TrimPrefix(table.PageFolder, "/"), "/")
+			pageFolder := strings.TrimSuffix(table.PageFolder, "/")
+			if len(pageFolder) == 0 || pageFolder[0] != '/' {
+				pageFolder = "/" + pageFolder
+			}
 			pagePath := pageFolder + "/" + fmt.Sprintf("%v", indexVal)
 
 			// Update page_path on the row in the database.
