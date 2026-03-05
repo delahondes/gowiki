@@ -828,6 +828,47 @@ mark.search-highlight {
   display: none;
 }
 
+.gowiki-login-oauth {
+  margin-bottom: 8px;
+}
+
+.gowiki-login-oauth-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: #0078d4;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.gowiki-login-oauth-btn:hover {
+  background: #106ebe;
+}
+
+.gowiki-login-divider {
+  text-align: center;
+  color: #888;
+  font-size: 12px;
+  margin: 12px 0 8px;
+  position: relative;
+}
+
+.gowiki-login-divider::before,
+.gowiki-login-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 30%;
+  height: 1px;
+  background: #ccc;
+}
+
+.gowiki-login-divider::before { left: 0; }
+.gowiki-login-divider::after { right: 0; }
+
 /* ── Access denied ────────────────────────────────── */
 
 .gowiki-access-denied {

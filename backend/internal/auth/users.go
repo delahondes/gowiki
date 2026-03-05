@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -182,6 +183,19 @@ func (s *UserStore) Get(username string) (User, error) {
 	defer s.mu.RUnlock()
 	for _, u := range s.users {
 		if u.Username == username {
+			return u, nil
+		}
+	}
+	return User{}, ErrUserNotFound
+}
+
+// GetByEmail returns the first user matching the given email (case-insensitive).
+func (s *UserStore) GetByEmail(email string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	lower := strings.ToLower(email)
+	for _, u := range s.users {
+		if strings.ToLower(u.Email) == lower {
 			return u, nil
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -90,6 +91,7 @@ type Server struct {
 	// Tracks pages where a forced inline edit modified the published content
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
+	oauthClient         *auth.OAuthClient
 	serveWeb            bool
 	webDirPath          string
 }
@@ -125,6 +127,14 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		s.dataStore = database.NewDataStore(dbPool, s.schemaStore)
 	}
 
+	// Initialize OAuth client if configured.
+	if err := s.initOAuthClient(); err != nil {
+		// Not an error — OAuth is simply not configured yet.
+		log.Printf("oauth: %v (will initialize on first use if configured later)", err)
+	} else {
+		log.Printf("oauth: Azure AD provider initialized")
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -135,6 +145,9 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Post("/api/auth/login", s.handleLogin)
 	r.Post("/api/auth/logout", s.handleLogout)
 	r.Get("/api/auth/me", s.handleMe)
+	r.Get("/api/auth/providers", s.handleAuthProviders)
+	r.Get("/api/auth/oauth/login", s.handleOAuthLogin)
+	r.Get("/api/auth/oauth/callback", s.handleOAuthCallback)
 
 	r.Get("/api/health", s.handleHealth)
 

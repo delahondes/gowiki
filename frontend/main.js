@@ -4598,6 +4598,30 @@ function showLoginDialog(onSuccess) {
     dialog.append(title, errorEl, userLabel, userInput, passLabel, passInput, actions)
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
+
+    // Fetch OAuth providers and add buttons if available.
+    fetch("/api/auth/providers").then(r => r.json()).then(data => {
+      if (data.providers && data.providers.length > 0) {
+        const oauthSection = document.createElement("div")
+        oauthSection.className = "gowiki-login-oauth"
+        for (const provider of data.providers) {
+          const btn = document.createElement("button")
+          btn.className = "gowiki-login-oauth-btn"
+          btn.textContent = "Sign in with " + provider.label
+          btn.addEventListener("click", () => {
+            window.location.href = "/api/auth/oauth/login"
+          })
+          oauthSection.appendChild(btn)
+        }
+        const divider = document.createElement("div")
+        divider.className = "gowiki-login-divider"
+        divider.textContent = "or sign in with username"
+        // Insert OAuth buttons before the local login form.
+        dialog.insertBefore(oauthSection, errorEl)
+        dialog.insertBefore(divider, errorEl)
+      }
+    }).catch(() => { /* OAuth not available, local-only login */ })
+
     userInput.focus()
   })
 }
@@ -6108,6 +6132,32 @@ async function renderAdminConfigTab(container) {
 
     const sessionTtlInput = adminFormField(form, "Session TTL (e.g. 24h, 168h)", "text", (config.auth && config.auth.session_ttl) || "")
 
+    // OAuth section
+    const oauthHeading = document.createElement("h3")
+    oauthHeading.textContent = "OAuth / Microsoft 365"
+    form.appendChild(oauthHeading)
+
+    const oauth = (config.auth && config.auth.oauth) || {}
+    const oauthProviderSelect = adminFormSelect(form, "Provider", [
+      { value: "", label: "(disabled)" },
+      { value: "azure", label: "Azure AD / Microsoft 365" },
+    ], oauth.provider || "")
+    const oauthTenantInput = adminFormField(form, "Tenant ID", "text", oauth.tenant_id || "")
+    const oauthClientIdInput = adminFormField(form, "Client ID", "text", oauth.client_id || "")
+    const oauthClientSecretInput = adminFormField(form, "Client Secret", "password", oauth.client_secret || "")
+    const oauthAutoCreateCheckbox = document.createElement("input")
+    oauthAutoCreateCheckbox.type = "checkbox"
+    oauthAutoCreateCheckbox.checked = !!oauth.auto_create_users
+    const oauthAutoCreateLabel = document.createElement("label")
+    oauthAutoCreateLabel.style.display = "flex"
+    oauthAutoCreateLabel.style.alignItems = "center"
+    oauthAutoCreateLabel.style.gap = "8px"
+    oauthAutoCreateLabel.style.margin = "8px 0"
+    oauthAutoCreateLabel.appendChild(oauthAutoCreateCheckbox)
+    oauthAutoCreateLabel.appendChild(document.createTextNode("Auto-create users on first OAuth login"))
+    form.appendChild(oauthAutoCreateLabel)
+    const oauthDefaultGroupsInput = adminFormField(form, "Default groups for auto-created users (comma-separated)", "text", (oauth.default_groups || []).join(", "))
+
     // Drafts section
     const draftsHeading = document.createElement("h3")
     draftsHeading.textContent = "Drafts"
@@ -6128,6 +6178,8 @@ async function renderAdminConfigTab(container) {
     saveBtn.className = "gowiki-admin-btn gowiki-admin-btn-primary"
     saveBtn.textContent = "Save Configuration"
     saveBtn.addEventListener("click", async () => {
+      const defaultGroupsRaw = oauthDefaultGroupsInput.value.trim()
+      const defaultGroups = defaultGroupsRaw ? defaultGroupsRaw.split(",").map(s => s.trim()).filter(Boolean) : []
       const payload = {
         site: {
           title: titleInput.value.trim(),
@@ -6137,11 +6189,20 @@ async function renderAdminConfigTab(container) {
         },
         auth: {
           session_ttl: sessionTtlInput.value.trim(),
+          oauth: {
+            provider: oauthProviderSelect.value,
+            tenant_id: oauthTenantInput.value.trim(),
+            client_id: oauthClientIdInput.value.trim(),
+            client_secret: oauthClientSecretInput.value.trim(),
+            auto_create_users: oauthAutoCreateCheckbox.checked,
+            default_groups: defaultGroups,
+          },
         },
         drafts: {
           auto_save_interval: autoSaveInput.value.trim(),
           stale_lock_timeout: staleLockInput.value.trim(),
         },
+        database: config.database || {},
       }
       try {
         const r = await authFetch("/api/admin/config", {

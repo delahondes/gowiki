@@ -26,5 +26,11 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	// Re-initialize OAuth client if config changed.
+	if err := s.initOAuthClient(); err != nil {
+		s.oauthClient = nil // Clear stale client if config is now invalid/empty.
+	}
+
 	writeJSON(w, http.StatusOK, s.configStore.Get())
 }

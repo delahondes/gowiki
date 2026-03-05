@@ -34,7 +34,18 @@ type SiteConfig struct {
 
 // AuthConfig holds authentication settings.
 type AuthConfig struct {
-	SessionTTL string `yaml:"session_ttl" json:"session_ttl"` // duration string, e.g. "24h"
+	SessionTTL string      `yaml:"session_ttl" json:"session_ttl"` // duration string, e.g. "24h"
+	OAuth      OAuthConfig `yaml:"oauth" json:"oauth"`
+}
+
+// OAuthConfig holds external OAuth/OIDC provider settings.
+type OAuthConfig struct {
+	Provider        string   `yaml:"provider" json:"provider"`                 // "azure" or "" (disabled)
+	TenantID        string   `yaml:"tenant_id" json:"tenant_id"`              // Azure AD tenant ID
+	ClientID        string   `yaml:"client_id" json:"client_id"`              // Application (client) ID
+	ClientSecret    string   `yaml:"client_secret" json:"client_secret"`      // Client secret value
+	AutoCreateUsers bool     `yaml:"auto_create_users" json:"auto_create_users"` // Create user on first OAuth login
+	DefaultGroups   []string `yaml:"default_groups" json:"default_groups"`    // Groups for auto-created users
 }
 
 // DraftsConfig holds draft/lock settings.
