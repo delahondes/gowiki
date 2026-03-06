@@ -665,6 +665,33 @@ func (s *TodoStore) ListWikiActionTasks(ctx context.Context, actionType, pagePat
 	return collectTasks(rows)
 }
 
+// ListCreateActionTasks returns open tasks with wiki_action_type='create' and a non-empty pattern.
+func (s *TodoStore) ListCreateActionTasks(ctx context.Context) ([]*Task, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT id, title, description, status, source, source_page, node_key,
+			assignee_type, assignee_target, assignee_resolution,
+			due_date, recur_type, recur_days, recur_every, recur_unit,
+			recurrence_group_id,
+			wiki_action_type, wiki_action_page, wiki_action_pattern,
+			wiki_action_template, wiki_action_schema, wiki_action_field, wiki_action_value,
+			tags, priority, created_by, created_at, updated_at
+		FROM todo_tasks
+		WHERE status IN ('open', 'in_progress')
+		  AND wiki_action_type = 'create'
+		  AND wiki_action_pattern != ''`)
+	if err != nil {
+		return nil, fmt.Errorf("list create action tasks: %w", err)
+	}
+	defer rows.Close()
+
+	return collectTasks(rows)
+}
+
 // ListDueBetween returns tasks with due dates in the given range.
 func (s *TodoStore) ListDueBetween(ctx context.Context, from, to time.Time) ([]*Task, error) {
 	p := s.pool.GetPool()

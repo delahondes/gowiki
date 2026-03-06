@@ -3,6 +3,7 @@ package todo
 import (
 	"context"
 	"log"
+	"regexp"
 	"time"
 )
 
@@ -148,6 +149,38 @@ func (svc *TodoService) AutoCompleteWikiAction(ctx context.Context, actionType, 
 	for _, task := range tasks {
 		if _, err := svc.CompleteTask(ctx, task.ID, userID, nil); err != nil {
 			log.Printf("todo: auto-complete wiki action %s for task %s failed: %v", actionType, task.ID, err)
+		}
+	}
+}
+
+// AutoCompleteCreateAction checks all open "create" action tasks and completes
+// those whose pattern matches the newly created/saved page path, provided the
+// user performing the save is the task's assignee.
+func (svc *TodoService) AutoCompleteCreateAction(ctx context.Context, pagePath, userID string) {
+	tasks, err := svc.store.ListCreateActionTasks(ctx)
+	if err != nil {
+		log.Printf("todo: create action query failed: %v", err)
+		return
+	}
+
+	for _, task := range tasks {
+		// Check the assignee matches the user who created the page.
+		if task.Assignee.Target != userID {
+			continue
+		}
+
+		// Match page path against the task's regex pattern.
+		re, err := regexp.Compile("^" + task.WikiAction.Pattern + "$")
+		if err != nil {
+			log.Printf("todo: invalid create action pattern %q for task %s: %v", task.WikiAction.Pattern, task.ID, err)
+			continue
+		}
+		if !re.MatchString(pagePath) {
+			continue
+		}
+
+		if _, err := svc.CompleteTask(ctx, task.ID, userID, nil); err != nil {
+			log.Printf("todo: auto-complete create action for task %s failed: %v", task.ID, err)
 		}
 	}
 }

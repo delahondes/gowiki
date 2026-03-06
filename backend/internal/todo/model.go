@@ -48,6 +48,7 @@ type Task struct {
 	CreatedBy   string   `json:"created_by,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	Warnings    []string `json:"warnings,omitempty"` // populated at response time, not stored
 	RecurrenceGroupID string `json:"recurrence_group_id,omitempty"`
 }
 
@@ -174,4 +175,9 @@ type NotifyEvent struct {
 // GroupResolver resolves group membership for "all" resolution tasks.
 type GroupResolver interface {
 	GroupMembers(groupName string) []string
+}
+
+// PageChecker checks whether a page exists.
+type PageChecker interface {
+	PageExists(pagePath string) bool
 }

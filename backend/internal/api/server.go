@@ -272,12 +272,12 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 			// Read-only endpoints: accessible to anyone who can read the page.
 			r.Group(func(r chi.Router) {
 				r.Use(s.optionalAuth)
-				todo.RegisterReadRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+				todo.RegisterReadRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store})
 			})
 			// Write endpoints: require authentication.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAuth)
-				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store})
 			})
 		})
 	}
@@ -394,6 +394,7 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 	// Auto-complete "edit" wiki action tasks.
 	if s.todoService != nil {
 		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, author)
+		go s.todoService.AutoCompleteCreateAction(context.Background(), result.Page.Path, author)
 		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
 	}
 
@@ -655,6 +656,16 @@ func (s *Server) handleSiteLogo(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": logoPath})
+}
+
+// pageCheckerAdapter implements todo.PageChecker using the page store.
+type pageCheckerAdapter struct {
+	store PageStore
+}
+
+func (a *pageCheckerAdapter) PageExists(pagePath string) bool {
+	_, err := a.store.Get(pagePath)
+	return err == nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

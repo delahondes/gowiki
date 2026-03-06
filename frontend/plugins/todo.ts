@@ -114,6 +114,7 @@ interface TodoTask {
   created_by: string
   created_at: string
   updated_at: string
+  warnings?: string[]
 }
 
 const gate = {
@@ -370,6 +371,16 @@ class TodoNodeView {
       descEl.textContent = desc
       this.dom.appendChild(descEl)
     }
+
+    // Warnings from backend validation
+    if (this.taskData?.warnings?.length) {
+      for (const w of this.taskData.warnings) {
+        const warn = document.createElement("div")
+        warn.className = "gowiki-todo-warning"
+        warn.textContent = "\u26A0 " + w
+        this.dom.appendChild(warn)
+      }
+    }
   }
 
   private async fetchTask() {
@@ -520,6 +531,13 @@ const todoStyles = `
 
 .gowiki-todo-action-link:hover {
   color: #4c1d95;
+}
+
+.gowiki-todo-warning {
+  margin: 2px 0 0 28px;
+  font-size: 12px;
+  color: #e65100;
+  line-height: 1.4;
 }
 
 .gowiki-todo-unavailable {

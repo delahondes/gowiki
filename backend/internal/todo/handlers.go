@@ -2,6 +2,7 @@ package todo
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -16,21 +17,21 @@ type UsernameExtractor func(r *http.Request) string
 
 // RegisterRoutes mounts all todo API routes (read + write) on the given chi router.
 // All routes are under /api/plugin/todo/v1/.
-func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
-	RegisterReadRoutes(r, svc, userStore, groupStore, extractUsername)
-	RegisterWriteRoutes(r, svc, userStore, groupStore, extractUsername)
+func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
+	RegisterReadRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker)
+	RegisterWriteRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker)
 }
 
 // RegisterReadRoutes mounts read-only todo endpoints (accessible without authentication).
-func RegisterReadRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
-	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername}
+func RegisterReadRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker}
 
 	r.Get("/tasks/page/*", h.handleByPage)
 }
 
 // RegisterWriteRoutes mounts todo endpoints that require authentication.
-func RegisterWriteRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
-	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername}
+func RegisterWriteRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker}
 
 	r.Get("/tasks", h.handleList)
 	r.Post("/tasks", h.handleCreate)
@@ -50,6 +51,7 @@ type handlers struct {
 	userStore       *auth.UserStore
 	groupStore      *auth.GroupStore
 	extractUsername UsernameExtractor
+	pageChecker     PageChecker
 }
 
 func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +235,7 @@ func (h *handlers) handleByPage(w http.ResponseWriter, r *http.Request) {
 	if tasks == nil {
 		tasks = []*Task{}
 	}
+	h.addWarnings(tasks)
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
@@ -311,6 +314,42 @@ func (h *handlers) handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.svc.Hub().HandleStream(w, r, userID)
+}
+
+// addWarnings populates the Warnings field on tasks based on validation checks.
+func (h *handlers) addWarnings(tasks []*Task) {
+	for _, task := range tasks {
+		// Check assignee exists.
+		if task.Assignee.Target != "" && h.userStore != nil {
+			if task.Assignee.Type == "user" {
+				if _, err := h.userStore.Get(task.Assignee.Target); err != nil {
+					task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee user %q does not exist", task.Assignee.Target))
+				}
+			} else if task.Assignee.Type == "group" {
+				if h.groupStore != nil {
+					found := false
+					for _, g := range h.groupStore.List() {
+						if g.Name == task.Assignee.Target {
+							found = true
+							break
+						}
+					}
+					if !found {
+						task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee group %q does not exist", task.Assignee.Target))
+					}
+				}
+			}
+		}
+
+		// Check wiki action target page exists (read/edit only).
+		if h.pageChecker != nil && task.WikiAction.Page != "" {
+			if task.WikiAction.Type == "read" || task.WikiAction.Type == "edit" {
+				if !h.pageChecker.PageExists(task.WikiAction.Page) {
+					task.Warnings = append(task.Warnings, fmt.Sprintf("Action target page %q does not exist", task.WikiAction.Page))
+				}
+			}
+		}
+	}
 }
 
 // --- Helpers ---
