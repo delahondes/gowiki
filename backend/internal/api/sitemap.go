@@ -39,11 +39,19 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 		return pages[i].Path < pages[j].Path
 	})
 
-	// Build tree structure.
-	root := &sitemapTreeNode{Title: "root"}
-	nodeMap := map[string]*sitemapTreeNode{"": root}
+	// Build tree structure. The root node represents "/".
+	root := &sitemapTreeNode{Path: "/", Title: "/"}
+	nodeMap := map[string]*sitemapTreeNode{"/": root}
 
 	for _, p := range pages {
+		// Root page populates the root node directly.
+		if p.Path == "/" {
+			root.Title = p.Title
+			root.HasPage = true
+			root.IsNamespaceIndex = p.IsNamespaceIndex
+			continue
+		}
+
 		// Strip leading "/" for splitting; the path in the node keeps it.
 		trimmed := strings.TrimPrefix(p.Path, "/")
 		parts := strings.Split(trimmed, "/")
@@ -89,8 +97,9 @@ func (s *Server) handleSitemap(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Return root as the single top-level element so "/" is the parent of all pages.
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"pages": root.Children,
+		"pages": []*sitemapTreeNode{root},
 	})
 }

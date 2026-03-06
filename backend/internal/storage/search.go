@@ -159,6 +159,21 @@ func stripANSI(s string) string {
 // RebuildFromDir walks all .md files under contentDir, strips markdown,
 // extracts titles, and indexes each page.
 func (s *SearchIndex) RebuildFromDir(contentDir string) error {
+	// Delete all existing documents before rebuilding.
+	// This prevents stale entries from prior indexing runs.
+	searchReq := bleve.NewSearchRequest(bleve.NewMatchAllQuery())
+	searchReq.Size = 10000
+	searchReq.Fields = []string{}
+	if sr, err := s.index.Search(searchReq); err == nil {
+		delBatch := s.index.NewBatch()
+		for _, hit := range sr.Hits {
+			delBatch.Delete(hit.ID)
+		}
+		if delBatch.Size() > 0 {
+			_ = s.index.Batch(delBatch)
+		}
+	}
+
 	batch := s.index.NewBatch()
 	count := 0
 
@@ -181,6 +196,9 @@ func (s *SearchIndex) RebuildFromDir(contentDir string) error {
 
 		pagePath := "/" + strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
+		if pagePath == "" {
+			pagePath = "/"
+		}
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {

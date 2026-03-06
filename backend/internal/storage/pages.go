@@ -577,6 +577,9 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 		isNsIndex := strings.HasSuffix(rel, "/index.md")
 		pagePath := "/" + strings.TrimSuffix(rel, ".md")
 		pagePath = strings.TrimSuffix(pagePath, "/index")
+		if pagePath == "" {
+			pagePath = "/"
+		}
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {

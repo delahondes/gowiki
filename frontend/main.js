@@ -4319,13 +4319,13 @@ async function restoreVersion(version) {
       return
     }
 
-    // Clean up edit state and refresh.
+    // Clean up edit state and show restored page.
     editToken = null
     pageLockInfo = null
     stashedEditorState = null
+    inHistoryView = false
     await reloadPageContent()
     setStatus(`Restored version ${version}`)
-    showHistory()
   } catch {
     setStatus("Failed to restore version")
   }
@@ -4492,11 +4492,12 @@ function initSearch() {
     }
     for (const r of results) {
       const item = document.createElement("a")
-      item.href = "/" + r.path
+      const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
+      item.href = displayPath
       item.className = "search-result-item"
       item.innerHTML =
-        `<div class="search-result-title">${escapeHtml(r.title || r.path)}</div>` +
-        `<div class="search-result-path">${escapeHtml(r.path)}</div>` +
+        `<div class="search-result-title">${escapeHtml(r.title || displayPath)}</div>` +
+        `<div class="search-result-path">${escapeHtml(displayPath)}</div>` +
         (r.snippet ? `<div class="search-result-snippet">${r.snippet}</div>` : "")
       item.addEventListener("click", (e) => {
         e.preventDefault()
@@ -4516,7 +4517,8 @@ function initSearch() {
   function navigateToSearchResult(path) {
     const query = input.value.trim()
     const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
-    window.location.href = "/" + path + qs
+    const url = path.startsWith("/") ? path : "/" + path
+    window.location.href = url + qs
   }
 }
 
@@ -4550,12 +4552,13 @@ async function renderSearchResultsPage(query) {
 
     for (const r of results) {
       const item = document.createElement("a")
+      const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
       const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
-      item.href = "/" + r.path + qs
+      item.href = displayPath + qs
       item.className = "search-page-item"
       item.innerHTML =
-        `<div class="search-page-item-title">${escapeHtml(r.title || r.path)}</div>` +
-        `<div class="search-page-item-path">${escapeHtml(r.path)}</div>` +
+        `<div class="search-page-item-title">${escapeHtml(r.title || displayPath)}</div>` +
+        `<div class="search-page-item-path">${escapeHtml(displayPath)}</div>` +
         (r.snippet ? `<div class="search-page-item-snippet">${r.snippet}</div>` : "")
       container.appendChild(item)
     }
@@ -5276,14 +5279,14 @@ async function renderSitemapPage() {
     const pages = data.pages || []
 
     function nodeUrl(node) {
-      if (node.path === "/index" || node.path === "index") return "/"
+      if (node.path === "/" || node.path === "/index" || node.path === "index") return "/"
       const hasChildren = node.children && node.children.length > 0
       if (node.is_namespace_index || hasChildren) return node.path + "/"
       return node.path
     }
 
     function leafName(node) {
-      if (node.path === "/index" || node.path === "index") return "/"
+      if (node.path === "/" || node.path === "/index" || node.path === "index") return "/"
       const leaf = node.path.split("/").pop()
       const hasChildren = node.children && node.children.length > 0
       if (node.is_namespace_index || hasChildren) return leaf + "/"
@@ -5298,11 +5301,12 @@ async function renderSitemapPage() {
         const li = document.createElement("li")
         const hasChildren = node.children && node.children.length > 0
         const isPhantom = !node.has_page
+        const isRoot = node.path === "/"
 
         if (hasChildren) {
           const toggle = document.createElement("span")
           toggle.className = "gowiki-sitemap-toggle"
-          toggle.textContent = "\u25B8"
+          toggle.textContent = isRoot ? "\u25BE" : "\u25B8"
           toggle.addEventListener("click", () => {
             const childUl = li.querySelector(":scope > ul")
             if (childUl) {
@@ -5354,7 +5358,7 @@ async function renderSitemapPage() {
 
         if (hasChildren) {
           const childUl = document.createElement("ul")
-          childUl.style.display = "none"
+          if (!isRoot) childUl.style.display = "none"
           buildTree(node.children, childUl, depth + 1)
           li.appendChild(childUl)
         }
