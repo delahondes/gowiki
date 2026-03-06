@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/smtp"
 	"strings"
@@ -17,38 +19,75 @@ import (
 	"gowiki/backend/internal/config"
 )
 
+// ConfigReader provides live access to the current configuration.
+type ConfigReader interface {
+	Get() config.Config
+}
+
+// EmailResolver maps a username to an email address.
+// Returns "" if the user has no email configured.
+type EmailResolver func(username string) string
+
 // Dispatcher sends notifications via email and webhooks.
+// It reads configuration live from the config store so that admin UI
+// changes take effect immediately without a restart.
 type Dispatcher struct {
-	notifyCfg config.TodoNotifyConfig
+	configReader  ConfigReader
+	emailResolver EmailResolver
+	// Fallback for when no config reader is available (e.g. tests).
+	notifyCfg *config.TodoNotifyConfig
 	siteTitle string
 }
 
-// NewDispatcher creates a new notification dispatcher.
-func NewDispatcher(notifyCfg config.TodoNotifyConfig, siteTitle string) *Dispatcher {
-	return &Dispatcher{
-		notifyCfg: notifyCfg,
-		siteTitle: siteTitle,
+// NewDispatcher creates a dispatcher that reads config live from the store.
+func NewDispatcher(configReader ConfigReader, emailResolver EmailResolver) *Dispatcher {
+	return &Dispatcher{configReader: configReader, emailResolver: emailResolver}
+}
+
+// NewDispatcherStatic creates a dispatcher with a fixed config snapshot (for tests).
+func NewDispatcherStatic(notifyCfg config.TodoNotifyConfig, siteTitle string) *Dispatcher {
+	return &Dispatcher{notifyCfg: &notifyCfg, siteTitle: siteTitle}
+}
+
+func (d *Dispatcher) getConfig() (config.TodoNotifyConfig, string) {
+	if d.configReader != nil {
+		cfg := d.configReader.Get()
+		return cfg.Todo.Notify, cfg.Site.Title
 	}
+	if d.notifyCfg != nil {
+		return *d.notifyCfg, d.siteTitle
+	}
+	return config.TodoNotifyConfig{}, ""
 }
 
 // Notify sends a notification for a task event.
 // If any webhook is enabled, email is suppressed.
 func (d *Dispatcher) Notify(event NotifyEvent) {
+	// Resolve username → email if an email resolver is available.
+	if event.Recipient != "" && d.emailResolver != nil && !strings.Contains(event.Recipient, "@") {
+		email := d.emailResolver(event.Recipient)
+		if email != "" {
+			event.Recipient = email
+		}
+	}
+
+	notifyCfg, _ := d.getConfig()
 	hasWebhook := false
-	for _, wh := range d.notifyCfg.Webhooks {
+	for _, wh := range notifyCfg.Webhooks {
 		if wh.Enabled {
 			hasWebhook = true
 			d.sendWebhook(wh, event)
 		}
 	}
 
-	if !hasWebhook && d.notifyCfg.Email.Enabled {
+	if !hasWebhook && notifyCfg.Email.Enabled {
 		d.sendEmail(event)
 	}
 }
 
 func (d *Dispatcher) sendEmail(event NotifyEvent) {
-	cfg := d.notifyCfg.Email
+	notifyCfg, _ := d.getConfig()
+	cfg := notifyCfg.Email
 	if cfg.SMTPHost == "" || cfg.From == "" || event.Recipient == "" {
 		return
 	}
@@ -62,14 +101,93 @@ func (d *Dispatcher) sendEmail(event NotifyEvent) {
 		cfg.From, event.Recipient, subject, body)
 
 	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
-	var auth smtp.Auth
-	if cfg.SMTPUser != "" {
-		auth = smtp.PlainAuth("", cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPHost)
+
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		log.Printf("todo notify: SMTP connect failed: %v", err)
+		return
 	}
 
-	if err := smtp.SendMail(addr, auth, cfg.From, []string{event.Recipient}, []byte(msg)); err != nil {
-		log.Printf("todo notify: email send failed to %s: %v", event.Recipient, err)
+	client, err := smtp.NewClient(conn, cfg.SMTPHost)
+	if err != nil {
+		conn.Close()
+		log.Printf("todo notify: SMTP client failed: %v", err)
+		return
 	}
+	defer client.Close()
+
+	// STARTTLS if supported.
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		tlsConfig := &tls.Config{ServerName: cfg.SMTPHost}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			log.Printf("todo notify: STARTTLS failed: %v", err)
+			return
+		}
+	}
+
+	// Authenticate if credentials are configured.
+	if cfg.SMTPUser != "" {
+		// Try LOGIN auth first (required by Office 365), fall back to PLAIN.
+		auth := &loginAuth{user: cfg.SMTPUser, pass: cfg.SMTPPass, host: cfg.SMTPHost}
+		if err := client.Auth(auth); err != nil {
+			// Fall back to PLAIN auth.
+			plainAuth := smtp.PlainAuth("", cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPHost)
+			if err := client.Auth(plainAuth); err != nil {
+				log.Printf("todo notify: SMTP auth failed: %v", err)
+				return
+			}
+		}
+	}
+
+	if err := client.Mail(cfg.From); err != nil {
+		log.Printf("todo notify: SMTP MAIL FROM failed: %v", err)
+		return
+	}
+	if err := client.Rcpt(event.Recipient); err != nil {
+		log.Printf("todo notify: SMTP RCPT TO failed: %v", err)
+		return
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		log.Printf("todo notify: SMTP DATA failed: %v", err)
+		return
+	}
+	if _, err := wc.Write([]byte(msg)); err != nil {
+		log.Printf("todo notify: SMTP write failed: %v", err)
+		wc.Close()
+		return
+	}
+	if err := wc.Close(); err != nil {
+		log.Printf("todo notify: SMTP close data failed: %v", err)
+		return
+	}
+
+	client.Quit()
+}
+
+// loginAuth implements smtp.Auth for the LOGIN mechanism (required by Office 365).
+type loginAuth struct {
+	user, pass, host string
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", []byte(a.user), nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if more {
+		prompt := strings.TrimSpace(string(fromServer))
+		switch strings.ToLower(prompt) {
+		case "username:":
+			return []byte(a.user), nil
+		case "password:":
+			return []byte(a.pass), nil
+		default:
+			return nil, fmt.Errorf("unexpected LOGIN prompt: %q", prompt)
+		}
+	}
+	return nil, nil
 }
 
 func (d *Dispatcher) renderEmailTemplate(event NotifyEvent) (string, string) {
@@ -78,8 +196,9 @@ func (d *Dispatcher) renderEmailTemplate(event NotifyEvent) (string, string) {
 		return "", ""
 	}
 
+	_, siteTitle := d.getConfig()
 	data := map[string]string{
-		"SiteTitle": d.siteTitle,
+		"SiteTitle": siteTitle,
 		"Title":     task.Title,
 		"Assignee":  task.Assignee.Target,
 		"DueDate":   task.DueDate,
@@ -89,19 +208,19 @@ func (d *Dispatcher) renderEmailTemplate(event NotifyEvent) (string, string) {
 
 	switch event.Type {
 	case "assigned":
-		return fmt.Sprintf("[%s] Task assigned: %s", d.siteTitle, task.Title),
+		return fmt.Sprintf("[%s] Task assigned: %s", siteTitle, task.Title),
 			renderTemplate(assignedTmpl, data)
 	case "due_reminder":
-		return fmt.Sprintf("[%s] Task due soon: %s", d.siteTitle, task.Title),
+		return fmt.Sprintf("[%s] Task due soon: %s", siteTitle, task.Title),
 			renderTemplate(dueReminderTmpl, data)
 	case "overdue":
-		return fmt.Sprintf("[%s] Task overdue: %s", d.siteTitle, task.Title),
+		return fmt.Sprintf("[%s] Task overdue: %s", siteTitle, task.Title),
 			renderTemplate(overdueTmpl, data)
 	case "completed_all":
-		return fmt.Sprintf("[%s] Task completed: %s", d.siteTitle, task.Title),
+		return fmt.Sprintf("[%s] Task completed: %s", siteTitle, task.Title),
 			renderTemplate(completedAllTmpl, data)
 	case "recurrence_spawned":
-		return fmt.Sprintf("[%s] Recurring task created: %s", d.siteTitle, task.Title),
+		return fmt.Sprintf("[%s] Recurring task created: %s", siteTitle, task.Title),
 			renderTemplate(recurrenceSpawnedTmpl, data)
 	}
 	return "", ""

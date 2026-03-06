@@ -35,12 +35,19 @@ func (ts *TodoSyncer) SyncPageRows(pagePath, markdown string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Snapshot existing task IDs before upsert to detect new tasks.
+	existingTasks, _ := ts.store.ListForPage(ctx, pagePath)
+	existingIDs := make(map[string]bool, len(existingTasks))
+	for _, t := range existingTasks {
+		existingIDs[t.ID] = true
+	}
+
 	if err := ts.store.UpsertForPage(ctx, pagePath, directives, ts.createdBy); err != nil {
 		log.Printf("todo sync: upsert for page %s failed: %v", pagePath, err)
 		return
 	}
 
-	// Notify via SSE about page task changes.
+	// Notify via SSE about page task changes, and send email for new tasks.
 	tasks, err := ts.store.ListForPage(ctx, pagePath)
 	if err != nil {
 		return
@@ -50,6 +57,15 @@ func (ts *TodoSyncer) SyncPageRows(pagePath, markdown string) {
 			ts.hub.Publish(task.Assignee.Target, Event{
 				Type: "task.updated",
 				Task: task,
+			})
+		}
+		// Send email/webhook notification for newly created tasks.
+		if !existingIDs[task.ID] && ts.dispatcher != nil && task.Assignee.Target != "" {
+			ts.dispatcher.Notify(NotifyEvent{
+				Type:      "assigned",
+				Task:      task,
+				Recipient: task.Assignee.Target,
+				UserID:    task.Assignee.Target,
 			})
 		}
 	}

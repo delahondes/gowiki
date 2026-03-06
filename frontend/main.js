@@ -6274,6 +6274,149 @@ async function renderAdminConfigTab(container) {
     const autoSaveInput = adminFormField(form, "Auto Save Interval (e.g. 30s, 1m)", "text", (config.drafts && config.drafts.auto_save_interval) || "")
     const staleLockInput = adminFormField(form, "Stale Lock Timeout (e.g. 30m, 1h)", "text", (config.drafts && config.drafts.stale_lock_timeout) || "")
 
+    // Todo section
+    const todoHeading = document.createElement("h3")
+    todoHeading.textContent = "Todo Plugin"
+    form.appendChild(todoHeading)
+
+    const todoConfig = config.todo || {}
+
+    const todoDisabledCheckbox = document.createElement("input")
+    todoDisabledCheckbox.type = "checkbox"
+    todoDisabledCheckbox.checked = !!todoConfig.disabled
+    const todoDisabledLabel = document.createElement("label")
+    todoDisabledLabel.style.display = "flex"
+    todoDisabledLabel.style.alignItems = "center"
+    todoDisabledLabel.style.gap = "8px"
+    todoDisabledLabel.style.margin = "8px 0"
+    todoDisabledLabel.appendChild(todoDisabledCheckbox)
+    todoDisabledLabel.appendChild(document.createTextNode("Disable todo plugin (requires restart)"))
+    form.appendChild(todoDisabledLabel)
+
+    const todoNote = document.createElement("div")
+    todoNote.style.fontSize = "0.85em"
+    todoNote.style.color = "#666"
+    todoNote.style.margin = "0 0 8px 0"
+    todoNote.textContent = "Todo is active when a database is connected and this box is unchecked."
+    form.appendChild(todoNote)
+
+    const reminderHoursInput = adminFormField(form, "Reminder hours before due date (comma-separated, e.g. 24, 48, 168)", "text",
+      (todoConfig.reminder_hours || []).join(", "))
+
+    // SMTP / Email Notifications section
+    const smtpHeading = document.createElement("h3")
+    smtpHeading.textContent = "Email Notifications (SMTP)"
+    form.appendChild(smtpHeading)
+
+    const emailConfig = (todoConfig.notify && todoConfig.notify.email) || {}
+
+    const smtpEnabledCheckbox = document.createElement("input")
+    smtpEnabledCheckbox.type = "checkbox"
+    smtpEnabledCheckbox.checked = !!emailConfig.enabled
+    const smtpEnabledLabel = document.createElement("label")
+    smtpEnabledLabel.style.display = "flex"
+    smtpEnabledLabel.style.alignItems = "center"
+    smtpEnabledLabel.style.gap = "8px"
+    smtpEnabledLabel.style.margin = "8px 0"
+    smtpEnabledLabel.appendChild(smtpEnabledCheckbox)
+    smtpEnabledLabel.appendChild(document.createTextNode("Enable email notifications"))
+    form.appendChild(smtpEnabledLabel)
+
+    const smtpFromInput = adminFormField(form, "From address", "text", emailConfig.from || "")
+    const smtpHostInput = adminFormField(form, "SMTP Host", "text", emailConfig.smtp_host || "")
+    const smtpPortInput = adminFormField(form, "SMTP Port", "number", String(emailConfig.smtp_port || 587))
+    smtpPortInput.min = "1"
+    smtpPortInput.max = "65535"
+    const smtpUserInput = adminFormField(form, "SMTP Username", "text", emailConfig.smtp_user || "")
+    const smtpPassInput = adminFormField(form, "SMTP Password", "password", emailConfig.smtp_pass || "")
+
+    // Webhooks section
+    const webhookHeading = document.createElement("h3")
+    webhookHeading.textContent = "Webhooks"
+    form.appendChild(webhookHeading)
+
+    const webhooks = (todoConfig.notify && todoConfig.notify.webhook) || []
+    const webhookContainer = document.createElement("div")
+    webhookContainer.className = "gowiki-admin-webhooks"
+
+    const webhookEntries = []
+
+    function renderWebhookEntry(wh, index) {
+      const entry = document.createElement("div")
+      entry.className = "gowiki-admin-webhook-entry"
+      entry.style.border = "1px solid #ddd"
+      entry.style.borderRadius = "4px"
+      entry.style.padding = "8px 12px"
+      entry.style.marginBottom = "8px"
+      entry.style.background = "#fafafa"
+
+      const header = document.createElement("div")
+      header.style.display = "flex"
+      header.style.alignItems = "center"
+      header.style.gap = "8px"
+      header.style.marginBottom = "6px"
+
+      const enabledCb = document.createElement("input")
+      enabledCb.type = "checkbox"
+      enabledCb.checked = !!wh.enabled
+
+      const nameInput = document.createElement("input")
+      nameInput.type = "text"
+      nameInput.value = wh.name || ""
+      nameInput.placeholder = "Hook name"
+      nameInput.style.width = "10em"
+
+      const removeBtn = document.createElement("button")
+      removeBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+      removeBtn.textContent = "Remove"
+      removeBtn.addEventListener("click", () => {
+        webhookEntries.splice(index, 1)
+        rebuildWebhooks()
+      })
+
+      header.appendChild(enabledCb)
+      header.appendChild(nameInput)
+      header.appendChild(removeBtn)
+      entry.appendChild(header)
+
+      const urlInput = adminFormField(entry, "URL", "text", wh.url || "")
+      urlInput.style.width = "100%"
+      const secretInput = adminFormField(entry, "HMAC Secret (optional)", "password", wh.hmac_secret || "")
+
+      webhookEntries[index] = { enabledCb, nameInput, urlInput, secretInput }
+      return entry
+    }
+
+    function rebuildWebhooks() {
+      webhookContainer.innerHTML = ""
+      const current = webhookEntries.map(e => ({
+        enabled: e.enabledCb.checked,
+        name: e.nameInput.value,
+        url: e.urlInput.value,
+        hmac_secret: e.secretInput.value,
+      }))
+      webhookEntries.length = 0
+      current.forEach((wh, i) => {
+        webhookContainer.appendChild(renderWebhookEntry(wh, i))
+      })
+    }
+
+    webhooks.forEach((wh, i) => {
+      webhookContainer.appendChild(renderWebhookEntry(wh, i))
+    })
+
+    form.appendChild(webhookContainer)
+
+    const addWebhookBtn = document.createElement("button")
+    addWebhookBtn.className = "gowiki-admin-btn-small"
+    addWebhookBtn.textContent = "Add Webhook"
+    addWebhookBtn.style.marginBottom = "12px"
+    addWebhookBtn.addEventListener("click", () => {
+      const idx = webhookEntries.length
+      webhookContainer.appendChild(renderWebhookEntry({ enabled: true, name: "", url: "", hmac_secret: "" }, idx))
+    })
+    form.appendChild(addWebhookBtn)
+
     // Save button
     const actions = document.createElement("div")
     actions.className = "gowiki-admin-config-actions"
@@ -6288,6 +6431,18 @@ async function renderAdminConfigTab(container) {
     saveBtn.addEventListener("click", async () => {
       const defaultGroupsRaw = oauthDefaultGroupsInput.value.trim()
       const defaultGroups = defaultGroupsRaw ? defaultGroupsRaw.split(",").map(s => s.trim()).filter(Boolean) : []
+      const reminderRaw = reminderHoursInput.value.trim()
+      const reminderHours = reminderRaw ? reminderRaw.split(",").map(s => parseInt(s.trim(), 10)).filter(n => n > 0) : []
+
+      const savedWebhooks = webhookEntries.map(e => ({
+        name: e.nameInput.value.trim(),
+        enabled: e.enabledCb.checked,
+        url: e.urlInput.value.trim(),
+        hmac_secret: e.secretInput.value,
+        content_type: "application/json",
+        payload_tmpl: "",
+      })).filter(w => w.url)
+
       const payload = {
         site: {
           title: titleInput.value.trim(),
@@ -6311,6 +6466,22 @@ async function renderAdminConfigTab(container) {
           stale_lock_timeout: staleLockInput.value.trim(),
         },
         database: config.database || {},
+        todo: {
+          enabled: todoConfig.enabled || false,
+          disabled: todoDisabledCheckbox.checked,
+          reminder_hours: reminderHours,
+          notify: {
+            email: {
+              enabled: smtpEnabledCheckbox.checked,
+              from: smtpFromInput.value.trim(),
+              smtp_host: smtpHostInput.value.trim(),
+              smtp_port: parseInt(smtpPortInput.value, 10) || 587,
+              smtp_user: smtpUserInput.value.trim(),
+              smtp_pass: smtpPassInput.value,
+            },
+            webhook: savedWebhooks,
+          },
+        },
       }
       try {
         const r = await authFetch("/api/admin/config", {

@@ -8,15 +8,12 @@ import (
 
 // RunScheduler starts a background goroutine that checks for
 // upcoming and overdue tasks every hour and sends notifications.
-func RunScheduler(ctx context.Context, store *TodoStore, dispatcher *Dispatcher, reminderHours []int) {
-	if len(reminderHours) == 0 {
-		reminderHours = []int{24, 2}
-	}
-
+// It reads reminder_hours from the config store dynamically.
+func RunScheduler(ctx context.Context, store *TodoStore, dispatcher *Dispatcher) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	log.Printf("todo scheduler: started (reminder hours: %v)", reminderHours)
+	log.Printf("todo scheduler: started")
 
 	for {
 		select {
@@ -24,6 +21,13 @@ func RunScheduler(ctx context.Context, store *TodoStore, dispatcher *Dispatcher,
 			log.Printf("todo scheduler: stopped")
 			return
 		case <-ticker.C:
+			var reminderHours []int
+			if dispatcher.configReader != nil {
+				reminderHours = dispatcher.configReader.Get().Todo.ReminderHours
+			}
+			if len(reminderHours) == 0 {
+				reminderHours = []int{24, 2}
+			}
 			checkReminders(ctx, store, dispatcher, reminderHours)
 			checkOverdue(ctx, store, dispatcher)
 		}
