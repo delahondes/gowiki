@@ -3728,7 +3728,7 @@ function renderActions() {
 
       actionsRoot.appendChild(
         makeActionButton("Edit (resume)", () => {
-          void enterEditMode(false)
+          void enterEditMode(true)
         })
       )
       actionsRoot.appendChild(
@@ -3799,7 +3799,8 @@ function renderActions() {
 
 async function publishFromView() {
   // Quick-publish: enter edit, then immediately publish.
-  const ok = await enterEditMode(false)
+  // Use force=true since the user owns the draft and is explicitly publishing.
+  const ok = await enterEditMode(true)
   if (!ok) return
   await publishDraft()
 }
@@ -4276,41 +4277,55 @@ function buildMediaChanges(fromRefs, toRefs) {
 
 async function restoreVersion(version) {
   try {
+    stopAutoSave()
     const resp = await fetch(`/api/versions/${encodePagePath(pagePath)}?v=${version}`)
     if (!resp.ok) {
       setStatus("Failed to load version for restore")
       return
     }
     const data = await resp.json()
-    // Enter edit mode with this version's content as a new draft.
-    currentMarkdown = data.markdown
-    currentDoc = markdownToPM(currentMarkdown, registry)
-    const ok = await enterEditMode(true)
-    if (ok) {
-      // Overwrite draft with restored content.
-      const markdown = data.markdown
-      const draftResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown, edit_token: editToken }),
-      })
-      if (!draftResp.ok) {
-        setStatus("Failed to save restored version as draft")
-        return
-      }
-      // Update baseline to restored content so database-row validation
-      // compares against the restored version, not the previously published one.
-      editBaselineMarkdown = markdown
-      currentMarkdown = markdown
-      currentDoc = markdownToPM(markdown, registry)
-      // Update editor with restored content.
-      if (editorView) {
-        const doc = markdownToPM(markdown, registry)
-        const state = EditorState.create({ doc, plugins: editorView.state.plugins })
-        editorView.updateState(state)
-      }
-      setStatus(`Restored version ${version} — review and publish`)
+    const markdown = data.markdown
+
+    // Acquire edit token (force to supersede any existing session).
+    const editResp = await authFetch(`/api/edit/${encodePagePath(pagePath)}?force=true`, {
+      method: "POST",
+    })
+    if (!editResp.ok) {
+      setStatus("Failed to acquire edit lock for restore")
+      return
     }
+    const token = (await editResp.json()).edit_token
+
+    // Save restored content as draft.
+    const draftResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown, edit_token: token }),
+    })
+    if (!draftResp.ok) {
+      setStatus("Failed to save restored version as draft")
+      return
+    }
+
+    // Publish immediately.
+    const pubResp = await authFetch(`/api/publish/${encodePagePath(pagePath)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ edit_token: token }),
+    })
+    if (!pubResp.ok) {
+      const body = await pubResp.json().catch(() => ({}))
+      setStatus(body.error || "Failed to publish restored version")
+      return
+    }
+
+    // Clean up edit state and refresh.
+    editToken = null
+    pageLockInfo = null
+    stashedEditorState = null
+    await reloadPageContent()
+    setStatus(`Restored version ${version}`)
+    showHistory()
   } catch {
     setStatus("Failed to restore version")
   }
@@ -5034,11 +5049,19 @@ async function publishDraft() {
     return
   }
   // Save draft with latest content
-  await fetch(`/api/draft/${encodePagePath(pagePath)}`, {
+  const draftResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ markdown: normalized.markdown, edit_token: editToken }),
   })
+  if (!draftResp.ok) {
+    if (draftResp.status === 409) {
+      await handleSuperseded()
+    } else {
+      setStatus("Failed to save draft before publish")
+    }
+    return
+  }
   // Publish
   const resp = await authFetch(`/api/publish/${encodePagePath(pagePath)}`, {
     method: "POST",
@@ -6227,6 +6250,7 @@ async function renderAdminConfigTab(container) {
     form.appendChild(siteHeading)
 
     const titleInput = adminFormField(form, "Site Title", "text", (config.site && config.site.title) || "")
+    const baseUrlInput = adminFormField(form, "Base URL (e.g. https://wiki.example.com)", "text", (config.site && config.site.base_url) || "")
     const sidebarInput = adminFormField(form, "Sidebar Page", "text", (config.site && config.site.sidebar_page) || "")
     const footerInput = adminFormField(form, "Footer Page", "text", (config.site && config.site.footer_page) || "")
     const tocMaxLevelInput = adminFormField(form, "TOC max heading level (0 = disabled, 1-6)", "number", String((config.site && config.site.toc_max_level) ?? 3))
@@ -6446,6 +6470,7 @@ async function renderAdminConfigTab(container) {
       const payload = {
         site: {
           title: titleInput.value.trim(),
+          base_url: baseUrlInput.value.trim(),
           sidebar_page: sidebarInput.value.trim(),
           footer_page: footerInput.value.trim(),
           toc_max_level: parseInt(tocMaxLevelInput.value, 10) || 3,

@@ -49,15 +49,15 @@ func NewDispatcherStatic(notifyCfg config.TodoNotifyConfig, siteTitle string) *D
 	return &Dispatcher{notifyCfg: &notifyCfg, siteTitle: siteTitle}
 }
 
-func (d *Dispatcher) getConfig() (config.TodoNotifyConfig, string) {
+func (d *Dispatcher) getConfig() (config.TodoNotifyConfig, string, string) {
 	if d.configReader != nil {
 		cfg := d.configReader.Get()
-		return cfg.Todo.Notify, cfg.Site.Title
+		return cfg.Todo.Notify, cfg.Site.Title, cfg.Site.BaseURL
 	}
 	if d.notifyCfg != nil {
-		return *d.notifyCfg, d.siteTitle
+		return *d.notifyCfg, d.siteTitle, ""
 	}
-	return config.TodoNotifyConfig{}, ""
+	return config.TodoNotifyConfig{}, "", ""
 }
 
 // Notify sends a notification for a task event.
@@ -71,7 +71,7 @@ func (d *Dispatcher) Notify(event NotifyEvent) {
 		}
 	}
 
-	notifyCfg, _ := d.getConfig()
+	notifyCfg, _, _ := d.getConfig()
 	hasWebhook := false
 	for _, wh := range notifyCfg.Webhooks {
 		if wh.Enabled {
@@ -86,7 +86,7 @@ func (d *Dispatcher) Notify(event NotifyEvent) {
 }
 
 func (d *Dispatcher) sendEmail(event NotifyEvent) {
-	notifyCfg, _ := d.getConfig()
+	notifyCfg, _, _ := d.getConfig()
 	cfg := notifyCfg.Email
 	if cfg.SMTPHost == "" || cfg.From == "" || event.Recipient == "" {
 		return
@@ -196,14 +196,54 @@ func (d *Dispatcher) renderEmailTemplate(event NotifyEvent) (string, string) {
 		return "", ""
 	}
 
-	_, siteTitle := d.getConfig()
+	_, siteTitle, baseURL := d.getConfig()
+	// Strip trailing slash from base URL for clean concatenation.
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	pageURL := task.SourcePage
+	if baseURL != "" && task.SourcePage != "" {
+		pageURL = baseURL + task.SourcePage
+	}
+
+	actionLabel := ""
+	actionURL := ""
+	if task.WikiAction.Type != "" && task.WikiAction.Page != "" {
+		switch task.WikiAction.Type {
+		case "read":
+			actionLabel = "Read " + task.WikiAction.Page
+			if baseURL != "" {
+				actionURL = baseURL + task.WikiAction.Page
+			} else {
+				actionURL = task.WikiAction.Page
+			}
+		case "edit":
+			actionLabel = "Edit " + task.WikiAction.Page
+			if baseURL != "" {
+				actionURL = baseURL + task.WikiAction.Page + "?edit=1"
+			} else {
+				actionURL = task.WikiAction.Page + "?edit=1"
+			}
+		case "create":
+			actionLabel = "Create " + task.WikiAction.Page
+			if baseURL != "" {
+				actionURL = baseURL + task.WikiAction.Page + "?edit=1"
+			} else {
+				actionURL = task.WikiAction.Page + "?edit=1"
+			}
+		}
+	}
+
 	data := map[string]string{
-		"SiteTitle": siteTitle,
-		"Title":     task.Title,
-		"Assignee":  task.Assignee.Target,
-		"DueDate":   task.DueDate,
-		"Priority":  string(task.Priority),
-		"Page":      task.SourcePage,
+		"SiteTitle":   siteTitle,
+		"Title":       task.Title,
+		"Description": task.Description,
+		"Assignee":    task.Assignee.Target,
+		"DueDate":     task.DueDate,
+		"Priority":    string(task.Priority),
+		"Page":        task.SourcePage,
+		"PageURL":     pageURL,
+		"ActionLabel": actionLabel,
+		"ActionURL":   actionURL,
 	}
 
 	switch event.Type {
@@ -301,34 +341,43 @@ func renderTemplate(tmpl string, data map[string]string) string {
 const assignedTmpl = `You have been assigned a task on {{.SiteTitle}}.
 
 Task: {{.Title}}
-Priority: {{.Priority}}
+{{if .Description}}Description: {{.Description}}
+{{end}}Priority: {{.Priority}}
 Due: {{.DueDate}}
-Page: {{.Page}}
-`
+Page: {{.PageURL}}
+{{if .ActionLabel}}Action: {{.ActionLabel}} — {{.ActionURL}}
+{{end}}`
 
 const dueReminderTmpl = `A task assigned to you is due soon on {{.SiteTitle}}.
 
 Task: {{.Title}}
-Due: {{.DueDate}}
-Page: {{.Page}}
-`
+{{if .Description}}Description: {{.Description}}
+{{end}}Due: {{.DueDate}}
+Page: {{.PageURL}}
+{{if .ActionLabel}}Action: {{.ActionLabel}} — {{.ActionURL}}
+{{end}}`
 
 const overdueTmpl = `A task assigned to you is overdue on {{.SiteTitle}}.
 
 Task: {{.Title}}
-Due: {{.DueDate}}
-Page: {{.Page}}
-`
+{{if .Description}}Description: {{.Description}}
+{{end}}Due: {{.DueDate}}
+Page: {{.PageURL}}
+{{if .ActionLabel}}Action: {{.ActionLabel}} — {{.ActionURL}}
+{{end}}`
 
 const completedAllTmpl = `A task has been completed on {{.SiteTitle}}.
 
 Task: {{.Title}}
-Page: {{.Page}}
+{{if .Description}}Description: {{.Description}}
+{{end}}Page: {{.PageURL}}
 `
 
 const recurrenceSpawnedTmpl = `A recurring task has been created on {{.SiteTitle}}.
 
 Task: {{.Title}}
-Due: {{.DueDate}}
-Page: {{.Page}}
-`
+{{if .Description}}Description: {{.Description}}
+{{end}}Due: {{.DueDate}}
+Page: {{.PageURL}}
+{{if .ActionLabel}}Action: {{.ActionLabel}} — {{.ActionURL}}
+{{end}}`

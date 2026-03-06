@@ -64,6 +64,7 @@ type DatabaseConfig struct {
 // SiteConfig holds site-wide display settings.
 type SiteConfig struct {
 	Title       string `yaml:"title" json:"title"`
+	BaseURL     string `yaml:"base_url" json:"base_url"` // e.g. "https://wiki.example.com"
 	FooterPage  string `yaml:"footer_page" json:"footer_page"`
 	SidebarPage string `yaml:"sidebar_page" json:"sidebar_page"`
 	TOCMaxLevel int    `yaml:"toc_max_level" json:"toc_max_level"` // 0 = disabled, 1-6 = show headings up to this level
