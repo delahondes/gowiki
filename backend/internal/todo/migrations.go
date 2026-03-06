@@ -64,5 +64,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_todo_tasks_node_key ON todo_tasks(source_p
 	if err != nil {
 		return fmt.Errorf("run todo migrations: %w", err)
 	}
+
+	// Add acknowledged_version column for read-ack tracking.
+	_, err = p.Exec(ctx, `ALTER TABLE todo_completions ADD COLUMN IF NOT EXISTS acknowledged_version BIGINT NOT NULL DEFAULT 0`)
+	if err != nil {
+		return fmt.Errorf("add acknowledged_version column: %w", err)
+	}
+
 	return nil
 }

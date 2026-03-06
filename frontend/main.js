@@ -61,6 +61,7 @@ let currentUser = null // { username } or null
 let editToken = null
 let autoSaveTimer = null
 let pageLockInfo = null // { locked_by, is_draft }
+let currentPageVersion = 0
 
 // Global media version cache: maps relative media paths (as in node attrs) to their max version.
 window.__gowikiMediaVersions = new Map()
@@ -1476,6 +1477,11 @@ function renderView() {
   // Build table of contents for view mode.
   buildTOC(contentRoot)
 
+  // Check for pending read acknowledgements.
+  if (currentUser && !isNewPage) {
+    checkReadAck(pagePath, currentPageVersion, contentRoot)
+  }
+
   // Scroll to fragment anchor if present.
   if (window.location.hash) {
     const id = window.location.hash.slice(1)
@@ -1486,6 +1492,90 @@ function renderView() {
   }
 
   updatePageTitle()
+}
+
+async function checkReadAck(path, currentVersion, container) {
+  try {
+    const resp = await fetch(`/api/plugin/todo/v1/tasks/ack/${encodePagePath(path)}`)
+    if (!resp.ok) return
+    const data = await resp.json()
+    const tasks = data.tasks || []
+    if (tasks.length === 0) return
+
+    for (const task of tasks) {
+      const banner = document.createElement("div")
+      banner.className = "gowiki-ack-banner"
+
+      const title = document.createElement("div")
+      title.className = "gowiki-ack-title"
+      title.textContent = task.title || "Read acknowledgement required"
+      banner.appendChild(title)
+
+      if (task.previous_ack_version > 0 && task.previous_ack_version < currentVersion) {
+        const info = document.createElement("div")
+        info.className = "gowiki-ack-info"
+        info.textContent = `You previously acknowledged version ${task.previous_ack_version}. `
+        const diffLink = document.createElement("a")
+        diffLink.href = "#"
+        diffLink.textContent = "View changes since your last acknowledgement"
+        diffLink.addEventListener("click", (e) => {
+          e.preventDefault()
+          showDiff(task.previous_ack_version, 0)
+        })
+        info.appendChild(diffLink)
+        banner.appendChild(info)
+      }
+
+      const row = document.createElement("div")
+      row.className = "gowiki-ack-row"
+
+      const label = document.createElement("label")
+      label.className = "gowiki-ack-label"
+      const checkbox = document.createElement("input")
+      checkbox.type = "checkbox"
+      label.appendChild(checkbox)
+      const labelText = document.createTextNode(" I confirm that I have read and understood the contents of this page")
+      label.appendChild(labelText)
+
+      const btn = document.createElement("button")
+      btn.className = "gowiki-ack-btn"
+      btn.textContent = "Acknowledge"
+      btn.disabled = true
+
+      checkbox.addEventListener("change", () => { btn.disabled = !checkbox.checked })
+      btn.addEventListener("click", async () => {
+        btn.disabled = true
+        btn.textContent = "Acknowledging…"
+        try {
+          const ackResp = await authFetch(`/api/plugin/todo/v1/tasks/${task.task_id}/acknowledge`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ version: currentVersion }),
+          })
+          if (ackResp.ok) {
+            banner.className = "gowiki-ack-banner gowiki-ack-done"
+            banner.textContent = "Acknowledged"
+            setTimeout(() => banner.remove(), 2000)
+          } else {
+            btn.textContent = "Acknowledge"
+            btn.disabled = false
+            setStatus("Failed to acknowledge")
+          }
+        } catch {
+          btn.textContent = "Acknowledge"
+          btn.disabled = false
+          setStatus("Failed to acknowledge")
+        }
+      })
+
+      row.appendChild(label)
+      row.appendChild(btn)
+      banner.appendChild(row)
+      container.appendChild(banner)
+    }
+  } catch {
+    // Silently ignore ack check failures.
+  }
 }
 
 function highlightTermsInView(container, query) {
@@ -4472,6 +4562,7 @@ async function checkAuth() {
   } catch {
     currentUser = null
   }
+  window.__gowikiCurrentUser = currentUser
   renderBannerUser()
 }
 
@@ -4499,6 +4590,7 @@ function renderBannerUser() {
       e.preventDefault()
       await fetch("/api/auth/logout", { method: "POST" })
       currentUser = null
+      window.__gowikiCurrentUser = null
       pageLockInfo = null
       editToken = null
       stashedEditorState = null
@@ -4609,7 +4701,8 @@ function showLoginDialog(onSuccess) {
           btn.className = "gowiki-login-oauth-btn"
           btn.textContent = "Sign in with " + provider.label
           btn.addEventListener("click", () => {
-            window.location.href = "/api/auth/oauth/login"
+            const returnTo = encodeURIComponent(window.location.pathname)
+            window.location.href = "/api/auth/oauth/login?return_to=" + returnTo
           })
           oauthSection.appendChild(btn)
         }
@@ -4639,6 +4732,7 @@ async function authFetch(url, options) {
 }
 // Expose for media_manager.js
 window.__gowikiAuthFetch = authFetch
+window.__gowikiCurrentUser = null
 
 async function reloadPageContent() {
   // Admin page is a virtual route — re-render it instead of fetching a wiki page.
@@ -4665,6 +4759,7 @@ async function reloadPageContent() {
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false
+    currentPageVersion = page.meta?.version || 0
     pageLockInfo = null
     if (page.locked_by) {
       pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
@@ -4678,6 +4773,7 @@ async function reloadPageContent() {
   } else {
     currentMarkdown = defaultMarkdown
     isNewPage = true
+    currentPageVersion = 0
     pageLockInfo = null
   }
 
@@ -5164,7 +5260,7 @@ async function renderSitemapPage() {
     }
 
     function leafName(node) {
-      if (node.path === "index") return "/"
+      if (node.path === "/index" || node.path === "index") return "/"
       const leaf = node.path.split("/").pop()
       const hasChildren = node.children && node.children.length > 0
       if (node.is_namespace_index || hasChildren) return leaf + "/"
@@ -6998,6 +7094,7 @@ async function bootstrap() {
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false
+    currentPageVersion = page.meta?.version || 0
     // Capture lock/draft info from page response.
     pageLockInfo = null
     if (page.locked_by) {
@@ -7012,6 +7109,7 @@ async function bootstrap() {
   } else {
     currentMarkdown = defaultMarkdown
     isNewPage = true
+    currentPageVersion = 0
     pageLockInfo = null
   }
 

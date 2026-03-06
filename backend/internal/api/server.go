@@ -265,12 +265,20 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 
 	// Todo plugin endpoints.
 	if s.todoService != nil {
+		extractUsername := func(r *http.Request) string {
+			return UsernameFromContext(r.Context())
+		}
 		r.Route("/api/plugin/todo/v1", func(r chi.Router) {
-			r.Use(s.requireAuth)
-			extractUsername := func(r *http.Request) string {
-				return UsernameFromContext(r.Context())
-			}
-			todo.RegisterRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+			// Read-only endpoints: accessible to anyone who can read the page.
+			r.Group(func(r chi.Router) {
+				r.Use(s.optionalAuth)
+				todo.RegisterReadRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+			})
+			// Write endpoints: require authentication.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername)
+			})
 		})
 	}
 
@@ -343,13 +351,7 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-complete "read" wiki action tasks.
-	if s.todoService != nil {
-		username := UsernameFromContext(r.Context())
-		if username != "" {
-			go s.todoService.AutoCompleteWikiAction(context.Background(), "read", page.Path, username)
-		}
-	}
+	// Read-action tasks now require explicit acknowledgement (no auto-complete).
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -392,6 +394,7 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 	// Auto-complete "edit" wiki action tasks.
 	if s.todoService != nil {
 		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, author)
+		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
 	}
 
 	writeJSON(w, http.StatusOK, result)

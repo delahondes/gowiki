@@ -83,6 +83,15 @@ const todoProperties = [
     parse: (raw: string) => raw.trim(),
     serialize: (value: string | null) => String(value ?? ""),
   },
+  {
+    name: "description",
+    label: "Description",
+    default: "",
+    wide: true,
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Optional explanation or intention",
+  },
 ]
 
 // --- API Gate ---
@@ -209,6 +218,7 @@ class TodoNodeView {
   private getPos: () => number | undefined
   private taskId: string | null = null
   private taskStatus: string = "open"
+  private taskData: TodoTask | null = null
   private eventSource: EventSource | null = null
   private unavailable: boolean = false
 
@@ -247,7 +257,14 @@ class TodoNodeView {
     cb.className = "gowiki-todo-checkbox"
     const status = this.taskStatus
     cb.checked = status === "done"
-    cb.disabled = !this.taskId
+    // Disable checkbox if no task ID, or if a wiki action is set and user is not admin.
+    const hasWikiAction = !!(node.attrs.action)
+    const user = (window as any).__gowikiCurrentUser
+    const isAdmin = user?.is_admin === true
+    cb.disabled = !this.taskId || (hasWikiAction && !isAdmin)
+    if (hasWikiAction && !isAdmin) {
+      cb.title = "This task is completed automatically by a wiki action"
+    }
     cb.addEventListener("change", (e) => {
       e.preventDefault()
       e.stopPropagation()
@@ -308,6 +325,33 @@ class TodoNodeView {
       chip.appendChild(pBadge)
     }
 
+    // Wiki action link
+    const actionAttr = node.attrs.action
+    if (actionAttr) {
+      const actionBadge = document.createElement("span")
+      actionBadge.className = "gowiki-todo-action"
+      const colonIdx = actionAttr.indexOf(":")
+      const actionType = colonIdx >= 0 ? actionAttr.slice(0, colonIdx) : actionAttr
+      const actionPage = colonIdx >= 0 ? actionAttr.slice(colonIdx + 1) : ""
+      if (actionPage) {
+        const label = actionType.charAt(0).toUpperCase() + actionType.slice(1)
+        actionBadge.textContent = label + " "
+        const link = document.createElement("a")
+        link.href = actionPage
+        link.textContent = actionPage
+        link.className = "gowiki-todo-action-link"
+        link.addEventListener("click", (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          window.location.href = actionPage
+        })
+        actionBadge.appendChild(link)
+      } else {
+        actionBadge.textContent = actionAttr
+      }
+      chip.appendChild(actionBadge)
+    }
+
     // Status indicator for done/cancelled
     if (status === "done") {
       chip.style.opacity = "0.7"
@@ -317,6 +361,15 @@ class TodoNodeView {
     }
 
     this.dom.appendChild(chip)
+
+    // Description (optional)
+    const desc = node.attrs.description
+    if (desc) {
+      const descEl = document.createElement("div")
+      descEl.className = "gowiki-todo-description"
+      descEl.textContent = desc
+      this.dom.appendChild(descEl)
+    }
   }
 
   private async fetchTask() {
@@ -329,6 +382,7 @@ class TodoNodeView {
       if (match) {
         this.taskId = match.id
         this.taskStatus = match.status
+        this.taskData = match
         this.render()
       }
     } catch (err: any) {
@@ -442,6 +496,32 @@ const todoStyles = `
   text-transform: uppercase;
 }
 
+.gowiki-todo-description {
+  margin: 2px 0 0 28px;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.gowiki-todo-action {
+  background: #f3e8ff;
+  color: #7c3aed;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.gowiki-todo-action-link {
+  color: #5b21b6;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gowiki-todo-action-link:hover {
+  color: #4c1d95;
+}
+
 .gowiki-todo-unavailable {
   background: #fff3e0;
   border-color: #ffb74d;
@@ -524,6 +604,7 @@ export const todoPlugin: WikiPlugin = {
             priority: { default: "normal" },
             action: { default: "" },
             tags: { default: "" },
+            description: { default: "" },
             task_id: { default: "" },
             task_status: { default: "open" },
           },
@@ -576,6 +657,7 @@ export const todoPlugin: WikiPlugin = {
             priority: attrs.priority ?? "normal",
             action: attrs.action ?? "",
             tags: attrs.tags ?? "",
+            description: attrs.description ?? "",
           })
         )
       },
@@ -602,6 +684,7 @@ export const todoPlugin: WikiPlugin = {
         }
         if (node.attrs.action) parts.push(`action="${node.attrs.action}"`)
         if (node.attrs.tags) parts.push(`tags="${node.attrs.tags}"`)
+        if (node.attrs.description) parts.push(`description="${node.attrs.description}"`)
 
         return `{todo ${parts.join(" ")}}\n\n`
       },

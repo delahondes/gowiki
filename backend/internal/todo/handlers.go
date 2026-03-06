@@ -14,20 +14,34 @@ import (
 // This avoids a circular import between the todo and api packages.
 type UsernameExtractor func(r *http.Request) string
 
-// RegisterRoutes mounts the todo API routes on the given chi router.
+// RegisterRoutes mounts all todo API routes (read + write) on the given chi router.
 // All routes are under /api/plugin/todo/v1/.
 func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
+	RegisterReadRoutes(r, svc, userStore, groupStore, extractUsername)
+	RegisterWriteRoutes(r, svc, userStore, groupStore, extractUsername)
+}
+
+// RegisterReadRoutes mounts read-only todo endpoints (accessible without authentication).
+func RegisterReadRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername}
+
+	r.Get("/tasks/page/*", h.handleByPage)
+}
+
+// RegisterWriteRoutes mounts todo endpoints that require authentication.
+func RegisterWriteRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor) {
 	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername}
 
 	r.Get("/tasks", h.handleList)
 	r.Post("/tasks", h.handleCreate)
 	r.Get("/tasks/mine", h.handleMine)
-	r.Get("/tasks/page/*", h.handleByPage)
+	r.Get("/tasks/ack/*", h.handleAckStatus)
 	r.Get("/tasks/{id}", h.handleGet)
 	r.Patch("/tasks/{id}", h.handlePatch)
 	r.Delete("/tasks/{id}", h.handleDelete)
 	r.Post("/tasks/{id}/complete", h.handleComplete)
 	r.Post("/tasks/{id}/reopen", h.handleReopen)
+	r.Post("/tasks/{id}/acknowledge", h.handleAcknowledge)
 	r.Get("/stream", h.handleStream)
 }
 
@@ -220,6 +234,74 @@ func (h *handlers) handleByPage(w http.ResponseWriter, r *http.Request) {
 		tasks = []*Task{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (h *handlers) handleAckStatus(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+	if !strings.HasPrefix(pagePath, "/") {
+		pagePath = "/" + pagePath
+	}
+
+	userID := h.extractUsername(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var groups []string
+	if h.userStore != nil {
+		user, err := h.userStore.Get(userID)
+		if err == nil {
+			groups = user.EffectiveGroups()
+		}
+	}
+
+	acks, err := h.svc.Store().ListPendingAcks(r.Context(), pagePath, userID, groups)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if acks == nil {
+		acks = []PendingAck{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": acks})
+}
+
+func (h *handlers) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	userID := h.extractUsername(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var req struct {
+		Version int64 `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	var resolver GroupResolver
+	if h.groupStore != nil && h.userStore != nil {
+		resolver = &authGroupResolver{groupStore: h.groupStore, userStore: h.userStore}
+	}
+
+	task, err := h.svc.AcknowledgeTask(r.Context(), id, userID, req.Version, resolver)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no rows") {
+			writeError(w, http.StatusNotFound, "task not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
 }
 
 func (h *handlers) handleStream(w http.ResponseWriter, r *http.Request) {

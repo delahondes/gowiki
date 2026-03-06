@@ -78,6 +78,7 @@ export type NodePropertySpec = {
   options?: NodePropertyOption[] | ((attrs: Record<string, any>) => NodePropertyOption[])
   visible?: (attrs: Record<string, any>) => boolean
   multiline?: boolean
+  wide?: boolean
   helpText?: string
   backspaceEmpty?: string | null
 }

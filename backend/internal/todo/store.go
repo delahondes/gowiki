@@ -502,7 +502,7 @@ func (s *TodoStore) ListCompletions(ctx context.Context, taskID string) ([]*Comp
 	}
 
 	rows, err := p.Query(ctx, `
-		SELECT task_id, user_id, completed_at
+		SELECT task_id, user_id, completed_at, acknowledged_version
 		FROM todo_completions WHERE task_id = $1
 		ORDER BY completed_at ASC`, taskID)
 	if err != nil {
@@ -513,7 +513,7 @@ func (s *TodoStore) ListCompletions(ctx context.Context, taskID string) ([]*Comp
 	var completions []*Completion
 	for rows.Next() {
 		var c Completion
-		if err := rows.Scan(&c.TaskID, &c.UserID, &c.CompletedAt); err != nil {
+		if err := rows.Scan(&c.TaskID, &c.UserID, &c.CompletedAt, &c.AcknowledgedVersion); err != nil {
 			return nil, fmt.Errorf("scan completion: %w", err)
 		}
 		completions = append(completions, &c)
@@ -547,11 +547,6 @@ func (s *TodoStore) UpsertForPage(ctx context.Context, pagePath string, directiv
 		nodeKey := computeNodeKey(pagePath, d.Title, d.Assign)
 		seenKeys[nodeKey] = true
 
-		if _, exists := existingByKey[nodeKey]; exists {
-			// Task already exists — could update fields here if needed.
-			continue
-		}
-
 		// Parse assignee.
 		assignee := Assignee{Type: "user", Target: "", Resolution: "any"}
 		if d.Assign != "" {
@@ -572,18 +567,58 @@ func (s *TodoStore) UpsertForPage(ctx context.Context, pagePath string, directiv
 			priority = PriorityNormal
 		}
 
+		action := parseAction(d.Action)
+		// Resolve relative action paths against the source page.
+		if action.Page != "" {
+			action.Page = resolveActionPath(pagePath, action.Page)
+		}
+
+		if existing, exists := existingByKey[nodeKey]; exists {
+			// Update mutable fields on existing task.
+			patch := Patch{}
+			if d.Due != existing.DueDate {
+				patch.DueDate = &d.Due
+			}
+			if action.Page != existing.WikiAction.Page || action.Type != existing.WikiAction.Type ||
+				action.Pattern != existing.WikiAction.Pattern || action.Schema != existing.WikiAction.Schema ||
+				action.Field != existing.WikiAction.Field || action.Value != existing.WikiAction.Value {
+				patch.WikiAction = &action
+			}
+			if string(priority) != string(existing.Priority) {
+				p := priority
+				patch.Priority = &p
+			}
+			if d.Tags != existing.Tags {
+				patch.Tags = &d.Tags
+			}
+			if d.Description != existing.Description {
+				patch.Description = &d.Description
+			}
+			rec := parseRecur(d.Recur)
+			if rec != existing.Recurrence {
+				patch.Recurrence = &rec
+			}
+			if !patch.IsEmpty() {
+				if _, err := s.Update(ctx, existing.ID, patch); err != nil {
+					log.Printf("todo: upsert update failed for task %s: %v", existing.ID, err)
+				}
+			}
+			continue
+		}
+
 		req := CreateRequest{
-			Title:      d.Title,
-			Source:     SourceWikiNode,
-			SourcePage: pagePath,
-			NodeKey:    nodeKey,
-			Assignee:   assignee,
-			DueDate:    d.Due,
-			Recurrence: parseRecur(d.Recur),
-			WikiAction: parseAction(d.Action),
-			Tags:       d.Tags,
-			Priority:   priority,
-			CreatedBy:  createdBy,
+			Title:       d.Title,
+			Description: d.Description,
+			Source:      SourceWikiNode,
+			SourcePage:  pagePath,
+			NodeKey:     nodeKey,
+			Assignee:    assignee,
+			DueDate:     d.Due,
+			Recurrence:  parseRecur(d.Recur),
+			WikiAction:  action,
+			Tags:        d.Tags,
+			Priority:    priority,
+			CreatedBy:   createdBy,
 		}
 
 		if _, err := s.Create(ctx, req); err != nil {
@@ -715,6 +750,159 @@ func (s *TodoStore) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("task not found")
 	}
 	return nil
+}
+
+// PendingAck represents a read-ack task pending for a user on a specific page.
+type PendingAck struct {
+	TaskID             string `json:"task_id"`
+	Title              string `json:"title"`
+	PreviousAckVersion int64  `json:"previous_ack_version"`
+}
+
+// ListPendingAcks returns open read-action tasks for a page that the given user
+// (or their groups) must acknowledge.
+func (s *TodoStore) ListPendingAcks(ctx context.Context, pagePath, userID string, groups []string) ([]PendingAck, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	targets := []string{userID}
+	targets = append(targets, groups...)
+
+	rows, err := p.Query(ctx, `
+		SELECT t.id, t.title, COALESCE(c.acknowledged_version, 0) AS prev_ack_version
+		FROM todo_tasks t
+		LEFT JOIN todo_completions c ON c.task_id = t.id AND c.user_id = $3
+		WHERE t.status IN ('open', 'in_progress')
+		  AND t.wiki_action_type = 'read'
+		  AND t.wiki_action_page = $1
+		  AND t.assignee_target = ANY($2)`,
+		pagePath, targets, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list pending acks: %w", err)
+	}
+	defer rows.Close()
+
+	var result []PendingAck
+	for rows.Next() {
+		var pa PendingAck
+		if err := rows.Scan(&pa.TaskID, &pa.Title, &pa.PreviousAckVersion); err != nil {
+			return nil, fmt.Errorf("scan pending ack: %w", err)
+		}
+		result = append(result, pa)
+	}
+	return result, nil
+}
+
+// Acknowledge records a read acknowledgement for a task, upserting the completion
+// with the acknowledged version. Returns the updated task and whether it was promoted to done.
+func (s *TodoStore) Acknowledge(ctx context.Context, id, userID string, version int64, resolver GroupResolver) (*Task, bool, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, false, fmt.Errorf("database not connected")
+	}
+
+	task, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if task.Status == StatusDone || task.Status == StatusCancelled {
+		return task, false, nil
+	}
+
+	now := time.Now().UTC()
+	_, err = p.Exec(ctx, `
+		INSERT INTO todo_completions (task_id, user_id, completed_at, acknowledged_version)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (task_id, user_id) DO UPDATE
+		SET completed_at = $3, acknowledged_version = $4`,
+		id, userID, now, version)
+	if err != nil {
+		return nil, false, fmt.Errorf("record acknowledgement: %w", err)
+	}
+
+	// Check if task should be promoted to done (same logic as Complete).
+	promoted := false
+	if task.Assignee.Type == "group" && task.Assignee.Resolution == "all" && resolver != nil {
+		members := resolver.GroupMembers(task.Assignee.Target)
+		completions, err := s.ListCompletions(ctx, id)
+		if err != nil {
+			return nil, false, err
+		}
+		completedUsers := make(map[string]bool, len(completions))
+		for _, c := range completions {
+			completedUsers[c.UserID] = true
+		}
+		allDone := true
+		for _, m := range members {
+			if !completedUsers[m] {
+				allDone = false
+				break
+			}
+		}
+		if allDone && len(members) > 0 {
+			promoted = true
+		}
+	} else {
+		promoted = true
+	}
+
+	if promoted {
+		_, err = p.Exec(ctx, `UPDATE todo_tasks SET status = $1, updated_at = $2 WHERE id = $3`,
+			string(StatusDone), now, id)
+		if err != nil {
+			return nil, false, fmt.Errorf("promote task to done: %w", err)
+		}
+	}
+
+	task, err = s.Get(ctx, id)
+	return task, promoted, err
+}
+
+// ReopenKeepCompletions sets a task back to open status but preserves completion
+// records (used for read-ack tasks where we need the previous ack version).
+func (s *TodoStore) ReopenKeepCompletions(ctx context.Context, id string) (*Task, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	now := time.Now().UTC()
+	_, err := p.Exec(ctx, `UPDATE todo_tasks SET status = $1, updated_at = $2 WHERE id = $3`,
+		string(StatusOpen), now, id)
+	if err != nil {
+		return nil, fmt.Errorf("reopen task: %w", err)
+	}
+
+	return s.Get(ctx, id)
+}
+
+// ListDoneReadTasks returns completed read-action tasks for a page.
+func (s *TodoStore) ListDoneReadTasks(ctx context.Context, pagePath string) ([]*Task, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT id, title, description, status, source, source_page, node_key,
+			assignee_type, assignee_target, assignee_resolution,
+			due_date, recur_type, recur_days, recur_every, recur_unit,
+			recurrence_group_id,
+			wiki_action_type, wiki_action_page, wiki_action_pattern,
+			wiki_action_template, wiki_action_schema, wiki_action_field, wiki_action_value,
+			tags, priority, created_by, created_at, updated_at
+		FROM todo_tasks
+		WHERE status = 'done'
+		  AND wiki_action_type = 'read'
+		  AND wiki_action_page = $1`, pagePath)
+	if err != nil {
+		return nil, fmt.Errorf("list done read tasks: %w", err)
+	}
+	defer rows.Close()
+
+	return collectTasks(rows)
 }
 
 // --- Scan helpers ---

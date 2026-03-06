@@ -47,7 +47,14 @@ func (s *Server) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	callbackURL := origin + oauthCallbackPath
 	s.oauthClient.SetRedirectURL(callbackURL)
 
-	url, _ := s.oauthClient.AuthorizationURL(callbackURL, origin)
+	// Preserve the page the user was on so we can redirect back after login.
+	returnTo := r.URL.Query().Get("return_to")
+	returnURL := origin
+	if returnTo != "" {
+		returnURL = origin + returnTo
+	}
+
+	url, _ := s.oauthClient.AuthorizationURL(callbackURL, returnURL)
 	http.Redirect(w, r, url, http.StatusFound)
 }
 
@@ -175,10 +182,14 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	sessionID := s.sessionStore.Create(user.Username)
 	auth.SetSessionCookie(w, sessionID)
 
-	// Redirect back to the origin the user started from.
+	// Redirect back to the page the user was on before login.
 	redirectTo := "/"
 	if result.Origin != "" {
-		redirectTo = result.Origin + "/"
+		redirectTo = result.Origin
+		// Ensure there's at least a trailing slash for bare origins.
+		if !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(redirectTo, "https://"), "http://"), "/") {
+			redirectTo += "/"
+		}
 	}
 	http.Redirect(w, r, redirectTo, http.StatusFound)
 }

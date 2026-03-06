@@ -3,6 +3,7 @@ package todo
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -26,14 +27,15 @@ func ExtractTodoDirectives(markdown string) []ParsedDirective {
 		kv := parseKeyValues(body)
 
 		d := ParsedDirective{
-			Title:      kv["title"],
-			Assign:     kv["assign"],
-			Resolution: kv["resolution"],
-			Due:        kv["due"],
-			Recur:      kv["recur"],
-			Priority:   kv["priority"],
-			Action:     kv["action"],
-			Tags:       kv["tags"],
+			Title:       kv["title"],
+			Assign:      kv["assign"],
+			Resolution:  kv["resolution"],
+			Due:         kv["due"],
+			Recur:       kv["recur"],
+			Priority:    kv["priority"],
+			Action:      kv["action"],
+			Tags:        kv["tags"],
+			Description: kv["description"],
 		}
 
 		// Compute node_key as SHA1 of source_page:title:assign for stable identity.
@@ -154,6 +156,27 @@ func parseAction(raw string) WikiAction {
 		}
 	}
 	return WikiAction{}
+}
+
+// resolveActionPath resolves an action path relative to the source page.
+// Absolute paths (starting with /) are returned as-is.
+// Relative paths (starting with ./ or without /) are resolved against the source page's namespace.
+func resolveActionPath(sourcePage, actionPath string) string {
+	actionPath = strings.TrimSpace(actionPath)
+	if actionPath == "" {
+		return ""
+	}
+	// Already absolute.
+	if strings.HasPrefix(actionPath, "/") {
+		return actionPath
+	}
+	// Resolve relative to source page namespace.
+	namespace := path.Dir(sourcePage)
+	resolved := path.Clean(namespace + "/" + actionPath)
+	if !strings.HasPrefix(resolved, "/") {
+		resolved = "/" + resolved
+	}
+	return resolved
 }
 
 // parseInt parses a non-negative integer from a string, returning 0 on failure.

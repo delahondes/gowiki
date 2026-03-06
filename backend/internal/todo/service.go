@@ -94,6 +94,49 @@ func (svc *TodoService) ReopenTask(ctx context.Context, taskID string) (*Task, e
 	return task, nil
 }
 
+// ReopenReadTasks reopens all completed read-action tasks for a page.
+// This is called when a page is saved, so users must re-acknowledge.
+// Completions are preserved so the previous ack version is available for diff links.
+func (svc *TodoService) ReopenReadTasks(ctx context.Context, pagePath string) {
+	tasks, err := svc.store.ListDoneReadTasks(ctx, pagePath)
+	if err != nil {
+		log.Printf("todo: list done read tasks for %s failed: %v", pagePath, err)
+		return
+	}
+
+	for _, task := range tasks {
+		reopened, err := svc.store.ReopenKeepCompletions(ctx, task.ID)
+		if err != nil {
+			log.Printf("todo: reopen read task %s failed: %v", task.ID, err)
+			continue
+		}
+		svc.hub.Publish(reopened.Assignee.Target, Event{Type: "task.reopened", Task: reopened})
+	}
+}
+
+// AcknowledgeTask records a read acknowledgement and promotes the task if appropriate.
+func (svc *TodoService) AcknowledgeTask(ctx context.Context, taskID, userID string, version int64, resolver GroupResolver) (*Task, error) {
+	task, promoted, err := svc.store.Acknowledge(ctx, taskID, userID, version, resolver)
+	if err != nil {
+		return nil, err
+	}
+
+	svc.hub.Publish(task.Assignee.Target, Event{Type: "task.completed", Task: task})
+
+	// Handle recurrence if task was fully promoted to done.
+	if promoted && !task.Recurrence.IsZero() {
+		spawnReq := SpawnNext(task, time.Now().UTC())
+		newTask, err := svc.store.Create(ctx, *spawnReq)
+		if err != nil {
+			log.Printf("todo: spawn recurrence failed for %s: %v", task.ID, err)
+		} else {
+			svc.hub.Publish(newTask.Assignee.Target, Event{Type: "task.created", Task: newTask})
+		}
+	}
+
+	return task, nil
+}
+
 // AutoCompleteWikiAction finds and completes tasks triggered by wiki actions.
 func (svc *TodoService) AutoCompleteWikiAction(ctx context.Context, actionType, pagePath, userID string) {
 	tasks, err := svc.store.ListWikiActionTasks(ctx, actionType, pagePath)

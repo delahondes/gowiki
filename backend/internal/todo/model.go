@@ -89,9 +89,10 @@ func (w WikiAction) IsZero() bool {
 
 // Completion records a single user's completion of a task.
 type Completion struct {
-	TaskID      string    `json:"task_id"`
-	UserID      string    `json:"user_id"`
-	CompletedAt time.Time `json:"completed_at"`
+	TaskID              string    `json:"task_id"`
+	UserID              string    `json:"user_id"`
+	CompletedAt         time.Time `json:"completed_at"`
+	AcknowledgedVersion int64     `json:"acknowledged_version,omitempty"`
 }
 
 // Event is emitted via SSE when task state changes.
@@ -130,6 +131,13 @@ type Patch struct {
 	Priority    *Priority  `json:"priority,omitempty"`
 }
 
+// IsEmpty returns true if no fields are set.
+func (p Patch) IsEmpty() bool {
+	return p.Title == nil && p.Description == nil && p.Status == nil &&
+		p.Assignee == nil && p.DueDate == nil && p.Recurrence == nil &&
+		p.WikiAction == nil && p.Tags == nil && p.Priority == nil
+}
+
 // ListOptions controls task listing with filtering and pagination.
 type ListOptions struct {
 	Status   Status `json:"status,omitempty"`
@@ -143,15 +151,16 @@ type ListOptions struct {
 
 // ParsedDirective is the result of extracting a {todo ...} directive from markdown.
 type ParsedDirective struct {
-	Title      string
-	Assign     string
-	Resolution string
-	Due        string
-	Recur      string
-	Priority   string
-	Action     string
-	Tags       string
-	NodeKey    string // computed from title + assign
+	Title       string
+	Assign      string
+	Resolution  string
+	Due         string
+	Recur       string
+	Priority    string
+	Action      string
+	Tags        string
+	Description string
+	NodeKey     string // computed from title + assign
 }
 
 // NotifyEvent describes a notification to be sent.

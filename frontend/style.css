@@ -258,6 +258,80 @@ mark.search-highlight {
   font-size: 0.95em;
 }
 
+.gowiki-ack-banner {
+  padding: 16px 20px;
+  margin: 24px 0 12px;
+  border: 2px solid #c9a825;
+  border-radius: 6px;
+  background: #fef9e7;
+  color: #5c5230;
+  font-size: 0.95em;
+}
+
+.gowiki-ack-banner.gowiki-ack-done {
+  border-color: #4caf50;
+  background: #e8f5e9;
+  color: #2e7d32;
+  text-align: center;
+  font-weight: 600;
+  padding: 12px 20px;
+}
+
+.gowiki-ack-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 1em;
+}
+
+.gowiki-ack-info {
+  margin-bottom: 10px;
+  font-size: 0.9em;
+  color: #7a6e40;
+}
+
+.gowiki-ack-info a {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+
+.gowiki-ack-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.gowiki-ack-label {
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gowiki-ack-label input[type="checkbox"] {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.gowiki-ack-btn {
+  padding: 6px 18px;
+  border: 1px solid #c9a825;
+  border-radius: 4px;
+  background: #f5e6a3;
+  color: #5c5230;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.gowiki-ack-btn:hover:not(:disabled) {
+  background: #ecd978;
+}
+
+.gowiki-ack-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 #actions {
   display: flex;
   flex-direction: column;

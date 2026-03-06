@@ -154,6 +154,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	// Auto-complete "edit" wiki action tasks.
 	if s.todoService != nil {
 		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, username)
+		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
 	}
 
 	writeJSON(w, http.StatusOK, result)

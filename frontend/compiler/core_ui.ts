@@ -22,16 +22,34 @@ export function requestInputFocus(propName: string) {
 const panelStyles = `
 .gowiki-props-panel {
   display: inline-flex;
-  gap: 8px;
-  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
   margin: 0 0 4px 10px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   background: #fff6cf;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 0.85em;
   position: relative;
   z-index: 1;
+  max-width: 720px;
+}
+
+.gowiki-props-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.gowiki-props-group--wide {
+  flex-basis: 100%;
+}
+
+.gowiki-props-group--wide input {
+  width: 100%;
+  flex: 1;
 }
 
 .gowiki-props-panel input {
@@ -60,8 +78,6 @@ const panelStyles = `
 .gowiki-props-help {
   color: #888;
   font-size: 0.8em;
-  display: block;
-  margin-top: 2px;
   white-space: pre-line;
 }
 
@@ -280,16 +296,18 @@ function buildPanel(
       control = input
     }
 
-    wrap.appendChild(label)
-    wrap.appendChild(control)
-    wrap.appendChild(error)
-
+    const group = document.createElement("span")
+    group.className = prop.wide ? "gowiki-props-group gowiki-props-group--wide" : "gowiki-props-group"
+    group.appendChild(label)
+    group.appendChild(control)
+    group.appendChild(error)
     if (prop.helpText) {
       const help = document.createElement("span")
       help.className = "gowiki-props-help"
       help.textContent = prop.helpText
-      wrap.appendChild(help)
+      group.appendChild(help)
     }
+    wrap.appendChild(group)
   }
 
   return wrap
