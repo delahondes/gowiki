@@ -460,6 +460,7 @@ export function markdownToPM(
   const ctx = new CompileContext(schema)
   run(tokens, registry, ctx, { strict: true })
 
-  // 4. Build final document
-  return schema.nodes.doc.create(null, ctx.output)
+  // 4. Build final document — ensure at least one empty paragraph
+  const content = ctx.output.length > 0 ? ctx.output : [schema.nodes.paragraph.create()]
+  return schema.nodes.doc.create(null, content)
 }

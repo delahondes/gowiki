@@ -81,9 +81,10 @@ const panelStyles = `
   white-space: pre-line;
 }
 
-.gowiki-props-panel--block {
+.gowiki-props-panel.gowiki-props-panel--block {
   display: flex;
   width: max-content;
+  margin: 0 0 4px 0;
 }
 
 `

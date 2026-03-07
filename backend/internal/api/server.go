@@ -287,6 +287,12 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 
 	if serveWeb {
 		r.NotFound(s.handleFrontend)
+	} else {
+		// Dev mode: Vite proxies attachment-like paths to the backend.
+		// The regex route above only matches single-segment paths, so
+		// register a NotFound handler to catch multi-segment file paths
+		// (e.g. /ns/image.png).
+		r.NotFound(s.handleFilePath)
 	}
 	return r
 }

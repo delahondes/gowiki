@@ -730,14 +730,17 @@ export const todoPlugin: WikiPlugin = {
         const node = todoType.create({ title: "" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
+        // Search backward from the mapped position to find the just-inserted todo.
+        // We search backward because replaceSelectionWith places the cursor after
+        // the inserted node, so the todo is just before approxPos.
         let insertedAt: number | null = null
         tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
+          Math.max(0, approxPos - 200),
           Math.min(tr.doc.content.size, approxPos + 5),
           (n, pos) => {
-            if (n.type === todoType && insertedAt === null) {
+            if (n.type === todoType) {
+              // Keep updating — we want the LAST (closest to approxPos) todo, not the first
               insertedAt = pos
-              return false
             }
           }
         )

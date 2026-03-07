@@ -2,7 +2,7 @@ import { Registry } from "./registry"
 import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
-import type { NodeSpec, MarkSpec } from "prosemirror-model"
+import type { NodeSpec, MarkSpec, Node as PMNode } from "prosemirror-model"
 import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { highlightPlugin, isKnownLanguage } from "../highlight"
@@ -25,6 +25,17 @@ export function registerCoreNodes(reg: Registry) {
   baseNodes.forEach((name: string, spec: NodeSpec) => {
     nodes[name] = spec
   })
+
+  // Extend paragraph: empty paragraphs get a clearfix class to clear floated images.
+  nodes.paragraph = {
+    ...nodes.paragraph,
+    toDOM(node) {
+      if (node.content.size === 0) {
+        return ["p", { class: "gowiki-clear" }, 0]
+      }
+      return ["p", 0]
+    },
+  }
 
   // Extend heading to carry a `numbered` attribute.
   nodes.heading = {
@@ -89,6 +100,8 @@ export function registerCoreNodes(reg: Registry) {
   registerMarkdownPrinters(reg)
   registerHeadingAnchors(reg)
   registerHeadingNumbers(reg)
+
+  reg.registerStyle("clearfix", `.gowiki-clear { clear: both; }`)
 }
 
 /* --------------------------------------------------
@@ -414,6 +427,26 @@ function registerMarkdownPrinters(reg: Registry) {
     return parts.join("\n")
   }
 
+  function printStandaloneImage(
+    image: PMNode,
+    recurse: (node: PMNode) => string
+  ): string {
+    const size = image.attrs.size ?? null
+    const version = image.attrs.version ?? null
+    const align = image.attrs.align ?? null
+    const wrap = image.attrs.wrap ?? null
+    const body = recurse(image)
+    const dirParts: string[] = []
+    if (size) dirParts.push(size.includes(";") ? `size="${size}"` : `size=${size}`)
+    if (version) dirParts.push(`version=${version}`)
+    if (align) dirParts.push(`align=${align}`)
+    if (wrap) dirParts.push(`wrap=${wrap}`)
+    if (dirParts.length > 0) {
+      return `{image ${dirParts.join(" ")}}\n${body}\n\n`
+    }
+    return body + "\n\n"
+  }
+
   reg.registerPMNode("paragraph", {
     print(node, ctx, recurse) {
       if (node.content.size === 0) {
@@ -422,16 +455,42 @@ function registerMarkdownPrinters(reg: Registry) {
 
       if (node.childCount === 1 && node.firstChild?.type.name === "image") {
         const image = node.firstChild
-        const size = image.attrs.size ?? null
-        const version = image.attrs.version ?? null
-        const body = recurse(image)
-        const dirParts: string[] = []
-        if (size) dirParts.push(`size=${size}`)
-        if (version) dirParts.push(`version=${version}`)
-        if (dirParts.length > 0) {
-          return `{image ${dirParts.join(" ")}}\n${body}\n\n`
+        return printStandaloneImage(image, recurse)
+      }
+
+      // Check if the paragraph contains an image with size/version alongside
+      // other content.  The {image ...} directive syntax only works for
+      // standalone images, so split the paragraph: emit the sized image as
+      // its own paragraph (with directive) and the remaining content as a
+      // separate paragraph.
+      let sizedImage: typeof node.firstChild | null = null
+      let sizedImageIndex = -1
+      node.content.forEach((child, _offset, index) => {
+        if (
+          !sizedImage &&
+          child.type.name === "image" &&
+          (child.attrs.size || child.attrs.version || child.attrs.align || child.attrs.wrap)
+        ) {
+          sizedImage = child
+          sizedImageIndex = index
         }
-        return body + "\n\n"
+      })
+
+      if (sizedImage) {
+        const before: string[] = []
+        const after: string[] = []
+        node.content.forEach((child, _offset, index) => {
+          if (index === sizedImageIndex) return
+          if (index < sizedImageIndex) before.push(recurse(child))
+          else after.push(recurse(child))
+        })
+        let out = ""
+        const beforeText = before.join("")
+        if (beforeText) out += beforeText + "\n\n"
+        out += printStandaloneImage(sizedImage, recurse)
+        const afterText = after.join("")
+        if (afterText) out += afterText + "\n\n"
+        return out
       }
 
       let out = ""

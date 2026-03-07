@@ -497,7 +497,12 @@ function setExternalLinkCommand() {
 function applyStyles(styles) {
   for (const { id, css } of styles) {
     const styleId = `gowiki-style-${id}`
-    if (document.getElementById(styleId)) continue
+    const existing = document.getElementById(styleId)
+    if (existing) {
+      // Update if content changed (e.g. after HMR).
+      if (existing.textContent !== css) existing.textContent = css
+      continue
+    }
     const style = document.createElement("style")
     style.id = styleId
     style.textContent = css
@@ -2974,6 +2979,7 @@ function buildMenubar() {
   tableWrap.appendChild(tableIcon)
   const tableDropMenu = document.createElement("div")
   tableDropMenu.className = "gowiki-raw-dropdown-menu"
+  tableDropMenu.dataset.menuId = "table"
   const tableActions = [
     { name: "insert", label: "Insert table" },
     { name: "row.addBefore", label: "Add row above" },
@@ -3460,12 +3466,13 @@ function renderEdit(nextEditMode) {
       // Check both files and items for image blobs.
       // Skip if clipboard also has HTML with table content (e.g. Excel paste)
       // — prefer structured table data over the image representation.
-      const clipHtml = event.clipboardData?.getData("text/html") ?? ""
-      const hasHtmlTable = /<table[\s>]/i.test(clipHtml)
       const imageFiles = extractImageFiles(event.clipboardData)
-      if (imageFiles.length > 0 && !hasHtmlTable) {
-        void handleImageFilePaste(view, imageFiles)
-        return true
+      if (imageFiles.length > 0) {
+        const clipHtml = event.clipboardData?.getData("text/html") ?? ""
+        if (!/<table[\s>]/i.test(clipHtml)) {
+          void handleImageFilePaste(view, imageFiles)
+          return true
+        }
       }
 
       // Sanitize through serialize → parse → insert pipeline
@@ -3542,8 +3549,82 @@ function renderEdit(nextEditMode) {
         }
         return false
       },
+      contextmenu(view, event) {
+        // Show table context menu when right-clicking inside a table.
+        const $pos = view.state.selection.$from
+        let inTable = false
+        for (let d = $pos.depth; d > 0; d--) {
+          if ($pos.node(d).type.name === "table") { inTable = true; break }
+        }
+        if (!inTable) return false
+        event.preventDefault()
+
+        // Remove any previous context menu clone.
+        document.querySelector(".gowiki-ctx-menu")?.remove()
+
+        // Build a standalone context menu (not a child of the toolbar).
+        const ctxMenu = document.createElement("div")
+        ctxMenu.className = "gowiki-raw-dropdown-menu gowiki-ctx-menu"
+        ctxMenu.style.position = "fixed"
+        ctxMenu.style.left = event.clientX + "px"
+        ctxMenu.style.top = event.clientY + "px"
+        ctxMenu.style.display = "block"
+        ctxMenu.style.zIndex = "9999"
+
+        const ctxActions = [
+          { name: "row.addBefore", label: "Add row above" },
+          { name: "row.addAfter", label: "Add row below" },
+          { name: "column.addBefore", label: "Add column left" },
+          { name: "column.addAfter", label: "Add column right" },
+          { name: "row.delete", label: "Delete row" },
+          { name: "column.delete", label: "Delete column" },
+          { name: "cell.properties", label: "Cell properties" },
+          { name: "cell.merge", label: "Merge cells" },
+          { name: "cell.split", label: "Unmerge cell" },
+        ]
+        const visualOnly = new Set(["cell.merge", "cell.split"])
+        for (const action of ctxActions) {
+          const item = document.createElement("div")
+          item.className = "gowiki-raw-dropdown-item"
+          item.textContent = action.label
+          if (visualOnly.has(action.name) && editMode !== "visual") {
+            item.classList.add("gowiki-raw-dropdown-item--disabled")
+          }
+          item.addEventListener("mousedown", (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (item.classList.contains("gowiki-raw-dropdown-item--disabled")) return
+            ctxMenu.remove()
+            if (editMode === "visual" && editorView) {
+              const cmd = tableCommands.get(action.name)
+              if (cmd) cmd(editorView.state, editorView.dispatch)
+              editorView.focus()
+            }
+          })
+          ctxMenu.appendChild(item)
+        }
+
+        document.body.appendChild(ctxMenu)
+        // Close on any outside click.
+        const closeCtx = (e) => {
+          if (!ctxMenu.contains(e.target)) {
+            ctxMenu.remove()
+            document.removeEventListener("mousedown", closeCtx, true)
+          }
+        }
+        document.addEventListener("mousedown", closeCtx, true)
+        return true
+      },
     },
   })
+
+  // Auto-focus the editor so the user can start typing immediately.
+  if (nextEditMode === "visual" && editorView) {
+    editorView.focus()
+  } else if (nextEditMode === "raw") {
+    const ta = document.querySelector(".gowiki-raw-editor")
+    if (ta) ta.focus()
+  }
 }
 
 function makeActionButton(label, onClick) {
@@ -3574,7 +3655,7 @@ function promptNewPage() {
     const pathInput = document.createElement("input")
     pathInput.type = "text"
     pathInput.className = "gowiki-link-modal-input"
-    pathInput.placeholder = "namespace/page-name"
+    pathInput.placeholder = "/namespace/page-name"
 
     const warning = document.createElement("div")
     warning.className = "gowiki-link-modal-warning"
@@ -4806,6 +4887,11 @@ async function reloadPageContent() {
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
+
+  // Auto-enter edit mode for new (blank) pages.
+  if (isNewPage && currentUser) {
+    void enterEditMode(true)
+  }
 }
 
 // ── Draft / Edit mode API ────────────────────────────
@@ -7198,6 +7284,42 @@ async function bootstrap() {
   resolveLogo()
   initSearch()
 
+  // Global keyboard shortcuts that work even when focus is in a property panel input.
+  document.addEventListener("keydown", e => {
+    const isMod = e.metaKey || e.ctrlKey
+    if (!isMod) return
+    // CMD+E: enter edit mode from view mode.
+    if (e.key === "e" && !e.shiftKey && mode === "view" && currentUser) {
+      e.preventDefault()
+      void enterEditMode(true)
+      return
+    }
+    if (mode !== "edit") return
+    if (e.key === "s" && e.shiftKey) {
+      e.preventDefault()
+      void publishDraft()
+    } else if (e.key === "s" && !e.shiftKey) {
+      e.preventDefault()
+      void saveDraftExplicit()
+    } else if (e.key === "h" && !e.shiftKey && !e.altKey && editorView) {
+      // CMD+H heading toggle — only when in visual mode and focus is NOT
+      // inside ProseMirror (PM's own keymap already handles it there;
+      // handling it again here would double-toggle).
+      if (editMode === "visual" && !editorView.dom.contains(document.activeElement)) {
+        e.preventDefault()
+        const state = editorView.state
+        const node = state.selection.$from.parent
+        const schema = state.schema
+        if (node.type === schema.nodes.heading) {
+          setBlockType(schema.nodes.paragraph)(state, editorView.dispatch)
+        } else {
+          setBlockType(schema.nodes.heading, { level: 2 })(state, editorView.dispatch)
+        }
+        editorView.focus()
+      }
+    }
+  })
+
   // Sitemap page: virtual route
   if (pagePath === "_sitemap") {
     await renderSitemapPage()
@@ -7237,7 +7359,7 @@ async function bootstrap() {
     return
   }
 
-  checkAuth()
+  await checkAuth()
 
   // Check for search query in URL.
   const searchQuery = new URLSearchParams(window.location.search).get("q")
@@ -7337,6 +7459,11 @@ async function bootstrap() {
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
+
+  // Auto-enter edit mode for new (blank) pages.
+  if (isNewPage && currentUser) {
+    void enterEditMode(true)
+  }
 
   // Fetch and mount sidebar and footer as read-only views (non-blocking)
   fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {

@@ -41,6 +41,41 @@ const imageProperties = [
       return opts
     },
   },
+  {
+    name: "align",
+    label: "Align",
+    default: null,
+    parse: (raw: string) => {
+      const v = String(raw ?? "").trim().toLowerCase()
+      if (!v) return null
+      if (v === "left" || v === "center" || v === "right") return v
+      throw new Error(`Invalid align value "${raw}". Expected "left", "center", or "right".`)
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: () => [
+      { value: "", label: "(none)" },
+      { value: "left", label: "Left" },
+      { value: "center", label: "Center" },
+      { value: "right", label: "Right" },
+    ],
+  },
+  {
+    name: "wrap",
+    label: "Wrap",
+    default: null,
+    parse: (raw: string) => {
+      const v = String(raw ?? "").trim().toLowerCase()
+      if (!v) return null
+      if (v === "left" || v === "right") return v
+      throw new Error(`Invalid wrap value "${raw}". Expected "left" or "right".`)
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: () => [
+      { value: "", label: "(none)" },
+      { value: "left", label: "Left" },
+      { value: "right", label: "Right" },
+    ],
+  },
 ]
 
 const imageStyles = `
@@ -71,6 +106,38 @@ const imageStyles = `
   border-radius: 2px;
   cursor: nwse-resize;
   z-index: 5;
+}
+
+.gowiki-image-align-left {
+  display: block;
+  margin-right: auto;
+}
+
+.gowiki-image-align-center {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.gowiki-image-align-right {
+  display: block;
+  margin-left: auto;
+}
+
+.gowiki-image-wrap-left {
+  float: left;
+  margin: 0 1em 0.5em 0;
+}
+
+.gowiki-image-wrap-right {
+  float: right;
+  margin: 0 0 0.5em 1em;
+}
+
+p:has(> .gowiki-image-wrap-left),
+p:has(> .gowiki-image-wrap-right) {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 `
 
@@ -190,6 +257,16 @@ class ImageNodeView {
       this.dom.style.width = ""
       this.dom.style.maxWidth = size ? "none" : ""
     }
+    const align = this.node.attrs.align ?? null
+    this.dom.classList.remove("gowiki-image-align-left", "gowiki-image-align-center", "gowiki-image-align-right")
+    if (align === "left") this.dom.classList.add("gowiki-image-align-left")
+    else if (align === "center") this.dom.classList.add("gowiki-image-align-center")
+    else if (align === "right") this.dom.classList.add("gowiki-image-align-right")
+
+    const wrap = this.node.attrs.wrap ?? null
+    this.dom.classList.remove("gowiki-image-wrap-left", "gowiki-image-wrap-right")
+    if (wrap === "left") this.dom.classList.add("gowiki-image-wrap-left")
+    else if (wrap === "right") this.dom.classList.add("gowiki-image-wrap-right")
   }
 
   update(node: PMNode): boolean {
@@ -323,6 +400,8 @@ export const imagePlugin: WikiPlugin = {
           ...(spec.attrs ?? {}),
           size: { default: null },
           version: { default: null },
+          align: { default: null },
+          wrap: { default: null },
         },
         toDOM(node: any) {
           const domSpec = baseToDOM(node)
@@ -361,7 +440,12 @@ export const imagePlugin: WikiPlugin = {
           version = normalizeImageVersion(String(directiveVersion))
         }
 
-        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version }))
+        const directiveAlign = directive?.align ?? null
+        const align = directiveAlign ? String(directiveAlign).trim().toLowerCase() : null
+        const directiveWrap = directive?.wrap ?? null
+        const wrap = directiveWrap ? String(directiveWrap).trim().toLowerCase() : null
+
+        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version, align, wrap }))
       },
     })
 
