@@ -3457,9 +3457,13 @@ function renderEdit(nextEditMode) {
       }
 
       // Direct image paste (screenshot, "Copy Image" from browser)
-      // Check both files and items for image blobs
+      // Check both files and items for image blobs.
+      // Skip if clipboard also has HTML with table content (e.g. Excel paste)
+      // — prefer structured table data over the image representation.
+      const clipHtml = event.clipboardData?.getData("text/html") ?? ""
+      const hasHtmlTable = /<table[\s>]/i.test(clipHtml)
       const imageFiles = extractImageFiles(event.clipboardData)
-      if (imageFiles.length > 0) {
+      if (imageFiles.length > 0 && !hasHtmlTable) {
         void handleImageFilePaste(view, imageFiles)
         return true
       }
