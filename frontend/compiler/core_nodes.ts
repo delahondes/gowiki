@@ -520,9 +520,12 @@ function registerMarkdownPrinters(reg: Registry) {
         const marker = "- "
         const continuationIndent = " ".repeat(marker.length)
         const item = renderListItemText(child, recurse)
+        if (!item) return // skip empty list items (no content to serialize)
         const formatted = item.replace(/\n/g, "\n" + continuationIndent)
         out += marker + formatted + "\n"
       })
+      // If all items were empty, return empty string to avoid orphan list markers.
+      if (!out) return ""
       return out + "\n"
     },
   })
@@ -535,9 +538,11 @@ function registerMarkdownPrinters(reg: Registry) {
         const marker = String(index++) + ". "
         const continuationIndent = " ".repeat(marker.length)
         const item = renderListItemText(child, recurse)
+        if (!item) return // skip empty list items
         const formatted = item.replace(/\n/g, "\n" + continuationIndent)
         out += marker + formatted + "\n"
       })
+      if (!out) return ""
       return out + "\n"
     },
   })
