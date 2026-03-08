@@ -155,7 +155,7 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService, reviewflowService)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService, reviewflowService)
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

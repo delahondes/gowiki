@@ -3851,6 +3851,11 @@ function renderActions() {
       })
     )
     actionsRoot.appendChild(
+      makeActionButton("Backlinks", () => {
+        void showBacklinks()
+      })
+    )
+    actionsRoot.appendChild(
       makeActionButton("New page", () => {
         void promptNewPage()
       })
@@ -3960,6 +3965,75 @@ async function showHistory() {
   } catch {
     setStatus("Failed to load history")
   }
+}
+
+async function showBacklinks() {
+  try {
+    const resp = await fetch(`/api/backlinks/${encodePagePath(pagePath)}`)
+    if (!resp.ok) {
+      setStatus("Failed to load backlinks")
+      return
+    }
+    const data = await resp.json()
+    const backlinks = data.backlinks || []
+    enterHistoryView()
+    renderBacklinksPage(backlinks)
+  } catch {
+    setStatus("Failed to load backlinks")
+  }
+}
+
+function renderBacklinksPage(backlinks) {
+  clearContent()
+  mode = "view"
+  appRoot.classList.remove("gowiki-editing")
+
+  const container = document.createElement("div")
+  container.className = "gowiki-history"
+
+  const title = document.createElement("h2")
+  title.textContent = `Backlinks: ${pageDisplayPath}`
+  container.appendChild(title)
+
+  if (backlinks.length === 0) {
+    const empty = document.createElement("p")
+    empty.textContent = "No pages link to this page."
+    empty.style.color = "#666"
+    container.appendChild(empty)
+  } else {
+    const list = document.createElement("ul")
+    list.className = "gowiki-backlinks-list"
+    for (const entry of backlinks) {
+      const li = document.createElement("li")
+      const link = document.createElement("a")
+      link.href = entry.path
+      link.textContent = entry.path
+      link.addEventListener("click", e => {
+        e.preventDefault()
+        window.location.href = entry.path
+      })
+      li.appendChild(link)
+      if (entry.title && entry.title !== entry.path) {
+        const titleSpan = document.createElement("span")
+        titleSpan.textContent = ` — ${entry.title}`
+        titleSpan.style.color = "#888"
+        li.appendChild(titleSpan)
+      }
+      list.appendChild(li)
+    }
+    container.appendChild(list)
+  }
+
+  const backBtn = document.createElement("button")
+  backBtn.textContent = "Back to page"
+  backBtn.className = "gowiki-action-btn"
+  backBtn.style.marginTop = "16px"
+  backBtn.addEventListener("click", () => {
+    window.history.back()
+  })
+  container.appendChild(backBtn)
+
+  contentRoot.appendChild(container)
 }
 
 function renderHistoryPage(versions, draft) {

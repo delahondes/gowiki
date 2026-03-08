@@ -74,6 +74,7 @@ type FileStore struct {
 	dataDir           string
 	RefIndex          *RefIndex
 	IncludeIndex      *IncludeIndex
+	LinkIndex         *LinkIndex
 	TagIndex          *TagIndex
 	SearchIndex       *SearchIndex
 	Attic             *Attic
@@ -101,6 +102,7 @@ func NewFileStore(contentRoot string) (*FileStore, error) {
 		dataDir:      dataDir,
 		RefIndex:     NewRefIndex(meta),
 		IncludeIndex: NewIncludeIndex(meta),
+		LinkIndex:    NewLinkIndex(meta),
 		Attic:        NewAttic(dataDir),
 		Changelog:    NewChangelog(dataDir),
 		Drafts:       NewDraftStore(dataDir, meta),
@@ -205,7 +207,7 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, err
 	}
 
-	contentPath, _, err := s.resolveWritableContentPath(normalized)
+	contentPath, isIndex, err := s.resolveWritableContentPath(normalized)
 	if err != nil {
 		return PutResult{}, err
 	}
@@ -214,14 +216,22 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		return PutResult{}, err
 	}
 
+	// For namespace index pages, relative paths resolve against the namespace
+	// directory (e.g. "./foo" in /test/index.md resolves to /test/foo).
+	// We use a separate resolvePath for extraction functions.
+	resolvePath := normalized
+	if isIndex {
+		resolvePath = normalized + "/index"
+	}
+
 	// --- Include cycle detection (before writing) ---
-	newIncludes := markdown.ExtractIncludes(markdownContent, normalized)
+	newIncludes := markdown.ExtractIncludes(markdownContent, resolvePath)
 	if cycle, hasCycle := s.IncludeIndex.DetectCycle(normalized, newIncludes); hasCycle {
 		return PutResult{}, &CircularIncludeError{Cycle: cycle}
 	}
 
 	// --- Extract media refs ---
-	newMediaRefs := markdown.ExtractMediaRefs(markdownContent, normalized)
+	newMediaRefs := markdown.ExtractMediaRefs(markdownContent, resolvePath)
 	oldMediaRefs := s.RefIndex.PageToMediaSnapshot(normalized)
 
 	// --- Write page and metadata ---
@@ -306,6 +316,12 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	s.RefIndex.UpdatePage(normalized, newMediaRefs)
 	s.IncludeIndex.UpdatePage(normalized, newIncludes)
 
+	// --- Update link index ---
+	if s.LinkIndex != nil {
+		newLinks := markdown.ExtractPageLinks(markdownContent, resolvePath)
+		s.LinkIndex.UpdatePage(normalized, newLinks)
+	}
+
 	// --- Update tag index ---
 	if s.TagIndex != nil {
 		tags := markdown.ExtractTags(markdownContent)
@@ -323,6 +339,9 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	// Persist indexes (best effort — indexes are rebuilt on startup anyway).
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
+	if s.LinkIndex != nil {
+		_ = s.LinkIndex.Save()
+	}
 	if s.TagIndex != nil {
 		_ = s.TagIndex.Save()
 	}
@@ -439,6 +458,11 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	includedBy := s.IncludeIndex.GetIncluders(normalized)
 	s.IncludeIndex.RemovePage(normalized)
 
+	// Update LinkIndex: remove this page.
+	if s.LinkIndex != nil {
+		s.LinkIndex.RemovePage(normalized)
+	}
+
 	// Update TagIndex: remove this page.
 	if s.TagIndex != nil {
 		s.TagIndex.RemovePage(normalized)
@@ -452,6 +476,9 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// Persist indexes (best effort).
 	_ = s.RefIndex.Save()
 	_ = s.IncludeIndex.Save()
+	if s.LinkIndex != nil {
+		_ = s.LinkIndex.Save()
+	}
 	if s.TagIndex != nil {
 		_ = s.TagIndex.Save()
 	}
@@ -480,6 +507,11 @@ func (s *FileStore) FindOrphans() ([]string, error) {
 	return s.RefIndex.FindOrphans(s.contentRoot)
 }
 
+// GetBacklinks returns pages that link to the given page via internal hyperlinks.
+func (s *FileStore) GetBacklinks(pagePath string) []string {
+	return s.LinkIndex.GetBacklinks(pagePath)
+}
+
 // GetReferencingPages returns the list of pages that reference a given media file.
 func (s *FileStore) GetReferencingPages(mediaPath string) []string {
 	return s.RefIndex.GetReferencingPages(mediaPath)
@@ -491,6 +523,7 @@ func (s *FileStore) GetReferencingPages(mediaPath string) []string {
 func (s *FileStore) RebuildIndexes() error {
 	refIdx := NewRefIndex(s.metaRoot)
 	incIdx := NewIncludeIndex(s.metaRoot)
+	linkIdx := NewLinkIndex(s.metaRoot)
 	tagIdx := NewTagIndex(s.metaRoot)
 
 	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
@@ -511,8 +544,10 @@ func (s *FileStore) RebuildIndexes() error {
 		rel = filepath.ToSlash(rel)
 
 		// Derive the logical page path from the file path.
-		pagePath := "/" + strings.TrimSuffix(rel, ".md")
-		pagePath = strings.TrimSuffix(pagePath, "/index")
+		// resolvePath keeps /index suffix so ResolvePath resolves relative
+		// links correctly for namespace index pages.
+		resolvePath := "/" + strings.TrimSuffix(rel, ".md")
+		pagePath := strings.TrimSuffix(resolvePath, "/index")
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {
@@ -520,11 +555,14 @@ func (s *FileStore) RebuildIndexes() error {
 		}
 
 		contentStr := string(content)
-		mediaRefs := markdown.ExtractMediaRefs(contentStr, pagePath)
+		mediaRefs := markdown.ExtractMediaRefs(contentStr, resolvePath)
 		refIdx.UpdatePage(pagePath, mediaRefs)
 
-		includes := markdown.ExtractIncludes(contentStr, pagePath)
+		includes := markdown.ExtractIncludes(contentStr, resolvePath)
 		incIdx.UpdatePage(pagePath, includes)
+
+		pageLinks := markdown.ExtractPageLinks(contentStr, resolvePath)
+		linkIdx.UpdatePage(pagePath, pageLinks)
 
 		tags := markdown.ExtractTags(contentStr)
 		title := markdown.ExtractTitle(contentStr)
@@ -538,6 +576,7 @@ func (s *FileStore) RebuildIndexes() error {
 
 	s.RefIndex = refIdx
 	s.IncludeIndex = incIdx
+	s.LinkIndex = linkIdx
 	s.TagIndex = tagIdx
 
 	if err := s.RefIndex.Save(); err != nil {
@@ -545,6 +584,9 @@ func (s *FileStore) RebuildIndexes() error {
 	}
 	if err := s.IncludeIndex.Save(); err != nil {
 		return fmt.Errorf("save include index: %w", err)
+	}
+	if err := s.LinkIndex.Save(); err != nil {
+		return fmt.Errorf("save link index: %w", err)
 	}
 	if err := s.TagIndex.Save(); err != nil {
 		return fmt.Errorf("save tag index: %w", err)

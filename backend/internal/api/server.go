@@ -55,6 +55,10 @@ type AtticStore interface {
 	GetEntry(pagePath string, version int64) (*storage.AtticEntry, error)
 }
 
+type BacklinkProvider interface {
+	GetBacklinks(pagePath string) []string
+}
+
 type LogoResolver interface {
 	ResolveLogo() (string, error)
 }
@@ -86,6 +90,7 @@ type Server struct {
 	dbPool            *database.Pool
 	schemaStore       *database.SchemaStore
 	dataStore         *database.DataStore
+	backlinkProvider    BacklinkProvider
 	tagIndex            *storage.TagIndex
 	// Persistent browser context for PDF export (nil if Chrome not available).
 	browserAllocCtx    context.Context
@@ -100,7 +105,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -117,6 +122,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		sessionStore:      sessionStore,
 		aclStore:          aclStore,
 		changelog:         changelog,
+		backlinkProvider:   backlinkProvider,
 		tagIndex:           tagIndex,
 		browserAllocCtx:    browserAllocCtx,
 		browserAllocCancel: browserAllocCancel,
@@ -171,6 +177,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/media-orphans", s.handleMediaOrphans)
 		r.Get("/api/media-version/*", s.handleServeMediaVersion)
 		r.Get("/api/export/pdf/*", s.handleExportPDF)
+		r.Get("/api/backlinks/*", s.handleBacklinks)
 	})
 
 	// Public read endpoints — no ACL check (search, logo, site info, sitemap).
@@ -781,6 +788,40 @@ func (s *Server) handleUsersDisplay(w http.ResponseWriter, r *http.Request) {
 		result[name] = entry
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": result})
+}
+
+func (s *Server) handleBacklinks(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(chi.URLParam(r, "*"))
+	if raw == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+	pagePath := path.Clean("/" + raw)
+
+	if s.backlinkProvider == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"backlinks": []any{}})
+		return
+	}
+
+	paths := s.backlinkProvider.GetBacklinks(pagePath)
+	type backlinkEntry struct {
+		Path  string `json:"path"`
+		Title string `json:"title"`
+	}
+	var backlinks []backlinkEntry
+	for _, p := range paths {
+		title := p
+		if page, err := s.store.Get(p); err == nil {
+			if t := markdown.ExtractTitle(page.Markdown); t != "" {
+				title = t
+			}
+		}
+		backlinks = append(backlinks, backlinkEntry{Path: p, Title: title})
+	}
+	if backlinks == nil {
+		backlinks = []backlinkEntry{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backlinks": backlinks})
 }
 
 // pageCheckerAdapter implements todo.PageChecker using the page store.
