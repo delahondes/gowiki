@@ -144,6 +144,10 @@ func main() {
 	rfStore := reviewflow.NewStore(metaRoot)
 	reviewflowService := reviewflow.NewService(rfStore, store.Attic, configStore)
 	reviewflowService.SetPageReader(store)
+	if todoService != nil {
+		reviewflowService.SetTodoIntegrator(reviewflow.NewTodoAdapter(todoService))
+		log.Printf("reviewflow plugin: todo integration active")
+	}
 	store.ReviewflowSync = reviewflowService
 	log.Printf("reviewflow plugin: active")
 

@@ -14,12 +14,22 @@ type PageReader interface {
 	Get(pagePath string) (storage.Page, error)
 }
 
+// TodoIntegrator creates and manages todo tasks for reviewflow roles.
+type TodoIntegrator interface {
+	// CreateReviewTasks creates one todo task per role that needs confirmation.
+	// Called when a page is invalidated (new version saved).
+	CreateReviewTasks(pagePath string, roles map[string]string, versionTag string, dueDate string) error
+	// CancelReviewTasks cancels any open reviewflow todo tasks for a page.
+	CancelReviewTasks(pagePath string) error
+}
+
 // Service implements reviewflow business logic.
 type Service struct {
 	store       *Store
 	attic       *storage.Attic
 	configStore *config.Store
 	pageReader  PageReader
+	todo        TodoIntegrator
 }
 
 func NewService(store *Store, attic *storage.Attic, configStore *config.Store) *Service {
@@ -33,6 +43,11 @@ func NewService(store *Store, attic *storage.Attic, configStore *config.Store) *
 // SetPageReader sets the page reader for bootstrapping state from existing pages.
 func (svc *Service) SetPageReader(pr PageReader) {
 	svc.pageReader = pr
+}
+
+// SetTodoIntegrator sets the todo integration for creating review tasks.
+func (svc *Service) SetTodoIntegrator(ti TodoIntegrator) {
+	svc.todo = ti
 }
 
 // SyncFromMarkdown parses the reviewflow directive from page markdown and
@@ -52,6 +67,9 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 			st.VersionTag = ""
 			st.Confirmations = nil
 			st.CurrentPageVersion = pageVersion
+			if svc.todo != nil {
+				_ = svc.todo.CancelReviewTasks(pagePath)
+			}
 			return svc.store.Save(pagePath, st)
 		}
 		return nil
@@ -61,9 +79,17 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 		st = &State{}
 	}
 
-	// If page version changed, reset confirmations (content changed).
+	// If page version changed, reset confirmations (content changed)
+	// and create todo tasks for each role.
 	if st.CurrentPageVersion != pageVersion {
 		st.Confirmations = nil
+		if svc.todo != nil {
+			// Cancel any existing review tasks first.
+			_ = svc.todo.CancelReviewTasks(pagePath)
+			// Compute due date from deadline config.
+			dueDate := svc.computeDueDate(roles)
+			_ = svc.todo.CreateReviewTasks(pagePath, roles, versionTag, dueDate)
+		}
 	}
 
 	st.Roles = roles
@@ -159,6 +185,11 @@ func (svc *Service) Confirm(pagePath, role, user string) (*Status, error) {
 		st.VersionHistory = append(st.VersionHistory, vr)
 		st.ValidatedVersion = st.CurrentPageVersion
 
+		// Cancel review tasks — all roles confirmed.
+		if svc.todo != nil {
+			_ = svc.todo.CancelReviewTasks(pagePath)
+		}
+
 		// Update attic entry with reviewflow metadata.
 		if svc.attic != nil {
 			meta := AtticMeta{
@@ -189,6 +220,37 @@ func (svc *Service) GetStatus(pagePath string) (*Status, error) {
 		}, nil
 	}
 	return svc.computeStatus(pagePath, st)
+}
+
+// computeDueDate returns a YYYY-MM-DD due date based on the shortest
+// configured deadline for any of the given roles. Returns "" if no deadlines.
+func (svc *Service) computeDueDate(roles map[string]string) string {
+	cfg := svc.configStore.Get()
+	if !cfg.Reviewflow.Enabled || len(cfg.Reviewflow.Deadlines) == 0 {
+		return ""
+	}
+
+	var shortest time.Duration
+	for role := range roles {
+		durStr := cfg.Reviewflow.Deadlines[role]
+		if durStr == "" {
+			durStr = cfg.Reviewflow.Deadlines["_default"]
+		}
+		if durStr == "" {
+			continue
+		}
+		dur, err := time.ParseDuration(durStr)
+		if err != nil {
+			continue
+		}
+		if shortest == 0 || dur < shortest {
+			shortest = dur
+		}
+	}
+	if shortest == 0 {
+		return ""
+	}
+	return time.Now().UTC().Add(shortest).Format("2006-01-02")
 }
 
 func (svc *Service) allConfirmed(st *State) bool {

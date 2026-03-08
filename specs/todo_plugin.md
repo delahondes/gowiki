@@ -391,15 +391,85 @@ If at least one webhook target is enabled, **email is suppressed** for that noti
 
 When a `set_meta` wiki action completes (Gowiki fires a `page.meta.updated` event), the todo engine checks whether any open task has that action as its `wiki_action` and closes it automatically.
 
-### 8.2 ACL / User Plugin
+### 8.2 Reviewflow Plugin
+
+When the **reviewflow** plugin is active alongside the todo plugin, reviewflow automatically creates and manages todo tasks to track pending role confirmations.
+
+#### Lifecycle
+
+1. **Page saved with a `{reviewflow}` directive** — When a page containing a reviewflow directive is saved and the page version changes (content modified), reviewflow:
+   - Cancels any existing open reviewflow todo tasks for that page
+   - Creates one new todo task per role, assigned to the role's user
+
+2. **Role confirmed** — When a user confirms their role, the task remains open (it tracks the page-level review, not individual confirmations). When **all roles** confirm and the version becomes fully validated, all reviewflow tasks for the page are cancelled.
+
+3. **Directive removed** — If a page save removes the `{reviewflow}` directive, all open reviewflow tasks for that page are cancelled.
+
+#### Task properties
+
+| Field | Value |
+|---|---|
+| `title` | `Review (v2.1): alice as author on /path/to/page` |
+| `source` | `api` |
+| `source_page` | Page path where the reviewflow directive lives |
+| `node_key` | SHA-1 of `reviewflow:{pagePath}:{role}:{user}` — stable identity |
+| `assignee` | `{ type: "user", target: "{username}", resolution: "any" }` |
+| `due_date` | Computed from the shortest applicable deadline in `reviewflow.deadlines` config |
+| `tags` | `reviewflow` |
+| `priority` | `normal` |
+| `created_by` | `reviewflow` |
+
+#### Due date computation
+
+The due date is derived from the `reviewflow.deadlines` configuration map. For each role, the system looks up `deadlines[roleName]`, falling back to `deadlines["_default"]`. The **shortest** deadline across all roles is used as the due date for all tasks (set to `now + shortest_deadline`). If no deadlines are configured, tasks are created without a due date.
+
+#### Configuration
+
+Reviewflow deadlines are configured in `config.yaml`:
+
+```yaml
+reviewflow:
+  enabled: true
+  deadlines:
+    _default: "168h"    # 7 days for any role without a specific deadline
+    reviewer: "72h"     # 3 days for reviewers
+    validator: "48h"    # 2 days for validators
+```
+
+The admin UI provides a dedicated "Reviewflow Plugin" section where deadlines can be edited (one `role=duration` pair per line).
+
+#### Implementation
+
+The integration uses a `TodoIntegrator` interface defined in the reviewflow package, with a concrete `TodoAdapter` that wraps the todo `TodoService`. This avoids circular imports and keeps the coupling one-directional (reviewflow depends on todo, not the reverse).
+
+```go
+// In package reviewflow
+type TodoIntegrator interface {
+    CreateReviewTasks(pagePath string, roles map[string]string, versionTag string, dueDate string) error
+    CancelReviewTasks(pagePath string) error
+}
+```
+
+The adapter is wired at startup in `main.go` only when the todo service is available (database connected and todo not disabled). If the todo plugin is inactive, reviewflow operates normally without creating tasks.
+
+#### Identifying reviewflow tasks
+
+Reviewflow tasks are identifiable by:
+- `tags = "reviewflow"` — used for filtering in cancel operations
+- `created_by = "reviewflow"` — distinguishes from user-created tasks
+- `source_page` matches the reviewflow page path
+
+These tasks appear in the user's "My Tasks" list and follow all standard todo notification rules (email, webhooks, reminders, overdue alerts).
+
+### 8.3 ACL / User Plugin
 
 Group membership is re-evaluated live from the ACL/user plugin, so roster changes are reflected without re-creating tasks.
 
-### 8.3 Search Plugin
+### 8.4 Search Plugin
 
 Tasks are indexed as a first-class content type. Users can search `todo:@alice status:open` from the main search bar.
 
-### 8.4 Audit / History Plugin
+### 8.5 Audit / History Plugin
 
 Tasks created from a `{todo}` wiki node are written to the audit log on every state change (create, update, complete, cancel), with full diff and user attribution.
 

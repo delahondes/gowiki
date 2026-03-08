@@ -6562,6 +6562,47 @@ async function renderAdminConfigTab(container) {
     })
     form.appendChild(addWebhookBtn)
 
+    // Reviewflow section
+    const rfHeading = document.createElement("h3")
+    rfHeading.textContent = "Reviewflow Plugin"
+    form.appendChild(rfHeading)
+
+    const rfConfig = config.reviewflow || {}
+
+    const rfEnabledCheckbox = document.createElement("input")
+    rfEnabledCheckbox.type = "checkbox"
+    rfEnabledCheckbox.checked = !!rfConfig.enabled
+    const rfEnabledLabel = document.createElement("label")
+    rfEnabledLabel.style.display = "flex"
+    rfEnabledLabel.style.alignItems = "center"
+    rfEnabledLabel.style.gap = "8px"
+    rfEnabledLabel.style.margin = "8px 0"
+    rfEnabledLabel.appendChild(rfEnabledCheckbox)
+    rfEnabledLabel.appendChild(document.createTextNode("Enable reviewflow plugin"))
+    form.appendChild(rfEnabledLabel)
+
+    const rfNote = document.createElement("div")
+    rfNote.style.fontSize = "0.85em"
+    rfNote.style.color = "#666"
+    rfNote.style.margin = "0 0 8px 0"
+    rfNote.textContent = "Deadlines: one per line as role=duration (e.g. reviewer=72h, _default=168h). _default applies to roles without a specific deadline."
+    form.appendChild(rfNote)
+
+    const rfDeadlinesRaw = rfConfig.deadlines || {}
+    const rfDeadlinesInput = document.createElement("textarea")
+    rfDeadlinesInput.rows = 4
+    rfDeadlinesInput.style.width = "100%"
+    rfDeadlinesInput.style.fontFamily = "monospace"
+    rfDeadlinesInput.style.fontSize = "13px"
+    rfDeadlinesInput.value = Object.entries(rfDeadlinesRaw).map(([k, v]) => `${k}=${v}`).join("\n")
+    const rfDeadlinesLabel = document.createElement("label")
+    rfDeadlinesLabel.style.display = "block"
+    rfDeadlinesLabel.style.margin = "8px 0 4px 0"
+    rfDeadlinesLabel.style.fontWeight = "500"
+    rfDeadlinesLabel.textContent = "Deadlines"
+    form.appendChild(rfDeadlinesLabel)
+    form.appendChild(rfDeadlinesInput)
+
     // Save button
     const actions = document.createElement("div")
     actions.className = "gowiki-admin-config-actions"
@@ -6613,6 +6654,17 @@ async function renderAdminConfigTab(container) {
           stale_lock_timeout: staleLockInput.value.trim(),
         },
         database: config.database || {},
+        reviewflow: {
+          enabled: rfEnabledCheckbox.checked,
+          deadlines: (() => {
+            const d = {}
+            rfDeadlinesInput.value.trim().split("\n").filter(Boolean).forEach(line => {
+              const eq = line.indexOf("=")
+              if (eq > 0) d[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
+            })
+            return d
+          })(),
+        },
         todo: {
           enabled: todoConfig.enabled || false,
           disabled: todoDisabledCheckbox.checked,
