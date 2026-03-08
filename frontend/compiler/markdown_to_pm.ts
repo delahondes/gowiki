@@ -105,6 +105,11 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
           }
           const prop = selfContained.properties.find(p => p.name === key)
           if (!prop) {
+            if (selfContained.collectExtra) {
+              // Pass through unknown keys as raw strings (e.g. role assignments).
+              parsedAttrs[key] = raw
+              continue
+            }
             if (strict) {
               throw new Error(
                 `Unknown property "${key}" for directive "${meta.name}"`

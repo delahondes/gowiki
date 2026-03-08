@@ -63,6 +63,11 @@ type DatabaseSyncer interface {
 	RemovePageRows(pagePath string)
 }
 
+// ReviewflowSyncer is an optional hook for syncing reviewflow state on page save.
+type ReviewflowSyncer interface {
+	SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error
+}
+
 type FileStore struct {
 	contentRoot       string
 	metaRoot          string
@@ -77,6 +82,7 @@ type FileStore struct {
 	MediaVersionStore *MediaVersionStore
 	DatabaseSync      DatabaseSyncer
 	TodoSync          DatabaseSyncer
+	ReviewflowSync    ReviewflowSyncer
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -329,6 +335,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 	// --- Sync todo tasks if configured ---
 	if s.TodoSync != nil {
 		s.TodoSync.SyncPageRows(normalized, markdownContent)
+	}
+
+	// --- Sync reviewflow state if configured ---
+	if s.ReviewflowSync != nil {
+		_ = s.ReviewflowSync.SyncFromMarkdown(normalized, meta.Version, markdownContent)
 	}
 
 	// --- Compute newly orphaned media ---

@@ -7,6 +7,7 @@ import { medialinkPlugin } from "./medialink"
 import { databasePlugin } from "./database"
 import { tagPlugin } from "./tag"
 import { todoPlugin } from "./todo"
+import { reviewflowPlugin } from "./reviewflow"
 
 export const plugins: Plugin[] = [
   imagePlugin,
@@ -17,4 +18,5 @@ export const plugins: Plugin[] = [
   databasePlugin,
   tagPlugin,
   todoPlugin,
+  reviewflowPlugin,
 ]

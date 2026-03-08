@@ -21,6 +21,7 @@ import (
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
+	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
 )
@@ -94,11 +95,12 @@ type Server struct {
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
 	oauthClient         *auth.OAuthClient
 	todoService         *todo.TodoService
+	reviewflowService   *reviewflow.Service
 	serveWeb            bool
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -119,8 +121,9 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		browserAllocCtx:    browserAllocCtx,
 		browserAllocCancel: browserAllocCancel,
 		dbPool:      dbPool,
-		todoService: todoService,
-		serveWeb:    serveWeb,
+		todoService:       todoService,
+		reviewflowService: reviewflowService,
+		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
 	}
 
@@ -178,6 +181,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/tags", s.handleTagQuery)
 		r.Get("/api/site/logo", s.handleSiteLogo)
 		r.Get("/api/site/info", s.handleSiteInfo)
+		r.Get("/api/users/display", s.handleUsersDisplay)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.
@@ -278,6 +282,23 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAuth)
 				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store})
+			})
+		})
+	}
+
+	// Reviewflow plugin endpoints.
+	{
+		extractUsername := func(r *http.Request) string {
+			return UsernameFromContext(r.Context())
+		}
+		r.Route("/api/plugin/reviewflow/v1", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(s.optionalAuth)
+				reviewflow.RegisterReadRoutes(r, s.reviewflowService)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				reviewflow.RegisterWriteRoutes(r, s.reviewflowService, extractUsername)
 			})
 		})
 	}
@@ -648,6 +669,7 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":         cfg.Site.Title,
 		"toc_max_level": cfg.Site.TOCMaxLevel,
+		"user_display":  cfg.Site.UserDisplay,
 	})
 }
 
@@ -662,6 +684,49 @@ func (s *Server) handleSiteLogo(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": logoPath})
+}
+
+// handleUsersDisplay returns display information for a list of usernames.
+// Query: ?users=alice,bob,carol
+// Returns: { "users": { "alice": { "display_name": "...", "email": "..." }, ... } }
+func (s *Server) handleUsersDisplay(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("users"))
+	if raw == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"users": map[string]any{}})
+		return
+	}
+
+	cfg := s.configStore.Get()
+	displayMode := cfg.Site.UserDisplay
+	if displayMode == "" {
+		displayMode = "login"
+	}
+
+	names := strings.Split(raw, ",")
+	result := make(map[string]any, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		entry := map[string]string{"username": name, "label": name}
+		if user, err := s.userStore.Get(name); err == nil {
+			entry["display_name"] = user.DisplayName
+			entry["email"] = user.Email
+			switch displayMode {
+			case "fullname":
+				if user.DisplayName != "" {
+					entry["label"] = user.DisplayName
+				}
+			case "email":
+				if user.Email != "" {
+					entry["label"] = user.Email
+				}
+			}
+		}
+		result[name] = entry
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": result})
 }
 
 // pageCheckerAdapter implements todo.PageChecker using the page store.

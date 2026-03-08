@@ -12,11 +12,18 @@ import (
 
 // Config holds the full site configuration.
 type Config struct {
-	Site     SiteConfig     `yaml:"site" json:"site"`
-	Auth     AuthConfig     `yaml:"auth" json:"auth"`
-	Drafts   DraftsConfig   `yaml:"drafts" json:"drafts"`
-	Database DatabaseConfig `yaml:"database" json:"database"`
-	Todo     TodoConfig     `yaml:"todo" json:"todo"`
+	Site       SiteConfig       `yaml:"site" json:"site"`
+	Auth       AuthConfig       `yaml:"auth" json:"auth"`
+	Drafts     DraftsConfig     `yaml:"drafts" json:"drafts"`
+	Database   DatabaseConfig   `yaml:"database" json:"database"`
+	Todo       TodoConfig       `yaml:"todo" json:"todo"`
+	Reviewflow ReviewflowConfig `yaml:"reviewflow" json:"reviewflow"`
+}
+
+// ReviewflowConfig holds document validation workflow settings.
+type ReviewflowConfig struct {
+	Enabled   bool              `yaml:"enabled" json:"enabled"`
+	Deadlines map[string]string `yaml:"deadlines" json:"deadlines"` // role name -> duration string (e.g. "72h")
 }
 
 // TodoConfig holds task management plugin settings.
@@ -63,11 +70,12 @@ type DatabaseConfig struct {
 
 // SiteConfig holds site-wide display settings.
 type SiteConfig struct {
-	Title       string `yaml:"title" json:"title"`
-	BaseURL     string `yaml:"base_url" json:"base_url"` // e.g. "https://wiki.example.com"
-	FooterPage  string `yaml:"footer_page" json:"footer_page"`
-	SidebarPage string `yaml:"sidebar_page" json:"sidebar_page"`
-	TOCMaxLevel int    `yaml:"toc_max_level" json:"toc_max_level"` // 0 = disabled, 1-6 = show headings up to this level
+	Title          string `yaml:"title" json:"title"`
+	BaseURL        string `yaml:"base_url" json:"base_url"`               // e.g. "https://wiki.example.com"
+	FooterPage     string `yaml:"footer_page" json:"footer_page"`
+	SidebarPage    string `yaml:"sidebar_page" json:"sidebar_page"`
+	TOCMaxLevel    int    `yaml:"toc_max_level" json:"toc_max_level"`     // 0 = disabled, 1-6 = show headings up to this level
+	UserDisplay    string `yaml:"user_display" json:"user_display"`       // "login" (default), "fullname", "email"
 }
 
 // AuthConfig holds authentication settings.
@@ -226,6 +234,11 @@ func validate(cfg Config) error {
 	if cfg.Drafts.StaleLockTimeout != "" {
 		if _, err := time.ParseDuration(cfg.Drafts.StaleLockTimeout); err != nil {
 			return fmt.Errorf("drafts.stale_lock_timeout: invalid duration %q: %w", cfg.Drafts.StaleLockTimeout, err)
+		}
+	}
+	for role, dur := range cfg.Reviewflow.Deadlines {
+		if _, err := time.ParseDuration(dur); err != nil {
+			return fmt.Errorf("reviewflow.deadlines.%s: invalid duration %q: %w", role, dur, err)
 		}
 	}
 	return nil

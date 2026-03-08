@@ -15,12 +15,13 @@ import (
 
 // AtticEntry describes one archived version of a page.
 type AtticEntry struct {
-	Version   int64            `json:"version"`
-	Timestamp string           `json:"timestamp"`
-	Author    string           `json:"author"`
-	MD5       string           `json:"md5"`
-	Summary   string           `json:"summary"`
-	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
+	Version    int64                          `json:"version"`
+	Timestamp  string                         `json:"timestamp"`
+	Author     string                         `json:"author"`
+	MD5        string                         `json:"md5"`
+	Summary    string                         `json:"summary"`
+	MediaRefs  map[string]int64               `json:"media_refs,omitempty"`
+	PluginMeta map[string]json.RawMessage     `json:"plugin_meta,omitempty"`
 }
 
 // Attic manages the version archive under data/attic/.
@@ -131,6 +132,24 @@ func (a *Attic) GetEntry(pagePath string, version int64) (*AtticEntry, error) {
 		}
 	}
 	return nil, nil
+}
+
+// UpdateEntryMeta updates the plugin metadata for a specific version in the attic index.
+func (a *Attic) UpdateEntryMeta(pagePath string, version int64, key string, data json.RawMessage) error {
+	entries, err := a.readIndex(pagePath)
+	if err != nil {
+		return fmt.Errorf("read attic index: %w", err)
+	}
+	for i := range entries {
+		if entries[i].Version == version {
+			if entries[i].PluginMeta == nil {
+				entries[i].PluginMeta = make(map[string]json.RawMessage)
+			}
+			entries[i].PluginMeta[key] = data
+			return a.writeIndex(pagePath, entries)
+		}
+	}
+	return fmt.Errorf("version %d not found in attic for %s", version, pagePath)
 }
 
 func (a *Attic) readIndex(pagePath string) ([]AtticEntry, error) {

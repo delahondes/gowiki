@@ -94,6 +94,8 @@ export type SelfContainedDirectiveSpec = {
   tokenType: string
   nodeType: string
   properties: NodePropertySpec[]
+  /** When true, unknown key=value pairs are passed through as raw strings. */
+  collectExtra?: boolean
 }
 
 export class Registry {

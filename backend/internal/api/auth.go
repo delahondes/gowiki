@@ -68,10 +68,15 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "session expired")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"username": sess.Username,
 		"is_admin": s.userStore.IsAdmin(sess.Username),
-	})
+	}
+	if user, err := s.userStore.Get(sess.Username); err == nil {
+		resp["display_name"] = user.DisplayName
+		resp["email"] = user.Email
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // requireAuth is middleware that protects write endpoints.

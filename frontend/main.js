@@ -3726,7 +3726,7 @@ function promptNewPage() {
     pathInput.focus()
   }).then(pagePath => {
     if (pagePath) {
-      window.location.href = "/" + pagePath
+      window.location.href = "/" + pagePath + "?action=create"
     }
   })
 }
@@ -4002,7 +4002,7 @@ function renderHistoryPage(versions, draft) {
     const table = document.createElement("table")
     table.className = "gowiki-history-table"
     const thead = document.createElement("thead")
-    thead.innerHTML = "<tr><th>Version</th><th>Date</th><th>Author</th><th>Actions</th></tr>"
+    thead.innerHTML = "<tr><th>Version</th><th>Date</th><th>Author</th><th>Status</th><th>Actions</th></tr>"
     table.appendChild(thead)
     const tbody = document.createElement("tbody")
 
@@ -4022,6 +4022,10 @@ function renderHistoryPage(versions, draft) {
       const tdAuthor = document.createElement("td")
       tdAuthor.textContent = draft.owner
       tr.appendChild(tdAuthor)
+
+      const tdStatus = document.createElement("td")
+      tdStatus.textContent = "—"
+      tr.appendChild(tdStatus)
 
       const tdActions = document.createElement("td")
       tdActions.className = "gowiki-history-actions"
@@ -4068,6 +4072,28 @@ function renderHistoryPage(versions, draft) {
         const tdAuthor = document.createElement("td")
         tdAuthor.textContent = v.author || "—"
         tr.appendChild(tdAuthor)
+
+        const tdStatus = document.createElement("td")
+        const rfMeta = v.plugin_meta?.reviewflow
+        if (rfMeta) {
+          if (rfMeta.is_validated) {
+            const badge = document.createElement("span")
+            badge.className = "gowiki-history-validated-badge"
+            badge.textContent = "Validated"
+            tdStatus.appendChild(badge)
+            if (rfMeta.version_tag) {
+              const tag = document.createElement("span")
+              tag.className = "gowiki-history-version-tag"
+              tag.textContent = rfMeta.version_tag
+              tdStatus.appendChild(tag)
+            }
+          } else {
+            tdStatus.textContent = "—"
+          }
+        } else {
+          tdStatus.textContent = "—"
+        }
+        tr.appendChild(tdStatus)
 
         const tdActions = document.createElement("td")
         tdActions.className = "gowiki-history-actions"
@@ -4887,11 +4913,6 @@ async function reloadPageContent() {
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
-
-  // Auto-enter edit mode for new (blank) pages.
-  if (isNewPage && currentUser) {
-    void enterEditMode(true)
-  }
 }
 
 // ── Draft / Edit mode API ────────────────────────────
@@ -6350,6 +6371,12 @@ async function renderAdminConfigTab(container) {
     const tocMaxLevelInput = adminFormField(form, "TOC max heading level (0 = disabled, 1-6)", "number", String((config.site && config.site.toc_max_level) ?? 3))
     tocMaxLevelInput.min = "0"
     tocMaxLevelInput.max = "6"
+    const userDisplaySelect = adminFormSelect(form, "User display format", [
+      { value: "", label: "Login (default)" },
+      { value: "login", label: "Login" },
+      { value: "fullname", label: "Full name" },
+      { value: "email", label: "Email" },
+    ], (config.site && config.site.user_display) || "")
 
     // Auth section
     const authHeading = document.createElement("h3")
@@ -6568,6 +6595,7 @@ async function renderAdminConfigTab(container) {
           sidebar_page: sidebarInput.value.trim(),
           footer_page: footerInput.value.trim(),
           toc_max_level: parseInt(tocMaxLevelInput.value, 10) || 3,
+          user_display: userDisplaySelect.value || "",
         },
         auth: {
           session_ttl: sessionTtlInput.value.trim(),
@@ -7460,8 +7488,12 @@ async function bootstrap() {
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
 
-  // Auto-enter edit mode for new (blank) pages.
-  if (isNewPage && currentUser) {
+  // Auto-enter edit mode only when the user explicitly chose "Create new page".
+  // Navigating to a non-existing page by accident should not auto-create it.
+  const actionParam = new URLSearchParams(window.location.search).get("action")
+  if (isNewPage && currentUser && actionParam === "create") {
+    // Clean the URL so a refresh doesn't re-trigger auto-edit.
+    window.history.replaceState(null, "", window.location.pathname)
     void enterEditMode(true)
   }
 
