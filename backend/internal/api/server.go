@@ -179,6 +179,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/search", s.handleSearch)
 		r.Get("/api/sitemap", s.handleSitemap)
 		r.Get("/api/tags", s.handleTagQuery)
+		r.Get("/api/changes", s.handleRecentChanges)
 		r.Get("/api/site/logo", s.handleSiteLogo)
 		r.Get("/api/site/info", s.handleSiteInfo)
 		r.Get("/api/users/display", s.handleUsersDisplay)
@@ -662,6 +663,59 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+func (s *Server) handleRecentChanges(w http.ResponseWriter, r *http.Request) {
+	count := 10
+	if raw := r.URL.Query().Get("count"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			count = n
+		}
+	}
+
+	opts := storage.ReadOptions{Count: count}
+
+	// Parse path filter: comma-separated prefixes, "-" prefix for exclusion.
+	if raw := r.URL.Query().Get("path"); raw != "" {
+		for _, p := range strings.Split(raw, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if strings.HasPrefix(p, "-") {
+				opts.ExcludePaths = append(opts.ExcludePaths, strings.TrimPrefix(p, "-"))
+			} else {
+				// Strip leading slash — backend paths don't use them.
+				opts.IncludePaths = append(opts.IncludePaths, strings.TrimPrefix(p, "/"))
+			}
+		}
+	}
+
+	if raw := r.URL.Query().Get("type"); raw != "" {
+		for _, t := range strings.Split(raw, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				opts.Types = append(opts.Types, t)
+			}
+		}
+	}
+
+	if raw := r.URL.Query().Get("user"); raw != "" {
+		for _, u := range strings.Split(raw, ",") {
+			u = strings.TrimSpace(u)
+			if u != "" {
+				opts.Users = append(opts.Users, u)
+			}
+		}
+	}
+
+	entries, err := s.changelog.Read(opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
 func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {

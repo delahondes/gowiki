@@ -8,6 +8,7 @@ import { databasePlugin } from "./database"
 import { tagPlugin } from "./tag"
 import { todoPlugin } from "./todo"
 import { reviewflowPlugin } from "./reviewflow"
+import { changesPlugin } from "./changes"
 
 export const plugins: Plugin[] = [
   imagePlugin,
@@ -19,4 +20,5 @@ export const plugins: Plugin[] = [
   tagPlugin,
   todoPlugin,
   reviewflowPlugin,
+  changesPlugin,
 ]
