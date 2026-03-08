@@ -487,9 +487,10 @@ function setExternalLinkCommand() {
       }
       tr.removeMark(markFrom, markTo, activeLinkType)
       tr.addMark(markFrom, markTo, linkMark)
-      tr.setSelection(TextSelection.create(tr.doc, markFrom, markTo))
+      tr.setSelection(TextSelection.create(tr.doc, markTo))
       setStatus("Link updated")
       activeDispatch(tr.scrollIntoView())
+      view.focus()
     })
     return true
   }
