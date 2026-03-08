@@ -219,7 +219,7 @@ class ChangesNodeView {
 
         const a = document.createElement("a")
         a.className = "gowiki-changes-link"
-        a.href = "/" + entry.page
+        a.href = entry.page.startsWith("/") ? entry.page : "/" + entry.page
         a.textContent = humanizePagePath(entry.page)
         li.appendChild(a)
 

@@ -4006,11 +4006,12 @@ function renderBacklinksPage(backlinks) {
     for (const entry of backlinks) {
       const li = document.createElement("li")
       const link = document.createElement("a")
-      link.href = entry.path
+      const href = entry.path.startsWith("/") ? entry.path : "/" + entry.path
+      link.href = href
       link.textContent = entry.path
       link.addEventListener("click", e => {
         e.preventDefault()
-        window.location.href = entry.path
+        window.location.href = href
       })
       li.appendChild(link)
       if (entry.title && entry.title !== entry.path) {
