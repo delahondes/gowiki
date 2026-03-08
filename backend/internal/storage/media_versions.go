@@ -111,6 +111,21 @@ func (s *MediaVersionStore) GetVersionsForPaths(paths []string) map[string]int64
 	return out
 }
 
+// RenamePath transfers a version entry from oldPath to newPath.
+// If oldPath has no entry, this is a no-op.
+func (s *MediaVersionStore) RenamePath(oldPath, newPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	v, ok := s.versions[oldPath]
+	if !ok {
+		return nil
+	}
+	delete(s.versions, oldPath)
+	s.versions[newPath] = v
+	return s.saveLocked()
+}
+
 // saveLocked persists the version map. Caller must hold s.mu for writing.
 func (s *MediaVersionStore) saveLocked() error {
 	data, err := json.MarshalIndent(s.versions, "", "  ")

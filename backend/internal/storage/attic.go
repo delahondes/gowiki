@@ -176,6 +176,24 @@ func (a *Attic) writeIndex(pagePath string, entries []AtticEntry) error {
 	return writeFileAtomic(a.indexPath(pagePath), data)
 }
 
+// RenamePage moves the entire attic history from oldPath to newPath.
+// This preserves all archived versions under the new page path.
+func (a *Attic) RenamePage(oldPath, newPath string) error {
+	oldDir := a.pageDir(oldPath)
+	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
+		return nil // no history to move
+	}
+	newDir := a.pageDir(newPath)
+	if err := os.MkdirAll(filepath.Dir(newDir), 0o755); err != nil {
+		return fmt.Errorf("create attic dir for new path: %w", err)
+	}
+	if err := os.Rename(oldDir, newDir); err != nil {
+		return fmt.Errorf("rename attic dir: %w", err)
+	}
+	cleanEmptyParents(filepath.Dir(oldDir), a.root)
+	return nil
+}
+
 // MigrateExistingPages creates version 1 attic entries for all existing pages
 // that don't already have attic records. Called on startup.
 func (a *Attic) MigrateExistingPages(contentRoot, metaRoot string, changelog *Changelog) error {

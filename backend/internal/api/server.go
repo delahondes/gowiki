@@ -33,6 +33,13 @@ type PageStore interface {
 	CheckNamespaceConflict(pagePath string) error
 }
 
+type PageMover interface {
+	Move(oldPath, newPath string, moveMedia, updateLinks bool, author string) (storage.MoveResult, error)
+	ConvertToNamespaceIndex(pagePath, author string) (storage.MoveResult, error)
+	ConvertToRegularPage(pagePath, author string) (storage.MoveResult, error)
+	PreviewMove(oldPath, newPath string, moveMedia bool) (storage.MovePreview, error)
+}
+
 type OrphanDetector interface {
 	FindOrphans() ([]string, error)
 	GetReferencingPages(mediaPath string) []string
@@ -204,6 +211,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Post("/api/media", s.handleUploadMedia)
 		r.Post("/api/media/", s.handleUploadMedia)
 		r.Post("/api/media/*", s.handleUploadMedia)
+		r.Post("/api/move/*", s.handleMovePage)
 	})
 
 	// Delete endpoints — require auth + ACL "delete" permission.

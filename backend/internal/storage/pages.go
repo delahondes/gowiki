@@ -18,6 +18,8 @@ import (
 var ErrPageNotFound = errors.New("page not found")
 var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at this path")
 var ErrPageHasLock = errors.New("page is locked by a draft")
+var ErrDestinationExists = errors.New("destination already exists")
+var ErrNamespaceNotEmpty = errors.New("namespace not empty")
 
 // CircularIncludeError is returned when saving a page would create a cycle
 // in the include graph.
@@ -33,6 +35,23 @@ func (e *CircularIncludeError) Error() string {
 type PutResult struct {
 	Page          Page     `json:"page"`
 	OrphanedMedia []string `json:"orphaned_media,omitempty"`
+}
+
+// MoveResult is returned by Move with information about the move operation.
+type MoveResult struct {
+	Page         Page     `json:"page"`
+	OldPath      string   `json:"old_path"`
+	NewPath      string   `json:"new_path"`
+	UpdatedPages []string `json:"updated_pages"`
+	MovedMedia   []string `json:"moved_media,omitempty"`
+}
+
+// MovePreview describes what a move operation would do, without applying changes.
+type MovePreview struct {
+	OldPath       string   `json:"old_path"`
+	NewPath       string   `json:"new_path"`
+	AffectedPages []string `json:"affected_pages"`
+	MediaToMove   []string `json:"media_to_move,omitempty"`
 }
 
 // DeleteResult is returned by Delete with side-effect information.
@@ -489,6 +508,507 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	return DeleteResult{
 		OrphanedMedia: orphaned,
 		IncludedBy:    includedBy,
+	}, nil
+}
+
+// ConvertToNamespaceIndex converts a regular page to a namespace index.
+// Moves content/{path}.md → content/{path}/index.md (and meta).
+// The page path is unchanged so no link rewriting is needed.
+func (s *FileStore) ConvertToNamespaceIndex(pagePath, author string) (MoveResult, error) {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+
+	contentPath, isIndex, err := s.resolveExistingContentPath(normalized)
+	if errors.Is(err, os.ErrNotExist) {
+		return MoveResult{}, ErrPageNotFound
+	}
+	if err != nil {
+		return MoveResult{}, err
+	}
+	if isIndex {
+		return MoveResult{}, fmt.Errorf("page is already a namespace index")
+	}
+
+	// Compute new paths.
+	newContentPath := filepath.Join(strings.TrimSuffix(contentPath, ".md"), "index.md")
+	metaPath, err := s.metadataPathForContent(contentPath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(newContentPath), 0o755); err != nil {
+		return MoveResult{}, fmt.Errorf("create namespace dir: %w", err)
+	}
+
+	// Move content file.
+	if err := os.Rename(contentPath, newContentPath); err != nil {
+		return MoveResult{}, fmt.Errorf("move content to namespace index: %w", err)
+	}
+
+	// Move metadata file.
+	newMetaDir := filepath.Join(strings.TrimSuffix(metaPath, ".json"), "")
+	// meta/{path}.json → meta/{path}/index.json
+	newMetaPath := filepath.Join(strings.TrimSuffix(metaPath, ".json"), "index.json")
+	if err := os.MkdirAll(filepath.Dir(newMetaPath), 0o755); err != nil {
+		// Best effort: content already moved.
+		_ = newMetaDir
+	}
+	if fileExists(metaPath) {
+		_ = os.Rename(metaPath, newMetaPath)
+	}
+
+	// Log to changelog.
+	if s.Changelog != nil {
+		s.Changelog.Append(normalized, 0, author, "converted to namespace index", "move")
+	}
+
+	page, _ := s.Get(normalized)
+	return MoveResult{
+		Page:    page,
+		OldPath: normalized,
+		NewPath: normalized,
+	}, nil
+}
+
+// ConvertToRegularPage converts a namespace index to a regular page.
+// Only allowed if the namespace directory contains only index.md.
+func (s *FileStore) ConvertToRegularPage(pagePath, author string) (MoveResult, error) {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+
+	contentPath, isIndex, err := s.resolveExistingContentPath(normalized)
+	if errors.Is(err, os.ErrNotExist) {
+		return MoveResult{}, ErrPageNotFound
+	}
+	if err != nil {
+		return MoveResult{}, err
+	}
+	if !isIndex {
+		return MoveResult{}, fmt.Errorf("page is not a namespace index")
+	}
+
+	// Check that the namespace dir contains only index.md.
+	nsDir := filepath.Dir(contentPath)
+	entries, err := os.ReadDir(nsDir)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("read namespace dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "index.md" {
+			return MoveResult{}, ErrNamespaceNotEmpty
+		}
+	}
+
+	// Also check meta dir.
+	metaPath, err := s.metadataPathForContent(contentPath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+	metaNsDir := filepath.Dir(metaPath)
+	if metaEntries, readErr := os.ReadDir(metaNsDir); readErr == nil {
+		for _, e := range metaEntries {
+			if e.Name() != "index.json" {
+				return MoveResult{}, ErrNamespaceNotEmpty
+			}
+		}
+	}
+
+	// Compute new paths: content/{path}/index.md → content/{path}.md
+	newContentPath := nsDir + ".md"
+	newMetaPath := metaNsDir + ".json"
+
+	// Move content file.
+	if err := os.Rename(contentPath, newContentPath); err != nil {
+		return MoveResult{}, fmt.Errorf("move content from namespace index: %w", err)
+	}
+	// Remove the now-empty namespace dir.
+	_ = os.Remove(nsDir)
+
+	// Move metadata file.
+	if fileExists(metaPath) {
+		_ = os.Rename(metaPath, newMetaPath)
+		_ = os.Remove(metaNsDir)
+	}
+
+	if s.Changelog != nil {
+		s.Changelog.Append(normalized, 0, author, "converted to regular page", "move")
+	}
+
+	page, _ := s.Get(normalized)
+	return MoveResult{
+		Page:    page,
+		OldPath: normalized,
+		NewPath: normalized,
+	}, nil
+}
+
+// PreviewMove computes what a move operation would do without applying changes.
+func (s *FileStore) PreviewMove(oldPath, newPath string, moveMedia bool) (MovePreview, error) {
+	oldNorm, err := normalizePagePath(oldPath)
+	if err != nil {
+		return MovePreview{}, err
+	}
+	newNorm, err := normalizePagePath(newPath)
+	if err != nil {
+		return MovePreview{}, err
+	}
+	if oldNorm == newNorm {
+		return MovePreview{}, fmt.Errorf("source and destination are the same")
+	}
+
+	srcPage, err := s.Get(oldNorm)
+	if err != nil {
+		return MovePreview{}, err
+	}
+
+	// Check destination doesn't exist.
+	if _, destErr := s.Get(newNorm); destErr == nil {
+		return MovePreview{}, ErrDestinationExists
+	}
+	if err := s.CheckNamespaceConflict(newNorm); err != nil {
+		return MovePreview{}, err
+	}
+
+	oldResolvePath := oldNorm
+	if srcPage.IsNamespaceIndex {
+		oldResolvePath = oldNorm + "/index"
+	}
+
+	// Gather affected pages.
+	var affectedPages []string
+	seen := make(map[string]bool)
+	if s.LinkIndex != nil {
+		for _, p := range s.LinkIndex.GetBacklinks(oldNorm) {
+			if p != oldNorm && !seen[p] {
+				seen[p] = true
+				affectedPages = append(affectedPages, p)
+			}
+		}
+	}
+	for _, p := range s.IncludeIndex.GetIncluders(oldNorm) {
+		if p != oldNorm && !seen[p] {
+			seen[p] = true
+			affectedPages = append(affectedPages, p)
+		}
+	}
+
+	// Gather media that would be moved.
+	var mediaToMove []string
+	if moveMedia {
+		mediaRefs := markdown.ExtractMediaRefs(srcPage.Markdown, oldResolvePath)
+		for _, mediaPath := range mediaRefs {
+			refPages := s.RefIndex.GetReferencingPages(mediaPath)
+			if len(refPages) == 1 && refPages[0] == oldNorm {
+				mediaToMove = append(mediaToMove, mediaPath)
+			}
+		}
+	}
+
+	return MovePreview{
+		OldPath:       oldNorm,
+		NewPath:       newNorm,
+		AffectedPages: affectedPages,
+		MediaToMove:   mediaToMove,
+	}, nil
+}
+
+// Move relocates a page from oldPath to newPath, rewriting all inbound references
+// in other pages. If moveMedia is true, exclusively-referenced media files are
+// co-moved to the new namespace.
+func (s *FileStore) Move(oldPath, newPath string, moveMedia, updateLinks bool, author string) (MoveResult, error) {
+	oldNorm, err := normalizePagePath(oldPath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+	newNorm, err := normalizePagePath(newPath)
+	if err != nil {
+		return MoveResult{}, err
+	}
+	if oldNorm == newNorm {
+		return MoveResult{}, fmt.Errorf("source and destination are the same")
+	}
+
+	// 1. Validate source exists.
+	srcPage, err := s.Get(oldNorm)
+	if err != nil {
+		return MoveResult{}, err
+	}
+
+	// Check draft lock on source.
+	if s.Drafts != nil {
+		lock := s.Drafts.GetLock(oldNorm)
+		if lock.Owner != "" {
+			return MoveResult{}, fmt.Errorf("%w: locked by %s", ErrPageHasLock, lock.Owner)
+		}
+	}
+
+	// 2. Validate destination doesn't exist.
+	if _, destErr := s.Get(newNorm); destErr == nil {
+		return MoveResult{}, ErrDestinationExists
+	}
+
+	// Check namespace constraints for destination.
+	if err := s.CheckNamespaceConflict(newNorm); err != nil {
+		return MoveResult{}, err
+	}
+
+	// Determine resolve paths for relative ref handling.
+	oldResolvePath := oldNorm
+	if srcPage.IsNamespaceIndex {
+		oldResolvePath = oldNorm + "/index"
+	}
+
+	// 3. Gather pages that reference the old path (backlinkers + includers).
+	var backlinkers []string
+	if updateLinks {
+		seen := make(map[string]bool)
+		if s.LinkIndex != nil {
+			for _, p := range s.LinkIndex.GetBacklinks(oldNorm) {
+				if p != oldNorm && !seen[p] {
+					seen[p] = true
+					backlinkers = append(backlinkers, p)
+				}
+			}
+		}
+		for _, p := range s.IncludeIndex.GetIncluders(oldNorm) {
+			if p != oldNorm && !seen[p] {
+				seen[p] = true
+				backlinkers = append(backlinkers, p)
+			}
+		}
+	}
+
+	// 4. Handle media co-moving.
+	type mediaMove struct {
+		oldPath string
+		newPath string
+	}
+	var mediaMoves []mediaMove
+	var movedMediaPaths []string
+
+	if moveMedia {
+		// Find all media referenced by the source page.
+		mediaRefs := markdown.ExtractMediaRefs(srcPage.Markdown, oldResolvePath)
+		oldNamespace := path.Dir(oldNorm)
+		newNamespace := path.Dir(newNorm)
+
+		for _, mediaPath := range mediaRefs {
+			// Only move media that is exclusively referenced by this page.
+			refPages := s.RefIndex.GetReferencingPages(mediaPath)
+			if len(refPages) == 1 && refPages[0] == oldNorm {
+				// Compute new media path: replace old namespace prefix with new.
+				mediaRel := strings.TrimPrefix(mediaPath, oldNamespace)
+				newMediaPath := path.Clean(newNamespace + mediaRel)
+
+				// Physically move the file.
+				oldAbsPath := filepath.Join(s.contentRoot, filepath.FromSlash(strings.TrimPrefix(mediaPath, "/")))
+				newAbsPath := filepath.Join(s.contentRoot, filepath.FromSlash(strings.TrimPrefix(newMediaPath, "/")))
+				if err := os.MkdirAll(filepath.Dir(newAbsPath), 0o755); err != nil {
+					return MoveResult{}, fmt.Errorf("create media dir: %w", err)
+				}
+				if err := os.Rename(oldAbsPath, newAbsPath); err != nil {
+					// Skip this media file if it can't be moved.
+					continue
+				}
+
+				// Rename version store entry.
+				if s.MediaVersionStore != nil {
+					_ = s.MediaVersionStore.RenamePath(mediaPath, newMediaPath)
+				}
+
+				mediaMoves = append(mediaMoves, mediaMove{oldPath: mediaPath, newPath: newMediaPath})
+				movedMediaPaths = append(movedMediaPaths, newMediaPath)
+
+				// Clean empty parent dirs of old media location.
+				cleanEmptyParents(filepath.Dir(oldAbsPath), s.contentRoot)
+			}
+		}
+	}
+
+	// 5. Rebase the moved page's own content.
+	rebasedContent := markdown.RebaseRelativeRefs(srcPage.Markdown, oldResolvePath, newNorm)
+	// Rewrite media refs in the moved page for co-moved media.
+	for _, mm := range mediaMoves {
+		rebasedContent = markdown.RewriteMediaRef(rebasedContent, mm.oldPath, mm.newPath, newNorm)
+	}
+
+	// 6. Rewrite each backlinker/includer.
+	var updatedPages []string
+	for _, bp := range backlinkers {
+		bPage, bErr := s.Get(bp)
+		if bErr != nil {
+			continue
+		}
+		// Use the resolve path (with /index suffix for namespace index pages)
+		// so that ResolvePath correctly resolves relative references.
+		bpResolvePath := bp
+		if bPage.IsNamespaceIndex {
+			bpResolvePath = bp + "/index"
+		}
+		newContent := markdown.RewritePageRef(bPage.Markdown, oldNorm, newNorm, bpResolvePath)
+		for _, mm := range mediaMoves {
+			newContent = markdown.RewriteMediaRef(newContent, mm.oldPath, mm.newPath, bpResolvePath)
+		}
+		if newContent != bPage.Markdown {
+			if _, putErr := s.Put(bp, newContent, author); putErr == nil {
+				updatedPages = append(updatedPages, bp)
+			}
+		}
+	}
+
+	// 7. Move the page files directly (preserving history).
+	// Resolve the old content path.
+	oldContentPath, _, err := s.resolveExistingContentPath(oldNorm)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("resolve old content path: %w", err)
+	}
+	oldMetaPath, err := s.metadataPathForContent(oldContentPath)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("resolve old meta path: %w", err)
+	}
+
+	// Resolve the new content path.
+	newContentPath, newIsIndex, err := s.resolveWritableContentPath(newNorm)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("resolve new content path: %w", err)
+	}
+	newMetaPath, err := s.metadataPathForContent(newContentPath)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("resolve new meta path: %w", err)
+	}
+
+	// Load and bump metadata.
+	meta, err := s.readOrInitMeta(oldNorm, oldContentPath, oldMetaPath)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("load metadata: %w", err)
+	}
+
+	// Archive the pre-move content at old version (so there's a record of the last state
+	// before the move, under the old path's history which will be transferred).
+	if s.Attic != nil {
+		_ = s.Attic.Archive(oldNorm, meta.Version, []byte(srcPage.Markdown), meta.Author, "", meta.MediaRefs)
+	}
+
+	meta.Version++
+	meta.UpdatedAt = time.Now().UTC()
+	meta.Author = author
+	meta.MediaRefs = nil
+
+	// Create destination directories.
+	if err := os.MkdirAll(filepath.Dir(newContentPath), 0o755); err != nil {
+		return MoveResult{}, fmt.Errorf("create destination dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newMetaPath), 0o755); err != nil {
+		return MoveResult{}, fmt.Errorf("create destination meta dir: %w", err)
+	}
+
+	// Write rebased content at new path.
+	if err := writeFileAtomic(newContentPath, []byte(rebasedContent)); err != nil {
+		return MoveResult{}, fmt.Errorf("write page at new path: %w", err)
+	}
+
+	// Write updated metadata at new path.
+	metaBytes, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("encode metadata: %w", err)
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := writeFileAtomic(newMetaPath, metaBytes); err != nil {
+		return MoveResult{}, fmt.Errorf("write metadata at new path: %w", err)
+	}
+
+	// Remove old content and metadata files.
+	_ = os.Remove(oldContentPath)
+	_ = os.Remove(oldMetaPath)
+	cleanEmptyParents(filepath.Dir(oldContentPath), s.contentRoot)
+	cleanEmptyParents(filepath.Dir(oldMetaPath), s.metaRoot)
+
+	// 8. Move attic history from old path to new path.
+	if s.Attic != nil {
+		_ = s.Attic.RenamePage(oldNorm, newNorm)
+		// Archive the move as a new version under the new path.
+		_ = s.Attic.Archive(newNorm, meta.Version, []byte(rebasedContent), author,
+			fmt.Sprintf("moved from %s", oldNorm), nil)
+	}
+
+	// 9. Update indexes: remove old, add new.
+	newResolvePath := newNorm
+	if newIsIndex {
+		newResolvePath = newNorm + "/index"
+	}
+
+	s.RefIndex.RemovePage(oldNorm)
+	newMediaRefs := markdown.ExtractMediaRefs(rebasedContent, newResolvePath)
+	s.RefIndex.UpdatePage(newNorm, newMediaRefs)
+
+	s.IncludeIndex.RemovePage(oldNorm)
+	newIncludes := markdown.ExtractIncludes(rebasedContent, newResolvePath)
+	s.IncludeIndex.UpdatePage(newNorm, newIncludes)
+
+	if s.LinkIndex != nil {
+		s.LinkIndex.RemovePage(oldNorm)
+		newLinks := markdown.ExtractPageLinks(rebasedContent, newResolvePath)
+		s.LinkIndex.UpdatePage(newNorm, newLinks)
+	}
+
+	if s.TagIndex != nil {
+		s.TagIndex.RemovePage(oldNorm)
+		tags := markdown.ExtractTags(rebasedContent)
+		title := markdown.ExtractTitle(rebasedContent)
+		s.TagIndex.UpdatePage(newNorm, tags, title)
+	}
+
+	if s.SearchIndex != nil {
+		_ = s.SearchIndex.DeletePage(oldNorm)
+		title := markdown.ExtractTitle(rebasedContent)
+		plaintext := markdown.StripMarkdown(rebasedContent)
+		_ = s.SearchIndex.IndexPage(newNorm, title, plaintext)
+	}
+
+	// Persist indexes.
+	_ = s.RefIndex.Save()
+	_ = s.IncludeIndex.Save()
+	if s.LinkIndex != nil {
+		_ = s.LinkIndex.Save()
+	}
+	if s.TagIndex != nil {
+		_ = s.TagIndex.Save()
+	}
+
+	// Sync database/todo/reviewflow.
+	if s.DatabaseSync != nil {
+		s.DatabaseSync.RemovePageRows(oldNorm)
+		s.DatabaseSync.SyncPageRows(newNorm, rebasedContent)
+	}
+	if s.TodoSync != nil {
+		s.TodoSync.RemovePageRows(oldNorm)
+		s.TodoSync.SyncPageRows(newNorm, rebasedContent)
+	}
+	if s.ReviewflowSync != nil {
+		_ = s.ReviewflowSync.SyncFromMarkdown(newNorm, meta.Version, rebasedContent)
+	}
+
+	// 10. Log move to changelog.
+	if s.Changelog != nil {
+		s.Changelog.Append(newNorm, meta.Version, author,
+			fmt.Sprintf("moved from %s", oldNorm), "move")
+	}
+
+	return MoveResult{
+		Page: Page{
+			Path:             newNorm,
+			Markdown:         rebasedContent,
+			Meta:             meta,
+			IsNamespaceIndex: newIsIndex,
+		},
+		OldPath:      oldNorm,
+		NewPath:      newNorm,
+		UpdatedPages: updatedPages,
+		MovedMedia:   movedMediaPaths,
 	}, nil
 }
 

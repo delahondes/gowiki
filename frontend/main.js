@@ -83,6 +83,7 @@ let editorView = null
 let rawEditor = null
 let statusText = ""
 let isNewPage = false
+let isNamespaceIndex = false
 let siteTitle = "Gowiki"
 let tocMaxLevel = 3
 let viewView = null
@@ -3871,6 +3872,28 @@ function renderActions() {
       })
     )
 
+    // Move / namespace conversion buttons — only when authenticated and not a new page.
+    if (currentUser && !isNewPage) {
+      actionsRoot.appendChild(
+        makeActionButton("Move", () => {
+          void movePage()
+        })
+      )
+      if (isNamespaceIndex) {
+        actionsRoot.appendChild(
+          makeActionButton("To regular page", () => {
+            void convertPageType("to_regular_page")
+          })
+        )
+      } else {
+        actionsRoot.appendChild(
+          makeActionButton("To namespace", () => {
+            void convertPageType("to_namespace_index")
+          })
+        )
+      }
+    }
+
     // Delete button — only shown when authenticated and not a new page.
     if (currentUser && !isNewPage) {
       const deleteBtn = makeActionButton("Delete", () => {
@@ -3923,6 +3946,111 @@ async function deletePage() {
     : "/"
   setStatus("Page deleted.")
   window.location.href = parent
+}
+
+async function movePage() {
+  const newPath = prompt("Move page to:", `/${pagePath}`)
+  if (!newPath || newPath.trim() === "" || newPath.trim() === `/${pagePath}`) return
+
+  // Dry run first: always request preview with move_media=true to show all options.
+  let preview
+  try {
+    const previewResp = await authFetch(`/api/move/${pagePath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: newPath.trim(), move_media: true, dry_run: true }),
+    })
+    if (!previewResp.ok) {
+      const data = await previewResp.json().catch(() => ({}))
+      setStatus(data.error || `Move preview failed (${previewResp.status})`)
+      return
+    }
+    preview = await previewResp.json()
+  } catch {
+    setStatus("Move preview failed")
+    return
+  }
+
+  const hasAffectedPages = preview.affected_pages && preview.affected_pages.length > 0
+  const hasMedia = preview.media_to_move && preview.media_to_move.length > 0
+
+  // Ask about optional actions first, before the final confirmation.
+  let updateLinks = false
+  if (hasAffectedPages) {
+    updateLinks = confirm(
+      `${preview.affected_pages.length} page(s) contain links to this page:\n\n` +
+      preview.affected_pages.map(p => `  - ${p}`).join("\n") +
+      "\n\nUpdate their links to point to the new location?"
+    )
+  }
+
+  let moveMedia = false
+  if (hasMedia) {
+    moveMedia = confirm(
+      `${preview.media_to_move.length} media file(s) are exclusively referenced by this page:\n\n` +
+      preview.media_to_move.map(m => `  - ${m}`).join("\n") +
+      "\n\nMove them alongside the page?"
+    )
+  }
+
+  // Build final confirmation summarizing all actions.
+  const lines = [`Move page "${pageDisplayPath}" to "${preview.new_path}"`, ""]
+  lines.push("Actions:")
+  lines.push(`  - Move page and its full history`)
+  if (updateLinks) {
+    lines.push(`  - Update links in ${preview.affected_pages.length} page(s)`)
+  }
+  if (moveMedia) {
+    lines.push(`  - Co-move ${preview.media_to_move.length} media file(s)`)
+  }
+  lines.push("")
+  lines.push("Apply?")
+  if (!confirm(lines.join("\n"))) return
+
+  // Execute the move.
+  const resp = await authFetch(`/api/move/${pagePath}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: newPath.trim(),
+      move_media: moveMedia,
+      update_links: updateLinks,
+    }),
+  })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    setStatus(data.error || `Move failed (${resp.status})`)
+    return
+  }
+
+  const result = await resp.json()
+  setStatus("Page moved.")
+  window.location.href = result.new_path
+}
+
+async function convertPageType(flag) {
+  const label = flag === "to_namespace_index"
+    ? "Convert to namespace index?"
+    : "Convert to regular page?"
+
+  if (!confirm(label)) return
+
+  const body = {}
+  body[flag] = true
+
+  const resp = await authFetch(`/api/move/${pagePath}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    setStatus(data.error || `Conversion failed (${resp.status})`)
+    return
+  }
+
+  setStatus("Page converted.")
+  window.location.reload()
 }
 
 // ── History and Diff UI ──────────────────────────────
@@ -4983,8 +5111,9 @@ async function reloadPageContent() {
     pageLockInfo = null
   }
 
-  // If page is a namespace index, update pageNamespace so relative links resolve correctly.
-  if (page && page.is_namespace_index) {
+  // Track namespace index state and update pageNamespace for relative link resolution.
+  isNamespaceIndex = !!(page && page.is_namespace_index)
+  if (isNamespaceIndex) {
     pageNamespace = pagePath
   }
 
