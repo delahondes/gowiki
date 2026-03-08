@@ -90,9 +90,10 @@ function getUserLabel(username: string): string {
 }
 
 const gate = {
-  async getStatus(pagePath: string): Promise<ReviewflowStatus> {
+  async getStatus(pagePath: string, version?: number | null): Promise<ReviewflowStatus> {
     const cleanPath = pagePath.replace(/^\/+/, "")
-    const resp = await fetch(`${API_BASE}/status/${cleanPath}`)
+    const vParam = version ? `?v=${version}` : ""
+    const resp = await fetch(`${API_BASE}/status/${cleanPath}${vParam}`)
     if (!resp.ok) throw new Error(`reviewflow status: ${resp.status}`)
     return resp.json()
   },
@@ -121,11 +122,15 @@ class ReviewflowNodeView {
   private getPos: () => number | undefined
   private status: ReviewflowStatus | null = null
   private loading = false
+  private historyVersion: number | null = null
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.node = node
     this.view = view
     this.getPos = getPos
+
+    // Capture history version context (set by viewVersion() in main.js).
+    this.historyVersion = (window as any).__gowikiViewingVersion ?? null
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-reviewflow"
@@ -155,7 +160,7 @@ class ReviewflowNodeView {
     // Check if the current version tag was already validated in a previous cycle.
     // If so, the version tag must be bumped before new approvals can proceed.
     const versionHistory = this.status?.version_history || []
-    const versionTagStale = !isValidated && version !== "" &&
+    const versionTagStale = !this.historyVersion && !isValidated && version !== "" &&
       versionHistory.some(vr => vr.version_tag === version)
 
     // Wrapper with border color
@@ -255,7 +260,7 @@ class ReviewflowNodeView {
 
         // Action
         const tdAction = document.createElement("td")
-        if (isMissing && user === currentUser && !versionTagStale) {
+        if (isMissing && user === currentUser && !versionTagStale && !this.historyVersion) {
           const btn = document.createElement("button")
           btn.className = "gowiki-rf-confirm-btn"
           btn.textContent = "Confirm"
@@ -282,7 +287,7 @@ class ReviewflowNodeView {
     this.loading = true
     this.render()
     try {
-      this.status = await gate.getStatus(pagePath)
+      this.status = await gate.getStatus(pagePath, this.historyVersion)
     } catch {
       // Status not available — show roles without status
     }
@@ -300,6 +305,8 @@ class ReviewflowNodeView {
 
   /** Apply light red background to the content area when page is not validated. */
   private updatePageBackground() {
+    // Don't change page background when viewing a historical version.
+    if (this.historyVersion) return
     const contentRoot = document.getElementById("content") || document.querySelector(".ProseMirror")
     if (!contentRoot) return
     const hasRoles = Object.keys(

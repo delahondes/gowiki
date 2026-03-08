@@ -220,9 +220,11 @@ Base path: `/api/plugin/reviewflow/v1`
 | `GET` | `/status/*` | Optional | Returns computed `Status` for a page |
 | `POST` | `/confirm/*` | Required | Confirm a role. Body: `{"role": "reviewer"}` |
 
-### 6.1 GET /status/{pagePath}
+### 6.1 GET /status/{pagePath}?v=N
 
 Returns a `Status` object. If no reviewflow directive exists on the page, returns an empty status with no roles.
+
+**Optional query parameter**: `v` — page version number (int64). When provided, returns the status as of that specific version rather than the current page version. Used by the frontend when viewing historical versions. The backend checks `version_history` for fully validated versions, and falls back to scanning individual `Confirmation` records for partial confirmation state.
 
 ### 6.2 POST /confirm/{pagePath}
 
@@ -337,16 +339,27 @@ Uses `collectExtra: true` on the self-contained directive spec, which passes thr
 Renders a status card with:
 
 - **Header**: "REVIEWFLOW" label + version tag badge + "DRAFT" or "Validated" badge.
-- **Stale version warning**: orange bar when the version tag was already used in a previous cycle.
+- **Stale version warning**: orange bar when the version tag was already used in a previous cycle (suppressed when viewing history).
 - **Role table**: columns for Role, Assignee, Status, Action.
   - Status: checkmark (confirmed), hourglass (pending), warning (overdue).
-  - Action: "Confirm" button shown only for the current user's unconfirmed role (hidden when version tag is stale).
-- **Page background**: `#fff5f5` (light red) when validation is pending; white when validated.
+  - Action: "Confirm" button shown only for the current user's unconfirmed role (hidden when version tag is stale or when viewing history).
+- **Page background**: `#fff5f5` (light red) when validation is pending; white when validated. Skipped when viewing history.
 - **Border color**: green when fully validated, orange when overdue roles exist, grey otherwise.
 
-On mount, fetches status from `GET /status/{pagePath}` and resolves user display names via `/api/users/display`.
+On mount, fetches status from `GET /status/{pagePath}` (with `?v=N` when viewing a historical version) and resolves user display names via `/api/users/display`.
 
-### 9.5 CSS Classes
+### 9.5 History Version Viewing
+
+When viewing an old page version from the history UI, the NodeView shows the reviewflow status as it was for that specific version:
+
+- The `viewVersion()` function in `main.js` sets `window.__gowikiViewingVersion` to the version number before mounting the read-only ProseMirror view. The NodeView captures this in its constructor as `historyVersion`.
+- Status is fetched via `GET /status/{pagePath}?v=N`, which returns per-version confirmation state.
+- Validated versions show the green "Validated" badge; unvalidated versions show "DRAFT" with per-role confirmation status (pending/confirmed).
+- Confirm buttons are hidden (cannot confirm an old version).
+- Stale version tag warnings are suppressed (not actionable in history context).
+- Page background coloring is skipped (avoid altering the history view).
+
+### 9.6 CSS Classes
 
 | Class | Purpose |
 |---|---|
@@ -366,6 +379,8 @@ On mount, fetches status from `GET /status/{pagePath}` and resolves user display
 
 ## 10. History Integration
 
+### 10.1 History Table
+
 The page history table includes a "Status" column. For each archived version:
 
 - If `plugin_meta.reviewflow.is_validated` is true: displays a green "Validated" badge with the version tag pill.
@@ -373,6 +388,15 @@ The page history table includes a "Status" column. For each archived version:
 - If absent: no change (non-reviewflow pages).
 
 The `AtticMeta` is written to `AtticEntry.PluginMeta["reviewflow"]` when a version becomes fully validated, making it available to the history API without extra queries.
+
+### 10.2 Version Viewer
+
+When viewing a specific archived version ("View" button in history), the reviewflow panel displays the validation status as of that version. The backend's `GetStatusForVersion(pagePath, version)` method:
+
+1. Checks `version_history` — if the version was fully validated, returns all roles as confirmed.
+2. Otherwise scans `Confirmations` for entries matching the requested version to show partial confirmation state.
+
+This allows users to see exactly which roles had confirmed an older draft before it was superseded. The frontend adapts: confirm buttons are hidden, stale warnings suppressed, and page background coloring is skipped.
 
 ---
 

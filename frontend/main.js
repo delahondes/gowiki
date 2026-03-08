@@ -4220,7 +4220,9 @@ async function viewVersion(version) {
 
     const content = document.createElement("div")
     content.className = "gowiki-version-content"
+    window.__gowikiViewingVersion = version
     mountReadOnlyView(content, data.markdown, "gowiki-view")
+    window.__gowikiViewingVersion = null
     rewriteMediaToVersioned(content, data.media_refs)
 
     const actions = document.createElement("div")

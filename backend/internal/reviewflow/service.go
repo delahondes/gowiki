@@ -222,6 +222,62 @@ func (svc *Service) GetStatus(pagePath string) (*Status, error) {
 	return svc.computeStatus(pagePath, st)
 }
 
+// GetStatusForVersion returns the reviewflow status as of a specific page version.
+// Used when viewing historical versions.
+func (svc *Service) GetStatusForVersion(pagePath string, version int64) (*Status, error) {
+	st, err := svc.store.Load(pagePath)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil || len(st.Roles) == 0 {
+		return &Status{
+			Roles:        make(map[string]string),
+			MissingRoles: make(map[string]string),
+		}, nil
+	}
+
+	// Check if this version was fully validated in history.
+	for _, vr := range st.VersionHistory {
+		if vr.PageVersion == version {
+			// Fully validated version — all roles confirmed.
+			return &Status{
+				Roles:            st.Roles,
+				VersionTag:       vr.VersionTag,
+				CurrentPageVer:   version,
+				ValidatedVersion: version,
+				MissingRoles:     make(map[string]string),
+				IsFullyValidated: true,
+				VersionHistory:   st.VersionHistory,
+			}, nil
+		}
+	}
+
+	// Not fully validated — check which roles had confirmations for this version.
+	confirmed := make(map[string]bool)
+	for _, c := range st.Confirmations {
+		if c.PageVersion == version {
+			confirmed[c.Role] = true
+		}
+	}
+
+	missing := make(map[string]string)
+	for role, user := range st.Roles {
+		if !confirmed[role] {
+			missing[role] = user
+		}
+	}
+
+	return &Status{
+		Roles:            st.Roles,
+		VersionTag:       st.VersionTag,
+		CurrentPageVer:   version,
+		ValidatedVersion: st.ValidatedVersion,
+		MissingRoles:     missing,
+		IsFullyValidated: false,
+		VersionHistory:   st.VersionHistory,
+	}, nil
+}
+
 // computeDueDate returns a YYYY-MM-DD due date based on the shortest
 // configured deadline for any of the given roles. Returns "" if no deadlines.
 func (svc *Service) computeDueDate(roles map[string]string) string {
