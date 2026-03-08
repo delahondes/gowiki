@@ -152,6 +152,12 @@ class ReviewflowNodeView {
     const currentUser = (window as any).__gowikiCurrentUser?.username || ""
     const isValidated = backendHasState && this.status!.is_fully_validated === true
 
+    // Check if the current version tag was already validated in a previous cycle.
+    // If so, the version tag must be bumped before new approvals can proceed.
+    const versionHistory = this.status?.version_history || []
+    const versionTagStale = !isValidated && version !== "" &&
+      versionHistory.some(vr => vr.version_tag === version)
+
     // Wrapper with border color
     const wrapper = document.createElement("div")
     wrapper.className = "gowiki-rf-wrapper"
@@ -176,6 +182,11 @@ class ReviewflowNodeView {
       badge.className = "gowiki-rf-validated-badge"
       badge.textContent = "\u2714 Validated"
       header.appendChild(badge)
+    } else if (roleEntries.length > 0 && !this.loading) {
+      const draft = document.createElement("span")
+      draft.className = "gowiki-rf-draft-badge"
+      draft.textContent = "DRAFT"
+      header.appendChild(draft)
     }
     if (this.loading) {
       const loadEl = document.createElement("span")
@@ -184,6 +195,14 @@ class ReviewflowNodeView {
       header.appendChild(loadEl)
     }
     wrapper.appendChild(header)
+
+    // Warning: version tag already used
+    if (versionTagStale) {
+      const warn = document.createElement("div")
+      warn.className = "gowiki-rf-stale-warning"
+      warn.textContent = `\u26A0 Version "${version}" was already validated. Update the version tag before approving.`
+      wrapper.appendChild(warn)
+    }
 
     // Table
     if (roleEntries.length > 0) {
@@ -236,7 +255,7 @@ class ReviewflowNodeView {
 
         // Action
         const tdAction = document.createElement("td")
-        if (isMissing && user === currentUser) {
+        if (isMissing && user === currentUser && !versionTagStale) {
           const btn = document.createElement("button")
           btn.className = "gowiki-rf-confirm-btn"
           btn.textContent = "Confirm"
@@ -298,6 +317,7 @@ class ReviewflowNodeView {
     try {
       this.status = await gate.confirm(pagePath, role)
       this.render()
+      this.updatePageBackground()
     } catch (err) {
       console.error("reviewflow confirm failed:", err)
     }
@@ -383,6 +403,21 @@ const reviewflowStyles = `
   color: #2e7d32;
   font-weight: 600;
   font-size: 13px;
+}
+
+.gowiki-rf-draft-badge {
+  color: #c62828;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+
+.gowiki-rf-stale-warning {
+  padding: 6px 14px;
+  background: #fff3e0;
+  color: #e65100;
+  font-size: 13px;
+  border-bottom: 1px solid #ffe0b2;
 }
 
 .gowiki-rf-loading {
