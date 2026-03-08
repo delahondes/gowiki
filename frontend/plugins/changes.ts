@@ -270,6 +270,7 @@ class ChangesNodeView {
   ignoreMutation(): boolean {
     return true
   }
+
 }
 
 export const changesPlugin: WikiPlugin = {

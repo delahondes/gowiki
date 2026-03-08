@@ -4915,6 +4915,9 @@ async function reloadPageContent() {
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
+
+  // Re-mount sidebar and footer so dynamic content (e.g. recent changes) refreshes.
+  refreshZones()
 }
 
 // ── Draft / Edit mode API ────────────────────────────
@@ -5241,6 +5244,20 @@ async function publishDraft() {
     promptOrphanDeletion(result.orphaned_media)
   }
   setMode("view")
+  refreshZones()
+}
+
+function refreshZones() {
+  if (sidebarView) { sidebarView.destroy(); sidebarView = null }
+  sidebarRoot.innerHTML = ""
+  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+    sidebarView = v
+  })
+  if (footerView) { footerView.destroy(); footerView = null }
+  footerRoot.innerHTML = ""
+  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+    footerView = v
+  })
 }
 
 async function discardDraft() {
