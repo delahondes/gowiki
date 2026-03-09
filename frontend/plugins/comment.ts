@@ -799,6 +799,15 @@ export function destroyComments() {
   currentContentRoot = null
 }
 
+export function reapplyComments() {
+  if (!currentContentRoot || currentComments.length === 0) return
+  // Re-try anchoring for all unresolved comments: remove existing highlights, re-anchor.
+  currentComments.forEach((c) => removeHighlights(c.id))
+  removeSidebar()
+  removeCollapsedToggle()
+  applyComments(currentContentRoot, currentComments)
+}
+
 export function addComment() {
   if (!currentContentRoot) return
   showCreateForm(currentContentRoot)

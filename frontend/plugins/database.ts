@@ -837,6 +837,7 @@ class DatabaseQueryNodeView {
       }
       const data = await resp.json()
       this.renderTable(schema, data.rows || [], data.total || 0, limit)
+      document.dispatchEvent(new Event("gowiki:node-rendered"))
     } catch (err) {
       this.showError("Network error")
     }
@@ -1171,6 +1172,7 @@ class DatabaseNewRowNodeView {
       }
       const schema = await resp.json()
       this.renderForm(schema)
+      document.dispatchEvent(new Event("gowiki:node-rendered"))
     } catch {
       this.showError("Network error")
     }
@@ -1405,6 +1407,7 @@ class DatabaseRowNodeView {
     } else {
       this.renderViewMode()
     }
+    document.dispatchEvent(new Event("gowiki:node-rendered"))
   }
 
   // ── Edit mode: inputs that update node attrs (synced to DB on publish) ──

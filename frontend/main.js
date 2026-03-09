@@ -14,7 +14,7 @@ import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
-import { initComments, destroyComments, addComment, getCommentCount } from "./plugins/comment.ts"
+import { initComments, destroyComments, addComment, getCommentCount, reapplyComments } from "./plugins/comment.ts"
 import "highlight.js/styles/github.css"
 
 const registry = buildRegistry(basicSchema)
@@ -90,6 +90,12 @@ let tocMaxLevel = 3
 let viewView = null
 let sidebarView = null
 let footerView = null
+
+let reapplyTimer = null
+const debouncedReapplyComments = () => {
+  if (reapplyTimer) clearTimeout(reapplyTimer)
+  reapplyTimer = setTimeout(reapplyComments, 100)
+}
 
 const tableCommands = new Map()
 const extraCommands = []
@@ -1131,6 +1137,8 @@ function clearContent() {
   }
   rawEditor = null
   destroyComments()
+  document.removeEventListener("gowiki:node-rendered", debouncedReapplyComments)
+  if (reapplyTimer) { clearTimeout(reapplyTimer); reapplyTimer = null }
   contentRoot.innerHTML = ""
 }
 
@@ -1517,6 +1525,9 @@ function renderView() {
       isAdmin: currentUser?.groups?.includes("admin") || false,
     })
   }
+
+  // Re-anchor comments when async nodes (database, etc.) finish rendering.
+  document.addEventListener("gowiki:node-rendered", debouncedReapplyComments)
 }
 
 async function checkReadAck(path, currentVersion, container) {
