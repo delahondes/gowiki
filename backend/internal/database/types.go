@@ -15,6 +15,8 @@ const (
 	FieldTypeMultiEnum     = "multi_enum"
 	FieldTypeAutoIncrement = "auto_increment"
 	FieldTypeImage         = "image"
+	FieldTypeColor         = "color"
+	FieldTypeTag           = "tag"
 )
 
 // ValidFieldTypes is the set of valid field type strings.
@@ -30,6 +32,8 @@ var ValidFieldTypes = map[string]bool{
 	FieldTypeMultiEnum:     true,
 	FieldTypeAutoIncrement: true,
 	FieldTypeImage:         true,
+	FieldTypeColor:         true,
+	FieldTypeTag:           true,
 }
 
 // TableDef represents a structured data table definition.
@@ -105,9 +109,9 @@ type Filter struct {
 // SQLTypeForField returns the PostgreSQL column type for a given field type.
 func SQLTypeForField(fieldType string) string {
 	switch fieldType {
-	case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage:
+	case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor:
 		return "TEXT"
-	case FieldTypeInteger, FieldTypeAutoIncrement:
+	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag:
 		return "BIGINT"
 	case FieldTypeFloat:
 		return "DOUBLE PRECISION"

@@ -260,6 +260,33 @@ const databaseStyles = `
   margin-left: 4px;
 }
 
+.db-color-swatch {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1px solid #ccc;
+  vertical-align: middle;
+}
+
+.db-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 18px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.db-tag-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+}
+
 /* Template variables — resolved styled in edit mode only */
 #app.gowiki-editing .gowiki-template-var {
   background: #f0f4ff;
@@ -286,6 +313,267 @@ function isolateInput(el: HTMLElement) {
   for (const evt of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const) {
     el.addEventListener(evt, (e) => e.stopPropagation())
   }
+}
+
+// ── Tag helpers ──
+
+const tagTableCache = new Map<string, { data: Map<number, { label: string; icon: string; color: string }>; timestamp: number }>()
+
+async function getTagOptions(tableName: string): Promise<Map<number, { label: string; icon: string; color: string }>> {
+  const cached = tagTableCache.get(tableName)
+  if (cached && Date.now() - cached.timestamp < 30000) return cached.data
+
+  const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
+  if (!resp.ok) return new Map()
+  const body = await resp.json()
+  const rows: any[] = body.rows || []
+  const result = new Map<number, { label: string; icon: string; color: string }>()
+  for (const r of rows) {
+    result.set(r.id, {
+      label: String(r.fields?.label ?? ""),
+      icon: String(r.fields?.icon ?? ""),
+      color: String(r.fields?.color ?? ""),
+    })
+  }
+  tagTableCache.set(tableName, { data: result, timestamp: Date.now() })
+  return result
+}
+
+function isLightColor(hex: string): boolean {
+  const c = hex.replace("#", "")
+  if (c.length < 6) return true
+  const r = parseInt(c.substring(0, 2), 16)
+  const g = parseInt(c.substring(2, 4), 16)
+  const b = parseInt(c.substring(4, 6), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150
+}
+
+function renderTagBadge(tag: { label: string; icon: string; color: string }): HTMLSpanElement {
+  const span = document.createElement("span")
+  span.className = "db-tag-badge"
+  if (tag.color) {
+    span.style.backgroundColor = tag.color
+    span.style.color = isLightColor(tag.color) ? "#333" : "#fff"
+  } else {
+    span.style.backgroundColor = "#e9ecef"
+    span.style.color = "#333"
+  }
+  if (tag.icon) {
+    const img = document.createElement("img")
+    img.src = tag.icon
+    img.className = "db-tag-icon"
+    span.appendChild(img)
+  }
+  const text = document.createTextNode(tag.label || "(no label)")
+  span.appendChild(text)
+  return span
+}
+
+function renderColorSwatch(color: string): HTMLSpanElement {
+  const span = document.createElement("span")
+  span.className = "db-color-swatch"
+  if (color) span.style.backgroundColor = color
+  return span
+}
+
+// Creates an overlay select that uses {value, label} option objects.
+function createOverlaySelectKeyed(
+  anchor: HTMLElement,
+  opts: {
+    options: { value: string; label: string }[]
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const sel = document.createElement("select")
+  sel.style.position = "fixed"
+  sel.style.left = rect.left + "px"
+  sel.style.top = rect.top + "px"
+  sel.style.width = Math.max(rect.width, 150) + "px"
+  sel.style.height = rect.height + "px"
+  sel.style.boxSizing = "border-box"
+  sel.style.fontSize = "13px"
+  sel.style.border = "2px solid #228be6"
+  sel.style.borderRadius = "2px"
+  sel.style.outline = "none"
+  sel.style.zIndex = "10000"
+  sel.style.background = "#fff"
+
+  const emptyOpt = document.createElement("option")
+  emptyOpt.value = ""
+  emptyOpt.textContent = "-- Select --"
+  sel.appendChild(emptyOpt)
+  for (const o of opts.options) {
+    const opt = document.createElement("option")
+    opt.value = o.value
+    opt.textContent = o.label
+    if (o.value === opts.value) opt.selected = true
+    sel.appendChild(opt)
+  }
+
+  const cleanup = () => { if (sel.parentNode) sel.remove() }
+
+  sel.addEventListener("change", () => {
+    opts.onSave(sel.value)
+    cleanup()
+  })
+  sel.addEventListener("blur", () => {
+    cleanup()
+    opts.onCancel()
+  })
+
+  document.body.appendChild(sel)
+  sel.focus()
+  return sel
+}
+
+// Preset pastel colors suitable for tag/badge backgrounds.
+const colorPresets = [
+  "#adb5bd", // gray
+  "#ffa8a8", // red
+  "#fcc2d7", // pink
+  "#eebefa", // purple
+  "#b197fc", // violet
+  "#91a7ff", // indigo
+  "#74c0fc", // blue
+  "#66d9e8", // cyan
+  "#63e6be", // teal
+  "#8ce99a", // green
+  "#c0eb75", // lime
+  "#ffe066", // yellow
+  "#ffc078", // orange
+  "#e9ecef", // light gray
+  "#868e96", // dark gray
+  "#ff6b6b", // saturated red
+  "#cc5de8", // saturated purple
+  "#5c7cfa", // saturated indigo
+  "#22b8cf", // saturated cyan
+  "#51cf66", // saturated green
+  "#fcc419", // saturated yellow
+  "#ff922b", // saturated orange
+  "#f06595", // saturated pink
+  "#845ef7", // saturated violet
+]
+
+// Creates a color picker overlay with preset swatches and a custom color input.
+function createOverlayColorPicker(
+  anchor: HTMLElement,
+  opts: {
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const wrap = document.createElement("div")
+  wrap.style.position = "fixed"
+  wrap.style.left = rect.left + "px"
+  wrap.style.top = (rect.bottom + 2) + "px"
+  wrap.style.zIndex = "10000"
+  wrap.style.background = "#fff"
+  wrap.style.border = "2px solid #228be6"
+  wrap.style.borderRadius = "4px"
+  wrap.style.padding = "8px"
+  wrap.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"
+  wrap.style.width = "220px"
+
+  // Preset grid.
+  const grid = document.createElement("div")
+  grid.style.display = "grid"
+  grid.style.gridTemplateColumns = "repeat(8, 1fr)"
+  grid.style.gap = "3px"
+  grid.style.marginBottom = "6px"
+
+  let saved = false
+  const cleanup = () => { if (wrap.parentNode) wrap.remove() }
+
+  for (const c of colorPresets) {
+    const swatch = document.createElement("div")
+    swatch.style.width = "22px"
+    swatch.style.height = "22px"
+    swatch.style.borderRadius = "3px"
+    swatch.style.backgroundColor = c
+    swatch.style.border = c === opts.value ? "2px solid #228be6" : "1px solid #ccc"
+    swatch.style.cursor = "pointer"
+    swatch.style.boxSizing = "border-box"
+    swatch.addEventListener("click", () => {
+      saved = true
+      opts.onSave(c)
+      cleanup()
+    })
+    grid.appendChild(swatch)
+  }
+  wrap.appendChild(grid)
+
+  // Custom color row.
+  const customRow = document.createElement("div")
+  customRow.style.display = "flex"
+  customRow.style.alignItems = "center"
+  customRow.style.gap = "4px"
+
+  const colorInput = document.createElement("input")
+  colorInput.type = "color"
+  colorInput.value = opts.value || "#adb5bd"
+  colorInput.style.width = "30px"
+  colorInput.style.height = "24px"
+  colorInput.style.padding = "0"
+  colorInput.style.border = "1px solid #ccc"
+  colorInput.style.cursor = "pointer"
+  customRow.appendChild(colorInput)
+
+  const textInput = document.createElement("input")
+  textInput.type = "text"
+  textInput.value = opts.value || ""
+  textInput.placeholder = "#rrggbb"
+  textInput.style.flex = "1"
+  textInput.style.fontSize = "12px"
+  textInput.style.padding = "2px 4px"
+  textInput.style.border = "1px solid #ccc"
+  textInput.style.borderRadius = "2px"
+  textInput.style.minWidth = "0"
+  customRow.appendChild(textInput)
+
+  const okBtn = document.createElement("button")
+  okBtn.textContent = "OK"
+  okBtn.style.fontSize = "12px"
+  okBtn.style.padding = "2px 8px"
+  okBtn.style.cursor = "pointer"
+  customRow.appendChild(okBtn)
+
+  colorInput.addEventListener("input", () => {
+    textInput.value = colorInput.value
+  })
+  textInput.addEventListener("input", () => {
+    if (/^#[0-9a-fA-F]{6}$/.test(textInput.value)) {
+      colorInput.value = textInput.value
+    }
+  })
+  okBtn.addEventListener("click", () => {
+    saved = true
+    opts.onSave(textInput.value || colorInput.value)
+    cleanup()
+  })
+  textInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(textInput.value || colorInput.value); cleanup() }
+    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup() }
+  })
+
+  wrap.appendChild(customRow)
+
+  // Close on outside click.
+  const onOutside = (e: MouseEvent) => {
+    if (!wrap.contains(e.target as Node)) {
+      document.removeEventListener("mousedown", onOutside, true)
+      if (!saved) { saved = true; opts.onCancel() }
+      cleanup()
+    }
+  }
+  setTimeout(() => document.addEventListener("mousedown", onOutside, true), 0)
+
+  document.body.appendChild(wrap)
+  return wrap
 }
 
 // Creates an inline edit overlay input OUTSIDE the ProseMirror DOM tree.
@@ -619,6 +907,18 @@ class DatabaseQueryNodeView {
           img.src = String(val)
           img.className = "db-image-cell"
           td.appendChild(img)
+        } else if (f.type === "color" && val) {
+          td.appendChild(renderColorSwatch(String(val)))
+        } else if (f.type === "tag" && f.foreign_key) {
+          if (val && Number(val) !== 0) {
+            td.textContent = "..."
+            getTagOptions(f.foreign_key).then(tags => {
+              td.textContent = ""
+              const tag = tags.get(Number(val))
+              if (tag) td.appendChild(renderTagBadge(tag))
+              else td.textContent = String(val)
+            })
+          }
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")
         } else {
@@ -710,6 +1010,45 @@ class DatabaseQueryNodeView {
       td.textContent = newVal
       this.saveInlineEdit(tableName, rowId, field.name, newVal).then(ok => {
         if (!ok) td.textContent = displayValue
+      })
+    } else if (field.type === "color") {
+      createOverlayColorPicker(td, {
+        value: displayValue || "#adb5bd",
+        onSave: async (newVal) => {
+          td.textContent = ""
+          td.appendChild(renderColorSwatch(newVal))
+          td.className = "gowiki-database-editable-value"
+          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          if (!ok) {
+            td.textContent = ""
+            td.appendChild(renderColorSwatch(displayValue))
+          }
+        },
+        onCancel: () => {},
+      })
+    } else if (field.type === "tag" && field.foreign_key) {
+      getTagOptions(field.foreign_key).then(tags => {
+        const options: { value: string; label: string }[] = []
+        tags.forEach((t, id) => options.push({ value: String(id), label: t.label || String(id) }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: displayValue,
+          onSave: async (newVal) => {
+            td.textContent = ""
+            const tag = tags.get(Number(newVal))
+            if (tag) td.appendChild(renderTagBadge(tag))
+            else td.textContent = newVal
+            td.className = "gowiki-database-editable-value"
+            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            if (!ok) {
+              td.textContent = ""
+              const oldTag = tags.get(Number(displayValue))
+              if (oldTag) td.appendChild(renderTagBadge(oldTag))
+              else td.textContent = displayValue
+            }
+          },
+          onCancel: () => {},
+        })
       })
     } else if (field.type === "image") {
       createOverlayImageInput(td, {
@@ -890,6 +1229,29 @@ class DatabaseNewRowNodeView {
         }
         inputs.set(f.name, sel)
         row.appendChild(sel)
+      } else if (f.type === "color") {
+        const inp = document.createElement("input")
+        inp.type = "color"
+        inp.value = f.default_value || "#adb5bd"
+        inputs.set(f.name, inp)
+        row.appendChild(inp)
+      } else if (f.type === "tag" && f.foreign_key) {
+        const sel = document.createElement("select")
+        const empty = document.createElement("option")
+        empty.value = ""
+        empty.textContent = "-- Select --"
+        sel.appendChild(empty)
+        inputs.set(f.name, sel)
+        row.appendChild(sel)
+        // Populate async.
+        getTagOptions(f.foreign_key).then(tags => {
+          tags.forEach((t, id) => {
+            const opt = document.createElement("option")
+            opt.value = String(id)
+            opt.textContent = t.label || String(id)
+            sel.appendChild(opt)
+          })
+        })
       } else if (f.type === "boolean") {
         const sel = document.createElement("select")
         for (const v of [
@@ -1151,6 +1513,39 @@ class DatabaseRowNodeView {
       })
       return wrap
     }
+    if (f && f.type === "color") {
+      const inp = document.createElement("input")
+      inp.type = "color"
+      inp.value = value || "#adb5bd"
+      inp.style.width = "50px"
+      inp.style.height = "30px"
+      inp.style.padding = "0"
+      inp.style.border = "1px solid #ccc"
+      inp.style.cursor = "pointer"
+      isolateInput(inp)
+      return inp
+    }
+    if (f && f.type === "tag" && f.foreign_key) {
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      isolateInput(sel)
+      // Populate async.
+      getTagOptions(f.foreign_key).then(tags => {
+        tags.forEach((t, id) => {
+          const opt = document.createElement("option")
+          opt.value = String(id)
+          opt.textContent = t.label || String(id)
+          if (String(id) === value) opt.selected = true
+          sel.appendChild(opt)
+        })
+      })
+      return sel
+    }
     if (f && (f.type === "enum" || f.type === "multi_enum")) {
       const sel = document.createElement("select")
       sel.style.width = "100%"
@@ -1236,6 +1631,18 @@ class DatabaseRowNodeView {
         img.src = String(val)
         img.className = "db-image-cell"
         tdVal.appendChild(img)
+      } else if (f && f.type === "color" && val) {
+        tdVal.appendChild(renderColorSwatch(String(val)))
+      } else if (f && f.type === "tag" && f.foreign_key) {
+        if (val && Number(val) !== 0) {
+          tdVal.textContent = "..."
+          getTagOptions(f.foreign_key).then(tags => {
+            tdVal.textContent = ""
+            const tag = tags.get(Number(val))
+            if (tag) tdVal.appendChild(renderTagBadge(tag))
+            else tdVal.textContent = String(val)
+          })
+        }
       } else {
         tdVal.textContent = String(val)
       }
@@ -1326,6 +1733,43 @@ class DatabaseRowNodeView {
       td.textContent = newVal
       const ok = await saveToApi(newVal)
       if (!ok) { td.textContent = currentValue }
+    } else if (fieldDef && fieldDef.type === "color") {
+      createOverlayColorPicker(td, {
+        value: currentValue || "#adb5bd",
+        onSave: async (newVal) => {
+          td.textContent = ""
+          td.appendChild(renderColorSwatch(newVal))
+          td.className = "gowiki-database-editable-value"
+          const ok = await saveToApi(newVal)
+          if (!ok) {
+            td.textContent = ""
+            td.appendChild(renderColorSwatch(currentValue))
+          }
+        },
+        onCancel: () => {
+          td.textContent = ""
+          td.appendChild(renderColorSwatch(currentValue))
+          td.className = "gowiki-database-editable-value"
+        },
+      })
+    } else if (fieldDef && fieldDef.type === "tag" && fieldDef.foreign_key) {
+      getTagOptions(fieldDef.foreign_key).then(tags => {
+        const options: { value: string; label: string }[] = []
+        tags.forEach((t, id) => options.push({ value: String(id), label: t.label || String(id) }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: currentValue,
+          onSave: async (newVal) => {
+            td.textContent = ""
+            const tag = tags.get(Number(newVal))
+            if (tag) td.appendChild(renderTagBadge(tag))
+            else td.textContent = newVal
+            td.className = "gowiki-database-editable-value"
+            await saveToApi(newVal)
+          },
+          onCancel: () => {},
+        })
+      })
     } else if (fieldDef && fieldDef.type === "image") {
       const restoreImage = (path: string) => {
         td.textContent = ""

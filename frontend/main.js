@@ -7359,6 +7359,8 @@ async function showDatabaseFieldEditModal(tableId, existing) {
     { value: "multi_enum", label: "Multi Enum" },
     { value: "auto_increment", label: "Auto Increment" },
     { value: "image", label: "Image" },
+    { value: "color", label: "Color" },
+    { value: "tag", label: "Tag" },
   ]
 
   return showAdminModal(existing ? `Edit Field: ${existing.name}` : "Add Field", (body, close, showError) => {
@@ -7395,9 +7397,30 @@ async function showDatabaseFieldEditModal(tableId, existing) {
     enumSection.appendChild(enumArea)
     body.appendChild(enumSection)
 
+    // Tag table section (shown for tag type).
+    const tagSection = document.createElement("div")
+    tagSection.style.display = "none"
+    tagSection.style.marginTop = "8px"
+
+    const tagLabel = document.createElement("label")
+    tagLabel.textContent = "Tag Table (name of table with label/icon/color columns)"
+    tagLabel.style.display = "block"
+    tagLabel.style.fontWeight = "500"
+    tagLabel.style.marginBottom = "4px"
+    tagSection.appendChild(tagLabel)
+
+    const tagInput = document.createElement("input")
+    tagInput.type = "text"
+    tagInput.style.width = "100%"
+    tagInput.placeholder = "e.g. tags"
+    if (existing && existing.foreign_key) tagInput.value = existing.foreign_key
+    tagSection.appendChild(tagInput)
+    body.appendChild(tagSection)
+
     function updateEnumVisibility() {
       const t = typeSelect.value
       enumSection.style.display = (t === "enum" || t === "multi_enum") ? "block" : "none"
+      tagSection.style.display = t === "tag" ? "block" : "none"
     }
     typeSelect.addEventListener("change", updateEnumVisibility)
     updateEnumVisibility()
@@ -7417,6 +7440,11 @@ async function showDatabaseFieldEditModal(tableId, existing) {
       // Add enum values if applicable.
       if (payload.type === "enum" || payload.type === "multi_enum") {
         payload.enum_values = enumArea.value.split("\n").map(v => v.trim()).filter(Boolean)
+      }
+
+      // Add foreign_key for tag type.
+      if (payload.type === "tag") {
+        payload.foreign_key = tagInput.value.trim()
       }
 
       const url = existing
