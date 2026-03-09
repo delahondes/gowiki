@@ -14,6 +14,7 @@ import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
+import { initComments, destroyComments, addComment, getCommentCount } from "./plugins/comment.ts"
 import "highlight.js/styles/github.css"
 
 const registry = buildRegistry(basicSchema)
@@ -1129,6 +1130,7 @@ function clearContent() {
     viewView = null
   }
   rawEditor = null
+  destroyComments()
   contentRoot.innerHTML = ""
 }
 
@@ -1407,6 +1409,11 @@ function mountReadOnlyView(container, markdown, className) {
     editable: () => false,
   })
   highlightCodeBlocks(wrapper)
+  // In view mode we only need the rendered DOM — not ProseMirror's event
+  // handling or selection tracking. Remove contenteditable and stop the
+  // internal DOM/selection observer so the browser handles selection natively.
+  view.dom.removeAttribute("contenteditable")
+  if (view.domObserver && view.domObserver.stop) view.domObserver.stop()
   return view
 }
 
@@ -1499,6 +1506,17 @@ function renderView() {
   }
 
   updatePageTitle()
+
+  // Initialize comments overlay.
+  if (!isNewPage) {
+    initComments({
+      pagePath: `/${pagePath}`,
+      contentRoot,
+      authFetch,
+      username: currentUser?.username || null,
+      isAdmin: currentUser?.groups?.includes("admin") || false,
+    })
+  }
 }
 
 async function checkReadAck(path, currentVersion, container) {
@@ -3872,6 +3890,14 @@ function renderActions() {
         window.open(`/api/export/pdf/${pagePath}`, "_blank")
       })
     )
+
+    // Comment button — only when authenticated and not a new page.
+    if (currentUser && !isNewPage) {
+      const commentCount = getCommentCount()
+      const commentLabel = commentCount > 0 ? `Comments (${commentCount})` : "Comment"
+      const commentBtn = makeActionButton(commentLabel, () => addComment())
+      actionsRoot.appendChild(commentBtn)
+    }
 
     // Move / namespace conversion buttons — only when authenticated and not a new page.
     if (currentUser && !isNewPage) {

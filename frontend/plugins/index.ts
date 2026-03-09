@@ -9,6 +9,7 @@ import { tagPlugin } from "./tag"
 import { todoPlugin } from "./todo"
 import { reviewflowPlugin } from "./reviewflow"
 import { changesPlugin } from "./changes"
+import { commentPlugin } from "./comment"
 
 export const plugins: Plugin[] = [
   imagePlugin,
@@ -21,4 +22,5 @@ export const plugins: Plugin[] = [
   todoPlugin,
   reviewflowPlugin,
   changesPlugin,
+  commentPlugin,
 ]

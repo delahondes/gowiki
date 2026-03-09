@@ -87,6 +87,11 @@ type ReviewflowSyncer interface {
 	SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error
 }
 
+// CommentRenamer is an optional hook for moving comment sidecar files during page move.
+type CommentRenamer interface {
+	Rename(oldPath, newPath string) error
+}
+
 type FileStore struct {
 	contentRoot       string
 	metaRoot          string
@@ -103,6 +108,7 @@ type FileStore struct {
 	DatabaseSync      DatabaseSyncer
 	TodoSync          DatabaseSyncer
 	ReviewflowSync    ReviewflowSyncer
+	CommentStore      CommentRenamer
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -990,6 +996,11 @@ func (s *FileStore) Move(oldPath, newPath string, moveMedia, updateLinks bool, a
 	}
 	if s.ReviewflowSync != nil {
 		_ = s.ReviewflowSync.SyncFromMarkdown(newNorm, meta.Version, rebasedContent)
+	}
+
+	// Move comment sidecar file.
+	if s.CommentStore != nil {
+		_ = s.CommentStore.Rename(oldNorm, newNorm)
 	}
 
 	// 10. Log move to changelog.

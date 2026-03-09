@@ -10,6 +10,7 @@ import (
 
 	"gowiki/backend/internal/api"
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/reviewflow"
@@ -151,11 +152,17 @@ func main() {
 	store.ReviewflowSync = reviewflowService
 	log.Printf("reviewflow plugin: active")
 
+	// Initialize comment plugin.
+	commentStore := comment.NewStore(metaRoot)
+	commentService := comment.NewService(commentStore)
+	store.CommentStore = commentStore
+	log.Printf("comment plugin: active")
+
 	// Initialize headless Chrome for PDF export.
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService, reviewflowService)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService, reviewflowService, commentService)
 	log.Printf("gowiki backend listening on %s", *addr)
 	if *serveWeb {
 		log.Printf("serving frontend assets from %s", *webDir)

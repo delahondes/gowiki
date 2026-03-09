@@ -193,6 +193,7 @@ mark.search-highlight {
 }
 
 #main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
@@ -108,11 +109,12 @@ type Server struct {
 	oauthClient         *auth.OAuthClient
 	todoService         *todo.TodoService
 	reviewflowService   *reviewflow.Service
+	commentService      *comment.Service
 	serveWeb            bool
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -136,6 +138,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		dbPool:      dbPool,
 		todoService:       todoService,
 		reviewflowService: reviewflowService,
+		commentService:    commentService,
 		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
 	}
@@ -315,6 +318,39 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAuth)
 				reviewflow.RegisterWriteRoutes(r, s.reviewflowService, extractUsername)
+			})
+		})
+	}
+
+	// Comment plugin endpoints.
+	if s.commentService != nil {
+		extractUsername := func(r *http.Request) string {
+			return UsernameFromContext(r.Context())
+		}
+		isAdmin := func(r *http.Request) bool {
+			username := UsernameFromContext(r.Context())
+			if username == "" {
+				return false
+			}
+			user, err := s.userStore.Get(username)
+			if err != nil {
+				return false
+			}
+			for _, g := range user.Groups {
+				if g == "admin" {
+					return true
+				}
+			}
+			return false
+		}
+		r.Route("/api/plugin/comment/v1", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(s.optionalAuth)
+				comment.RegisterReadRoutes(r, s.commentService)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				comment.RegisterWriteRoutes(r, s.commentService, extractUsername, isAdmin)
 			})
 		})
 	}
