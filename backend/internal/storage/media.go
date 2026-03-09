@@ -78,7 +78,7 @@ func (s *MediaFileStore) List(namespacePath string) ([]MediaEntry, error) {
 		}
 		out = append(out, MediaEntry{
 			Name:      name,
-			Path:      entryPath,
+			Path:      "/" + entryPath,
 			Kind:      kind,
 			Size:      size,
 			UpdatedAt: info.ModTime().UTC(),
@@ -168,7 +168,7 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 	}
 	return MediaEntry{
 		Name:      safeName,
-		Path:      relPath,
+		Path:      "/" + relPath,
 		Kind:      "file",
 		Size:      info.Size(),
 		UpdatedAt: info.ModTime().UTC(),

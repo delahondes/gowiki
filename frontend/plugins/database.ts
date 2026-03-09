@@ -4,6 +4,7 @@ import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
 import { enablePropertiesPanel } from "../compiler/core_ui"
+import { openMediaManager } from "../media_manager.js"
 
 // ── Properties ──
 
@@ -229,6 +230,36 @@ const databaseStyles = `
   text-decoration: underline;
 }
 
+.db-image-cell {
+  max-height: 24px;
+  vertical-align: middle;
+}
+
+.db-image-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.db-image-input-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-image-input-wrap button {
+  white-space: nowrap;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.db-image-preview {
+  max-height: 24px;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
 /* Template variables — resolved styled in edit mode only */
 #app.gowiki-editing .gowiki-template-var {
   background: #f0f4ff;
@@ -357,6 +388,83 @@ function createOverlaySelect(
   document.body.appendChild(sel)
   sel.focus()
   return sel
+}
+
+// Creates an inline edit overlay with text input + browse button for image fields.
+function createOverlayImageInput(
+  anchor: HTMLElement,
+  opts: {
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const wrap = document.createElement("div")
+  wrap.style.position = "fixed"
+  wrap.style.left = rect.left + "px"
+  wrap.style.top = rect.top + "px"
+  wrap.style.width = Math.max(rect.width, 250) + "px"
+  wrap.style.height = rect.height + "px"
+  wrap.style.boxSizing = "border-box"
+  wrap.style.display = "flex"
+  wrap.style.gap = "4px"
+  wrap.style.alignItems = "center"
+  wrap.style.zIndex = "10000"
+  wrap.style.background = "#fff"
+  wrap.style.border = "2px solid #228be6"
+  wrap.style.borderRadius = "2px"
+  wrap.style.padding = "0 4px"
+
+  const input = document.createElement("input")
+  input.type = "text"
+  input.value = opts.value
+  input.placeholder = "/path/to/image.png"
+  input.style.flex = "1"
+  input.style.minWidth = "0"
+  input.style.border = "none"
+  input.style.outline = "none"
+  input.style.fontSize = "13px"
+  input.style.padding = "2px 4px"
+  wrap.appendChild(input)
+
+  const btn = document.createElement("button")
+  btn.type = "button"
+  btn.textContent = "Browse"
+  btn.style.whiteSpace = "nowrap"
+  btn.style.padding = "2px 6px"
+  btn.style.fontSize = "12px"
+  btn.style.cursor = "pointer"
+  wrap.appendChild(btn)
+
+  let saved = false
+  const cleanup = () => { if (wrap.parentNode) wrap.remove() }
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation()
+    const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
+    openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
+      input.value = insertedPath
+      saved = true
+      opts.onSave(input.value)
+      cleanup()
+    })
+  })
+
+  input.addEventListener("blur", () => {
+    // Delay to allow browse button click to fire first.
+    setTimeout(() => {
+      if (!saved && wrap.parentNode) { saved = true; opts.onSave(input.value); cleanup() }
+    }, 150)
+  })
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(input.value); cleanup() }
+    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup() }
+  })
+
+  document.body.appendChild(wrap)
+  input.focus()
+  input.select()
 }
 
 // Custom event name for cross-NodeView communication.
@@ -506,6 +614,11 @@ class DatabaseQueryNodeView {
           a.textContent = String(val)
           a.href = String(val)
           td.appendChild(a)
+        } else if (f.type === "image" && val) {
+          const img = document.createElement("img")
+          img.src = String(val)
+          img.className = "db-image-cell"
+          td.appendChild(img)
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")
         } else {
@@ -597,6 +710,31 @@ class DatabaseQueryNodeView {
       td.textContent = newVal
       this.saveInlineEdit(tableName, rowId, field.name, newVal).then(ok => {
         if (!ok) td.textContent = displayValue
+      })
+    } else if (field.type === "image") {
+      createOverlayImageInput(td, {
+        value: displayValue,
+        onSave: async (newVal) => {
+          td.textContent = ""
+          if (newVal) {
+            const img = document.createElement("img")
+            img.src = newVal
+            img.className = "db-image-cell"
+            td.appendChild(img)
+          }
+          td.className = "gowiki-database-editable-value"
+          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          if (!ok) {
+            td.textContent = ""
+            if (displayValue) {
+              const img = document.createElement("img")
+              img.src = displayValue
+              img.className = "db-image-cell"
+              td.appendChild(img)
+            }
+          }
+        },
+        onCancel: () => {},
       })
     } else {
       createOverlayInput(td, {
@@ -704,7 +842,7 @@ class DatabaseNewRowNodeView {
     const form = document.createElement("div")
     form.className = "gowiki-database-form"
 
-    const inputs: Map<string, HTMLInputElement | HTMLSelectElement> = new Map()
+    const inputs: Map<string, HTMLInputElement | HTMLSelectElement | HTMLDivElement> = new Map()
 
     for (const f of fields) {
       const row = document.createElement("div")
@@ -714,7 +852,31 @@ class DatabaseNewRowNodeView {
       lbl.textContent = f.label || f.name
       row.appendChild(lbl)
 
-      if (f.type === "enum") {
+      if (f.type === "image") {
+        const wrap = document.createElement("div")
+        wrap.className = "db-image-input-wrap"
+        const inp = document.createElement("input")
+        inp.type = "text"
+        inp.placeholder = f.placeholder || "/path/to/image.png"
+        if (f.default_value) inp.value = f.default_value
+        wrap.appendChild(inp)
+        const btn = document.createElement("button")
+        btn.type = "button"
+        btn.textContent = "Browse"
+        btn.addEventListener("click", () => {
+          const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
+          openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
+            inp.value = insertedPath
+          })
+        })
+        wrap.appendChild(btn)
+        Object.defineProperty(wrap, "value", {
+          get: () => inp.value,
+          set: (v: string) => { inp.value = v },
+        })
+        inputs.set(f.name, wrap)
+        row.appendChild(wrap)
+      } else if (f.type === "enum") {
         const sel = document.createElement("select")
         const empty = document.createElement("option")
         empty.value = ""
@@ -911,12 +1073,21 @@ class DatabaseRowNodeView {
         // Editable input, type-aware.
         const input = this.createFieldInput(f, String(val))
         const commitChange = () => {
-          const newVal = input instanceof HTMLSelectElement ? input.value : (input as HTMLInputElement).value
+          const newVal = (input as any).value
           this.updateField(key, newVal)
         }
-        input.addEventListener("change", commitChange)
-        if (input instanceof HTMLInputElement) {
-          input.addEventListener("blur", commitChange)
+        if (input instanceof HTMLDivElement) {
+          // Image wrapper: listen on the inner input.
+          const innerInput = input.querySelector("input")
+          if (innerInput) {
+            innerInput.addEventListener("change", commitChange)
+            innerInput.addEventListener("blur", commitChange)
+          }
+        } else {
+          input.addEventListener("change", commitChange)
+          if (input instanceof HTMLInputElement) {
+            input.addEventListener("blur", commitChange)
+          }
         }
         tdVal.appendChild(input)
       }
@@ -935,7 +1106,51 @@ class DatabaseRowNodeView {
     }
   }
 
-  private createFieldInput(f: any, value: string): HTMLInputElement | HTMLSelectElement {
+  private createFieldInput(f: any, value: string): HTMLInputElement | HTMLSelectElement | HTMLDivElement {
+    if (f && f.type === "image") {
+      const wrap = document.createElement("div")
+      wrap.className = "db-image-input-wrap"
+      const inp = document.createElement("input")
+      inp.type = "text"
+      inp.value = value
+      inp.placeholder = "/path/to/image.png"
+      inp.style.fontSize = "inherit"
+      isolateInput(inp)
+      wrap.appendChild(inp)
+      if (value) {
+        const preview = document.createElement("img")
+        preview.src = value
+        preview.className = "db-image-preview"
+        wrap.appendChild(preview)
+      }
+      const btn = document.createElement("button")
+      btn.type = "button"
+      btn.textContent = "Browse"
+      isolateInput(btn)
+      btn.addEventListener("click", () => {
+        const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
+        openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
+          inp.value = insertedPath
+          inp.dispatchEvent(new Event("change"))
+          // Update or add preview.
+          const existing = wrap.querySelector(".db-image-preview")
+          if (existing) { (existing as HTMLImageElement).src = insertedPath }
+          else {
+            const img = document.createElement("img")
+            img.src = insertedPath
+            img.className = "db-image-preview"
+            wrap.insertBefore(img, btn)
+          }
+        })
+      })
+      wrap.appendChild(btn)
+      // Expose .value on the wrapper for the commitChange handler.
+      Object.defineProperty(wrap, "value", {
+        get: () => inp.value,
+        set: (v: string) => { inp.value = v },
+      })
+      return wrap
+    }
     if (f && (f.type === "enum" || f.type === "multi_enum")) {
       const sel = document.createElement("select")
       sel.style.width = "100%"
@@ -1016,7 +1231,14 @@ class DatabaseRowNodeView {
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
-      tdVal.textContent = String(val)
+      if (f && f.type === "image" && val) {
+        const img = document.createElement("img")
+        img.src = String(val)
+        img.className = "db-image-cell"
+        tdVal.appendChild(img)
+      } else {
+        tdVal.textContent = String(val)
+      }
 
       // Inline editing forbidden for index and auto_increment fields.
       if (key !== this.indexField && !(f && f.type === "auto_increment")) {
@@ -1104,6 +1326,26 @@ class DatabaseRowNodeView {
       td.textContent = newVal
       const ok = await saveToApi(newVal)
       if (!ok) { td.textContent = currentValue }
+    } else if (fieldDef && fieldDef.type === "image") {
+      const restoreImage = (path: string) => {
+        td.textContent = ""
+        td.className = "gowiki-database-editable-value"
+        if (path) {
+          const img = document.createElement("img")
+          img.src = path
+          img.className = "db-image-cell"
+          td.appendChild(img)
+        }
+      }
+      createOverlayImageInput(td, {
+        value: currentValue,
+        onSave: async (newVal) => {
+          restoreImage(newVal)
+          const ok = await saveToApi(newVal)
+          if (!ok) { restoreImage(currentValue) }
+        },
+        onCancel: () => { restoreImage(currentValue) },
+      })
     } else {
       createOverlayInput(td, {
         type: fieldDef?.type === "date" ? "date"

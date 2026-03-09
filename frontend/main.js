@@ -7358,6 +7358,7 @@ async function showDatabaseFieldEditModal(tableId, existing) {
     { value: "enum", label: "Enum" },
     { value: "multi_enum", label: "Multi Enum" },
     { value: "auto_increment", label: "Auto Increment" },
+    { value: "image", label: "Image" },
   ]
 
   return showAdminModal(existing ? `Edit Field: ${existing.name}` : "Add Field", (body, close, showError) => {
