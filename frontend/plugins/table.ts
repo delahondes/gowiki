@@ -1002,21 +1002,8 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
           // "=" → open properties panel with formula input focused
           if (event.key === "=") {
             event.preventDefault()
+            requestInputFocus("formula")
             view.dispatch(enablePropertiesPanel(view.state.tr))
-            // Focus the Formula input (works whether panel was just opened or already visible)
-            requestAnimationFrame(() => {
-              const panels = view.dom.parentElement?.querySelectorAll(".gowiki-props-panel")
-              if (!panels) return
-              for (const panel of panels) {
-                const labels = panel.querySelectorAll(".gowiki-props-label")
-                for (const label of labels) {
-                  if (label.textContent === "Formula") {
-                    const input = label.nextElementSibling as HTMLElement
-                    if (input) { input.focus(); return }
-                  }
-                }
-              }
-            })
             return true
           }
 

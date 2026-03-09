@@ -87,55 +87,52 @@ const panelStyles = `
   margin: 0 0 4px 0;
 }
 
+.gowiki-props-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #999;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.gowiki-props-expand:hover {
+  background: #f0e8b0;
+  color: #333;
+}
+
+.gowiki-props-panel--minimal {
+  padding: 1px 2px;
+  background: none;
+  border: none;
+  margin: 0 0 2px 4px;
+}
+
 `
 
-function buildPanel(
+/** Check whether a property has a non-default (active) value on the given node. */
+function isPropActive(prop: NodePropertySpec, attrs: Record<string, any>): boolean {
+  const val = attrs[prop.name]
+  if (val == null) return false
+  if (prop.default != null && val === prop.default) return false
+  // Empty string is default for text-like properties
+  if (val === "") return false
+  return true
+}
+
+function buildPropGroup(
   view: any,
   node: PMNode,
   pos: number,
-  properties: NodePropertySpec[],
-  showAll = false,
-) {
-  const wrap = document.createElement("div")
-  wrap.className = "gowiki-props-panel"
-
-  wrap.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key !== "Tab") return
-    e.preventDefault()
-    e.stopPropagation()
-
-    const focusable = Array.from(wrap.querySelectorAll<HTMLElement>("input, select, textarea"))
-    const current = document.activeElement as HTMLElement
-    const idx = focusable.indexOf(current)
-
-    if (!e.shiftKey) {
-      // Forward: next field, or leave node
-      if (idx >= 0 && idx < focusable.length - 1) {
-        focusable[idx + 1].focus()
-      } else {
-        // Move cursor to just after the node
-        const after = pos + node.nodeSize
-        const $pos = view.state.doc.resolve(Math.min(after, view.state.doc.content.size))
-        const sel = Selection.near($pos)
-        view.dispatch(view.state.tr.setSelection(sel))
-        view.focus()
-      }
-    } else {
-      // Backward: previous field, or move before node
-      if (idx > 0) {
-        focusable[idx - 1].focus()
-      } else {
-        const $pos = view.state.doc.resolve(Math.max(0, pos))
-        const sel = Selection.near($pos, -1)
-        view.dispatch(view.state.tr.setSelection(sel))
-        view.focus()
-      }
-    }
-  })
-
-  for (const prop of properties) {
-    if (!showAll && prop.visible && !prop.visible(node.attrs)) continue
-
+  prop: NodePropertySpec,
+): HTMLElement {
     const label = document.createElement("span")
     label.className = "gowiki-props-label"
     label.textContent = prop.label
@@ -196,7 +193,6 @@ function buildPanel(
       }
       populateOptions(resolvedOptions, current ?? prop.default ?? "")
       select.addEventListener("change", () => dispatchChange(select.value))
-      // Re-populate options on focus to pick up cache changes (e.g. new media versions).
       if (typeof prop.options === "function") {
         const optionsFn = prop.options
         select.addEventListener("focus", () => {
@@ -235,7 +231,6 @@ function buildPanel(
         dispatchChange(textarea.value)
       })
 
-      // Prevent Tab from leaving textarea — allow normal tab behavior
       textarea.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key === "Tab") {
           // Let the panel-level handler deal with it
@@ -309,7 +304,114 @@ function buildPanel(
       help.textContent = prop.helpText
       group.appendChild(help)
     }
-    wrap.appendChild(group)
+    return group
+}
+
+function buildPanel(
+  view: any,
+  node: PMNode,
+  pos: number,
+  properties: NodePropertySpec[],
+  collapsible = false,
+) {
+  const wrap = document.createElement("div")
+  wrap.className = "gowiki-props-panel"
+
+  wrap.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Tab") return
+    e.preventDefault()
+    e.stopPropagation()
+
+    const focusable = Array.from(wrap.querySelectorAll<HTMLElement>("input, select, textarea"))
+    const current = document.activeElement as HTMLElement
+    const idx = focusable.indexOf(current)
+
+    if (!e.shiftKey) {
+      if (idx >= 0 && idx < focusable.length - 1) {
+        focusable[idx + 1].focus()
+      } else {
+        const after = pos + node.nodeSize
+        const $pos = view.state.doc.resolve(Math.min(after, view.state.doc.content.size))
+        const sel = Selection.near($pos)
+        view.dispatch(view.state.tr.setSelection(sel))
+        view.focus()
+      }
+    } else {
+      if (idx > 0) {
+        focusable[idx - 1].focus()
+      } else {
+        const $pos = view.state.doc.resolve(Math.max(0, pos))
+        const sel = Selection.near($pos, -1)
+        view.dispatch(view.state.tr.setSelection(sel))
+        view.focus()
+      }
+    }
+  })
+
+  // Determine which props to show and which to hide behind "+"
+  const activeProps: NodePropertySpec[] = []
+  const hiddenProps: NodePropertySpec[] = []
+
+  // If pendingInputRefocus targets a hidden prop, auto-expand
+  let forceExpand = false
+
+  for (const prop of properties) {
+    if (!collapsible) {
+      // Non-collapsible: filter by visible as before
+      if (prop.visible && !prop.visible(node.attrs)) continue
+      activeProps.push(prop)
+    } else if (isPropActive(prop, node.attrs)) {
+      activeProps.push(prop)
+    } else {
+      hiddenProps.push(prop)
+    }
+  }
+
+  // Check if pendingInputRefocus targets a hidden prop → force expand
+  if (collapsible && pendingInputRefocus && hiddenProps.some(p => p.name === pendingInputRefocus!.propName)) {
+    forceExpand = true
+  }
+
+  for (const prop of activeProps) {
+    wrap.appendChild(buildPropGroup(view, node, pos, prop))
+  }
+
+  const isMinimal = collapsible && activeProps.length === 0 && !forceExpand
+  if (isMinimal) {
+    wrap.classList.add("gowiki-props-panel--minimal")
+  }
+
+  if (collapsible && hiddenProps.length > 0) {
+    const hiddenContainer = document.createElement("span")
+    hiddenContainer.style.display = forceExpand ? "contents" : "none"
+
+    for (const prop of hiddenProps) {
+      hiddenContainer.appendChild(buildPropGroup(view, node, pos, prop))
+    }
+
+    const expandBtn = document.createElement("button")
+    expandBtn.className = "gowiki-props-expand"
+    expandBtn.textContent = forceExpand ? "\u2212" : "+"
+    expandBtn.title = forceExpand ? "Hide default properties" : "Show all properties"
+    expandBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault() // don't steal focus from editor
+    })
+    expandBtn.addEventListener("click", (e) => {
+      e.preventDefault()
+      const isHidden = hiddenContainer.style.display === "none"
+      hiddenContainer.style.display = isHidden ? "contents" : "none"
+      expandBtn.textContent = isHidden ? "\u2212" : "+"
+      expandBtn.title = isHidden ? "Hide default properties" : "Show all properties"
+      // Toggle minimal style
+      if (isHidden) {
+        wrap.classList.remove("gowiki-props-panel--minimal")
+      } else if (activeProps.length === 0) {
+        wrap.classList.add("gowiki-props-panel--minimal")
+      }
+    })
+
+    wrap.appendChild(expandBtn)
+    wrap.appendChild(hiddenContainer)
   }
 
   return wrap
@@ -431,7 +533,7 @@ function cleanupVtextOverlay(pos: number) {
  *  The real panel is a separate element on document.body, positioned via
  *  getBoundingClientRect. */
 function buildVtextPanelOverlay(
-  view: any, node: PMNode, pos: number, props: NodePropertySpec[], showAll = false
+  view: any, node: PMNode, pos: number, props: NodePropertySpec[], collapsible = false
 ): HTMLElement {
   // Clean up any previous overlay at this position.
   cleanupVtextOverlay(pos)
@@ -440,7 +542,7 @@ function buildVtextPanelOverlay(
   placeholder.style.display = "none"
   placeholder.className = "gowiki-props-panel-vtext-placeholder"
 
-  const overlay = buildPanel(view, node, pos, props, showAll)
+  const overlay = buildPanel(view, node, pos, props, collapsible)
   overlay.style.position = "fixed"
   overlay.style.zIndex = "10000"
   overlay.style.maxWidth = "none"
@@ -551,16 +653,16 @@ function propertiesPlugin(reg: Registry) {
           const deco = Decoration.widget(
             target.anchorPos,
             view => {
-              const showAll = !!pluginState?.enabled
+              const collapsible = !!pluginState?.enabled
               // For vertical-text cells, render the panel as a body overlay
               // to escape the cell's writing-mode/transform context.
               const vtext = target.node.attrs.cellVtext
               if (vtext === "upward" || vtext === "downward") {
-                return buildVtextPanelOverlay(view, target.node, target.pos, target.props, showAll)
+                return buildVtextPanelOverlay(view, target.node, target.pos, target.props, collapsible)
               }
               // Clean up any stale vtext overlay at this position (e.g. switched to horizontal).
               cleanupVtextOverlay(target.pos)
-              const panel = buildPanel(view, target.node, target.pos, target.props, showAll)
+              const panel = buildPanel(view, target.node, target.pos, target.props, collapsible)
               if (target.anchorPos !== target.pos) {
                 panel.classList.add("gowiki-props-panel--block")
               }
