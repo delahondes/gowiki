@@ -93,7 +93,8 @@ function buildPanel(
   view: any,
   node: PMNode,
   pos: number,
-  properties: NodePropertySpec[]
+  properties: NodePropertySpec[],
+  showAll = false,
 ) {
   const wrap = document.createElement("div")
   wrap.className = "gowiki-props-panel"
@@ -133,7 +134,7 @@ function buildPanel(
   })
 
   for (const prop of properties) {
-    if (prop.visible && !prop.visible(node.attrs)) continue
+    if (!showAll && prop.visible && !prop.visible(node.attrs)) continue
 
     const label = document.createElement("span")
     label.className = "gowiki-props-label"
@@ -430,7 +431,7 @@ function cleanupVtextOverlay(pos: number) {
  *  The real panel is a separate element on document.body, positioned via
  *  getBoundingClientRect. */
 function buildVtextPanelOverlay(
-  view: any, node: PMNode, pos: number, props: NodePropertySpec[]
+  view: any, node: PMNode, pos: number, props: NodePropertySpec[], showAll = false
 ): HTMLElement {
   // Clean up any previous overlay at this position.
   cleanupVtextOverlay(pos)
@@ -439,7 +440,7 @@ function buildVtextPanelOverlay(
   placeholder.style.display = "none"
   placeholder.className = "gowiki-props-panel-vtext-placeholder"
 
-  const overlay = buildPanel(view, node, pos, props)
+  const overlay = buildPanel(view, node, pos, props, showAll)
   overlay.style.position = "fixed"
   overlay.style.zIndex = "10000"
   overlay.style.maxWidth = "none"
@@ -541,22 +542,25 @@ function propertiesPlugin(reg: Registry) {
           const isAutoShow = target.autoShow
           if (!pluginState?.enabled && !isAutoShow) continue
 
-          // For auto-show targets, filter to visible props only
-          const visibleProps = target.props.filter(p => !p.visible || p.visible(target.node.attrs))
-          if (visibleProps.length === 0) continue
+          // For auto-show targets, skip if no props are visible
+          if (!pluginState?.enabled) {
+            const visibleProps = target.props.filter(p => !p.visible || p.visible(target.node.attrs))
+            if (visibleProps.length === 0) continue
+          }
 
           const deco = Decoration.widget(
             target.anchorPos,
             view => {
+              const showAll = !!pluginState?.enabled
               // For vertical-text cells, render the panel as a body overlay
               // to escape the cell's writing-mode/transform context.
               const vtext = target.node.attrs.cellVtext
               if (vtext === "upward" || vtext === "downward") {
-                return buildVtextPanelOverlay(view, target.node, target.pos, target.props)
+                return buildVtextPanelOverlay(view, target.node, target.pos, target.props, showAll)
               }
               // Clean up any stale vtext overlay at this position (e.g. switched to horizontal).
               cleanupVtextOverlay(target.pos)
-              const panel = buildPanel(view, target.node, target.pos, target.props)
+              const panel = buildPanel(view, target.node, target.pos, target.props, showAll)
               if (target.anchorPos !== target.pos) {
                 panel.classList.add("gowiki-props-panel--block")
               }

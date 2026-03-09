@@ -348,6 +348,7 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
       const [, key, val] = m
       if (key === "color") newAttrs.cellColor = val
       else if (key === "text-color") newAttrs.cellTextColor = val
+      else if (key === "align") newAttrs.cellAlign = val
       else if (key === "valign") newAttrs.cellValign = val
       else if (key === "vtext") newAttrs.cellVtext = val
     }
@@ -838,6 +839,7 @@ function serializeCellContent(
   const dirParts: string[] = []
   if (cell.attrs.cellColor) dirParts.push(`color=${cell.attrs.cellColor}`)
   if (cell.attrs.cellTextColor) dirParts.push(`text-color=${cell.attrs.cellTextColor}`)
+  if (cell.attrs.cellAlign && cell.attrs.cellAlign !== "left") dirParts.push(`align=${cell.attrs.cellAlign}`)
   if (cell.attrs.cellValign && cell.attrs.cellValign !== "top") dirParts.push(`valign=${cell.attrs.cellValign}`)
   if (cell.attrs.cellVtext && cell.attrs.cellVtext !== "horizontal") dirParts.push(`vtext=${cell.attrs.cellVtext}`)
   if (dirParts.length > 0) prefix = `{${dirParts.join(" ")}} `
@@ -1649,6 +1651,18 @@ export const tablePlugin: GowikiPlugin = {
             }
           },
         },
+        cellAlign: {
+          default: null,
+          getFromDOM: (dom: HTMLElement) =>
+            dom.getAttribute("data-cell-align") || null,
+          setDOMAttr(value: any, attrs: any) {
+            if (value) {
+              attrs["data-cell-align"] = value
+              const existing = attrs.style || ""
+              attrs.style = existing + `text-align: ${value}; `
+            }
+          },
+        },
         cellValign: {
           default: null,
           getFromDOM: (dom: HTMLElement) =>
@@ -1761,9 +1775,22 @@ export const tablePlugin: GowikiPlugin = {
       serialize: (value: string | null) => String(value ?? ""),
       visible: (attrs: Record<string, any>) => !!attrs.cellTextColor,
     }
-    // Show valign/vtext whenever any cell property is active (color, text-color, formula, or themselves).
+    // Show align/valign/vtext whenever any cell property is active.
     const anyCellProp = (attrs: Record<string, any>) =>
-      !!attrs.cellColor || !!attrs.cellTextColor || !!attrs.formula || !!attrs.cellValign || !!attrs.cellVtext
+      !!attrs.cellColor || !!attrs.cellTextColor || !!attrs.formula || !!attrs.cellAlign || !!attrs.cellValign || !!attrs.cellVtext
+    const cellAlignProperty: NodePropertySpec = {
+      name: "cellAlign",
+      label: "Align",
+      default: null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: anyCellProp,
+      options: [
+        { value: "left", label: "Left (default)" },
+        { value: "center", label: "Center" },
+        { value: "right", label: "Right" },
+      ],
+    }
     const cellValignProperty: NodePropertySpec = {
       name: "cellValign",
       label: "Vertical align",
@@ -1790,8 +1817,8 @@ export const tablePlugin: GowikiPlugin = {
         { value: "downward", label: "Downward" },
       ],
     }
-    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty, cellValignProperty, cellVtextProperty])
-    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty, cellValignProperty, cellVtextProperty])
+    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty, cellAlignProperty, cellValignProperty, cellVtextProperty])
+    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty, cellAlignProperty, cellValignProperty, cellVtextProperty])
 
     reg.registerDirective("table", {
       nodeType: "table",
@@ -2091,6 +2118,7 @@ export const tablePlugin: GowikiPlugin = {
             let tr = state.tr.setNodeMarkup(cellPos, undefined, {
               ...node.attrs,
               cellColor: node.attrs.cellColor || "none",
+              cellAlign: node.attrs.cellAlign || "left",
               cellValign: node.attrs.cellValign || "top",
               cellVtext: node.attrs.cellVtext || "horizontal",
             })
