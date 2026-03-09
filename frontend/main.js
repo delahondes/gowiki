@@ -5149,11 +5149,7 @@ async function reloadPageContent() {
     pageLockInfo = null
   }
 
-  // Track namespace index state and update pageNamespace for relative link resolution.
   isNamespaceIndex = !!(page && page.is_namespace_index)
-  if (isNamespaceIndex) {
-    pageNamespace = pagePath
-  }
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
@@ -7820,7 +7816,6 @@ async function bootstrap() {
 
   // If page is a namespace index, ensure URL ends with / so relative links resolve correctly.
   if (page && page.is_namespace_index) {
-    pageNamespace = pagePath
     const currentPathname = window.location.pathname
     if (!currentPathname.endsWith("/")) {
       window.history.replaceState(null, "", "/" + pagePath + "/" + window.location.search + window.location.hash)

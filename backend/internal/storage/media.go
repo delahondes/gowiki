@@ -111,6 +111,20 @@ func (s *MediaFileStore) Put(namespacePath, fileName string, content io.Reader, 
 	if err != nil {
 		return MediaEntry{}, err
 	}
+
+	// Reject namespace paths that would create a directory conflicting with an
+	// existing .md page file (e.g. creating "index/" when "index.md" exists).
+	if ns != "" {
+		parts := strings.Split(ns, "/")
+		check := s.rootDir
+		for _, part := range parts {
+			check = filepath.Join(check, part)
+			if _, statErr := os.Stat(check + ".md"); statErr == nil {
+				return MediaEntry{}, fmt.Errorf("namespace %q conflicts with existing page %s.md", ns, part)
+			}
+		}
+	}
+
 	if err := os.MkdirAll(dirPath, 0o755); err != nil {
 		return MediaEntry{}, fmt.Errorf("create media namespace: %w", err)
 	}
