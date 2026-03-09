@@ -2,6 +2,10 @@ import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
 
 const API_BASE = "/api/plugin/comment/v1"
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
 interface CommentAnchor {
   selected: string
   before: string
@@ -271,22 +275,42 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
   })
   sidebar.appendChild(header)
 
-  // Sort unresolved by anchor position in the document (top to bottom).
-  const unresolved = comments.filter(c => !c.resolved).slice()
-  unresolved.sort((a, b) => {
+  // Split unresolved into anchored vs orphaned.
+  const anchored = comments.filter(c => !c.resolved && !orphanedIds.has(c.id)).slice()
+  const orphaned = comments.filter(c => !c.resolved && orphanedIds.has(c.id))
+  const resolved = comments.filter(c => c.resolved)
+
+  // Sort anchored by position in the document (top to bottom).
+  anchored.sort((a, b) => {
     const spanA = document.getElementById(a.id)
     const spanB = document.getElementById(b.id)
     if (!spanA && !spanB) return 0
-    if (!spanA) return 1   // orphaned sorts last
+    if (!spanA) return 1
     if (!spanB) return -1
     return spanA.getBoundingClientRect().top - spanB.getBoundingClientRect().top
   })
-  const resolved = comments.filter(c => c.resolved)
 
-  for (const c of unresolved) {
-    sidebar.appendChild(renderCommentBox(c, orphanedIds.has(c.id)))
+  for (const c of anchored) {
+    sidebar.appendChild(renderCommentBox(c, false))
   }
 
+  // Orphaned comments: visible but pushed to the very bottom with a spacer.
+  if (orphaned.length > 0) {
+    const spacer = document.createElement("div")
+    spacer.className = "comment-orphaned-spacer"
+    sidebar.appendChild(spacer)
+
+    const label = document.createElement("div")
+    label.className = "comment-orphaned-label-header"
+    label.textContent = `Orphaned (${orphaned.length})`
+    sidebar.appendChild(label)
+
+    for (const c of orphaned) {
+      sidebar.appendChild(renderCommentBox(c, true))
+    }
+  }
+
+  // Resolved comments: collapsed section at the very bottom.
   if (resolved.length > 0) {
     const toggle = document.createElement("div")
     toggle.className = "comment-resolved-toggle"
@@ -312,6 +336,14 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
 function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
   const box = document.createElement("div")
   box.className = "comment-box" + (c.resolved ? " comment-resolved" : "") + (orphaned ? " comment-orphaned" : "")
+
+  // Tooltip showing the anchored text.
+  const tooltip = document.createElement("div")
+  tooltip.className = "comment-tooltip"
+  const sel = c.anchor.selected
+  const truncated = sel.length > 120 ? sel.slice(0, 120) + "\u2026" : sel
+  tooltip.innerHTML = `Comment on \u201C<i>${escapeHtml(truncated)}</i>\u201D`
+  box.appendChild(tooltip)
   box.dataset.commentId = c.id
 
   box.addEventListener("click", () => {
@@ -810,10 +842,12 @@ const commentStyles = `
 #comment-sidebar {
   grid-column: 2;
   grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
   padding: 4px;
   font-size: 0.82em;
   scrollbar-width: thin;
-  align-self: start;
+  align-self: stretch;
 }
 @media (max-width: 900px) {
   #comment-sidebar { display: none; }
@@ -894,6 +928,42 @@ const commentStyles = `
 .comment-action-delete:hover { background: #ffebee; border-color: #c62828; }
 .comment-action-submit { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
 .comment-action-submit:hover { background: #c8e6c9; }
+
+/* --- Tooltip --- */
+.comment-tooltip {
+  display: none;
+  position: absolute;
+  left: 0; right: 0; bottom: 100%;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+  font-size: 0.82em;
+  color: #444;
+  background: #fffef5;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+  z-index: 10;
+  pointer-events: none;
+}
+.comment-box { position: relative; }
+.comment-box:hover > .comment-tooltip { display: block; }
+
+/* --- Orphaned: floated to bottom --- */
+.comment-orphaned-spacer {
+  flex-grow: 1;
+  min-height: 80px;
+}
+.comment-orphaned-label-header {
+  font-size: 0.82em;
+  color: #c62828;
+  font-style: italic;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-top: 1px dashed #e0a0a0;
+}
 
 .comment-resolved-toggle {
   font-size: 0.85em; color: #888; cursor: pointer; padding: 4px 8px; margin: 4px 0; border-radius: 3px;
