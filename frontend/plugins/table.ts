@@ -298,9 +298,12 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
   return tableNode.type.create(tableNode.attrs, newRows)
 }
 
-// ─── Cell color + formula parsing ────────────────────────
+// ─── Cell directive parsing ──────────────────────────────
 
-const CELL_COLOR_RE = /^\{color=([^\s}]+)(?:\s+text-color=([^\s}]+))?\}\s*/
+// Generic cell directive: {key=value key=value ...} at start of cell text.
+// Supported keys: color, text-color, valign, vtext
+const CELL_DIRECTIVE_RE = /^\{([^}]+)\}\s*/
+const CELL_KV_RE = /([a-z-]+)=([^\s}]+)/g
 
 function applyCellFeatures(tableNode: Node, schema: Schema): Node {
   let changed = false
@@ -335,12 +338,20 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
   let newText = text
   let changed = false
 
-  // Cell color directive
-  const colorMatch = newText.match(CELL_COLOR_RE)
-  if (colorMatch) {
-    newAttrs.cellColor = colorMatch[1]
-    if (colorMatch[2]) newAttrs.cellTextColor = colorMatch[2]
-    newText = newText.slice(colorMatch[0].length)
+  // Cell directive: {color=X text-color=Y valign=Z vtext=W}
+  const directiveMatch = newText.match(CELL_DIRECTIVE_RE)
+  if (directiveMatch) {
+    const inner = directiveMatch[1]
+    let m: RegExpExecArray | null
+    const kvRe = new RegExp(CELL_KV_RE.source, "g")
+    while ((m = kvRe.exec(inner)) !== null) {
+      const [, key, val] = m
+      if (key === "color") newAttrs.cellColor = val
+      else if (key === "text-color") newAttrs.cellTextColor = val
+      else if (key === "valign") newAttrs.cellValign = val
+      else if (key === "vtext") newAttrs.cellVtext = val
+    }
+    newText = newText.slice(directiveMatch[0].length)
     changed = true
   }
 
@@ -824,12 +835,12 @@ function serializeCellContent(
   recurse: (node: Node) => string
 ): string {
   let prefix = ""
-  if (cell.attrs.cellColor) {
-    prefix = `{color=${cell.attrs.cellColor}`
-    if (cell.attrs.cellTextColor)
-      prefix += ` text-color=${cell.attrs.cellTextColor}`
-    prefix += "} "
-  }
+  const dirParts: string[] = []
+  if (cell.attrs.cellColor) dirParts.push(`color=${cell.attrs.cellColor}`)
+  if (cell.attrs.cellTextColor) dirParts.push(`text-color=${cell.attrs.cellTextColor}`)
+  if (cell.attrs.cellValign && cell.attrs.cellValign !== "top") dirParts.push(`valign=${cell.attrs.cellValign}`)
+  if (cell.attrs.cellVtext && cell.attrs.cellVtext !== "horizontal") dirParts.push(`vtext=${cell.attrs.cellVtext}`)
+  if (dirParts.length > 0) prefix = `{${dirParts.join(" ")}} `
 
   if (cell.attrs.formula) {
     return prefix + `=${cell.attrs.formula}`
@@ -1638,6 +1649,34 @@ export const tablePlugin: GowikiPlugin = {
             }
           },
         },
+        cellValign: {
+          default: null,
+          getFromDOM: (dom: HTMLElement) =>
+            dom.getAttribute("data-cell-valign") || null,
+          setDOMAttr(value: any, attrs: any) {
+            if (value) {
+              attrs["data-cell-valign"] = value
+              const existing = attrs.style || ""
+              attrs.style = existing + `vertical-align: ${value === "centered" ? "middle" : value}; `
+            }
+          },
+        },
+        cellVtext: {
+          default: null,
+          getFromDOM: (dom: HTMLElement) =>
+            dom.getAttribute("data-cell-vtext") || null,
+          setDOMAttr(value: any, attrs: any) {
+            if (value) {
+              attrs["data-cell-vtext"] = value
+              const existing = attrs.style || ""
+              if (value === "upward") {
+                attrs.style = existing + "writing-mode: vertical-rl; transform: rotate(180deg); "
+              } else if (value === "downward") {
+                attrs.style = existing + "writing-mode: vertical-rl; "
+              }
+            }
+          },
+        },
         formula: {
           default: null,
           getFromDOM: (dom: HTMLElement) =>
@@ -1722,8 +1761,37 @@ export const tablePlugin: GowikiPlugin = {
       serialize: (value: string | null) => String(value ?? ""),
       visible: (attrs: Record<string, any>) => !!attrs.cellTextColor,
     }
-    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty])
-    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty])
+    // Show valign/vtext whenever any cell property is active (color, text-color, formula, or themselves).
+    const anyCellProp = (attrs: Record<string, any>) =>
+      !!attrs.cellColor || !!attrs.cellTextColor || !!attrs.formula || !!attrs.cellValign || !!attrs.cellVtext
+    const cellValignProperty: NodePropertySpec = {
+      name: "cellValign",
+      label: "Vertical align",
+      default: null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: anyCellProp,
+      options: [
+        { value: "top", label: "Top (default)" },
+        { value: "centered", label: "Centered" },
+        { value: "bottom", label: "Bottom" },
+      ],
+    }
+    const cellVtextProperty: NodePropertySpec = {
+      name: "cellVtext",
+      label: "Vertical text",
+      default: null,
+      parse: (raw: string) => raw.trim() || null,
+      serialize: (value: string | null) => String(value ?? ""),
+      visible: anyCellProp,
+      options: [
+        { value: "horizontal", label: "Horizontal (default)" },
+        { value: "upward", label: "Upward" },
+        { value: "downward", label: "Downward" },
+      ],
+    }
+    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty, cellValignProperty, cellVtextProperty])
+    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty, cellValignProperty, cellVtextProperty])
 
     reg.registerDirective("table", {
       nodeType: "table",
@@ -2019,10 +2087,12 @@ export const tablePlugin: GowikiPlugin = {
         if (node.type === reg.schema.nodes.table_cell || node.type === reg.schema.nodes.table_header) {
           if (dispatch) {
             const cellPos = $from.before(depth)
-            // Set a default cellColor to make the property visible
+            // Set defaults to make properties visible in panel
             let tr = state.tr.setNodeMarkup(cellPos, undefined, {
               ...node.attrs,
               cellColor: node.attrs.cellColor || "none",
+              cellValign: node.attrs.cellValign || "top",
+              cellVtext: node.attrs.cellVtext || "horizontal",
             })
             tr = enablePropertiesPanel(tr)
             dispatch(tr)

@@ -414,6 +414,97 @@ function shiftTabToPanel(view: any, event: KeyboardEvent): boolean {
   return true
 }
 
+/** Active body-mounted vtext panel overlays, keyed by doc position. */
+const vtextOverlays = new Map<number, { overlay: HTMLElement; cleanup: () => void }>()
+
+function cleanupVtextOverlay(pos: number) {
+  const entry = vtextOverlays.get(pos)
+  if (entry) {
+    entry.cleanup()
+    vtextOverlays.delete(pos)
+  }
+}
+
+/** Build a body-mounted property panel for vertical-text cells.
+ *  Returns a tiny invisible placeholder that stays in the PM DOM tree.
+ *  The real panel is a separate element on document.body, positioned via
+ *  getBoundingClientRect. */
+function buildVtextPanelOverlay(
+  view: any, node: PMNode, pos: number, props: NodePropertySpec[]
+): HTMLElement {
+  // Clean up any previous overlay at this position.
+  cleanupVtextOverlay(pos)
+
+  const placeholder = document.createElement("span")
+  placeholder.style.display = "none"
+  placeholder.className = "gowiki-props-panel-vtext-placeholder"
+
+  const overlay = buildPanel(view, node, pos, props)
+  overlay.style.position = "fixed"
+  overlay.style.zIndex = "10000"
+  overlay.style.maxWidth = "none"
+  overlay.style.width = "max-content"
+  overlay.style.writingMode = "horizontal-tb"
+  overlay.style.transform = "none"
+
+  let scrollHandler: (() => void) | null = null
+
+  const cleanup = () => {
+    overlay.remove()
+    if (scrollHandler) {
+      window.removeEventListener("scroll", scrollHandler, true)
+      window.removeEventListener("resize", scrollHandler)
+    }
+  }
+
+  // Store for external cleanup.
+  vtextOverlays.set(pos, { overlay, cleanup })
+
+  // Append after a microtask so the placeholder is in the DOM.
+  setTimeout(() => {
+    if (!placeholder.isConnected) { cleanup(); vtextOverlays.delete(pos); return }
+    document.body.appendChild(overlay)
+
+    const cell = placeholder.closest("td, th") as HTMLElement | null
+    const reposition = () => {
+      const anchor = cell && cell.isConnected ? cell : placeholder
+      if (!anchor.isConnected) { cleanupVtextOverlay(pos); return }
+      const r = anchor.getBoundingClientRect()
+      overlay.style.left = r.left + "px"
+      overlay.style.top = (r.top - overlay.offsetHeight - 2) + "px"
+    }
+    reposition()
+
+    scrollHandler = reposition
+    window.addEventListener("scroll", scrollHandler, true)
+    window.addEventListener("resize", scrollHandler)
+
+    // Watch cell for vtext attribute changes (user switching to horizontal)
+    // and placeholder removal (PM rebuilding decorations).
+    if (cell) {
+      const observer = new MutationObserver(() => {
+        if (!placeholder.isConnected || !cell.isConnected) {
+          observer.disconnect()
+          cleanupVtextOverlay(pos)
+          return
+        }
+        const vtext = cell.getAttribute("data-cell-vtext")
+        if (vtext !== "upward" && vtext !== "downward") {
+          observer.disconnect()
+          cleanupVtextOverlay(pos)
+        }
+      })
+      observer.observe(cell, { attributes: true, attributeFilter: ["data-cell-vtext"] })
+      // Also watch for placeholder removal.
+      if (placeholder.parentNode) {
+        observer.observe(placeholder.parentNode, { childList: true })
+      }
+    }
+  }, 0)
+
+  return placeholder
+}
+
 let registry: Registry
 
 function propertiesPlugin(reg: Registry) {
@@ -457,6 +548,14 @@ function propertiesPlugin(reg: Registry) {
           const deco = Decoration.widget(
             target.anchorPos,
             view => {
+              // For vertical-text cells, render the panel as a body overlay
+              // to escape the cell's writing-mode/transform context.
+              const vtext = target.node.attrs.cellVtext
+              if (vtext === "upward" || vtext === "downward") {
+                return buildVtextPanelOverlay(view, target.node, target.pos, target.props)
+              }
+              // Clean up any stale vtext overlay at this position (e.g. switched to horizontal).
+              cleanupVtextOverlay(target.pos)
               const panel = buildPanel(view, target.node, target.pos, target.props)
               if (target.anchorPos !== target.pos) {
                 panel.classList.add("gowiki-props-panel--block")
