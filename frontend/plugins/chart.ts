@@ -334,6 +334,7 @@ class ChartNodeView {
       options: {
         responsive: false,
         maintainAspectRatio: false,
+        animation: false,
         indexAxis: attrs.type === "hbar" ? "y" as const : "x" as const,
         plugins: {
           title: {
