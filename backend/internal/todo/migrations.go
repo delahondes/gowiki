@@ -71,5 +71,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_todo_tasks_node_key ON todo_tasks(source_p
 		return fmt.Errorf("add acknowledged_version column: %w", err)
 	}
 
+	// Track sent notifications to avoid duplicate alerts.
+	_, err = p.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS todo_notifications_sent (
+    task_id    TEXT NOT NULL REFERENCES todo_tasks(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    sent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (task_id, event_type)
+);
+`)
+	if err != nil {
+		return fmt.Errorf("create todo_notifications_sent: %w", err)
+	}
+
 	return nil
 }

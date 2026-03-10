@@ -3612,6 +3612,7 @@ function renderEdit(nextEditMode) {
           { name: "cell.properties", label: "Cell properties" },
           { name: "cell.merge", label: "Merge cells" },
           { name: "cell.split", label: "Unmerge cell" },
+          { name: "delete", label: "Delete table" },
         ]
         const visualOnly = new Set(["cell.merge", "cell.split"])
         for (const action of ctxActions) {

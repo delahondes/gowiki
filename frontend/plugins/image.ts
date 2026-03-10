@@ -110,17 +110,20 @@ const imageStyles = `
 
 .gowiki-image-align-left {
   display: block;
+  width: fit-content;
   margin-right: auto;
 }
 
 .gowiki-image-align-center {
   display: block;
+  width: fit-content;
   margin-left: auto;
   margin-right: auto;
 }
 
 .gowiki-image-align-right {
   display: block;
+  width: fit-content;
   margin-left: auto;
 }
 

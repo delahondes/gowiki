@@ -49,6 +49,8 @@ func (svc *TodoService) CreateTask(ctx context.Context, req CreateRequest) (*Tas
 			Recipient: task.Assignee.Target,
 			UserID:    task.Assignee.Target,
 		})
+		// Record that the "assigned" notification has been sent (once only).
+		_ = svc.store.RecordNotificationSent(ctx, task.ID, "assigned")
 	}
 
 	return task, nil

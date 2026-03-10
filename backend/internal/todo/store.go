@@ -989,3 +989,61 @@ func nullableDate(s string) any {
 	}
 	return s
 }
+
+// HasNotificationBeenSent checks whether a notification of the given type has
+// already been sent for a task.
+func (s *TodoStore) HasNotificationBeenSent(ctx context.Context, taskID, eventType string) (bool, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return false, fmt.Errorf("database not connected")
+	}
+
+	var count int
+	err := p.QueryRow(ctx,
+		`SELECT COUNT(*) FROM todo_notifications_sent WHERE task_id = $1 AND event_type = $2`,
+		taskID, eventType).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check notification sent: %w", err)
+	}
+	return count > 0, nil
+}
+
+// RecordNotificationSent marks a notification type as sent for a task.
+// Uses upsert to update sent_at if re-sent (e.g. daily overdue).
+func (s *TodoStore) RecordNotificationSent(ctx context.Context, taskID, eventType string) error {
+	p := s.pool.GetPool()
+	if p == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	_, err := p.Exec(ctx, `
+		INSERT INTO todo_notifications_sent (task_id, event_type, sent_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (task_id, event_type) DO UPDATE SET sent_at = NOW()`,
+		taskID, eventType)
+	if err != nil {
+		return fmt.Errorf("record notification sent: %w", err)
+	}
+	return nil
+}
+
+// GetNotificationSentAt returns the time a notification was sent, or zero time if never sent.
+func (s *TodoStore) GetNotificationSentAt(ctx context.Context, taskID, eventType string) (time.Time, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return time.Time{}, fmt.Errorf("database not connected")
+	}
+
+	var sentAt *time.Time
+	err := p.QueryRow(ctx,
+		`SELECT sent_at FROM todo_notifications_sent WHERE task_id = $1 AND event_type = $2`,
+		taskID, eventType).Scan(&sentAt)
+	if err != nil {
+		// No row = never sent.
+		return time.Time{}, nil
+	}
+	if sentAt == nil {
+		return time.Time{}, nil
+	}
+	return *sentAt, nil
+}

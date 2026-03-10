@@ -10,6 +10,7 @@ import {
   addRowBefore,
   deleteColumn,
   deleteRow,
+  deleteTable,
   mergeCells,
   splitCell,
 } from "prosemirror-tables"
@@ -2092,6 +2093,7 @@ export const tablePlugin: GowikiPlugin = {
     reg.registerCommand("table", "column.delete", wrapTableCmd(deleteColumn, "deleteCol", 0))
     reg.registerCommand("table", "cell.merge", mergeCells)
     reg.registerCommand("table", "cell.split", splitCell)
+    reg.registerCommand("table", "delete", deleteTable)
 
     // Add cell property — sets cellColor to a default value so the panel shows it
     reg.registerCommand("table", "cell.properties", (state, dispatch) => {
