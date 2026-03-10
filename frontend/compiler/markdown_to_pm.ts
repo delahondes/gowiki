@@ -345,6 +345,45 @@ function convertTemplateVarTokens(tokens: any[]) {
   return tokens
 }
 
+const captionRefRe = /\{ref\s+([a-zA-Z_][a-zA-Z0-9_.:/-]*)\}/
+
+function convertCaptionRefChildren(children: any[]): any[] {
+  const out: any[] = []
+  for (const tok of children) {
+    if (tok?.type !== "text" || !tok.content || !captionRefRe.test(tok.content)) {
+      out.push(tok)
+      continue
+    }
+    const re = /\{ref\s+([a-zA-Z_][a-zA-Z0-9_.:/-]*)\}/g
+    let lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(tok.content)) !== null) {
+      if (m.index > lastIndex) {
+        out.push({ type: "text", content: tok.content.slice(lastIndex, m.index) })
+      }
+      out.push({
+        type: "caption_ref",
+        content: "",
+        meta: { label: m[1] },
+      })
+      lastIndex = re.lastIndex
+    }
+    if (lastIndex < tok.content.length) {
+      out.push({ type: "text", content: tok.content.slice(lastIndex) })
+    }
+  }
+  return out
+}
+
+function convertCaptionRefTokens(tokens: any[]) {
+  for (const tok of tokens) {
+    if (Array.isArray(tok.children)) {
+      tok.children = convertCaptionRefChildren(tok.children)
+    }
+  }
+  return tokens
+}
+
 function isTopLevelBlockStart(token: any) {
   if (!token?.block || token.level !== 0) return false
   return token.nesting === 1 || token.nesting === 0
@@ -450,10 +489,12 @@ export function markdownToPM(
   }
   md.use(directivePlugin)
   const tokens = injectExtraBlankParagraphs(
-    convertTemplateVarTokens(
-      convertMediaLinkTokens(
-        normalizeEmptyLinkLabels(
-          applyDirectives(md.parse(markdown, {}), registry, true)
+    convertCaptionRefTokens(
+      convertTemplateVarTokens(
+        convertMediaLinkTokens(
+          normalizeEmptyLinkLabels(
+            applyDirectives(md.parse(markdown, {}), registry, true)
+          )
         )
       )
     )

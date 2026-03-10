@@ -10,8 +10,10 @@ import { todoPlugin } from "./todo"
 import { reviewflowPlugin } from "./reviewflow"
 import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
+import { captionPlugin } from "./caption"
 
 export const plugins: Plugin[] = [
+  captionPlugin,
   imagePlugin,
   blockquotePlugin,
   tablePlugin,

@@ -107,6 +107,7 @@ let databaseInsertRowCommand = null
 let databaseInsertVarCommand = null
 let tagInsertCommand = null
 let tagQueryInsertCommand = null
+let captionInsertRefCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -139,6 +140,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "tag-query") {
     if (name === "insert") tagQueryInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "caption") {
+    if (name === "insertRef") captionInsertRefCommand = cmd
     return
   }
 
@@ -3228,6 +3234,23 @@ function buildMenubar() {
         rawEditor.focus()
         rawInsertText(rawEditor, snippet + "\n\n")
         const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Caption reference
+  if (captionInsertRefCommand) {
+    addButton("Ref", "Insert caption reference", () => {
+      if (editMode === "visual" && editorView) {
+        captionInsertRefCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{ref }"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet)
+        const cursorPos = start + 5
         rawEditor.setSelectionRange(cursorPos, cursorPos)
       }
     })

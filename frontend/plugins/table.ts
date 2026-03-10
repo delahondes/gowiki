@@ -652,6 +652,23 @@ const tableProperties: NodePropertySpec[] = [
     parse: (raw: string) => parseColumnRulesText(raw) as any,
     serialize: (value: any) => serializeColumnRulesText(value as ColumnProps | null),
   },
+  {
+    name: "caption",
+    label: "Caption",
+    default: null,
+    wide: true,
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (val: string | null) => String(val ?? ""),
+    visible: (attrs: Record<string, any>) => !!attrs.caption || !!attrs.label,
+  },
+  {
+    name: "label",
+    label: "Label",
+    default: null,
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (val: string | null) => String(val ?? ""),
+    visible: (attrs: Record<string, any>) => !!attrs.caption || !!attrs.label,
+  },
 ]
 
 // ─── DOM helpers ─────────────────────────────────────────
@@ -1725,6 +1742,8 @@ export const tablePlugin: GowikiPlugin = {
         width: { default: null },
         headers: { default: "1st_row" },
         columns: { default: null },
+        caption: { default: null },
+        label: { default: null },
       },
       toDOM(node: Node) {
         const domSpec = baseTable.toDOM
@@ -1925,6 +1944,15 @@ export const tablePlugin: GowikiPlugin = {
         const columns: ColumnProps | null = node.attrs.columns
         if (columns) {
           directiveParts.push(...serializeColumnSpecs(columns))
+        }
+
+        const caption = node.attrs.caption ?? null
+        if (caption) {
+          directiveParts.push(`caption="${String(caption).replace(/"/g, '\\"')}"`)
+        }
+        const label = node.attrs.label ?? null
+        if (label) {
+          directiveParts.push(`label=${label}`)
         }
 
         let out = ""

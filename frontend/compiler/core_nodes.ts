@@ -435,12 +435,16 @@ function registerMarkdownPrinters(reg: Registry) {
     const version = image.attrs.version ?? null
     const align = image.attrs.align ?? null
     const wrap = image.attrs.wrap ?? null
+    const caption = image.attrs.caption ?? null
+    const label = image.attrs.label ?? null
     const body = recurse(image)
     const dirParts: string[] = []
     if (size) dirParts.push(size.includes(";") ? `size="${size}"` : `size=${size}`)
     if (version) dirParts.push(`version=${version}`)
     if (align) dirParts.push(`align=${align}`)
     if (wrap) dirParts.push(`wrap=${wrap}`)
+    if (caption) dirParts.push(`caption="${String(caption).replace(/"/g, '\\"')}"`)
+    if (label) dirParts.push(`label=${label}`)
     if (dirParts.length > 0) {
       return `{image ${dirParts.join(" ")}}\n${body}\n\n`
     }
@@ -469,7 +473,7 @@ function registerMarkdownPrinters(reg: Registry) {
         if (
           !sizedImage &&
           child.type.name === "image" &&
-          (child.attrs.size || child.attrs.version || child.attrs.align || child.attrs.wrap)
+          (child.attrs.size || child.attrs.version || child.attrs.align || child.attrs.wrap || child.attrs.caption || child.attrs.label)
         ) {
           sizedImage = child
           sizedImageIndex = index

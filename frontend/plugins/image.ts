@@ -2,6 +2,7 @@ import { NodeSelection, Plugin as PMPlugin, PluginKey } from "prosemirror-state"
 import { EditorView } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
+import { captionNumberingKey, renderInlineMarkdown } from "./caption"
 
 function normalizeImageVersion(raw: string): string | null {
   const value = String(raw ?? "").trim().toLowerCase()
@@ -75,6 +76,23 @@ const imageProperties = [
       { value: "left", label: "Left" },
       { value: "right", label: "Right" },
     ],
+  },
+  {
+    name: "caption",
+    label: "Caption",
+    default: null,
+    wide: true,
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (val: string | null) => String(val ?? ""),
+    visible: (attrs: Record<string, any>) => !!attrs.caption || !!attrs.label,
+  },
+  {
+    name: "label",
+    label: "Label",
+    default: null,
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (val: string | null) => String(val ?? ""),
+    visible: (attrs: Record<string, any>) => !!attrs.caption || !!attrs.label,
   },
 ]
 
@@ -215,6 +233,7 @@ class ImageNodeView {
   dom: HTMLElement
   private imgEl: HTMLImageElement
   private handle: HTMLElement | null = null
+  private figcaptionEl: HTMLElement | null = null
   private node: PMNode
   private outerView: EditorView
   private getPos: () => number | undefined
@@ -230,6 +249,7 @@ class ImageNodeView {
     this.imgEl = document.createElement("img")
     this.applyAttrs()
     this.dom.appendChild(this.imgEl)
+    this.applyCaptionDisplay()
   }
 
   private applyAttrs() {
@@ -272,10 +292,55 @@ class ImageNodeView {
     else if (wrap === "right") this.dom.classList.add("gowiki-image-wrap-right")
   }
 
+  private applyCaptionDisplay() {
+    const caption = this.node.attrs.caption ?? null
+    const label = this.node.attrs.label ?? null
+
+    if (caption) {
+      this.dom.classList.add("gowiki-figure")
+      if (label) {
+        this.dom.id = label
+      } else {
+        this.dom.removeAttribute("id")
+      }
+
+      // Get figure number from caption numbering plugin
+      const captionState = captionNumberingKey.getState(this.outerView.state)
+      const pos = this.getPos()
+      const number = (pos !== undefined ? captionState?.posnums.get(pos) : null) ?? null
+
+      if (!this.figcaptionEl) {
+        this.figcaptionEl = document.createElement("div")
+        this.figcaptionEl.className = "gowiki-caption"
+        this.figcaptionEl.contentEditable = "false"
+        this.dom.appendChild(this.figcaptionEl)
+      }
+
+      const numText = number ? `Figure ${number}:` : "Figure:"
+      this.figcaptionEl.innerHTML = ""
+      const numSpan = document.createElement("span")
+      numSpan.className = "gowiki-caption-number"
+      numSpan.textContent = numText
+      const textSpan = document.createElement("span")
+      textSpan.className = "gowiki-caption-text"
+      renderInlineMarkdown(caption, textSpan)
+      this.figcaptionEl.appendChild(numSpan)
+      this.figcaptionEl.appendChild(textSpan)
+    } else {
+      this.dom.classList.remove("gowiki-figure")
+      this.dom.removeAttribute("id")
+      if (this.figcaptionEl) {
+        this.figcaptionEl.remove()
+        this.figcaptionEl = null
+      }
+    }
+  }
+
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
     this.applyAttrs()
+    this.applyCaptionDisplay()
     return true
   }
 
@@ -405,6 +470,8 @@ export const imagePlugin: WikiPlugin = {
           version: { default: null },
           align: { default: null },
           wrap: { default: null },
+          caption: { default: null },
+          label: { default: null },
         },
         toDOM(node: any) {
           const domSpec = baseToDOM(node)
@@ -448,7 +515,10 @@ export const imagePlugin: WikiPlugin = {
         const directiveWrap = directive?.wrap ?? null
         const wrap = directiveWrap ? String(directiveWrap).trim().toLowerCase() : null
 
-        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version, align, wrap }))
+        const caption = directive?.caption ? String(directive.caption).trim() || null : null
+        const label = directive?.label ? String(directive.label).trim() || null : null
+
+        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version, align, wrap, caption, label }))
       },
     })
 
