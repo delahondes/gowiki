@@ -125,6 +125,7 @@ let databaseInsertVarCommand = null
 let tagInsertCommand = null
 let tagQueryInsertCommand = null
 let captionInsertRefCommand = null
+let spoilerInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -162,6 +163,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "caption") {
     if (name === "insertRef") captionInsertRefCommand = cmd
+    return
+  }
+
+  if (namespace === "spoiler") {
+    if (name === "insert") spoilerInsertCommand = cmd
     return
   }
 
@@ -950,6 +956,8 @@ function normalizeMarkdownForStorage(markdown) {
     const md3 = pmToMarkdown(doc2, registry)
     if (md3 !== normalizedMarkdown) {
       console.error("Round-trip validation failed: serialize→parse→serialize not stable")
+      console.error("=== PASS 1 ===\n" + JSON.stringify(normalizedMarkdown))
+      console.error("=== PASS 2 ===\n" + JSON.stringify(md3))
       roundTripError = true
     }
   } catch (err) {
@@ -1440,6 +1448,8 @@ function mountReadOnlyView(container, markdown, className) {
     editable: () => false,
   })
   highlightCodeBlocks(wrapper)
+  // Fold spoilers by default in view mode
+  wrapper.querySelectorAll("details.gowiki-spoiler[open]").forEach(d => d.removeAttribute("open"))
   // In view mode we only need the rendered DOM — not ProseMirror's event
   // handling or selection tracking. Remove contenteditable and stop the
   // internal DOM/selection observer so the browser handles selection natively.
@@ -1849,6 +1859,23 @@ function rawInsertCodeBlock(textarea) {
     rawInsertText(textarea, "```\n\n```")
     // Place cursor inside the code block
     textarea.setSelectionRange(start + 4, start + 4)
+  }
+}
+
+function rawInsertSpoiler(textarea) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = textarea.value.substring(start, end)
+
+  textarea.focus()
+  if (selected.length > 0) {
+    textarea.setSelectionRange(start, end)
+    rawInsertText(textarea, "```spoiler Details\n" + selected + "\n```")
+  } else {
+    textarea.setSelectionRange(start, start)
+    rawInsertText(textarea, "```spoiler Details\n\n```")
+    // Place cursor inside the spoiler
+    textarea.setSelectionRange(start + 19, start + 19)
   }
 }
 
@@ -3127,6 +3154,18 @@ function buildMenubar() {
       rawInsertCodeBlock(rawEditor)
     }
   })
+
+  // Spoiler
+  if (spoilerInsertCommand) {
+    addImgButton("/icons/spoiler.svg", "Spoiler", () => {
+      if (editMode === "visual" && editorView) {
+        spoilerInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawInsertSpoiler(rawEditor)
+      }
+    })
+  }
 
   // Include
   if (includeInsertCommand) {

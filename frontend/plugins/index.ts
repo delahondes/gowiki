@@ -10,6 +10,7 @@ import { todoPlugin } from "./todo"
 import { reviewflowPlugin } from "./reviewflow"
 import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
+import { spoilerPlugin } from "./spoiler"
 import { captionPlugin } from "./caption"
 
 export const plugins: Plugin[] = [
@@ -25,4 +26,5 @@ export const plugins: Plugin[] = [
   reviewflowPlugin,
   changesPlugin,
   commentPlugin,
+  spoilerPlugin,
 ]
