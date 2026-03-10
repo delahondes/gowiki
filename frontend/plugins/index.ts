@@ -11,6 +11,7 @@ import { reviewflowPlugin } from "./reviewflow"
 import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
 import { spoilerPlugin } from "./spoiler"
+import { chartPlugin } from "./chart"
 import { captionPlugin } from "./caption"
 
 export const plugins: Plugin[] = [
@@ -27,4 +28,5 @@ export const plugins: Plugin[] = [
   changesPlugin,
   commentPlugin,
   spoilerPlugin,
+  chartPlugin,
 ]

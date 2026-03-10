@@ -126,6 +126,7 @@ let tagInsertCommand = null
 let tagQueryInsertCommand = null
 let captionInsertRefCommand = null
 let spoilerInsertCommand = null
+let chartInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -168,6 +169,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "spoiler") {
     if (name === "insert") spoilerInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "chart") {
+    if (name === "insert") chartInsertCommand = cmd
     return
   }
 
@@ -956,8 +962,6 @@ function normalizeMarkdownForStorage(markdown) {
     const md3 = pmToMarkdown(doc2, registry)
     if (md3 !== normalizedMarkdown) {
       console.error("Round-trip validation failed: serialize→parse→serialize not stable")
-      console.error("=== PASS 1 ===\n" + JSON.stringify(normalizedMarkdown))
-      console.error("=== PASS 2 ===\n" + JSON.stringify(md3))
       roundTripError = true
     }
   } catch (err) {
@@ -1877,6 +1881,17 @@ function rawInsertSpoiler(textarea) {
     // Place cursor inside the spoiler
     textarea.setSelectionRange(start + 19, start + 19)
   }
+}
+
+function rawInsertChart(textarea) {
+  const start = textarea.selectionStart
+  const snippet = "```chart pie\nItem 1 = 30\nItem 2 = 50\nItem 3 = 20\n```"
+  textarea.focus()
+  textarea.setSelectionRange(start, start)
+  rawInsertText(textarea, snippet)
+  // Place cursor on the first data line
+  const cursorPos = start + 13 // after "```chart pie\n"
+  textarea.setSelectionRange(cursorPos, cursorPos)
 }
 
 // --- Raw ordered list renumbering ---
@@ -3163,6 +3178,18 @@ function buildMenubar() {
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
         rawInsertSpoiler(rawEditor)
+      }
+    })
+  }
+
+  // Chart
+  if (chartInsertCommand) {
+    addImgButton("/icons/chart.svg", "Chart", () => {
+      if (editMode === "visual" && editorView) {
+        chartInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawInsertChart(rawEditor)
       }
     })
   }
