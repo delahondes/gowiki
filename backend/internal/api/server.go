@@ -775,6 +775,7 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 		"title":         cfg.Site.Title,
 		"toc_max_level": cfg.Site.TOCMaxLevel,
 		"user_display":  cfg.Site.UserDisplay,
+		"code_theme":    cfg.Site.CodeTheme,
 	})
 }
 

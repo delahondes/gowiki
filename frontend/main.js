@@ -15,7 +15,24 @@ import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { initComments, destroyComments, addComment, getCommentCount, reapplyComments } from "./plugins/comment.ts"
-import "highlight.js/styles/github.css"
+const HLJS_THEMES = [
+  "github", "atom-one-light", "vs", "xcode", "idea",
+  "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
+]
+
+function loadHighlightTheme(theme) {
+  if (!HLJS_THEMES.includes(theme)) theme = "github"
+  let link = document.getElementById("gowiki-hljs-theme")
+  if (!link) {
+    link = document.createElement("link")
+    link.id = "gowiki-hljs-theme"
+    link.rel = "stylesheet"
+    document.head.appendChild(link)
+  }
+  link.href = `/hljs/${theme}.css`
+}
+
+loadHighlightTheme("github")
 
 const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
@@ -4763,6 +4780,9 @@ async function resolveSiteInfo() {
       if (typeof data.toc_max_level === "number") {
         tocMaxLevel = data.toc_max_level
       }
+      if (data.code_theme) {
+        loadHighlightTheme(data.code_theme)
+      }
     }
   } catch { /* keep default */ }
 }
@@ -6659,6 +6679,24 @@ async function renderAdminConfigTab(container) {
       { value: "email", label: "Email" },
     ], (config.site && config.site.user_display) || "")
 
+    const codeThemeSelect = adminFormSelect(form, "Code theme", [
+      { value: "github", label: "GitHub (light)" },
+      { value: "atom-one-light", label: "Atom One Light" },
+      { value: "vs", label: "Visual Studio (light)" },
+      { value: "xcode", label: "Xcode (light)" },
+      { value: "idea", label: "IntelliJ IDEA (light)" },
+      { value: "github-dark", label: "GitHub Dark" },
+      { value: "atom-one-dark", label: "Atom One Dark" },
+      { value: "monokai", label: "Monokai (dark)" },
+      { value: "nord", label: "Nord (dark)" },
+      { value: "vs2015", label: "VS 2015 (dark)" },
+      { value: "tokyo-night-dark", label: "Tokyo Night (dark)" },
+    ], (config.site && config.site.code_theme) || "github")
+
+    codeThemeSelect.addEventListener("change", () => {
+      loadHighlightTheme(codeThemeSelect.value)
+    })
+
     // Auth section
     const authHeading = document.createElement("h3")
     authHeading.textContent = "Authentication"
@@ -6918,6 +6956,7 @@ async function renderAdminConfigTab(container) {
           footer_page: footerInput.value.trim(),
           toc_max_level: parseInt(tocMaxLevelInput.value, 10) || 3,
           user_display: userDisplaySelect.value || "",
+          code_theme: codeThemeSelect.value,
         },
         auth: {
           session_ttl: sessionTtlInput.value.trim(),

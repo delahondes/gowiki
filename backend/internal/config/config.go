@@ -76,6 +76,7 @@ type SiteConfig struct {
 	SidebarPage    string `yaml:"sidebar_page" json:"sidebar_page"`
 	TOCMaxLevel    int    `yaml:"toc_max_level" json:"toc_max_level"`     // 0 = disabled, 1-6 = show headings up to this level
 	UserDisplay    string `yaml:"user_display" json:"user_display"`       // "login" (default), "fullname", "email"
+	CodeTheme      string `yaml:"code_theme" json:"code_theme"`           // highlight.js theme name
 }
 
 // AuthConfig holds authentication settings.
@@ -108,6 +109,7 @@ func DefaultConfig() Config {
 			FooterPage:  "footer",
 			SidebarPage: "sidebar",
 			TOCMaxLevel: 3,
+			CodeTheme:   "github",
 		},
 		Auth: AuthConfig{
 			SessionTTL: "24h",
