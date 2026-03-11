@@ -3,98 +3,23 @@ import type { Node as PMNode, Schema } from "prosemirror-model"
 import type { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, NodePropertySpec, Registry } from "../compiler/registry"
 import { enablePropertiesPanel } from "../compiler/core_ui"
-import MarkdownIt from "markdown-it"
 
 const VALID_THEMES = ["light", "dark"]
 const VALID_RATIOS = ["16:9", "4:3"]
-
-// ── Info string parsing ──
-
-interface SlidesAttrs {
-  title: string
-  theme: string
-  ratio: string
-}
-
-function parseSlidesInfo(info: string): SlidesAttrs {
-  const attrs: SlidesAttrs = {
-    title: "",
-    theme: "light",
-    ratio: "16:9",
-  }
-
-  // Extract quoted title first
-  const titleMatch = info.match(/"([^"]*)"/)
-  if (titleMatch) {
-    attrs.title = titleMatch[1]
-    info = info.slice(0, titleMatch.index) + info.slice(titleMatch.index! + titleMatch[0].length)
-  }
-
-  const tokens = info.trim().split(/\s+/).filter(Boolean)
-  for (const tok of tokens) {
-    const lower = tok.toLowerCase()
-    if (lower === "dark" || lower === "light") {
-      attrs.theme = lower
-    } else if (lower === "16:9" || lower === "4:3") {
-      attrs.ratio = lower
-    }
-  }
-
-  return attrs
-}
-
-// ── Serialization ──
-
-function serializeSlidesHeader(attrs: Record<string, any>): string {
-  const parts: string[] = []
-
-  // Canonical order: title, theme (if not light), ratio (if not 16:9)
-  if (attrs.title) parts.push(`"${attrs.title}"`)
-  if (attrs.theme && attrs.theme !== "light") parts.push(attrs.theme)
-  if (attrs.ratio && attrs.ratio !== "16:9") parts.push(attrs.ratio)
-
-  if (parts.length > 0) {
-    return "```slides " + parts.join(" ")
-  }
-  return "```slides"
-}
-
-// ── Slide splitting ──
-
-function splitSlides(data: string): string[] {
-  const parts = data.split(/^---$/m)
-  return parts
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
-}
-
-function countSlides(data: string): number {
-  if (!data.trim()) return 0
-  return splitSlides(data).length
-}
-
-// ── Markdown rendering for slides ──
-
-const slideMd = new MarkdownIt({
-  html: false,
-  breaks: true,
-  linkify: false,
-})
 
 // ── Presentation engine ──
 
 class PresentationEngine {
   private overlay: HTMLElement
-  private slides: string[] // raw HTML per slide
+  private slides: HTMLElement[] // cloned DOM fragments per slide
   private current = 0
   private hideTimer: ReturnType<typeof setTimeout> | null = null
   private progressBar: HTMLElement
   private counter: HTMLElement
 
-  constructor(slidesHtml: string[], theme: string, ratio: string) {
-    this.slides = slidesHtml
+  constructor(slides: HTMLElement[], theme: string, ratio: string) {
+    this.slides = slides
 
-    // Build overlay DOM
     this.overlay = document.createElement("div")
     this.overlay.className = `gowiki-slides-overlay theme-${theme}`
 
@@ -102,7 +27,6 @@ class PresentationEngine {
     viewport.className = "gowiki-slides-viewport"
     this.overlay.appendChild(viewport)
 
-    // Size viewport to aspect ratio
     const [rw, rh] = ratio === "4:3" ? [4, 3] : [16, 9]
     viewport.dataset.ratioW = String(rw)
     viewport.dataset.ratioH = String(rh)
@@ -120,7 +44,6 @@ class PresentationEngine {
     this.overlay.appendChild(this.counter)
 
     this.overlay.addEventListener("click", (e) => {
-      // Don't advance on button clicks, links, etc.
       if ((e.target as HTMLElement).closest("a, button")) return
       this.next()
     })
@@ -138,11 +61,8 @@ class PresentationEngine {
     document.addEventListener("fullscreenchange", this.handleFullscreenChange)
     window.addEventListener("resize", this.resizeViewport)
 
-    // Try fullscreen
     if (this.overlay.requestFullscreen) {
-      this.overlay.requestFullscreen().catch(() => {
-        // Fallback: stay as fixed overlay
-      })
+      this.overlay.requestFullscreen().catch(() => {})
     }
 
     this.showSlide(0)
@@ -204,9 +124,9 @@ class PresentationEngine {
   private showSlide(index: number) {
     this.current = index
     const slideEl = this.overlay.querySelector(".gowiki-slides-slide")!
-    slideEl.innerHTML = this.slides[index]
+    slideEl.innerHTML = ""
+    slideEl.appendChild(this.slides[index].cloneNode(true))
 
-    // Update progress
     const pct = this.slides.length > 1
       ? ((index + 1) / this.slides.length) * 100
       : 100
@@ -223,12 +143,11 @@ class PresentationEngine {
 
     const vw = this.overlay.clientWidth
     const vh = this.overlay.clientHeight
-    const margin = 0
 
-    let width = vw - margin * 2
+    let width = vw
     let height = width * (rh / rw)
-    if (height > vh - margin * 2) {
-      height = vh - margin * 2
+    if (height > vh) {
+      height = vh
       width = height * (rw / rh)
     }
 
@@ -267,51 +186,83 @@ class PresentationEngine {
   }
 }
 
-function launchPresentation(data: string, theme: string, ratio: string) {
-  const rawSlides = splitSlides(data)
-  if (rawSlides.length === 0) return
+/**
+ * Collect the page DOM and split it into slides at <hr> boundaries.
+ * The slides marker node itself is excluded from the output.
+ */
+function collectSlides(markerDom: HTMLElement): HTMLElement[] {
+  // Walk up to find the ProseMirror content root
+  const pmRoot = markerDom.closest(".ProseMirror")
+  if (!pmRoot) return []
 
-  const slidesHtml = rawSlides.map(s => slideMd.render(s))
-  const engine = new PresentationEngine(slidesHtml, theme, ratio)
+  const slides: HTMLElement[] = []
+  let current = document.createElement("div")
+
+  for (const child of Array.from(pmRoot.children)) {
+    const el = child as HTMLElement
+    // Skip the slides marker node itself
+    if (el.classList?.contains("gowiki-slides-marker")) continue
+
+    if (el.tagName === "HR") {
+      // Finish current slide if it has content
+      if (current.children.length > 0) {
+        slides.push(current)
+      }
+      current = document.createElement("div")
+    } else {
+      current.appendChild(el.cloneNode(true))
+    }
+  }
+
+  // Last slide
+  if (current.children.length > 0) {
+    slides.push(current)
+  }
+
+  return slides
+}
+
+function launchPresentation(markerDom: HTMLElement, theme: string, ratio: string) {
+  const slides = collectSlides(markerDom)
+  if (slides.length === 0) return
+
+  const engine = new PresentationEngine(slides, theme, ratio)
   engine.start()
 }
 
 // ── NodeView ──
 
-class SlidesNodeView {
+class SlidesMarkerView {
   dom: HTMLElement
   private node: PMNode
-  private presentBtn: HTMLButtonElement
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
 
     this.dom = document.createElement("div")
-    this.dom.className = "gowiki-slides"
+    this.dom.className = "gowiki-slides-marker"
     this.dom.contentEditable = "false"
 
-    this.buildCard()
-
-    this.presentBtn = this.dom.querySelector(".gowiki-slides-present-btn") as HTMLButtonElement
-    this.presentBtn.addEventListener("click", (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      launchPresentation(this.node.attrs.data, this.node.attrs.theme, this.node.attrs.ratio)
-    })
+    this.buildBanner()
   }
 
-  private buildCard() {
-    const count = countSlides(this.node.attrs.data)
-    const title = this.node.attrs.title || "Untitled Presentation"
+  private buildBanner() {
+    const title = this.node.attrs.title || "Presentation"
     const theme = this.node.attrs.theme || "light"
     const ratio = this.node.attrs.ratio || "16:9"
 
     this.dom.innerHTML = `
-      <div class="gowiki-slides-icon">&#9654;</div>
-      <div class="gowiki-slides-title">${this.escHtml(title)}</div>
-      <div class="gowiki-slides-info">${count} slide${count !== 1 ? "s" : ""} &middot; ${theme} &middot; ${ratio}</div>
+      <span class="gowiki-slides-marker-label">${this.escHtml(title)}</span>
+      <span class="gowiki-slides-marker-info">${theme} &middot; ${ratio}</span>
       <button class="gowiki-slides-present-btn">&#9654; Present</button>
     `
+
+    const btn = this.dom.querySelector(".gowiki-slides-present-btn") as HTMLButtonElement
+    btn.addEventListener("click", (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio)
+    })
   }
 
   private escHtml(s: string): string {
@@ -321,16 +272,7 @@ class SlidesNodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
-    this.buildCard()
-
-    // Re-attach click handler
-    this.presentBtn = this.dom.querySelector(".gowiki-slides-present-btn") as HTMLButtonElement
-    this.presentBtn.addEventListener("click", (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      launchPresentation(this.node.attrs.data, this.node.attrs.theme, this.node.attrs.ratio)
-    })
-
+    this.buildBanner()
     return true
   }
 
@@ -380,61 +322,44 @@ const slidesProperties: NodePropertySpec[] = [
     serialize: (v: string | null) => String(v ?? "16:9"),
     options: VALID_RATIOS.map(r => ({ value: r, label: r })),
   },
-  {
-    name: "data",
-    label: "Slides",
-    default: "",
-    parse: (raw: string) => raw,
-    serialize: (v: string | null) => String(v ?? ""),
-    multiline: true,
-    wide: true,
-    helpText: "Separate slides with --- on its own line",
-  },
 ]
 
 // ── Styles ──
 
 const slidesStyles = `
-/* --- Placeholder card --- */
-.gowiki-slides {
-  margin: 0.5em 0;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 1.2em;
-  text-align: center;
-  background: #f8f9fa;
-  cursor: default;
+/* --- Marker banner in editor/view --- */
+.gowiki-slides-marker {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  margin: 0 0 0.5em 0;
+  padding: 0.4em 0.8em;
+  background: #eef3f8;
+  border: 1px solid #c5d5e8;
+  border-radius: 4px;
+  font-size: 0.85em;
 }
-#app.gowiki-editing .gowiki-slides {
-  border: 1px dashed #ccc;
-}
-#app.gowiki-editing .gowiki-slides.ProseMirror-selectednode {
+#app.gowiki-editing .gowiki-slides-marker.ProseMirror-selectednode {
   outline: 2px solid #ffd43b;
   outline-offset: 1px;
 }
-.gowiki-slides-icon {
-  font-size: 1.5em;
-  margin-bottom: 0.2em;
-}
-.gowiki-slides-title {
+.gowiki-slides-marker-label {
   font-weight: 600;
-  margin: 0.3em 0;
 }
-.gowiki-slides-info {
+.gowiki-slides-marker-info {
   color: #666;
-  font-size: 0.85em;
-  margin-bottom: 0.4em;
+  font-size: 0.9em;
 }
 .gowiki-slides-present-btn {
-  display: inline-block;
-  margin-top: 0.4em;
-  padding: 0.4em 1.4em;
+  margin-left: auto;
+  padding: 0.25em 0.8em;
   border: none;
-  border-radius: 4px;
+  border-radius: 3px;
   background: #4e79a7;
   color: #fff;
-  font-size: 0.9em;
+  font-size: 0.85em;
   cursor: pointer;
+  white-space: nowrap;
 }
 .gowiki-slides-present-btn:hover {
   background: #3d6a96;
@@ -566,25 +491,22 @@ export const slidePlugin: WikiPlugin = {
             title: { default: "" },
             theme: { default: "light" },
             ratio: { default: "16:9" },
-            data:  { default: "" },
           },
           toDOM(node: any) {
             return ["div", {
-              class: "gowiki-slides",
+              class: "gowiki-slides-marker",
               "data-slides-title": node.attrs.title,
               "data-slides-theme": node.attrs.theme,
               "data-slides-ratio": node.attrs.ratio,
-              "data-slides-data": node.attrs.data,
-            }, `Slides: ${node.attrs.title || "Untitled"}${countSlides(node.attrs.data) > 0 ? ` (${countSlides(node.attrs.data)} slides)` : ""}`]
+            }, `Slides: ${node.attrs.title || "Presentation"}`]
           },
           parseDOM: [{
-            tag: "div.gowiki-slides",
+            tag: "div.gowiki-slides-marker",
             getAttrs(dom: HTMLElement) {
               return {
                 title: dom.getAttribute("data-slides-title") || "",
                 theme: dom.getAttribute("data-slides-theme") || "light",
                 ratio: dom.getAttribute("data-slides-ratio") || "16:9",
-                data: dom.getAttribute("data-slides-data") || "",
               }
             },
           }],
@@ -592,66 +514,21 @@ export const slidePlugin: WikiPlugin = {
       },
     })
 
-    // ── Properties ──
-    reg.registerNodeProperties("slides", slidesProperties)
-
-    // ── markdown-it block rule ──
-    reg.registerMarkdownItPlugin((md: any) => {
-      md.block.ruler.before("fence", "slides_fence", (state: any, startLine: number, endLine: number, silent: boolean) => {
-        const startPos = state.bMarks[startLine] + state.tShift[startLine]
-        const maxPos = state.eMarks[startLine]
-        const firstLine = state.src.slice(startPos, maxPos)
-
-        if (!firstLine.match(/^`{3,}slides(?:\s|$)/)) return false
-        if (silent) return true
-
-        const backtickCount = firstLine.match(/^(`+)/)![1].length
-        const infoStr = firstLine.slice(backtickCount).replace(/^slides\s*/, "").trim()
-
-        // Find closing fence
-        let nextLine = startLine + 1
-        let found = false
-        for (; nextLine < endLine; nextLine++) {
-          const lineStart = state.bMarks[nextLine] + state.tShift[nextLine]
-          const lineEnd = state.eMarks[nextLine]
-          const line = state.src.slice(lineStart, lineEnd)
-          if (line.match(new RegExp("^`{" + backtickCount + ",}\\s*$"))) {
-            found = true
-            break
-          }
-        }
-        if (!found) return false
-
-        // Extract body
-        const bodyLines: string[] = []
-        for (let l = startLine + 1; l < nextLine; l++) {
-          bodyLines.push(state.src.slice(state.bMarks[l], state.eMarks[l]))
-        }
-        const body = bodyLines.join("\n")
-
-        // Parse info string
-        const attrs = parseSlidesInfo(infoStr)
-
-        // Emit single token
-        const token = state.push("slides", "div", 0)
-        token.block = true
-        token.map = [startLine, nextLine + 1]
-        token.meta = { ...attrs, data: body }
-
-        state.line = nextLine + 1
-        return true
-      })
+    // ── Self-contained directive: {slides title="..." theme=dark ratio=4:3} ──
+    reg.registerSelfContainedDirective("slides", {
+      tokenType: "slides",
+      nodeType: "slides",
+      properties: slidesProperties,
     })
 
     // ── Markdown → PM ──
     reg.registerText("slides", {
       run(ctx, tok) {
-        const meta = tok.meta ?? {}
+        const attrs = tok.meta?.attrs ?? {}
         ctx.push(ctx.schema.nodes.slides.create({
-          title: meta.title ?? "",
-          theme: meta.theme ?? "light",
-          ratio: meta.ratio ?? "16:9",
-          data: meta.data ?? "",
+          title: attrs.title ?? "",
+          theme: attrs.theme ?? "light",
+          ratio: attrs.ratio ?? "16:9",
         }))
       },
     })
@@ -659,11 +536,14 @@ export const slidePlugin: WikiPlugin = {
     // ── PM → Markdown ──
     reg.registerPMNode("slides", {
       print(node) {
-        let out = serializeSlidesHeader(node.attrs) + "\n"
-        const data = node.attrs.data || ""
-        if (data) out += data + "\n"
-        out += "```\n\n"
-        return out
+        const parts: string[] = []
+        if (node.attrs.title) parts.push(`title=${node.attrs.title}`)
+        if (node.attrs.theme && node.attrs.theme !== "light") parts.push(`theme=${node.attrs.theme}`)
+        if (node.attrs.ratio && node.attrs.ratio !== "16:9") parts.push(`ratio=${node.attrs.ratio}`)
+        if (parts.length > 0) {
+          return `{slides ${parts.join(" ")}}\n\n`
+        }
+        return "{slides}\n\n"
       },
     })
 
@@ -674,33 +554,41 @@ export const slidePlugin: WikiPlugin = {
         props: {
           nodeViews: {
             slides(node: PMNode, view: EditorView, getPos: () => number | undefined) {
-              return new SlidesNodeView(node, view, getPos)
+              return new SlidesMarkerView(node, view, getPos)
             },
           },
         },
       })
     })
 
-    // ── Toolbar command ──
+    // ── Toolbar command: insert slides marker + sample content ──
     reg.registerCommand("slides", "insert", (state, dispatch) => {
       const slidesType = reg.schema.nodes.slides
-      if (!slidesType) return false
+      const hrType = reg.schema.nodes.horizontal_rule
+      const headingType = reg.schema.nodes.heading
+      const paragraphType = reg.schema.nodes.paragraph
+      if (!slidesType || !hrType || !headingType) return false
       if (dispatch) {
-        const sampleData = "# Title Slide\n\n---\n\n# Slide 2\n\n---\n\n# Thank You"
-        const node = slidesType.create({ data: sampleData })
-        let tr = state.tr.replaceSelectionWith(node)
-        const approxPos = tr.mapping.map(state.selection.from)
+        const nodes = [
+          slidesType.create({}),
+          headingType.create({ level: 1 }, reg.schema.text("Title Slide")),
+          hrType.create(),
+          headingType.create({ level: 1 }, reg.schema.text("Slide 2")),
+          hrType.create(),
+          headingType.create({ level: 1 }, reg.schema.text("Thank You")),
+        ]
+        let tr = state.tr
+        const { from, to } = state.selection
+        tr = tr.replaceWith(from, to, nodes)
+
+        // Select the slides marker node and open properties
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === slidesType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(0, Math.min(tr.doc.content.size, from + 10), (n, pos) => {
+          if (n.type === slidesType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))

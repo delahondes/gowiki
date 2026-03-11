@@ -1902,12 +1902,12 @@ function rawInsertChart(textarea) {
 
 function rawInsertSlides(textarea) {
   const start = textarea.selectionStart
-  const snippet = "```slides\n# Title Slide\n\n---\n\n# Slide 2\n\n---\n\n# Thank You\n```"
+  const snippet = "{slides}\n\n# Title Slide\n\n---\n\n# Slide 2\n\n---\n\n# Thank You"
   textarea.focus()
   textarea.setSelectionRange(start, start)
   rawInsertText(textarea, snippet)
   // Place cursor on the title
-  const cursorPos = start + 12 // after "```slides\n# "
+  const cursorPos = start + 12 // after "{slides}\n\n# "
   textarea.setSelectionRange(cursorPos, cursorPos)
 }
 
