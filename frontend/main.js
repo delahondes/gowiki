@@ -5642,6 +5642,11 @@ async function publishDraft() {
           applyNormalizedEditState(normalized)
           editBaselineMarkdown = normalized.markdown
           isNewPage = false
+          hasTemplate = false
+          if (result.page?.meta) {
+            currentPageMeta = result.page.meta
+            currentPageVersion = result.page.meta.version || 0
+          }
           setStatus(`Published (forced) ${new Date().toLocaleTimeString()}`)
           if (result.orphaned_media && result.orphaned_media.length > 0) {
             promptOrphanDeletion(result.orphaned_media)
@@ -5673,6 +5678,12 @@ async function publishDraft() {
   applyNormalizedEditState(normalized)
   editBaselineMarkdown = normalized.markdown
   isNewPage = false
+  hasTemplate = false
+  // Update metadata from the publish response so global variables resolve immediately.
+  if (result.page?.meta) {
+    currentPageMeta = result.page.meta
+    currentPageVersion = result.page.meta.version || 0
+  }
   setStatus(`Published ${new Date().toLocaleTimeString()}`)
 
   if (result.orphaned_media && result.orphaned_media.length > 0) {
