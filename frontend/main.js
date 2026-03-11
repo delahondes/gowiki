@@ -109,6 +109,7 @@ let tocMaxLevel = 3
 let viewView = null
 let sidebarView = null
 let footerView = null
+let isFullscreen = false
 
 let reapplyTimer = null
 const debouncedReapplyComments = () => {
@@ -1107,9 +1108,23 @@ function applyNormalizedEditState(normalized) {
   }
 }
 
+let statusToastEl = null
+let statusToastTimer = null
+
 function setStatus(text) {
   statusText = text
-  renderActions()
+  if (!text) return
+  if (!statusToastEl) {
+    statusToastEl = document.createElement("div")
+    statusToastEl.className = "gowiki-action-toast"
+    document.body.appendChild(statusToastEl)
+  }
+  statusToastEl.textContent = text
+  statusToastEl.classList.add("visible")
+  clearTimeout(statusToastTimer)
+  statusToastTimer = setTimeout(() => {
+    statusToastEl.classList.remove("visible")
+  }, 3000)
 }
 
 function setMode(nextMode) {
@@ -3795,10 +3810,85 @@ function renderEdit(nextEditMode) {
   }
 }
 
-function makeActionButton(label, onClick) {
+// ── Action bar icon SVG paths (stroke-based, 24x24 viewBox) ──
+
+const actionIcons = {
+  // Pencil
+  edit: "M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z",
+  // Clock with arrow
+  history: "M12 8v4l3 3m6-3a9 9 0 1 1-2.64-6.36",
+  // Arrow bend left
+  backlinks: "M9 17H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m6 16 4-4-4-4m4 4H9",
+  // File with plus
+  newPage: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M12 18v-6m-3 3h6",
+  // Tree/sitemap
+  siteMap: "M6 9H4.5a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7a2 2 0 0 1-2 2H6Zm0 0v3m0 0c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2m-8 0c0 1.1-.9 2-2 2H4.5a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h3a2 2 0 0 0 2-2v-1.5a2 2 0 0 0-2-2H6m8-2.5v3.5a2 2 0 0 0 2 2h1.5a2 2 0 0 0 2-2V17a2 2 0 0 0-2-2h-1.5a2 2 0 0 0-2 2Z",
+  // File arrow down
+  exportPdf: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M12 18v-6m-3 3 3 3 3-3",
+  // Chat bubble
+  comment: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z",
+  // Arrows move
+  move: "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20",
+  // Folder arrows
+  convert: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2ZM9 15l3-3 3 3",
+  // Trash
+  delete: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6Z",
+  // Image/photo
+  media: "M21 3H3a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Zm-3 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM2 20l5.5-7L11 17l3.5-4.5L22 20Z",
+  // Code brackets
+  switchRaw: "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  // Eye
+  switchVisual: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
+  // Floppy disk
+  save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM17 21v-8H7v8M7 3v5h8",
+  // Upload / cloud up
+  publish: "M12 16V4m-5 4 5-5 5 5M20 21H4",
+  // X circle
+  cancel: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm3.54 6.46L9.46 14.54m0-6.08 6.08 6.08",
+  // Hourglass (main, shifted up-left) + small trash (nudged down-right)
+  discard: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 10h8M17 10V8.5a1.5 1.5 0 0 1 3 0V10m2.5 0v8.5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5V10Z",
+  // Expand arrows
+  fullscreen: "M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3",
+  // Contract arrows
+  exitFullscreen: "M4 14h4v4M20 10h-4V6M14 10h4V6M10 14H6v4",
+  // Lock
+  lock: "M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2ZM7 11V7a5 5 0 0 1 10 0v4",
+  // Hourglass (main, shifted up-left) + small floppy (nudged down-right)
+  saveDraft: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
+}
+
+function makeActionIconBtn(iconName, tooltip, onClick, extraClass) {
   const btn = document.createElement("button")
   btn.type = "button"
-  btn.className = "gowiki-action-btn"
+  btn.className = "gowiki-action-btn gowiki-action-btn--stroke" + (extraClass ? " " + extraClass : "")
+  btn.title = tooltip
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+  svg.setAttribute("viewBox", "0 0 24 24")
+  const pathData = actionIcons[iconName]
+  if (pathData) {
+    for (const d of pathData.split(/(?=M)/)) {
+      // For multi-path icons split at each M, but actually just use one path
+    }
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path")
+    p.setAttribute("d", pathData)
+    svg.appendChild(p)
+  }
+  btn.appendChild(svg)
+  btn.addEventListener("click", onClick)
+  return btn
+}
+
+function makeActionSep() {
+  const sep = document.createElement("div")
+  sep.className = "gowiki-action-sep"
+  return sep
+}
+
+// Text-button factory for in-content buttons (history Back, etc.)
+function makeContentButton(label, onClick) {
+  const btn = document.createElement("button")
+  btn.type = "button"
+  btn.className = "gowiki-content-btn"
   btn.textContent = label
   btn.addEventListener("click", onClick)
   return btn
@@ -3899,190 +3989,124 @@ function promptNewPage() {
   })
 }
 
+function toggleFullscreen() {
+  isFullscreen = !isFullscreen
+  document.body.classList.toggle("gowiki-fullscreen", isFullscreen)
+  if (isFullscreen) {
+    const exitBtn = document.createElement("button")
+    exitBtn.className = "gowiki-fullscreen-exit"
+    exitBtn.title = "Exit fullscreen (F11 or Esc)"
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    svg.setAttribute("viewBox", "0 0 24 24")
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path")
+    p.setAttribute("d", actionIcons.exitFullscreen)
+    svg.appendChild(p)
+    exitBtn.appendChild(svg)
+    exitBtn.addEventListener("click", toggleFullscreen)
+    document.body.appendChild(exitBtn)
+  } else {
+    const existing = document.querySelector(".gowiki-fullscreen-exit")
+    if (existing) existing.remove()
+  }
+}
+
 function renderActions() {
   actionsRoot.innerHTML = ""
 
-  const pageLabel = document.createElement("div")
-  pageLabel.className = "gowiki-status"
-  pageLabel.textContent = isNewPage
-    ? `Page: ${pageDisplayPath} (new)`
-    : `Page: ${pageDisplayPath}`
-  actionsRoot.appendChild(pageLabel)
-
   if (mode === "edit") {
-    const editModeLabel = document.createElement("div")
-    editModeLabel.className = "gowiki-status"
-    editModeLabel.textContent = `Edit mode: ${editMode}`
-    actionsRoot.appendChild(editModeLabel)
-
-    actionsRoot.appendChild(
-      makeActionButton("Media manager", () => {
-        openMediaManager(
-          pageNamespace,
-          text => setStatus(text),
-          (kind, entry) => {
-            if (editMode === "raw") {
-              rawInsertMediaReference(kind, entry)
-            } else {
-              insertMediaReference(kind, entry)
-            }
+    // ── Edit mode actions ──
+    actionsRoot.appendChild(makeActionIconBtn("media", "Media manager", () => {
+      openMediaManager(
+        pageNamespace,
+        text => setStatus(text),
+        (kind, entry) => {
+          if (editMode === "raw") {
+            rawInsertMediaReference(kind, entry)
+          } else {
+            insertMediaReference(kind, entry)
           }
-        )
-      })
-    )
+        }
+      )
+    }))
 
     if (editMode === "visual") {
-      actionsRoot.appendChild(
-        makeActionButton("Switch to raw", () => {
-          setEditMode("raw")
-        })
-      )
+      actionsRoot.appendChild(makeActionIconBtn("switchRaw", "Switch to raw", () => setEditMode("raw")))
     } else {
-      actionsRoot.appendChild(
-        makeActionButton("Switch to visual", () => {
-          setEditMode("visual")
-        })
-      )
+      actionsRoot.appendChild(makeActionIconBtn("switchVisual", "Switch to visual", () => setEditMode("visual")))
     }
 
-    // Draft-based save actions.
-    const saveContinueBtn = makeActionButton(shortcutHint("Save & continue", "S"), () => {
-      void saveDraftExplicit()
-    })
-    actionsRoot.appendChild(saveContinueBtn)
-    actionsRoot.appendChild(
-      makeActionButton("Save to draft", () => {
-        void saveDraftAndExit()
-      })
-    )
-    const publishBtn = makeActionButton("Publish", () => {
-      void publishDraft()
-    })
-    publishBtn.title = isMac ? "Publish (\u21E7\u2318S)" : "Publish (Ctrl+Shift+S)"
-    actionsRoot.appendChild(publishBtn)
-    actionsRoot.appendChild(
-      makeActionButton("Cancel", () => {
-        cancelEdit()
-      })
-    )
-    actionsRoot.appendChild(
-      makeActionButton("Discard draft", () => {
-        void discardDraft()
-      })
-    )
+    actionsRoot.appendChild(makeActionSep())
+
+    const saveHint = isMac ? "\u2318S" : "Ctrl+S"
+    actionsRoot.appendChild(makeActionIconBtn("save", `Save & continue (${saveHint})`, () => void saveDraftExplicit()))
+    actionsRoot.appendChild(makeActionIconBtn("saveDraft", "Save to draft", () => void saveDraftAndExit()))
+
+    const pubHint = isMac ? "\u21E7\u2318S" : "Ctrl+Shift+S"
+    actionsRoot.appendChild(makeActionIconBtn("publish", `Publish (${pubHint})`, () => void publishDraft()))
+
+    actionsRoot.appendChild(makeActionSep())
+    actionsRoot.appendChild(makeActionIconBtn("cancel", "Cancel editing", () => cancelEdit()))
+    actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
+
+    actionsRoot.appendChild(makeActionSep())
+    actionsRoot.appendChild(makeActionIconBtn("fullscreen", "Fullscreen (F11)", () => toggleFullscreen()))
+
   } else {
-    // View mode — check lock/draft state.
+    // ── View mode actions ──
+
+    // Edit button — varies by lock/draft state
     if (pageLockInfo && pageLockInfo.is_draft && pageLockInfo.locked_by === currentUser?.username) {
-      // Draft owner — show draft banner and actions.
-      const banner = document.createElement("div")
-      banner.className = "gowiki-draft-banner"
-      banner.textContent = "You have an unpublished draft"
-      actionsRoot.appendChild(banner)
-
-      actionsRoot.appendChild(
-        makeActionButton("Edit (resume)", () => {
-          void enterEditMode(true)
-        })
-      )
-      actionsRoot.appendChild(
-        makeActionButton("Publish", () => {
-          void publishFromView()
-        })
-      )
-      actionsRoot.appendChild(
-        makeActionButton("Discard draft", () => {
-          void discardDraft()
-        })
-      )
+      const editBtn = makeActionIconBtn("edit", "Resume editing \u2014 unpublished draft", () => void enterEditMode(true))
+      const dot = document.createElement("span")
+      dot.className = "gowiki-action-draft-dot"
+      editBtn.appendChild(dot)
+      actionsRoot.appendChild(editBtn)
+      actionsRoot.appendChild(makeActionIconBtn("publish", "Publish draft", () => void publishFromView()))
+      actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
     } else if (pageLockInfo && pageLockInfo.locked_by && pageLockInfo.locked_by !== currentUser?.username) {
-      // Locked by another user.
-      const lockLabel = document.createElement("div")
-      lockLabel.className = "gowiki-status gowiki-lock-indicator"
-      lockLabel.textContent = `Locked by ${pageLockInfo.locked_by}`
-      actionsRoot.appendChild(lockLabel)
-
-      const editBtn = makeActionButton("Edit", () => {})
+      const editBtn = makeActionIconBtn("lock", `Locked by ${pageLockInfo.locked_by}`, () => {})
       editBtn.disabled = true
-      editBtn.style.opacity = "0.5"
       actionsRoot.appendChild(editBtn)
     } else {
-      actionsRoot.appendChild(
-        makeActionButton("Edit", () => {
-          void enterEditMode(false)
-        })
-      )
+      const editHint = isMac ? "\u2318E" : "Ctrl+E"
+      actionsRoot.appendChild(makeActionIconBtn("edit", `Edit (${editHint})`, () => void enterEditMode(false)))
     }
 
-    actionsRoot.appendChild(
-      makeActionButton("History", () => {
-        void showHistory()
-      })
-    )
-    actionsRoot.appendChild(
-      makeActionButton("Backlinks", () => {
-        void showBacklinks()
-      })
-    )
-    actionsRoot.appendChild(
-      makeActionButton("New page", () => {
-        void promptNewPage()
-      })
-    )
-    actionsRoot.appendChild(
-      makeActionButton("Site map", () => {
-        window.location.href = "/_sitemap"
-      })
-    )
-    actionsRoot.appendChild(
-      makeActionButton("Export PDF", () => {
-        window.open(`/api/export/pdf/${pagePath}`, "_blank")
-      })
-    )
+    actionsRoot.appendChild(makeActionSep())
 
-    // Comment button — only when authenticated and not a new page.
+    actionsRoot.appendChild(makeActionIconBtn("history", "History", () => void showHistory()))
+    actionsRoot.appendChild(makeActionIconBtn("backlinks", "Backlinks", () => void showBacklinks()))
+
+    actionsRoot.appendChild(makeActionSep())
+
+    actionsRoot.appendChild(makeActionIconBtn("newPage", "New page", () => void promptNewPage()))
+    actionsRoot.appendChild(makeActionIconBtn("siteMap", "Site map", () => { window.location.href = "/_sitemap" }))
+    actionsRoot.appendChild(makeActionIconBtn("exportPdf", "Export PDF", () => window.open(`/api/export/pdf/${pagePath}`, "_blank")))
+
     if (currentUser && !isNewPage) {
+      actionsRoot.appendChild(makeActionSep())
       const commentCount = getCommentCount()
-      const commentLabel = commentCount > 0 ? `Comments (${commentCount})` : "Comment"
-      const commentBtn = makeActionButton(commentLabel, () => addComment())
-      actionsRoot.appendChild(commentBtn)
-    }
-
-    // Move / namespace conversion buttons — only when authenticated and not a new page.
-    if (currentUser && !isNewPage) {
-      actionsRoot.appendChild(
-        makeActionButton("Move", () => {
-          void movePage()
-        })
-      )
-      if (isNamespaceIndex) {
-        actionsRoot.appendChild(
-          makeActionButton("To regular page", () => {
-            void convertPageType("to_regular_page")
-          })
-        )
-      } else {
-        actionsRoot.appendChild(
-          makeActionButton("To namespace", () => {
-            void convertPageType("to_namespace_index")
-          })
-        )
+      const commentTip = commentCount > 0 ? `Comments (${commentCount})` : "Comment"
+      const commentBtn = makeActionIconBtn("comment", commentTip, () => addComment())
+      if (commentCount > 0) {
+        const badge = document.createElement("span")
+        badge.className = "gowiki-action-badge"
+        badge.textContent = String(commentCount)
+        commentBtn.appendChild(badge)
       }
+      actionsRoot.appendChild(commentBtn)
+      actionsRoot.appendChild(makeActionIconBtn("move", "Move page", () => void movePage()))
+      if (isNamespaceIndex) {
+        actionsRoot.appendChild(makeActionIconBtn("convert", "Convert to regular page", () => void convertPageType("to_regular_page")))
+      } else {
+        actionsRoot.appendChild(makeActionIconBtn("convert", "Convert to namespace", () => void convertPageType("to_namespace_index")))
+      }
+      actionsRoot.appendChild(makeActionIconBtn("delete", "Delete page", () => void deletePage(), "gowiki-action-delete"))
     }
 
-    // Delete button — only shown when authenticated and not a new page.
-    if (currentUser && !isNewPage) {
-      const deleteBtn = makeActionButton("Delete", () => {
-        void deletePage()
-      })
-      deleteBtn.className = "gowiki-action-btn gowiki-action-delete"
-      actionsRoot.appendChild(deleteBtn)
-    }
+    actionsRoot.appendChild(makeActionSep())
+    actionsRoot.appendChild(makeActionIconBtn("fullscreen", "Fullscreen (F11)", () => toggleFullscreen()))
   }
-
-  const status = document.createElement("div")
-  status.className = "gowiki-status"
-  status.textContent = statusText
-  actionsRoot.appendChild(status)
 }
 
 async function publishFromView() {
@@ -4330,7 +4354,7 @@ function renderBacklinksPage(backlinks) {
 
   const backBtn = document.createElement("button")
   backBtn.textContent = "Back to page"
-  backBtn.className = "gowiki-action-btn"
+  backBtn.className = "gowiki-content-btn"
   backBtn.style.marginTop = "16px"
   backBtn.addEventListener("click", () => {
     window.history.back()
@@ -4515,7 +4539,7 @@ function renderHistoryPage(versions, draft) {
 
   const backBtn = document.createElement("button")
   backBtn.textContent = "Back to page"
-  backBtn.className = "gowiki-action-btn"
+  backBtn.className = "gowiki-content-btn"
   backBtn.style.marginTop = "16px"
   backBtn.addEventListener("click", () => {
     window.history.back()
@@ -4610,14 +4634,14 @@ async function viewVersion(version) {
 
     const backBtn = document.createElement("button")
     backBtn.textContent = "Back to history"
-    backBtn.className = "gowiki-action-btn"
+    backBtn.className = "gowiki-content-btn"
     backBtn.addEventListener("click", () => void showHistory())
     actions.appendChild(backBtn)
 
     if (historyLatestVersion == null || version < historyLatestVersion) {
       const restoreBtn = document.createElement("button")
       restoreBtn.textContent = "Restore this version"
-      restoreBtn.className = "gowiki-action-btn"
+      restoreBtn.className = "gowiki-content-btn"
       restoreBtn.addEventListener("click", () => void restoreVersion(version))
       actions.appendChild(restoreBtn)
     }
@@ -4675,7 +4699,7 @@ function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRef
   actions.style.marginTop = "16px"
   const backBtn = document.createElement("button")
   backBtn.textContent = "Back to history"
-  backBtn.className = "gowiki-action-btn"
+  backBtn.className = "gowiki-content-btn"
   backBtn.addEventListener("click", () => void showHistory())
   actions.appendChild(backBtn)
 
@@ -5913,18 +5937,7 @@ function renderAdminPage() {
   contentRoot.innerHTML = ""
   actionsRoot.innerHTML = ""
 
-  // Show "Administration" in actions sidebar
-  const label = document.createElement("div")
-  label.className = "gowiki-status"
-  label.textContent = "Administration"
-  actionsRoot.appendChild(label)
-
-  // Back to wiki link
-  const backBtn = document.createElement("button")
-  backBtn.className = "gowiki-action-btn"
-  backBtn.textContent = "Back to Wiki"
-  backBtn.addEventListener("click", () => { window.location.href = "/" })
-  actionsRoot.appendChild(backBtn)
+  actionsRoot.appendChild(makeActionIconBtn("backlinks", "Back to Wiki", () => { window.location.href = "/" }))
 
   // Tab bar
   const tabBar = document.createElement("div")
@@ -7826,6 +7839,18 @@ async function bootstrap() {
 
   // Global keyboard shortcuts that work even when focus is in a property panel input.
   document.addEventListener("keydown", e => {
+    // F11: toggle fullscreen
+    if (e.key === "F11") {
+      e.preventDefault()
+      toggleFullscreen()
+      return
+    }
+    // Escape: exit fullscreen (only when no modal is open)
+    if (e.key === "Escape" && isFullscreen && !document.querySelector(".gowiki-link-modal-overlay, .gowiki-media-modal-overlay, .gowiki-admin-modal-overlay, .gowiki-login-overlay")) {
+      e.preventDefault()
+      toggleFullscreen()
+      return
+    }
     const isMod = e.metaKey || e.ctrlKey
     if (!isMod) return
     // CMD+E: enter edit mode from view mode.

@@ -184,7 +184,7 @@ mark.search-highlight {
   position: relative;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 220px;
+  grid-template-columns: 220px minmax(0, 1fr) 48px;
   column-gap: 16px;
   row-gap: 0;
   width: 100%;
@@ -336,12 +336,13 @@ mark.search-highlight {
 #actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 2px;
   position: fixed;
   top: 62px;
-  right: 16px;
-  width: 220px;
-  padding-left: 0;
+  right: 4px;
+  width: 40px;
+  padding: 4px 0;
   z-index: 20;
 }
 
@@ -351,9 +352,61 @@ mark.search-highlight {
 }
 
 .gowiki-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.gowiki-action-btn:hover {
+  background: #e8e8e8;
+  border-color: #c9c9c9;
+  color: #222;
+}
+
+.gowiki-action-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.gowiki-action-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.gowiki-action-btn path {
+  fill: currentColor;
+}
+
+.gowiki-action-btn--stroke path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gowiki-action-delete {
+  color: #c33;
+}
+
+.gowiki-action-delete:hover {
+  background: #fce8e8;
+  color: #c33;
+}
+
+/* Text-based button for in-content use (Back to page, Restore, etc.) */
+.gowiki-content-btn {
   display: inline-block;
-  width: auto;
-  max-width: 170px;
   padding: 8px 10px;
   border: 1px solid #c9c9c9;
   border-radius: 4px;
@@ -361,30 +414,133 @@ mark.search-highlight {
   color: #222;
   text-align: left;
   cursor: pointer;
+  font-size: inherit;
 }
 
-.gowiki-action-btn:hover {
+.gowiki-content-btn:hover {
   background: #ececec;
 }
 
-.gowiki-action-btn:disabled {
+.gowiki-content-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.gowiki-action-delete {
-  color: #c33;
-  border-color: #c33;
+.gowiki-action-sep {
+  width: 24px;
+  height: 1px;
+  background: #d0d0d0;
+  margin: 3px 0;
+  flex-shrink: 0;
 }
 
-.gowiki-action-delete:hover {
-  background: #fce8e8;
+.gowiki-action-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: #1e3f72;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  padding: 0 3px;
+  pointer-events: none;
+}
+
+.gowiki-action-draft-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e6a817;
+  pointer-events: none;
+}
+
+.gowiki-action-toast {
+  position: fixed;
+  right: 56px;
+  top: 62px;
+  background: #333;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  z-index: 25;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  white-space: nowrap;
+}
+
+.gowiki-action-toast.visible {
+  opacity: 1;
 }
 
 .gowiki-status {
   min-height: 1.2em;
   color: #666;
   font-size: 0.9em;
+}
+
+/* ── Fullscreen mode ─────────────────────────────── */
+
+body.gowiki-fullscreen #banner { display: none !important; }
+body.gowiki-fullscreen #left { display: none !important; }
+body.gowiki-fullscreen #footer { display: none !important; }
+body.gowiki-fullscreen #actions { display: none !important; }
+
+body.gowiki-fullscreen #app {
+  grid-template-columns: 1fr !important;
+  column-gap: 0;
+  margin: 0;
+  padding: 0 12px;
+}
+
+body.gowiki-fullscreen #main {
+  grid-column: 1;
+  height: 100vh;
+}
+
+.gowiki-fullscreen-exit {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 200;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.25;
+  transition: opacity 0.2s;
+}
+
+.gowiki-fullscreen-exit:hover {
+  opacity: 1;
+}
+
+.gowiki-fullscreen-exit svg {
+  width: 18px;
+  height: 18px;
+}
+
+.gowiki-fullscreen-exit path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .gowiki-menu-icon {
@@ -703,8 +859,17 @@ mark.search-highlight {
   #actions {
     position: static;
     width: auto;
-    padding-left: 0;
-    z-index: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 0;
+  }
+
+  .gowiki-action-sep {
+    width: 1px;
+    height: 24px;
+    margin: 0 2px;
   }
 }
 
