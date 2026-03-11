@@ -11,8 +11,11 @@ In the following syntax `\n` is meant to be interpreted as a new line contained 
 | -- | -- | -- | -- | -- |
 | *Italic*  | `*Italic*` | `<em>Italic</em>` | `_italic_` | |
 | **Bold** | `**Bold**` | `<strong>Bold</strong>` | `__bold__` |
-| ~~Strike through~~ | `~~Strike through~~` | `<s>Strike through</s>` | 
+| ~~Strike through~~ | `~~Strike through~~` | `<s>Strike through</s>` | |
 | _Underlined_  | `_Underlined_` | `<u>Underlined</u>` | | |
+| ~Subscript~ | `~Subscript~` | `<sub>Subscript</sub>` | | Single tilde wraps subscript text |
+| ^Superscript^ | `^Superscript^` | `<sup>Superscript</sup>` | | Single caret wraps superscript text |
+| ^[Footnote text] | `^[Footnote text]` | `<sup>1</sup>` (numbered) | | Inline footnote; rendered as auto-numbered superscript with hover tooltip |
 | # Heading 1 | `# Heading 1` | `<h1> Heading 1 </h1>` | `Heading 1 \n =======` |
 | ## Heading 2 | `## Heading 2` | `<h2> Heading 2 </h2>` | `Heading 2 \n -------` |
 | [Link](http://a.com) | `[Link](http://a.com)` | `<a href="http://a.com">Link</a>` | `[Link][1] \n... [1]: http://b.org` |
@@ -187,9 +190,15 @@ The include directive embeds the content of another page as a read-only zone. It
 ```
 
 - The `include` node has one required attribute: `path` (absolute or relative, following the same resolution rules as page links).
+- The path may include a `#section` anchor to include only a specific section of the target page:
+  ```
+  {include path=/path/to/page#section-heading}
+  ```
+  The anchor is matched against heading slugs. When an anchor is present, only the content from the matched heading to the next heading of the same or higher level is included.
 - The serializer produces exactly `{include path=...}` with no variation.
 - The included content is fetched at render time and displayed as non-editable content.
 - In edit mode, the include block shows a visual header identifying the included path and renders the content in a read-only zone.
+- Numbered headings inside included content continue the parent document's numbering sequence as if the content were inlined.
 
 ## Escaping and forbidden syntax
 
@@ -332,8 +341,11 @@ Status legend:
 | Area | Rule | Status | Notes |
 | -- | -- | -- | -- |
 | Inline emphasis | `*italic*`, `**bold**`, `` `code` `` | `implemented` | Implemented via current mark handlers and printers. |
-| Strike-through | `~~text~~` | `planned` | Not currently wired in core marks. |
-| Underline | `_text_` means underline (not italic) | `planned` | Conflicts with CommonMark emphasis; requires explicit dialect parser/printer rules. |
+| Strike-through | `~~text~~` | `implemented` | Custom markdown-it rule (built-in strikethrough disabled to avoid conflict with subscript). |
+| Underline | `_text_` means underline (not italic) | `implemented` | Overrides CommonMark `_` emphasis with custom parser/printer rules. |
+| Subscript | `~text~` | `implemented` | Single tilde. Custom rule runs before strikethrough to disambiguate `~` vs `~~`. |
+| Superscript | `^text^` | `implemented` | Single caret wraps superscript. |
+| Inline footnote | `^[text]` | `implemented` | Inline atom node; auto-numbered superscript with hover tooltip in rendered view. |
 | Headings | ATX headings (`#` .. `######`) | `implemented` | Setext headings are not implemented by custom handlers. |
 | Lists (unordered) | `- item` | `implemented` | Core list handlers support this form. |
 | Lists (ordered) | `1. item` (CommonMark) | `implemented` | Standard ordered-list syntax is canonical. Optional raw-mode helpers may auto-renumber without changing stored syntax. |
@@ -346,7 +358,7 @@ Status legend:
 | Table cell merging | `<<` colspan, `^^` rowspan | `planned` | Chevron tokens as sole cell content. Corner merges not supported. |
 | Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
-| Include directive | `{include path=/path/to/page}` self-contained | `implemented` | Self-contained directive that renders included page content as a read-only zone. |
+| Include directive | `{include path=/path/to/page}` self-contained, supports `#section` anchor | `implemented` | Self-contained directive; supports section-targeted includes via `#anchor`. Numbered headings flow through includes. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |
 | HTML entities | not interpreted specially | `partial` | Not explicitly transformed by custom logic; current behavior follows markdown-it defaults. |
 | Line breaks in top-level paragraphs | single newline -> hard break | `implemented` | Implemented with context-aware `softbreak` handling. |

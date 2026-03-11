@@ -174,7 +174,7 @@ Gowiki: `{tag label1 label2}`
 
 DokuWiki: `((footnote text))`
 
-100 pages match `((` but manual inspection shows most are false positives (parenthesized text in tables, e.g. scientific notes). Real DokuWiki footnotes are rare. Convert: `((note))` -> `(note)`. Flag each occurrence for manual review since distinguishing real footnotes from parenthesized text requires context.
+~100 pages use footnotes, mostly as inline glossary annotations (e.g. `CRC((ColoRectal Cancer))`, `KPI((Key Performance Indicators))`). These are genuine DokuWiki footnotes. Convert directly: `((text))` -> `^[text]` (Gowiki inline footnote, Pandoc-style). Renders as a superscript number with tooltip on hover.
 
 ### Nowiki
 

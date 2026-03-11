@@ -14,9 +14,11 @@ import { spoilerPlugin } from "./spoiler"
 import { chartPlugin } from "./chart"
 import { slidePlugin } from "./slide"
 import { captionPlugin } from "./caption"
+import { footnotePlugin } from "./footnote"
 
 export const plugins: Plugin[] = [
   captionPlugin,
+  footnotePlugin,
   imagePlugin,
   blockquotePlugin,
   tablePlugin,

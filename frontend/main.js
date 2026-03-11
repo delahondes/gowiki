@@ -129,6 +129,7 @@ let databaseInsertVarCommand = null
 let tagInsertCommand = null
 let tagQueryInsertCommand = null
 let captionInsertRefCommand = null
+let footnoteInsertCommand = null
 let spoilerInsertCommand = null
 let chartInsertCommand = null
 let slidesInsertCommand = null
@@ -169,6 +170,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "caption") {
     if (name === "insertRef") captionInsertRefCommand = cmd
+    return
+  }
+
+  if (namespace === "footnote") {
+    if (name === "insert") footnoteInsertCommand = cmd
     return
   }
 
@@ -3102,6 +3108,18 @@ function buildMenubar() {
       rawWrapSelection(rawEditor, "^", "^")
     }
   }, "superscript")
+
+  // Footnote
+  if (footnoteInsertCommand) {
+    addButton("fn", "Insert footnote", () => {
+      if (editMode === "visual" && editorView) {
+        footnoteInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "^[", "]")
+      }
+    })
+  }
 
   // Inline code
   addButton("</>", shortcutHint("Inline code", "E"), () => {
