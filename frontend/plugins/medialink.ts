@@ -68,6 +68,7 @@ function iconPathForHref(href: string): string {
 }
 
 const medialinkStyles = `
+.ProseMirror .gowiki-media-link,
 .gowiki-media-link {
   cursor: pointer;
   text-decoration: underline;
