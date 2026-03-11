@@ -52,6 +52,11 @@ func ExtractIncludes(content string, pagePath string) []string {
 			val = match[3]
 		}
 
+		// Strip anchor (#section) before resolving — for cycle detection
+		// only the page identity matters, not the section.
+		if idx := strings.Index(val, "#"); idx != -1 {
+			val = val[:idx]
+		}
 		resolved := ResolvePath(pagePath, val)
 		if resolved == "" {
 			continue

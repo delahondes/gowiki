@@ -99,6 +99,18 @@ func TestExtractIncludes(t *testing.T) {
 			pagePath: "/start",
 			want:     []string{"/sidebar"},
 		},
+		{
+			name:     "include with anchor strips fragment",
+			content:  "{include path=/docs/page#section}",
+			pagePath: "/start",
+			want:     []string{"/docs/page"},
+		},
+		{
+			name:     "include with anchor deduplicates against same page without anchor",
+			content:  "{include path=/docs/page#one}\n{include path=/docs/page#two}\n{include path=/docs/page}",
+			pagePath: "/start",
+			want:     []string{"/docs/page"},
+		},
 	}
 
 	for _, tc := range tests {

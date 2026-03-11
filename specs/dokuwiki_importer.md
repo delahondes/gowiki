@@ -134,7 +134,7 @@ Gowiki:
 Special cases:
 - **Header column** (first column with `^`, rest with `|`): Convert to `{table headers=1st_col}` property + pipe table with all `|` cells.
 - **Cell merge** (`:::`): 44 pages. DokuWiki uses `:::` for vertical merge. Convert to Gowiki's merge syntax: `<<` (colspan, merge left) and `^^` (rowspan, merge up).
-- **Cell colors** (`@LightBlue:text`): 2 pages. Convert to Gowiki cell property syntax. DokuWiki named colors map to Gowiki named colors where they exist (red, green, yellow, orange, grey, blue), otherwise use hex values.
+- **Cell colors** (`@LightBlue:text`): 2 pages. Convert to Gowiki cell property syntax. DokuWiki uses standard CSS color names which Gowiki accepts as-is (e.g. `lightblue` -> `lightblue`). No color mapping needed.
 - **Table formulas** (`~~=sum(...)~~`): 9 pages. Gowiki has a `table_formulas` plugin. Syntax may differ; convert where possible, flag for review.
 - **WRAP inside table cells**: Extract WRAP content, keep text only. Strip `<WRAP>`/`</WRAP>` tags.
 - **Multi-line cells**: DokuWiki allows `\\` for line breaks in cells -> convert to `\n`.
@@ -143,13 +143,14 @@ Special cases:
 
 DokuWiki: `{{page>ns:page}}` or `{{page>ns:page#section&noheader&nofooter}}`
 
-Gowiki: `{include path=/ns/page}`
+Gowiki: `{include path=/ns/page}` or `{include path=/ns/page#section}` (section-targeted)
 
 52 pages use includes. Conversion:
 - `{{page>ns:page}}` -> `{include path=/ns/page}`
 - `{{page>ns:page&nofooter}}` -> `{include path=/ns/page}` (nofooter/noheader are DokuWiki rendering hints -- drop them)
 - `{{page>ns:page&firstseconly&noreadmore}}` -> `{include path=/ns/page}` (firstseconly changes content scope -- **flag** for manual review)
-- `{{page>ns:page#section&link}}` -> `{include path=/ns/page}` (section targeting not supported -- **flag**, include full page)
+- `{{page>ns:page#section}}` -> `{include path=/ns/page#section}` (section-targeted include -- renders from the anchor heading to the next heading of same or higher level)
+- `{{page>ns:page#section&link}}` -> `{include path=/ns/page#section}` (drop DokuWiki rendering hints)
 
 ### Tags
 
@@ -315,7 +316,6 @@ Found only in `templates/` namespace. Convert to Gowiki: `{{PAGE}}`.
 |---|---|---|
 | Struct/data blocks and variables | ~50 | Excluded from scope -- custom migration |
 | Interwiki links (`[[wp>...]]`) | rare | Not supported in Gowiki |
-| Section-targeted includes (`#section`) | ~10 | Gowiki include is whole-page only |
 | `firstseconly` in includes | ~10 | Gowiki has no partial-include |
 | PDFNS directives | 9 | No Gowiki equivalent |
 | WRAP column layout (non-image) | ~11 | Flattened, no multi-column in Gowiki |

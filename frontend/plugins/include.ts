@@ -6,6 +6,7 @@ import type { Registry } from "../compiler/registry"
 import { markdownToPM } from "../compiler/markdown_to_pm"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 import { highlightCodeBlocks } from "../highlight"
+import { slugify } from "../compiler/slugify"
 
 const includeProperties = [
   {
@@ -57,6 +58,59 @@ const includeStyles = `
   padding: 8px;
 }
 `
+
+/** Extract a section from a PM doc: from the anchor heading to the next heading of same/higher level. */
+function extractSection(doc: PMNode, anchor: string, schema: Schema): PMNode {
+  let startIdx = -1
+  let startLevel = 0
+  let endIdx = doc.childCount
+  for (let i = 0; i < doc.childCount; i++) {
+    const child = doc.child(i)
+    if (child.type.name === "heading") {
+      if (startIdx === -1) {
+        if (slugify(child.textContent) === anchor) {
+          startIdx = i
+          startLevel = child.attrs.level
+        }
+      } else if (child.attrs.level <= startLevel) {
+        endIdx = i
+        break
+      }
+    }
+  }
+  if (startIdx === -1) return doc // anchor not found — show full page
+  const nodes: PMNode[] = []
+  for (let i = startIdx; i < endIdx; i++) {
+    nodes.push(doc.child(i))
+  }
+  return schema.nodes.doc.create(null, nodes)
+}
+
+/** Resolve a possibly-relative include path against the current page. */
+function resolveIncludePath(includePath: string): string {
+  if (includePath.startsWith("/")) return includePath
+  // Get current page path from location
+  let current = window.location.pathname.replace(/^\/+|\/+$/g, "")
+  if (!current || current === "index") current = ""
+  const namespace = current.includes("/")
+    ? current.slice(0, current.lastIndexOf("/"))
+    : ""
+  if (includePath.startsWith("./")) {
+    const rel = includePath.slice(2)
+    return namespace ? `/${namespace}/${rel}` : `/${rel}`
+  }
+  if (includePath.startsWith("../")) {
+    let ns = namespace
+    let p = includePath
+    while (p.startsWith("../")) {
+      p = p.slice(3)
+      ns = ns.includes("/") ? ns.slice(0, ns.lastIndexOf("/")) : ""
+    }
+    return ns ? `/${ns}/${p}` : `/${p}`
+  }
+  // Bare relative
+  return namespace ? `/${namespace}/${includePath}` : `/${includePath}`
+}
 
 function encodePagePath(path: string): string {
   return path
@@ -114,7 +168,7 @@ class IncludeNodeView {
     }
   }
 
-  private async fetchAndRender(path: string) {
+  private async fetchAndRender(fullPath: string) {
     this.destroyInnerView()
     this.bodyEl.innerHTML = ""
     const loading = document.createElement("div")
@@ -122,8 +176,20 @@ class IncludeNodeView {
     loading.textContent = "Loading..."
     this.bodyEl.appendChild(loading)
 
+    // Split path and optional #anchor
+    let pagePath = fullPath
+    let anchor = ""
+    const hashIdx = fullPath.indexOf("#")
+    if (hashIdx !== -1) {
+      pagePath = fullPath.slice(0, hashIdx)
+      anchor = fullPath.slice(hashIdx + 1)
+    }
+
+    // Resolve relative paths (./foo, ../foo, bare) against current page
+    pagePath = resolveIncludePath(pagePath)
+
     try {
-      const cleanPath = path.replace(/^\/+/, "")
+      const cleanPath = pagePath.replace(/^\/+/, "")
       const resp = await fetch(`/api/pages/${encodePagePath(cleanPath)}`)
       if (!resp.ok) {
         if (resp.status === 403) {
@@ -131,14 +197,17 @@ class IncludeNodeView {
           this.bodyEl.innerHTML = ""
           return
         }
-        this.showError(`Page not found: ${path}`)
+        this.showError(`Page not found: ${pagePath}`)
         return
       }
 
       const data = await resp.json()
       const markdown = data.markdown ?? ""
 
-      const doc = markdownToPM(markdown, this.registry)
+      let doc = markdownToPM(markdown, this.registry)
+      if (anchor) {
+        doc = extractSection(doc, anchor, this.registry.schema)
+      }
 
       this.bodyEl.innerHTML = ""
       const state = EditorState.create({
