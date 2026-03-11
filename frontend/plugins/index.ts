@@ -12,6 +12,7 @@ import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
 import { spoilerPlugin } from "./spoiler"
 import { chartPlugin } from "./chart"
+import { slidePlugin } from "./slide"
 import { captionPlugin } from "./caption"
 
 export const plugins: Plugin[] = [
@@ -29,4 +30,5 @@ export const plugins: Plugin[] = [
   commentPlugin,
   spoilerPlugin,
   chartPlugin,
+  slidePlugin,
 ]

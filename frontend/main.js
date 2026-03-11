@@ -127,6 +127,7 @@ let tagQueryInsertCommand = null
 let captionInsertRefCommand = null
 let spoilerInsertCommand = null
 let chartInsertCommand = null
+let slidesInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -174,6 +175,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "chart") {
     if (name === "insert") chartInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "slides") {
+    if (name === "insert") slidesInsertCommand = cmd
     return
   }
 
@@ -1894,6 +1900,17 @@ function rawInsertChart(textarea) {
   textarea.setSelectionRange(cursorPos, cursorPos)
 }
 
+function rawInsertSlides(textarea) {
+  const start = textarea.selectionStart
+  const snippet = "```slides\n# Title Slide\n\n---\n\n# Slide 2\n\n---\n\n# Thank You\n```"
+  textarea.focus()
+  textarea.setSelectionRange(start, start)
+  rawInsertText(textarea, snippet)
+  // Place cursor on the title
+  const cursorPos = start + 12 // after "```slides\n# "
+  textarea.setSelectionRange(cursorPos, cursorPos)
+}
+
 // --- Raw ordered list renumbering ---
 
 function rawRenumberOrderedLists(textarea) {
@@ -3190,6 +3207,18 @@ function buildMenubar() {
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
         rawInsertChart(rawEditor)
+      }
+    })
+  }
+
+  // Slides
+  if (slidesInsertCommand) {
+    addImgButton("/icons/slides.svg", "Slides", () => {
+      if (editMode === "visual" && editorView) {
+        slidesInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawInsertSlides(rawEditor)
       }
     })
   }
