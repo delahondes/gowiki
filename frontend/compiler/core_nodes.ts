@@ -790,10 +790,15 @@ function buildLinkDecorations(
 function registerLinkStatus(reg: Registry) {
   reg.registerEditorPlugin(() => {
     const loc = window.location.pathname
+    const isNamespaceIndex = loc.endsWith("/")
     const curPage = loc === "/" ? "" : loc.replace(/^\/+|\/+$/g, "").replace(/\/index$/, "")
-    const pageNamespace = curPage.includes("/")
-      ? curPage.split("/").slice(0, -1).join("/")
-      : ""
+    // For namespace index pages (URL ends with /), the page IS the namespace.
+    // For regular pages, the namespace is the parent directory.
+    const pageNamespace = isNamespaceIndex
+      ? curPage
+      : curPage.includes("/")
+        ? curPage.split("/").slice(0, -1).join("/")
+        : ""
 
     const statusMap = new Map<string, boolean>()
     let timer: ReturnType<typeof setTimeout> | null = null
