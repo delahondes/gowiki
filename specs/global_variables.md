@@ -88,6 +88,14 @@ Derived from the page metadata returned by `GET /api/pages/{path}` (the `meta` o
 
 Note: DATE/MONTH/DAY are based on the **page version date** (last save), not the current wall-clock time. This is deliberate — the values are stable and reproducible, not time-dependent.
 
+### Creation variables
+
+Derived from page metadata. The creation date is the timestamp of the first version (version 1) of the page. Requires `created_at` to be stored in page metadata (alongside the existing `created_by`).
+
+| Variable | Description | Example value |
+|---|---|---|
+| `{{CREATIONDATE}}` | Page creation date in `YYYY-MM-DD` format | `2026-01-15` |
+
 ### Author variables
 
 Two sets: the page **creator** (first version) and the **last editor** (current version).

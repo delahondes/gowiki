@@ -193,6 +193,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/export/pdf/*", s.handleExportPDF)
 		r.Get("/api/backlinks/*", s.handleBacklinks)
 		r.Post("/api/pages/check", s.handleCheckPages)
+		r.Get("/api/template/*", s.handleGetTemplate)
+		r.Get("/api/templates", s.handleListTemplates)
 	})
 
 	// Public read endpoints — no ACL check (search, logo, site info, sitemap).

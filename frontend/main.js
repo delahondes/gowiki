@@ -102,6 +102,7 @@ let editorView = null
 let rawEditor = null
 let statusText = ""
 let isNewPage = false
+let hasTemplate = false
 let isNamespaceIndex = false
 let siteTitle = "Gowiki"
 let siteVersion = ""
@@ -5308,6 +5309,7 @@ async function reloadPageContent() {
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false
+    hasTemplate = false
     currentPageVersion = page.meta?.version || 0
     currentPageMeta = page.meta || null
     pageLockInfo = null
@@ -5321,7 +5323,23 @@ async function reloadPageContent() {
       }
     }
   } else {
-    currentMarkdown = defaultMarkdown
+    // Page doesn't exist — try to fetch a template.
+    let templateMarkdown = null
+    try {
+      const tmplUrl = `/api/template/${encodePagePath(pagePath)}`
+      console.log("[gowiki] reloadPageContent fetching template:", tmplUrl)
+      const tmplResp = await fetch(tmplUrl)
+      console.log("[gowiki] reloadPageContent template response:", tmplResp.status)
+      if (tmplResp.ok) {
+        const tmplData = await tmplResp.json()
+        console.log("[gowiki] reloadPageContent template data:", tmplData)
+        templateMarkdown = tmplData.markdown
+      }
+    } catch (err) {
+      console.error("[gowiki] reloadPageContent template fetch error:", err)
+    }
+    currentMarkdown = templateMarkdown || defaultMarkdown
+    hasTemplate = !!templateMarkdown
     isNewPage = true
     currentPageVersion = 0
     currentPageMeta = null
@@ -7982,9 +8000,11 @@ async function bootstrap() {
     }
     throw err
   }
+  console.log("[gowiki] bootstrap: page =", page ? "exists" : "null", "pagePath =", pagePath)
   if (page) {
     currentMarkdown = page.markdown
     isNewPage = false
+    hasTemplate = false
     currentPageVersion = page.meta?.version || 0
     currentPageMeta = page.meta || null
     // Capture lock/draft info from page response.
@@ -7999,7 +8019,23 @@ async function bootstrap() {
       }
     }
   } else {
-    currentMarkdown = defaultMarkdown
+    // Page doesn't exist — try to fetch a template.
+    let templateMarkdown = null
+    try {
+      const tmplUrl = `/api/template/${encodePagePath(pagePath)}`
+      console.log("[gowiki] fetching template:", tmplUrl)
+      const tmplResp = await fetch(tmplUrl)
+      console.log("[gowiki] template response:", tmplResp.status)
+      if (tmplResp.ok) {
+        const tmplData = await tmplResp.json()
+        console.log("[gowiki] template data:", tmplData)
+        templateMarkdown = tmplData.markdown
+      }
+    } catch (err) {
+      console.error("[gowiki] template fetch error:", err)
+    }
+    currentMarkdown = templateMarkdown || defaultMarkdown
+    hasTemplate = !!templateMarkdown
     isNewPage = true
     currentPageVersion = 0
     currentPageMeta = null

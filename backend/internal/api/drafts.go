@@ -44,6 +44,12 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a page exists at a parent path that conflicts with this namespace")
 			return
 		}
+		// New page — resolve template if available.
+		if tmpl, ok := s.store.(TemplateResolver); ok {
+			if content, _, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
+				published = content
+			}
+		}
 	}
 
 	markdown, editToken, err := s.draftManager.EnterEditMode(pagePath, username, force, published)

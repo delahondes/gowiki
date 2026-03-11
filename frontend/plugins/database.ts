@@ -1937,6 +1937,13 @@ function resolveGlobalVar(name: string, view: EditorView): string | null | undef
       return isNaN(d.getTime()) ? "" : String(d.getDate())
     }
 
+    // Creation date variable
+    case "CREATIONDATE": {
+      if (!meta?.created_at) return ""
+      const d = new Date(meta.created_at)
+      return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10)
+    }
+
     // Author variables (sync: return username, trigger async display name fetch)
     case "AUTHOR":         return meta?.created_by || ""
     case "AUTHORNAME":     return userInfoCache[meta?.created_by]?.display_name || meta?.created_by || ""

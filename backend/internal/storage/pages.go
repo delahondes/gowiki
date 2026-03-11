@@ -20,6 +20,12 @@ var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at
 var ErrPageHasLock = errors.New("page is locked by a draft")
 var ErrDestinationExists = errors.New("destination already exists")
 var ErrNamespaceNotEmpty = errors.New("namespace not empty")
+var ErrNoTemplate = errors.New("no template found")
+
+// IsTemplatePath reports whether a normalized page path refers to a template file.
+func IsTemplatePath(pagePath string) bool {
+	return pagePath == "/_template" || strings.HasSuffix(pagePath, "/_template")
+}
 
 // CircularIncludeError is returned when saving a page would create a cycle
 // in the include graph.
@@ -339,53 +345,54 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		s.Changelog.Append(normalized, meta.Version, author, "", "edit")
 	}
 
+	// Templates are excluded from indexes and syncs (but not changelog or search).
+	isTemplate := IsTemplatePath(normalized)
+
 	// --- Update indexes ---
-	s.RefIndex.UpdatePage(normalized, newMediaRefs)
-	s.IncludeIndex.UpdatePage(normalized, newIncludes)
+	if !isTemplate {
+		s.RefIndex.UpdatePage(normalized, newMediaRefs)
+		s.IncludeIndex.UpdatePage(normalized, newIncludes)
 
-	// --- Update link index ---
-	if s.LinkIndex != nil {
-		newLinks := markdown.ExtractPageLinks(markdownContent, resolvePath)
-		s.LinkIndex.UpdatePage(normalized, newLinks)
+		if s.LinkIndex != nil {
+			newLinks := markdown.ExtractPageLinks(markdownContent, resolvePath)
+			s.LinkIndex.UpdatePage(normalized, newLinks)
+		}
+
+		if s.TagIndex != nil {
+			tags := markdown.ExtractTags(markdownContent)
+			title := markdown.ExtractTitle(markdownContent)
+			s.TagIndex.UpdatePage(normalized, tags, title)
+		}
+
+		if s.DatabaseSync != nil {
+			s.DatabaseSync.SyncPageRows(normalized, markdownContent)
+		}
+
+		if s.TodoSync != nil {
+			s.TodoSync.SyncPageRows(normalized, markdownContent)
+		}
+
+		if s.ReviewflowSync != nil {
+			_ = s.ReviewflowSync.SyncFromMarkdown(normalized, meta.Version, markdownContent)
+		}
 	}
 
-	// --- Update tag index ---
-	if s.TagIndex != nil {
-		tags := markdown.ExtractTags(markdownContent)
-		title := markdown.ExtractTitle(markdownContent)
-		s.TagIndex.UpdatePage(normalized, tags, title)
-	}
-
-	// --- Update search index ---
+	// Always index templates for search so they can be found.
 	if s.SearchIndex != nil {
 		title := markdown.ExtractTitle(markdownContent)
 		plaintext := markdown.StripMarkdown(markdownContent)
 		_ = s.SearchIndex.IndexPage(normalized, title, plaintext)
 	}
 
-	// Persist indexes (best effort — indexes are rebuilt on startup anyway).
-	_ = s.RefIndex.Save()
-	_ = s.IncludeIndex.Save()
-	if s.LinkIndex != nil {
-		_ = s.LinkIndex.Save()
-	}
-	if s.TagIndex != nil {
-		_ = s.TagIndex.Save()
-	}
-
-	// --- Sync database rows if configured ---
-	if s.DatabaseSync != nil {
-		s.DatabaseSync.SyncPageRows(normalized, markdownContent)
-	}
-
-	// --- Sync todo tasks if configured ---
-	if s.TodoSync != nil {
-		s.TodoSync.SyncPageRows(normalized, markdownContent)
-	}
-
-	// --- Sync reviewflow state if configured ---
-	if s.ReviewflowSync != nil {
-		_ = s.ReviewflowSync.SyncFromMarkdown(normalized, meta.Version, markdownContent)
+	if !isTemplate {
+		_ = s.RefIndex.Save()
+		_ = s.IncludeIndex.Save()
+		if s.LinkIndex != nil {
+			_ = s.LinkIndex.Save()
+		}
+		if s.TagIndex != nil {
+			_ = s.TagIndex.Save()
+		}
 	}
 
 	// --- Compute newly orphaned media ---
@@ -1069,6 +1076,10 @@ func (s *FileStore) RebuildIndexes() error {
 		if !strings.HasSuffix(absPath, ".md") {
 			return nil
 		}
+		// Skip template files.
+		if filepath.Base(absPath) == "_template.md" {
+			return nil
+		}
 
 		rel, relErr := filepath.Rel(s.contentRoot, absPath)
 		if relErr != nil {
@@ -1135,6 +1146,73 @@ func (s *FileStore) RebuildIndexes() error {
 	return nil
 }
 
+// ResolveTemplate walks up from the target page's namespace looking for
+// _template.md and returns its content and logical path. Returns ErrNoTemplate
+// if no template is found.
+func (s *FileStore) ResolveTemplate(pagePath string) (string, string, error) {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Determine namespace: parent directory of the target page.
+	ns := path.Dir(normalized)
+	if ns == "." {
+		ns = "/"
+	}
+
+	// Walk up from the namespace to root, checking for _template.md.
+	for {
+		tmplPath := filepath.Join(s.contentRoot, filepath.FromSlash(ns), "_template.md")
+		if fileExists(tmplPath) {
+			content, err := os.ReadFile(tmplPath)
+			if err != nil {
+				return "", "", fmt.Errorf("read template: %w", err)
+			}
+			logicalPath := path.Join(ns, "_template")
+			return string(content), logicalPath, nil
+		}
+		if ns == "/" {
+			break
+		}
+		ns = path.Dir(ns)
+	}
+
+	return "", "", ErrNoTemplate
+}
+
+// TemplateEntry describes a template file for listing purposes.
+type TemplateEntry struct {
+	Namespace string `json:"namespace"`
+	Path      string `json:"path"`
+}
+
+// ListTemplates returns all _template.md files found under content/.
+func (s *FileStore) ListTemplates() ([]TemplateEntry, error) {
+	var templates []TemplateEntry
+	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || filepath.Base(absPath) != "_template.md" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(s.contentRoot, absPath)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		ns := "/" + strings.TrimSuffix(rel, "/_template.md")
+		if ns == "/." || ns == "/" {
+			ns = "/"
+		}
+		tmplPath := "/" + strings.TrimSuffix(rel, ".md")
+		templates = append(templates, TemplateEntry{Namespace: ns, Path: tmplPath})
+		return nil
+	})
+	return templates, err
+}
+
 // PageEntry is a summary for sitemap / listing purposes.
 type PageEntry struct {
 	Path             string `json:"path"`
@@ -1151,6 +1229,10 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 			return err
 		}
 		if info.IsDir() || !strings.HasSuffix(absPath, ".md") {
+			return nil
+		}
+		// Skip template files.
+		if filepath.Base(absPath) == "_template.md" {
 			return nil
 		}
 
