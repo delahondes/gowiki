@@ -88,6 +88,29 @@ export function registerCoreNodes(reg: Registry) {
     }
   }
 
+  // Extra marks: underline, strikethrough, subscript, superscript
+  marks.underline = {
+    parseDOM: [{ tag: "u" }, { style: "text-decoration=underline" }],
+    toDOM() { return ["u", 0] },
+  } as MarkSpec
+
+  marks.strikethrough = {
+    parseDOM: [{ tag: "s" }, { tag: "del" }, { style: "text-decoration=line-through" }],
+    toDOM() { return ["s", 0] },
+  } as MarkSpec
+
+  marks.subscript = {
+    parseDOM: [{ tag: "sub" }],
+    toDOM() { return ["sub", 0] },
+    excludes: "superscript",
+  } as MarkSpec
+
+  marks.superscript = {
+    parseDOM: [{ tag: "sup" }],
+    toDOM() { return ["sup", 0] },
+    excludes: "subscript",
+  } as MarkSpec
+
   reg.registerSchema({ nodes, marks })
 
   registerParagraph(reg)
@@ -165,7 +188,7 @@ function registerParagraph(reg: Registry) {
 }
 
 /* --------------------------------------------------
- * Emphasis / strong / code
+ * Emphasis / strong / code / underline / strikethrough / sub / sup
  * -------------------------------------------------- */
 
 function registerEmphasis(reg: Registry) {
@@ -175,6 +198,126 @@ function registerEmphasis(reg: Registry) {
     return /^(#\S+|(\/(?!\/)|\.\/|\.\.\/)\S*)$/.test(href)
   }
 
+  // --- markdown-it plugin: remap _text_ from em to underline ---
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.core.ruler.push("gowiki_underline", (state: any) => {
+      function walk(tokens: any[]) {
+        // Track which em_open/close pairs come from _ delimiters.
+        // markdown-it sets markup = "_" on em tokens produced by underscore.
+        for (const tok of tokens) {
+          if ((tok.type === "em_open" || tok.type === "em_close") && tok.markup === "_") {
+            tok.type = tok.type === "em_open" ? "underline_open" : "underline_close"
+            tok.tag = "u"
+          }
+          if (tok.children) walk(tok.children)
+        }
+      }
+      walk(state.tokens)
+    })
+  })
+
+  // --- markdown-it plugin: ~~strikethrough~~ and ~subscript~ ---
+  // We disable the built-in strikethrough (which uses a delimiter processor
+  // that greedily consumes all ~ runs) and implement both ~~ and ~ ourselves
+  // so they coexist cleanly — including when adjacent (e.g. ~~strike~~~sub~).
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.disable("strikethrough")
+
+    // ~subscript~ — registered first so single ~ is tried before ~~
+    md.inline.ruler.push("gowiki_subscript", (state: any, silent: boolean) => {
+      const src = state.src
+      const start = state.pos
+      if (src.charCodeAt(start) !== 0x7E) return false
+      // Must be a lone ~ (not followed by another ~)
+      if (start + 1 < state.posMax && src.charCodeAt(start + 1) === 0x7E) return false
+      // Find closing single ~ (skip tilde runs of 2+)
+      let end = -1
+      for (let i = start + 1; i < state.posMax; i++) {
+        if (src.charCodeAt(i) !== 0x7E) continue
+        // Count tilde run length at this position
+        let runEnd = i
+        while (runEnd + 1 < state.posMax && src.charCodeAt(runEnd + 1) === 0x7E) runEnd++
+        if (runEnd === i) { end = i; break } // single ~ → valid close
+        i = runEnd // skip past the run
+      }
+      if (end === -1) return false
+      const content = src.slice(start + 1, end)
+      if (content.length === 0 || /[\s\n]/.test(content)) return false
+      if (!silent) {
+        if (state.pending) state.pushPending()
+        const tokenO = state.push("subscript_open", "sub", 1)
+        tokenO.markup = "~"
+        const tokenT = state.push("text", "", 0)
+        tokenT.content = content
+        const tokenC = state.push("subscript_close", "sub", -1)
+        tokenC.markup = "~"
+      }
+      state.pos = end + 1
+      return true
+    })
+
+    // ~~strikethrough~~ — supports nested inline marks inside
+    md.inline.ruler.push("gowiki_strikethrough", (state: any, silent: boolean) => {
+      const src = state.src
+      const start = state.pos
+      if (src.charCodeAt(start) !== 0x7E || src.charCodeAt(start + 1) !== 0x7E) return false
+      // Opening must be exactly ~~ (reject ~~~ at start)
+      if (start + 2 < state.posMax && src.charCodeAt(start + 2) === 0x7E) return false
+      // Also reject if preceded by ~ (tail of a longer run)
+      if (start > 0 && src.charCodeAt(start - 1) === 0x7E) return false
+      // Find closing ~~ (not preceded by ~; what follows is irrelevant)
+      let closePos = -1
+      for (let i = start + 2; i < state.posMax - 1; i++) {
+        if (src.charCodeAt(i) !== 0x7E) continue
+        if (src.charCodeAt(i + 1) !== 0x7E) continue // single ~, skip
+        if (i > 0 && src.charCodeAt(i - 1) === 0x7E) continue // preceded by ~, skip
+        closePos = i
+        break
+      }
+      if (closePos === -1 || closePos <= start + 2) return false
+      if (!silent) {
+        if (state.pending) state.pushPending()
+        const tokenO = state.push("s_open", "s", 1)
+        tokenO.markup = "~~"
+        // Recursively tokenize inner content (supports nested bold, italic, etc.)
+        const savedMax = state.posMax
+        state.pos = start + 2
+        state.posMax = closePos
+        state.md.inline.tokenize(state)
+        state.posMax = savedMax
+        const tokenC = state.push("s_close", "s", -1)
+        tokenC.markup = "~~"
+      }
+      state.pos = closePos + 2
+      return true
+    })
+  })
+
+  // --- markdown-it plugin: ^superscript^ ---
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.inline.ruler.push("gowiki_superscript", (state: any, silent: boolean) => {
+      const src = state.src
+      const start = state.pos
+      if (src.charCodeAt(start) !== 0x5E /* ^ */) return false
+      const end = src.indexOf("^", start + 1)
+      if (end === -1 || end === start + 1) return false
+      // No spaces or newlines inside superscript
+      const content = src.slice(start + 1, end)
+      if (/[\s\n]/.test(content)) return false
+      if (!silent) {
+        const tokenO = state.push("superscript_open", "sup", 1)
+        tokenO.markup = "^"
+        const tokenT = state.push("text", "", 0)
+        tokenT.content = content
+        const tokenC = state.push("superscript_close", "sup", -1)
+        tokenC.markup = "^"
+      }
+      state.pos = end + 1
+      return true
+    })
+  })
+
+  // --- em (italic, *text*) ---
   reg.registerMark("em_open", {
     open(ctx) {
       ctx.pushMark(ctx.schema.marks.em.create())
@@ -187,6 +330,7 @@ function registerEmphasis(reg: Registry) {
     },
   })
 
+  // --- strong (bold, **text**) ---
   reg.registerMark("strong_open", {
     open(ctx) {
       ctx.pushMark(ctx.schema.marks.strong.create())
@@ -194,6 +338,58 @@ function registerEmphasis(reg: Registry) {
   })
 
   reg.registerMark("strong_close", {
+    close(ctx) {
+      ctx.popMark()
+    },
+  })
+
+  // --- underline (_text_) ---
+  reg.registerMark("underline_open", {
+    open(ctx) {
+      ctx.pushMark(ctx.schema.marks.underline.create())
+    },
+  })
+
+  reg.registerMark("underline_close", {
+    close(ctx) {
+      ctx.popMark()
+    },
+  })
+
+  // --- strikethrough (~~text~~) ---
+  reg.registerMark("s_open", {
+    open(ctx) {
+      ctx.pushMark(ctx.schema.marks.strikethrough.create())
+    },
+  })
+
+  reg.registerMark("s_close", {
+    close(ctx) {
+      ctx.popMark()
+    },
+  })
+
+  // --- subscript (~text~) ---
+  reg.registerMark("subscript_open", {
+    open(ctx) {
+      ctx.pushMark(ctx.schema.marks.subscript.create())
+    },
+  })
+
+  reg.registerMark("subscript_close", {
+    close(ctx) {
+      ctx.popMark()
+    },
+  })
+
+  // --- superscript (^text^) ---
+  reg.registerMark("superscript_open", {
+    open(ctx) {
+      ctx.pushMark(ctx.schema.marks.superscript.create())
+    },
+  })
+
+  reg.registerMark("superscript_close", {
     close(ctx) {
       ctx.popMark()
     },
@@ -565,6 +761,10 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("em", { open: "*", close: "*" })
   reg.registerPMMark("strong", { open: "**", close: "**" })
   reg.registerPMMark("code", { open: "`", close: "`" })
+  reg.registerPMMark("underline", { open: "_", close: "_" })
+  reg.registerPMMark("strikethrough", { open: "~~", close: "~~" })
+  reg.registerPMMark("subscript", { open: "~", close: "~" })
+  reg.registerPMMark("superscript", { open: "^", close: "^" })
   reg.registerPMMark("link", {
     open: mark => (mark.attrs.autoText ? "" : "["),
     close: mark => {

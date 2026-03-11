@@ -16,7 +16,7 @@ import { Node as PMNode } from "prosemirror-model"
 import { Registry } from "./registry"
 
 function escapeMarkdownText(text: string): string {
-  return text.replace(/[\\*_`>{}]/g, ch => "\\" + ch)
+  return text.replace(/[\\*_`>{}~^]/g, ch => "\\" + ch)
 }
 
 function serializePlainTextWithAutoLinks(text: string): string {

@@ -2867,6 +2867,18 @@ function updateMenubarState(state, refs) {
   if (schema.marks.code && refs.code) {
     setActive(refs.code, markActive(state, schema.marks.code))
   }
+  if (schema.marks.underline && refs.underline) {
+    setActive(refs.underline, markActive(state, schema.marks.underline))
+  }
+  if (schema.marks.strikethrough && refs.strikethrough) {
+    setActive(refs.strikethrough, markActive(state, schema.marks.strikethrough))
+  }
+  if (schema.marks.subscript && refs.subscript) {
+    setActive(refs.subscript, markActive(state, schema.marks.subscript))
+  }
+  if (schema.marks.superscript && refs.superscript) {
+    setActive(refs.superscript, markActive(state, schema.marks.superscript))
+  }
   if (refs.properties) {
     setActive(refs.properties, isPropertiesPanelEnabled(state))
   }
@@ -3048,6 +3060,48 @@ function buildMenubar() {
       rawWrapSelection(rawEditor, "*", "*")
     }
   }, "italic").style.fontStyle = "italic"
+
+  // Underline
+  const uBtn = addButton("U", shortcutHint("Underline", "U"), () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.underline)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "_", "_")
+    }
+  }, "underline")
+  uBtn.style.textDecoration = "underline"
+
+  // Strikethrough
+  const sBtn = addButton("S", shortcutHint("Strikethrough", "Shift-S"), () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.strikethrough)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "~~", "~~")
+    }
+  }, "strikethrough")
+  sBtn.style.textDecoration = "line-through"
+
+  // Subscript
+  addButton("x\u2082", "Subscript", () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.subscript)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "~", "~")
+    }
+  }, "subscript")
+
+  // Superscript
+  addButton("x\u00B2", "Superscript", () => {
+    if (editMode === "visual" && editorView) {
+      toggleMark(schema.marks.superscript)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawWrapSelection(rawEditor, "^", "^")
+    }
+  }, "superscript")
 
   // Inline code
   addButton("</>", shortcutHint("Inline code", "E"), () => {
@@ -3579,6 +3633,8 @@ function renderEdit(nextEditMode) {
   const shortcutKeymap = keymap({
     "Mod-b": toggleMark(schema.marks.strong),
     "Mod-i": toggleMark(schema.marks.em),
+    "Mod-u": toggleMark(schema.marks.underline),
+    "Mod-Shift-s": toggleMark(schema.marks.strikethrough),
     "Mod-e": toggleMark(schema.marks.code),
     "Mod-k": (state, dispatch, view) => {
       setExternalLinkCommand()(state, dispatch, view)

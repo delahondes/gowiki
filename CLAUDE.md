@@ -167,8 +167,9 @@ The backend detects and rejects circular includes at save time (not render time)
 | Feature | Status |
 |---|---|
 | `*italic*`, `**bold**`, `` `code` `` | implemented |
-| `~~strikethrough~~` | planned |
-| `_underline_` | planned |
+| `~~strikethrough~~` | implemented |
+| `_underline_` | implemented |
+| `~subscript~`, `^superscript^` | implemented |
 | ATX headings | implemented |
 | `- unordered list` | implemented |
 | `1. ordered list` | implemented |
