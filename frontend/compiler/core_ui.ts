@@ -367,13 +367,8 @@ function buildPanel(
     }
   }
 
-  // When ALL properties would be hidden (none active), don't collapse —
-  // show them all.  A panel with only "+" and nothing visible is useless.
-  if (collapsible && activeProps.length === 0 && hiddenProps.length > 0) {
-    forceExpand = true
-  }
-
-  // Check if pendingInputRefocus targets a hidden prop → force expand
+  // When a specific property is being focused (e.g. variable insert, cell
+  // formula button), force-expand the panel so that property is visible.
   if (collapsible && pendingInputRefocus && hiddenProps.some(p => p.name === pendingInputRefocus!.propName)) {
     forceExpand = true
   }
