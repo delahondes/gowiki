@@ -210,7 +210,24 @@ function collectSlides(markerDom: HTMLElement): HTMLElement[] {
       }
       current = document.createElement("div")
     } else {
-      current.appendChild(el.cloneNode(true))
+      const clone = el.cloneNode(true) as HTMLElement
+      // Canvas pixel data is lost on cloneNode — convert to images
+      const origCanvases = el.querySelectorAll("canvas")
+      const clonedCanvases = clone.querySelectorAll("canvas")
+      for (let i = 0; i < origCanvases.length; i++) {
+        const orig = origCanvases[i]
+        const cloned = clonedCanvases[i]
+        if (!orig || !cloned) continue
+        try {
+          const img = document.createElement("img")
+          img.src = orig.toDataURL()
+          img.style.width = `${orig.width}px`
+          img.style.maxWidth = "100%"
+          img.style.height = "auto"
+          cloned.replaceWith(img)
+        } catch { /* tainted canvas, keep blank */ }
+      }
+      current.appendChild(clone)
     }
   }
 
