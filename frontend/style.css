@@ -92,7 +92,7 @@ body {
 .search-result-title {
   font-weight: 600;
   font-size: 14px;
-  color: #1a3a6a;
+  color: inherit;
 }
 
 .search-result-path {
@@ -150,7 +150,7 @@ body {
 .search-page-item-title {
   font-weight: 600;
   font-size: 1.05em;
-  color: #1e3f72;
+  color: inherit;
   margin-bottom: 2px;
 }
 
@@ -614,6 +614,20 @@ body.gowiki-fullscreen #main {
   margin: 0.9em 0;
   scroll-margin-top: 72px;
 }
+/* Internal link status: green = exists, orange = missing */
+.gowiki-link-exists { color: #388e3c; }
+.gowiki-link-missing { color: #e65100; }
+a.gowiki-link-exists { color: #388e3c; text-decoration-color: #388e3c; }
+a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
+.ProseMirror a:has(.gowiki-link-exists) {
+  color: #388e3c;
+  text-decoration-color: #388e3c;
+}
+.ProseMirror a:has(.gowiki-link-missing) {
+  color: #e65100;
+  text-decoration-color: #e65100;
+}
+
 .ProseMirror a.gowiki-external-link {
   text-decoration-thickness: from-font;
 }
@@ -1842,7 +1856,6 @@ body.gowiki-fullscreen #main {
 }
 
 .gowiki-sitemap .gowiki-sitemap-path {
-  color: #1e3f72;
   text-decoration: none;
   font-family: monospace;
   font-size: 0.9em;

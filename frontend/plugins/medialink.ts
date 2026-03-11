@@ -71,7 +71,7 @@ const medialinkStyles = `
 .gowiki-media-link {
   cursor: pointer;
   text-decoration: underline;
-  color: #2b6cb0;
+  color: #388e3c;
 }
 
 .gowiki-media-link-icon {

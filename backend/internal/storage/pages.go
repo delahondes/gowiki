@@ -1230,6 +1230,16 @@ func (s *FileStore) loadMeta(metaPath string) (PageMetadata, error) {
 	return meta, nil
 }
 
+// Exists checks whether a page exists without reading its content.
+func (s *FileStore) Exists(pagePath string) bool {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return false
+	}
+	_, _, err = s.resolveExistingContentPath(normalized)
+	return err == nil
+}
+
 func (s *FileStore) resolveExistingContentPath(pagePath string) (string, bool, error) {
 	pageFile, err := s.contentPagePath(pagePath)
 	if err != nil {

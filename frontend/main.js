@@ -5015,7 +5015,7 @@ function initSearch() {
       const item = document.createElement("a")
       const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
       item.href = displayPath
-      item.className = "search-result-item"
+      item.className = "search-result-item gowiki-link-exists"
       item.innerHTML =
         `<div class="search-result-title">${escapeHtml(r.title || displayPath)}</div>` +
         `<div class="search-result-path">${escapeHtml(displayPath)}</div>` +
@@ -5076,7 +5076,7 @@ async function renderSearchResultsPage(query) {
       const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
       const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
       item.href = displayPath + qs
-      item.className = "search-page-item"
+      item.className = "search-page-item gowiki-link-exists"
       item.innerHTML =
         `<div class="search-page-item-title">${escapeHtml(r.title || displayPath)}</div>` +
         `<div class="search-page-item-path">${escapeHtml(displayPath)}</div>` +
@@ -5883,7 +5883,7 @@ async function renderSitemapPage() {
           const url = nodeUrl(node)
           const a = document.createElement("a")
           a.href = url
-          a.className = "gowiki-sitemap-path"
+          a.className = "gowiki-sitemap-path gowiki-link-exists"
           a.textContent = label
           a.addEventListener("click", e => {
             e.preventDefault()

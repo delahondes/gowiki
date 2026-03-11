@@ -74,7 +74,6 @@ const changesStyles = `
 }
 
 .gowiki-changes-link {
-  color: #1e3f72;
   text-decoration: none;
 }
 
@@ -218,7 +217,8 @@ class ChangesNodeView {
         li.className = "gowiki-changes-item"
 
         const a = document.createElement("a")
-        a.className = "gowiki-changes-link"
+        const linkCls = entry.type === "delete" ? "gowiki-link-missing" : "gowiki-link-exists"
+        a.className = `gowiki-changes-link ${linkCls}`
         a.href = entry.page.startsWith("/") ? entry.page : "/" + entry.page
         a.textContent = humanizePagePath(entry.page)
         li.appendChild(a)

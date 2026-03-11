@@ -35,6 +35,7 @@ type PageStore interface {
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
 	Delete(pagePath, author string) (storage.DeleteResult, error)
 	CheckNamespaceConflict(pagePath string) error
+	Exists(pagePath string) bool
 }
 
 type PageMover interface {
@@ -191,6 +192,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/media-version/*", s.handleServeMediaVersion)
 		r.Get("/api/export/pdf/*", s.handleExportPDF)
 		r.Get("/api/backlinks/*", s.handleBacklinks)
+		r.Post("/api/pages/check", s.handleCheckPages)
 	})
 
 	// Public read endpoints — no ACL check (search, logo, site info, sitemap).

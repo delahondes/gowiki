@@ -100,6 +100,7 @@ export function registerCoreNodes(reg: Registry) {
   registerMarkdownPrinters(reg)
   registerHeadingAnchors(reg)
   registerHeadingNumbers(reg)
+  registerLinkStatus(reg)
 
   reg.registerStyle("clearfix", `.gowiki-clear { clear: both; }`)
 }
@@ -713,4 +714,169 @@ function computeHeadingNumbers(doc: any): DecorationSet {
   })
 
   return DecorationSet.create(doc, decorations)
+}
+
+/* --------------------------------------------------
+ * Internal link status decorations (exists / missing)
+ * -------------------------------------------------- */
+
+const linkStatusKey = new PluginKey("gowiki.linkStatus")
+
+function resolveInternalHref(href: string, pageNamespace: string): string | null {
+  if (!href || /^https?:\/\//i.test(href)) return null
+  if (href.startsWith("#")) return null
+  // Decode percent-encoded characters (match backend resolve.go)
+  try { href = decodeURIComponent(href) } catch {}
+  let resolved: string
+  if (href.startsWith("/")) {
+    resolved = href
+  } else {
+    // Relative: resolve against current page namespace
+    const base = pageNamespace ? pageNamespace + "/" + href : href
+    const parts = base.split("/")
+    const out: string[] = []
+    for (const p of parts) {
+      if (p === "..") out.pop()
+      else if (p !== "." && p !== "") out.push(p)
+    }
+    resolved = "/" + out.join("/")
+  }
+  // Strip trailing slash and query/hash
+  resolved = resolved.split(/[?#]/)[0].replace(/\/+$/, "") || "/"
+  return resolved
+}
+
+function collectLinkRanges(
+  doc: any,
+  pageNamespace: string
+): { ranges: Array<{ from: number; to: number; path: string }>; paths: string[] } {
+  const ranges: Array<{ from: number; to: number; path: string }> = []
+  const pathSet = new Set<string>()
+
+  doc.descendants((node: any, pos: number) => {
+    if (!node.isInline) return
+    for (const mark of node.marks) {
+      if (mark.type.name === "link") {
+        const href = String(mark.attrs.href ?? "")
+        const path = resolveInternalHref(href, pageNamespace)
+        if (path) {
+          ranges.push({ from: pos, to: pos + node.nodeSize, path })
+          pathSet.add(path)
+        }
+      }
+    }
+  })
+
+  return { ranges, paths: Array.from(pathSet) }
+}
+
+function buildLinkDecorations(
+  doc: any,
+  pageNamespace: string,
+  statusMap: Map<string, boolean>
+): DecorationSet {
+  if (statusMap.size === 0) return DecorationSet.empty
+  const { ranges } = collectLinkRanges(doc, pageNamespace)
+  const decorations: Decoration[] = []
+  for (const { from, to, path } of ranges) {
+    const exists = statusMap.get(path)
+    if (exists === undefined) continue
+    const cls = exists ? "gowiki-link-exists" : "gowiki-link-missing"
+    decorations.push(Decoration.inline(from, to, { class: cls }))
+  }
+  return DecorationSet.create(doc, decorations)
+}
+
+function registerLinkStatus(reg: Registry) {
+  reg.registerEditorPlugin(() => {
+    const loc = window.location.pathname
+    const curPage = loc === "/" ? "" : loc.replace(/^\/+|\/+$/g, "").replace(/\/index$/, "")
+    const pageNamespace = curPage.includes("/")
+      ? curPage.split("/").slice(0, -1).join("/")
+      : ""
+
+    const statusMap = new Map<string, boolean>()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let currentView: any = null
+
+    async function checkLinks(doc: any) {
+      const { paths } = collectLinkRanges(doc, pageNamespace)
+      if (paths.length === 0) {
+        if (statusMap.size > 0) {
+          statusMap.clear()
+          if (currentView) {
+            currentView.dispatch(currentView.state.tr.setMeta(linkStatusKey, true))
+          }
+        }
+        return
+      }
+
+      try {
+        const resp = await fetch("/api/pages/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths }),
+        })
+        if (!resp.ok) return
+        const data = await resp.json()
+        const exists = data.exists as Record<string, boolean>
+        statusMap.clear()
+        for (const [p, v] of Object.entries(exists)) {
+          statusMap.set(p, v)
+        }
+        if (currentView) {
+          currentView.dispatch(currentView.state.tr.setMeta(linkStatusKey, true))
+        }
+      } catch {
+        // Ignore network errors
+      }
+    }
+
+    function scheduleCheck(doc: any, immediate?: boolean) {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        checkLinks(doc)
+      }, immediate ? 0 : 500)
+    }
+
+    return new PMPlugin({
+      key: linkStatusKey,
+      state: {
+        init() {
+          return DecorationSet.empty
+        },
+        apply(tr, old, _oldState, newState) {
+          if (tr.getMeta(linkStatusKey)) {
+            return buildLinkDecorations(newState.doc, pageNamespace, statusMap)
+          }
+          if (tr.docChanged) {
+            return old.map(tr.mapping, tr.doc)
+          }
+          return old
+        },
+      },
+      props: {
+        decorations(state) {
+          return linkStatusKey.getState(state)
+        },
+      },
+      view(view) {
+        currentView = view
+        scheduleCheck(view.state.doc, true)
+        return {
+          update(view, prevState) {
+            currentView = view
+            if (view.state.doc !== prevState.doc) {
+              scheduleCheck(view.state.doc)
+            }
+          },
+          destroy() {
+            currentView = null
+            if (timer) clearTimeout(timer)
+          },
+        }
+      },
+    })
+  })
 }
