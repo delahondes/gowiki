@@ -157,6 +157,34 @@ func (c *Changelog) Read(opts ReadOptions) ([]ChangeEntry, error) {
 	return result, nil
 }
 
+// FirstAuthor returns the author of the first (oldest) changelog entry for a page.
+// Returns empty string if no entry is found.
+func (c *Changelog) FirstAuthor(pagePath string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	data, err := os.ReadFile(c.path)
+	if err != nil {
+		return ""
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 6)
+		if len(parts) < 4 {
+			continue
+		}
+		if parts[1] == pagePath {
+			return parts[3]
+		}
+	}
+	return ""
+}
+
 // matchPathFilters checks if pagePath matches the include/exclude path prefix filters.
 func matchPathFilters(pagePath string, include, exclude []string) bool {
 	// If include list is non-empty, page must match at least one include prefix.

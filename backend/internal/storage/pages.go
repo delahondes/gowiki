@@ -66,6 +66,7 @@ type PageMetadata struct {
 	UpdatedAt time.Time        `json:"updated_at"`
 	Version   int64            `json:"version"`
 	Author    string           `json:"author,omitempty"`
+	CreatedBy string           `json:"created_by,omitempty"`
 	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
 }
 
@@ -306,6 +307,7 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 			UpdatedAt: now,
 			Version:   1,
 			Author:    author,
+			CreatedBy: author,
 		}
 	default:
 		return PutResult{}, fmt.Errorf("load metadata: %w", err)

@@ -27,6 +27,9 @@ import (
 	"gowiki/backend/internal/todo"
 )
 
+// Version is the Gowiki software version string.
+const Version = "0.4.0"
+
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
@@ -396,6 +399,13 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 	// Check draft/lock state.
 	username := UsernameFromContext(r.Context())
 	lock := s.draftManager.GetLock(pagePath)
+
+	// Backfill created_by from changelog if not already set in metadata.
+	if page.Meta.CreatedBy == "" && s.changelog != nil {
+		if author := s.changelog.FirstAuthor(page.Path); author != "" {
+			page.Meta.CreatedBy = author
+		}
+	}
 
 	resp := map[string]any{
 		"path":               page.Path,
@@ -773,6 +783,7 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.configStore.Get()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":         cfg.Site.Title,
+		"version":       Version,
 		"toc_max_level": cfg.Site.TOCMaxLevel,
 		"user_display":  cfg.Site.UserDisplay,
 		"code_theme":    cfg.Site.CodeTheme,

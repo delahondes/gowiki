@@ -3,7 +3,7 @@ import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
-import { enablePropertiesPanel } from "../compiler/core_ui"
+import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 import { openMediaManager } from "../media_manager.js"
 
 // ── Properties ──
@@ -295,12 +295,13 @@ const databaseStyles = `
   font-style: normal;
 }
 
-/* Unresolved always visible (error state) */
-.gowiki-template-var-unresolved {
+/* Error state: unknown variable */
+.gowiki-template-var-error {
   background: #fff3cd;
   color: #856404;
   border-radius: 3px;
   padding: 0 3px;
+  font-weight: 600;
 }
 `
 
@@ -1835,6 +1836,123 @@ class DatabaseRowNodeView {
   destroy() {}
 }
 
+// ── Global Variable Resolution ──
+
+const ALL_CAPS_RE = /^[A-Z_]+$/
+
+// Cache for user display info: username -> { display_name, email }
+const userInfoCache: Record<string, { display_name: string; email: string }> = {}
+
+async function fetchUserInfo(username: string): Promise<{ display_name: string; email: string }> {
+  if (!username) return { display_name: "", email: "" }
+  if (userInfoCache[username]) return userInfoCache[username]
+  try {
+    const resp = await fetch(`/api/users/display?users=${encodeURIComponent(username)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      const info = data.users?.[username]
+      if (info) {
+        userInfoCache[username] = {
+          display_name: info.display_name || username,
+          email: info.email || "",
+        }
+        return userInfoCache[username]
+      }
+    }
+  } catch { /* best effort */ }
+  return { display_name: username, email: "" }
+}
+
+function extractTitle(view: EditorView): string {
+  let title = ""
+  view.state.doc.descendants((node) => {
+    if (!title && node.type.name === "heading") {
+      title = node.textContent
+      return false
+    }
+  })
+  return title
+}
+
+/**
+ * Resolve a global variable synchronously from available context.
+ *
+ * Return values:
+ *   null      — not an ALL_CAPS name → fall back to database template resolution
+ *   undefined — ALL_CAPS but not a recognized global variable → ERROR
+ *   ""        — recognized, but data unavailable → show fallback or nothing
+ *   "value"   — resolved value
+ */
+function resolveGlobalVar(name: string, view: EditorView): string | null | undefined {
+  if (!ALL_CAPS_RE.test(name)) return null
+
+  const ctx = (window as any).__gowikiGlobalVarContext?.()
+  if (!ctx) return ""
+
+  const meta = ctx.pageMeta
+
+  switch (name) {
+    // Page variables
+    case "ID":    return ctx.pagePath || ""
+    case "PATH":  return ctx.pageNamespace || ""
+    case "PAGE":  return ctx.pageName || ""
+    case "TITLE": return extractTitle(view)
+
+    // Link variables
+    case "EXTID":   return `${window.location.origin}${ctx.pagePath || ""}`
+    case "EXTPATH": return `${window.location.origin}${ctx.pageNamespace || ""}${ctx.pageNamespace?.endsWith("/") ? "" : "/"}`
+    case "SERVER":  return window.location.hostname
+
+    // Version variables
+    case "VERSION":     return meta?.version != null ? String(meta.version) : ""
+    case "VERSIONDATE": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10)
+    }
+    case "VERSIONTAG": return meta?.version_tag || ""
+    case "YEAR": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : String(d.getFullYear())
+    }
+    case "MONTH": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : String(d.getMonth() + 1).padStart(2, "0")
+    }
+    case "SMONTH": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : String(d.getMonth() + 1)
+    }
+    case "DAY": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : String(d.getDate()).padStart(2, "0")
+    }
+    case "SDAY": {
+      if (!meta?.updated_at) return ""
+      const d = new Date(meta.updated_at)
+      return isNaN(d.getTime()) ? "" : String(d.getDate())
+    }
+
+    // Author variables (sync: return username, trigger async display name fetch)
+    case "AUTHOR":         return meta?.created_by || ""
+    case "AUTHORNAME":     return userInfoCache[meta?.created_by]?.display_name || meta?.created_by || ""
+    case "AUTHORMAIL":     return userInfoCache[meta?.created_by]?.email || ""
+    case "LASTAUTHOR":     return meta?.author || ""
+    case "LASTAUTHORNAME": return userInfoCache[meta?.author]?.display_name || meta?.author || ""
+    case "LASTAUTHORMAIL": return userInfoCache[meta?.author]?.email || ""
+
+    // Wiki variables
+    case "WIKI":        return ctx.siteTitle || ""
+    case "WIKIVERSION": return ctx.siteVersion || ""
+  }
+
+  return undefined // ALL_CAPS but not a recognized global variable → ERROR
+}
+
 // ── Template Variable NodeView ──
 
 function resolveTemplateFields(state: EditorState): Record<string, string> {
@@ -1863,16 +1981,86 @@ class TemplateVarNodeView {
   }
 
   private renderResolved(fields: Record<string, string>) {
-    const name = this.node.attrs.name
+    const name = this.node.attrs.name || ""
+    const fallback = this.node.attrs.fallback || ""
+
+    // Empty name = user is still typing — show placeholder, not error
+    if (!name) {
+      this.dom.className = "gowiki-template-var"
+      this.dom.textContent = "{{…}}"
+      this.dom.title = "Variable (empty name)"
+      return
+    }
+
+    // Try global variable resolution first (ALL_CAPS names)
+    const globalResolved = resolveGlobalVar(name, this.view)
+    if (globalResolved === undefined) {
+      // Unknown ALL_CAPS variable → error
+      this.dom.className = "gowiki-template-var gowiki-template-var-error"
+      this.dom.textContent = `ERR: {{${name}}}`
+      this.dom.title = `Unknown variable: ${name}`
+      return
+    }
+    if (globalResolved !== null) {
+      // Known global variable
+      if (globalResolved) {
+        // Has a value → show it
+        this.dom.className = "gowiki-template-var"
+        this.dom.textContent = globalResolved
+        this.dom.title = `{{${name}}}`
+      } else if (fallback) {
+        // Empty value, has fallback → show fallback
+        this.dom.className = "gowiki-template-var"
+        this.dom.textContent = fallback
+        this.dom.title = `{{${name}}} (default)`
+      } else {
+        // Empty value, no fallback → invisible
+        this.dom.className = "gowiki-template-var"
+        this.dom.textContent = ""
+        this.dom.title = `{{${name}}} (empty)`
+      }
+      this.resolveAuthorDisplayAsync(name)
+      return
+    }
+
+    // Fall back to database template variable resolution
     const resolved = fields[name]
     if (resolved !== undefined) {
       this.dom.className = "gowiki-template-var"
       this.dom.textContent = resolved
       this.dom.title = `{{${name}}}`
+    } else if (fallback) {
+      // Unresolved database var with fallback → show fallback
+      this.dom.className = "gowiki-template-var"
+      this.dom.textContent = fallback
+      this.dom.title = `{{${name}}} (default)`
     } else {
-      this.dom.className = "gowiki-template-var gowiki-template-var-unresolved"
-      this.dom.textContent = `{{${name}}}`
+      // Unresolved database var, no fallback → error
+      this.dom.className = "gowiki-template-var gowiki-template-var-error"
+      this.dom.textContent = `ERR: {{${name}}}`
+      this.dom.title = `Unresolved variable: ${name}`
     }
+  }
+
+  private resolveAuthorDisplayAsync(name: string) {
+    const ctx = (window as any).__gowikiGlobalVarContext?.()
+    if (!ctx?.pageMeta) return
+
+    let username = ""
+    if (name === "AUTHORNAME" || name === "AUTHORMAIL") {
+      username = ctx.pageMeta.created_by || ""
+    } else if (name === "LASTAUTHORNAME" || name === "LASTAUTHORMAIL") {
+      username = ctx.pageMeta.author || ""
+    }
+    if (!username || userInfoCache[username]) return
+
+    // Fetch user info and re-render once available
+    fetchUserInfo(username).then(() => {
+      const val = resolveGlobalVar(name, this.view)
+      if (val) {
+        this.dom.textContent = val
+      }
+    })
   }
 
   update(node: PMNode): boolean {
@@ -1980,22 +2168,28 @@ export const databasePlugin: WikiPlugin = {
           atom: true,
           attrs: {
             name: { default: "" },
+            fallback: { default: "" },
           },
           toDOM(node: PMNode) {
+            const fb = node.attrs.fallback ? `:${node.attrs.fallback}` : ""
             return [
               "span",
               {
                 class: "gowiki-template-var",
                 "data-var": node.attrs.name,
+                "data-var-fallback": node.attrs.fallback || "",
               },
-              `{{${node.attrs.name}}}`,
+              `{{${node.attrs.name}${fb}}}`,
             ]
           },
           parseDOM: [
             {
               tag: "span.gowiki-template-var",
               getAttrs(dom: HTMLElement) {
-                return { name: dom.getAttribute("data-var") || "" }
+                return {
+                  name: dom.getAttribute("data-var") || "",
+                  fallback: dom.getAttribute("data-var-fallback") || "",
+                }
               },
             },
           ],
@@ -2131,7 +2325,10 @@ export const databasePlugin: WikiPlugin = {
     reg.registerText("template_var", {
       run(ctx, tok) {
         ctx.push(
-          ctx.schema.nodes.template_var.create({ name: tok.meta?.name ?? "" })
+          ctx.schema.nodes.template_var.create({
+            name: tok.meta?.name ?? "",
+            fallback: tok.meta?.fallback ?? "",
+          })
         )
       },
     })
@@ -2184,7 +2381,9 @@ export const databasePlugin: WikiPlugin = {
 
     reg.registerPMNode("template_var", {
       print(node) {
-        return `{{${node.attrs.name}}}`
+        const name = node.attrs.name || "NAME"
+        const fb = node.attrs.fallback ? `:${node.attrs.fallback}` : ""
+        return `{{${name}${fb}}}`
       },
     })
 
@@ -2240,15 +2439,52 @@ export const databasePlugin: WikiPlugin = {
                 if (node.type.name === "template_var") {
                   const domNode = view.nodeDOM(pos)
                   if (domNode instanceof HTMLElement) {
-                    const name = node.attrs.name
+                    const name = node.attrs.name || ""
+                    const fallback = node.attrs.fallback || ""
+
+                    // Empty name = placeholder state
+                    if (!name) return
+
+                    // Global variables: three-state resolution
+                    const globalVal = resolveGlobalVar(name, view)
+                    if (globalVal === undefined) {
+                      // Unknown ALL_CAPS variable → error
+                      domNode.className = "gowiki-template-var gowiki-template-var-error"
+                      domNode.textContent = `ERR: {{${name}}}`
+                      domNode.title = `Unknown variable: ${name}`
+                      return
+                    }
+                    if (globalVal !== null) {
+                      if (globalVal) {
+                        domNode.className = "gowiki-template-var"
+                        domNode.textContent = globalVal
+                        domNode.title = `{{${name}}}`
+                      } else if (fallback) {
+                        domNode.className = "gowiki-template-var"
+                        domNode.textContent = fallback
+                        domNode.title = `{{${name}}} (default)`
+                      } else {
+                        domNode.className = "gowiki-template-var"
+                        domNode.textContent = ""
+                        domNode.title = `{{${name}}} (empty)`
+                      }
+                      return
+                    }
+
+                    // Database template variables
                     const resolved = fields[name]
                     if (resolved !== undefined) {
                       domNode.className = "gowiki-template-var"
                       domNode.textContent = resolved
                       domNode.title = `{{${name}}}`
+                    } else if (fallback) {
+                      domNode.className = "gowiki-template-var"
+                      domNode.textContent = fallback
+                      domNode.title = `{{${name}}} (default)`
                     } else {
-                      domNode.className = "gowiki-template-var gowiki-template-var-unresolved"
-                      domNode.textContent = `{{${name}}}`
+                      domNode.className = "gowiki-template-var gowiki-template-var-error"
+                      domNode.textContent = `ERR: {{${name}}}`
+                      domNode.title = `Unresolved variable: ${name}`
                     }
                   }
                 }
@@ -2381,6 +2617,7 @@ export const databasePlugin: WikiPlugin = {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
+            requestInputFocus("name")
           } catch {}
         }
         dispatch(tr.scrollIntoView())
@@ -2400,7 +2637,14 @@ export const databasePlugin: WikiPlugin = {
         name: "name",
         label: "Variable",
         default: "",
-        parse: (raw: string) => raw.trim() || null,
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+      },
+      {
+        name: "fallback",
+        label: "Default",
+        default: "",
+        parse: (raw: string) => raw,
         serialize: (value: string | null) => String(value ?? ""),
       },
     ])

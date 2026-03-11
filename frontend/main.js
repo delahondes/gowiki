@@ -80,6 +80,7 @@ let editToken = null
 let autoSaveTimer = null
 let pageLockInfo = null // { locked_by, is_draft }
 let currentPageVersion = 0
+let currentPageMeta = null // full meta object from API: { version, author, created_by, updated_at, ... }
 
 // Global media version cache: maps relative media paths (as in node attrs) to their max version.
 window.__gowikiMediaVersions = new Map()
@@ -103,6 +104,7 @@ let statusText = ""
 let isNewPage = false
 let isNamespaceIndex = false
 let siteTitle = "Gowiki"
+let siteVersion = ""
 let tocMaxLevel = 3
 let viewView = null
 let sidebarView = null
@@ -3297,12 +3299,11 @@ function buildMenubar() {
         databaseInsertVarCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        const snippet = "{{}}"
+        const snippet = "{{NAME}}"
         const start = rawEditor.selectionStart
         rawEditor.focus()
         rawInsertText(rawEditor, snippet)
-        const cursorPos = start + 2
-        rawEditor.setSelectionRange(cursorPos, cursorPos)
+        rawEditor.setSelectionRange(start + 2, start + 6)
       }
     })
   }
@@ -4872,6 +4873,9 @@ async function resolveSiteInfo() {
         document.getElementById("banner-title").textContent = siteTitle
         updatePageTitle()
       }
+      if (data.version) {
+        siteVersion = data.version
+      }
       if (typeof data.toc_max_level === "number") {
         tocMaxLevel = data.toc_max_level
       }
@@ -5245,6 +5249,16 @@ async function authFetch(url, options) {
 window.__gowikiAuthFetch = authFetch
 window.__gowikiCurrentUser = null
 
+// Expose global variable context for the template_var resolver.
+window.__gowikiGlobalVarContext = () => ({
+  pagePath: "/" + pagePath,
+  pageNamespace: pageNamespace ? "/" + pageNamespace : "/",
+  pageName: pagePath.includes("/") ? pagePath.split("/").pop().replace(/_/g, " ") : pagePath.replace(/_/g, " "),
+  pageMeta: currentPageMeta,
+  siteTitle,
+  siteVersion,
+})
+
 async function reloadPageContent() {
   // Admin page is a virtual route — re-render it instead of fetching a wiki page.
   if (pagePath === "_admin") {
@@ -5271,6 +5285,7 @@ async function reloadPageContent() {
     currentMarkdown = page.markdown
     isNewPage = false
     currentPageVersion = page.meta?.version || 0
+    currentPageMeta = page.meta || null
     pageLockInfo = null
     if (page.locked_by) {
       pageLockInfo = { locked_by: page.locked_by, is_draft: !!page.is_draft }
@@ -5285,6 +5300,7 @@ async function reloadPageContent() {
     currentMarkdown = defaultMarkdown
     isNewPage = true
     currentPageVersion = 0
+    currentPageMeta = null
     pageLockInfo = null
   }
 
@@ -7945,6 +7961,7 @@ async function bootstrap() {
     currentMarkdown = page.markdown
     isNewPage = false
     currentPageVersion = page.meta?.version || 0
+    currentPageMeta = page.meta || null
     // Capture lock/draft info from page response.
     pageLockInfo = null
     if (page.locked_by) {
@@ -7960,6 +7977,7 @@ async function bootstrap() {
     currentMarkdown = defaultMarkdown
     isNewPage = true
     currentPageVersion = 0
+    currentPageMeta = null
     pageLockInfo = null
   }
 
