@@ -7,6 +7,7 @@ import { markdownToPM } from "../compiler/markdown_to_pm"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 import { highlightCodeBlocks } from "../highlight"
 import { slugify } from "../compiler/slugify"
+import { headingNumberKey, computeHeadingNumbers, getHeadingCountersAt, INCLUDE_HEADING_META } from "../compiler/core_nodes"
 
 const includeProperties = [
   {
@@ -21,6 +22,8 @@ const includeProperties = [
     serialize: (value: string | null) => String(value ?? ""),
   },
 ]
+
+const includeHeadingKey = new PluginKey("gowiki.includeHeadingNumbers")
 
 const includeStyles = `
 /* In edit mode: show a grey zone so the user can see the block is non-editable */
@@ -125,16 +128,20 @@ class IncludeNodeView {
   private bodyEl: HTMLElement
   private node: PMNode
   private registry: Registry
+  private outerView: EditorView
+  private getPos: () => number | undefined
   private innerView: EditorView | null = null
 
   constructor(
     node: PMNode,
-    _outerView: EditorView,
-    _getPos: () => number | undefined,
+    outerView: EditorView,
+    getPos: () => number | undefined,
     registry: Registry
   ) {
     this.node = node
     this.registry = registry
+    this.outerView = outerView
+    this.getPos = getPos
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-include"
@@ -210,16 +217,51 @@ class IncludeNodeView {
       }
 
       this.bodyEl.innerHTML = ""
+      // Compute heading counter state from the outer doc up to this include's position,
+      // so numbered headings in the included content continue the parent's sequence.
+      const pos = this.getPos()
+      const initialCounters = pos !== undefined
+        ? getHeadingCountersAt(this.outerView.state.doc, pos)
+        : undefined
+      // Replace the standard heading-numbers plugin with one seeded from parent counters.
+      const plugins = this.registry.getEditorPlugins().filter(
+        p => (p as any).key !== headingNumberKey.key
+      )
+      plugins.push(new PMPlugin({
+        key: includeHeadingKey,
+        state: {
+          init(_, s) { return computeHeadingNumbers(s.doc, initialCounters) },
+          apply(tr, old) { return tr.docChanged ? computeHeadingNumbers(tr.doc, initialCounters) : old },
+        },
+        props: {
+          decorations(s) { return includeHeadingKey.getState(s) },
+        },
+      }))
       const state = EditorState.create({
         doc,
         schema: this.registry.schema,
-        plugins: this.registry.getEditorPlugins(),
+        plugins,
       })
       this.innerView = new EditorView(this.bodyEl, {
         state,
         editable: () => false,
       })
       highlightCodeBlocks(this.bodyEl)
+
+      // Report heading counts back to the parent so its numbering accounts for include content.
+      const includePos = this.getPos()
+      if (includePos !== undefined) {
+        const headingCounts = [0, 0, 0, 0, 0, 0]
+        doc.descendants((n: PMNode) => {
+          if (n.type.name === "heading" && n.attrs.numbered) {
+            headingCounts[n.attrs.level - 1]++
+          }
+          return false
+        })
+        const tr = this.outerView.state.tr
+        tr.setMeta(INCLUDE_HEADING_META, { pos: includePos, counters: headingCounts })
+        this.outerView.dispatch(tr)
+      }
     } catch (err) {
       this.showError(
         `Error loading include: ${err instanceof Error ? err.message : String(err)}`

@@ -860,32 +860,55 @@ function buildHeadingDecorations(doc: any): DecorationSet {
 
 const headingNumberKey = new PluginKey("gowiki.headingNumbers")
 
+/** Meta key used by include NodeViews to report their heading counts to the parent. */
+export const INCLUDE_HEADING_META = "includeHeadingUpdate"
+
+type HeadingNumberState = {
+  decorations: DecorationSet
+  includeCounts: Map<number, number[]>  // pos → final counter state of that include
+}
+
 function registerHeadingNumbers(reg: Registry) {
   reg.registerEditorPlugin(() => {
     return new PMPlugin({
       key: headingNumberKey,
       state: {
-        init(_, state) {
-          return computeHeadingNumbers(state.doc)
+        init(_, state): HeadingNumberState {
+          return { decorations: computeHeadingNumbers(state.doc), includeCounts: new Map() }
         },
-        apply(tr, old) {
+        apply(tr, old: HeadingNumberState): HeadingNumberState {
+          const meta = tr.getMeta(INCLUDE_HEADING_META)
+          if (meta) {
+            const newCounts = new Map(old.includeCounts)
+            newCounts.set(meta.pos, meta.counters)
+            return { decorations: computeHeadingNumbers(tr.doc, undefined, newCounts), includeCounts: newCounts }
+          }
           if (tr.docChanged) {
-            return computeHeadingNumbers(tr.doc)
+            // Remap include positions after doc changes
+            const newCounts = new Map<number, number[]>()
+            for (const [pos, counts] of old.includeCounts) {
+              newCounts.set(tr.mapping.map(pos), counts)
+            }
+            return { decorations: computeHeadingNumbers(tr.doc, undefined, newCounts), includeCounts: newCounts }
           }
           return old
         },
       },
       props: {
         decorations(state) {
-          return headingNumberKey.getState(state)
+          return (headingNumberKey.getState(state) as HeadingNumberState)?.decorations
         },
       },
     })
   })
 }
 
-function computeHeadingNumbers(doc: any): DecorationSet {
-  const counters = [0, 0, 0, 0, 0, 0]
+export function computeHeadingNumbers(
+  doc: any,
+  initialCounters?: number[],
+  includeCounts?: Map<number, number[]>,
+): DecorationSet {
+  const counters = initialCounters ? [...initialCounters] : [0, 0, 0, 0, 0, 0]
   const decorations: Decoration[] = []
 
   doc.descendants((node: any, pos: number) => {
@@ -911,10 +934,41 @@ function computeHeadingNumbers(doc: any): DecorationSet {
       }
       return false
     }
+    // When encountering an include node, add its heading counts to our counters.
+    if (node.type.name === "include" && includeCounts) {
+      const counts = includeCounts.get(pos)
+      if (counts) {
+        for (let i = 0; i < 6; i++) counters[i] += counts[i]
+      }
+    }
+    return false
   })
 
   return DecorationSet.create(doc, decorations)
 }
+
+/** Compute heading counter state at a given position in the doc. */
+export function getHeadingCountersAt(doc: any, targetPos: number): number[] {
+  const counters = [0, 0, 0, 0, 0, 0]
+  let offset = 0
+  for (let i = 0; i < doc.childCount; i++) {
+    if (offset >= targetPos) break
+    const child = doc.child(i)
+    if (child.type.name === "heading") {
+      const level: number = child.attrs.level
+      if (child.attrs.numbered) {
+        counters[level - 1]++
+        for (let j = level; j < 6; j++) counters[j] = 0
+      } else {
+        for (let j = level; j < 6; j++) counters[j] = 0
+      }
+    }
+    offset += child.nodeSize
+  }
+  return counters
+}
+
+export { headingNumberKey }
 
 /* --------------------------------------------------
  * Internal link status decorations (exists / missing)
