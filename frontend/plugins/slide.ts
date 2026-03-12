@@ -17,11 +17,14 @@ class PresentationEngine {
   private progressBar: HTMLElement
   private counter: HTMLElement
 
-  constructor(slides: HTMLElement[], theme: string, ratio: string) {
+  constructor(slides: HTMLElement[], theme: string, ratio: string, background: string) {
     this.slides = slides
 
     this.overlay = document.createElement("div")
     this.overlay.className = `gowiki-slides-overlay theme-${theme}`
+    if (background) {
+      this.overlay.classList.add("has-background")
+    }
 
     const viewport = document.createElement("div")
     viewport.className = "gowiki-slides-viewport"
@@ -33,6 +36,9 @@ class PresentationEngine {
 
     const slideEl = document.createElement("div")
     slideEl.className = "gowiki-slides-slide"
+    if (background) {
+      slideEl.style.backgroundImage = `url(${background})`
+    }
     viewport.appendChild(slideEl)
 
     this.progressBar = document.createElement("div")
@@ -239,11 +245,11 @@ function collectSlides(markerDom: HTMLElement): HTMLElement[] {
   return slides
 }
 
-function launchPresentation(markerDom: HTMLElement, theme: string, ratio: string) {
+function launchPresentation(markerDom: HTMLElement, theme: string, ratio: string, background: string) {
   const slides = collectSlides(markerDom)
   if (slides.length === 0) return
 
-  const engine = new PresentationEngine(slides, theme, ratio)
+  const engine = new PresentationEngine(slides, theme, ratio, background)
   engine.start()
 }
 
@@ -267,10 +273,14 @@ class SlidesMarkerView {
     const title = this.node.attrs.title || "Presentation"
     const theme = this.node.attrs.theme || "light"
     const ratio = this.node.attrs.ratio || "16:9"
+    const bg = this.node.attrs.background
+
+    let info = `${theme} &middot; ${ratio}`
+    if (bg) info += ` &middot; bg`
 
     this.dom.innerHTML = `
       <span class="gowiki-slides-marker-label">${this.escHtml(title)}</span>
-      <span class="gowiki-slides-marker-info">${theme} &middot; ${ratio}</span>
+      <span class="gowiki-slides-marker-info">${info}</span>
       <button class="gowiki-slides-present-btn">&#9654; Present</button>
     `
 
@@ -278,7 +288,7 @@ class SlidesMarkerView {
     btn.addEventListener("click", (e) => {
       e.preventDefault()
       e.stopPropagation()
-      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio)
+      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio, this.node.attrs.background)
     })
   }
 
@@ -338,6 +348,13 @@ const slidesProperties: NodePropertySpec[] = [
     },
     serialize: (v: string | null) => String(v ?? "16:9"),
     options: VALID_RATIOS.map(r => ({ value: r, label: r })),
+  },
+  {
+    name: "background",
+    label: "Background",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => String(v ?? ""),
   },
 ]
 
@@ -413,6 +430,9 @@ const slidesStyles = `
   height: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 .gowiki-slides-slide h1 { font-size: 2em; margin: 0.3em 0; }
 .gowiki-slides-slide h2 { font-size: 1.5em; margin: 0.3em 0; }
@@ -508,6 +528,7 @@ export const slidePlugin: WikiPlugin = {
             title: { default: "" },
             theme: { default: "light" },
             ratio: { default: "16:9" },
+            background: { default: "" },
           },
           toDOM(node: any) {
             return ["div", {
@@ -515,6 +536,7 @@ export const slidePlugin: WikiPlugin = {
               "data-slides-title": node.attrs.title,
               "data-slides-theme": node.attrs.theme,
               "data-slides-ratio": node.attrs.ratio,
+              "data-slides-background": node.attrs.background,
             }, `Slides: ${node.attrs.title || "Presentation"}`]
           },
           parseDOM: [{
@@ -524,6 +546,7 @@ export const slidePlugin: WikiPlugin = {
                 title: dom.getAttribute("data-slides-title") || "",
                 theme: dom.getAttribute("data-slides-theme") || "light",
                 ratio: dom.getAttribute("data-slides-ratio") || "16:9",
+                background: dom.getAttribute("data-slides-background") || "",
               }
             },
           }],
@@ -546,6 +569,7 @@ export const slidePlugin: WikiPlugin = {
           title: attrs.title ?? "",
           theme: attrs.theme ?? "light",
           ratio: attrs.ratio ?? "16:9",
+          background: attrs.background ?? "",
         }))
       },
     })
@@ -557,6 +581,7 @@ export const slidePlugin: WikiPlugin = {
         if (node.attrs.title) parts.push(`title=${node.attrs.title}`)
         if (node.attrs.theme && node.attrs.theme !== "light") parts.push(`theme=${node.attrs.theme}`)
         if (node.attrs.ratio && node.attrs.ratio !== "16:9") parts.push(`ratio=${node.attrs.ratio}`)
+        if (node.attrs.background) parts.push(`background=${node.attrs.background}`)
         if (parts.length > 0) {
           return `{slides ${parts.join(" ")}}\n\n`
         }

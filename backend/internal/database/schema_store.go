@@ -340,9 +340,9 @@ func (s *SchemaStore) CreateField(ctx context.Context, f *FieldDef, changedBy st
 		sqlType := SQLTypeForField(f.Type)
 		defaultClause := ""
 		switch f.Type {
-		case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor:
+		case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor, FieldTypeUser:
 			defaultClause = "DEFAULT ''"
-		case FieldTypeInteger, FieldTypeFloat, FieldTypeTag:
+		case FieldTypeInteger, FieldTypeFloat, FieldTypeTag, FieldTypeLookup:
 			defaultClause = "DEFAULT 0"
 		case FieldTypeBoolean:
 			defaultClause = "DEFAULT FALSE"

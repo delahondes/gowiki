@@ -207,6 +207,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/site/logo", s.handleSiteLogo)
 		r.Get("/api/site/info", s.handleSiteInfo)
 		r.Get("/api/users/display", s.handleUsersDisplay)
+		r.Get("/api/users/list", s.handleUsersList)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.
@@ -851,6 +852,23 @@ func (s *Server) handleUsersDisplay(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		result[name] = entry
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": result})
+}
+
+// handleUsersList returns all active users with username and display name.
+// Used by the database plugin's "user" field type for dropdown population.
+func (s *Server) handleUsersList(w http.ResponseWriter, _ *http.Request) {
+	users := s.userStore.List()
+	result := make([]map[string]string, 0, len(users))
+	for _, u := range users {
+		if u.Disabled {
+			continue
+		}
+		result = append(result, map[string]string{
+			"username":     u.Username,
+			"display_name": u.DisplayName,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"users": result})
 }

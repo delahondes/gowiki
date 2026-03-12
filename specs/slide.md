@@ -63,6 +63,7 @@ Options appear after `slides` on the opening fence line, in any order:
 | Title | `"My Presentation"` | (none) | Shown in the placeholder card and as an overlay at presentation start |
 | Theme | `dark` / `light` | `light` | Color theme for the presentation |
 | Ratio | `16:9` / `4:3` | `16:9` | Aspect ratio of the slide area |
+| Background | `background=./image.png` | (none) | Background image applied to all slides (cover, centered) |
 
 ### Examples
 
@@ -97,6 +98,18 @@ Thank you for your attention
 - Frontend (TypeScript/ProseMirror)
 - Backend (Go)
 - Storage (Markdown)
+```
+```
+
+**With background image:**
+```
+```slides "Q1 Review" dark background=./slide-bg.png
+# Q1 Revenue Review
+
+---
+
+# Highlights
+- Revenue up 15%
 ```
 ```
 
@@ -140,6 +153,7 @@ Plugin-specific nodes (charts, includes, spoilers) inside slides are **not rende
 | `attrs.title` | `string`, default `""` |
 | `attrs.theme` | `string`, default `"light"` |
 | `attrs.ratio` | `string`, default `"16:9"` |
+| `attrs.background` | `string`, default `""` (path to background image) |
 | `attrs.data` | `string`, default `""` (raw body: all slides separated by `---`) |
 
 Atomic node — same pattern as chart. The slide content is stored as a raw string in the `data` attribute, not as ProseMirror content children.
@@ -179,15 +193,16 @@ Inside the fenced block, `---` on its own line is **always** a slide separator. 
 ```
 ```
 
-Options serialized in canonical order: title, theme, ratio. Only non-default options are emitted.
+Options serialized in canonical order: title, theme, ratio, background. Only non-default options are emitted.
 
-Canonical order: `"title"`, `dark`/`light` (omit if `light`), `4:3`/`16:9` (omit if `16:9`).
+Canonical order: `"title"`, `dark`/`light` (omit if `light`), `4:3`/`16:9` (omit if `16:9`), `background=path` (omit if empty).
 
 Examples:
 - All defaults: `` ```slides ``
 - Title only: `` ```slides "My Talk" ``
 - Dark + 4:3: `` ```slides dark 4:3 ``
 - Everything: `` ```slides "My Talk" dark 4:3 ``
+- With background: `` ```slides "My Talk" background=./bg.png ``
 
 ---
 
@@ -221,6 +236,7 @@ In edit mode, selected via NodeSelection; property panel for editing attributes.
 | Title | text input | |
 | Theme | dropdown | light, dark |
 | Ratio | dropdown | 16:9, 4:3 |
+| Background | text input | Path to background image (e.g. `./slide-bg.png`) |
 | Data | multiline textarea | Raw slide content with `---` separators |
 
 Changes update the node attrs immediately.
@@ -265,6 +281,7 @@ Each slide's markdown fragment is rendered to HTML using a **standalone markdown
 - Content is sized to fill the slide area using CSS `transform: scale()` — compute scale factor from viewport dimensions vs. a reference content area (e.g. 960×540 for 16:9)
 - Base font size is large for projection readability (~2.5em effective)
 - Content overflow is hidden (slides should be concise)
+- If a `background` image is set, it is applied to every slide via CSS `background-image` with `background-size: cover` and `background-position: center`
 
 ### Keyboard navigation
 

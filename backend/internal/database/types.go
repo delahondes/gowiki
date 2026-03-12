@@ -17,6 +17,8 @@ const (
 	FieldTypeImage         = "image"
 	FieldTypeColor         = "color"
 	FieldTypeTag           = "tag"
+	FieldTypeLookup        = "lookup"
+	FieldTypeUser          = "user"
 )
 
 // ValidFieldTypes is the set of valid field type strings.
@@ -34,6 +36,8 @@ var ValidFieldTypes = map[string]bool{
 	FieldTypeImage:         true,
 	FieldTypeColor:         true,
 	FieldTypeTag:           true,
+	FieldTypeLookup:        true,
+	FieldTypeUser:          true,
 }
 
 // TableDef represents a structured data table definition.
@@ -109,9 +113,9 @@ type Filter struct {
 // SQLTypeForField returns the PostgreSQL column type for a given field type.
 func SQLTypeForField(fieldType string) string {
 	switch fieldType {
-	case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor:
+	case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor, FieldTypeUser:
 		return "TEXT"
-	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag:
+	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag, FieldTypeLookup:
 		return "BIGINT"
 	case FieldTypeFloat:
 		return "DOUBLE PRECISION"

@@ -565,7 +565,7 @@ func convertValue(fieldType string, val any) any {
 		return nil
 	}
 	switch fieldType {
-	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag:
+	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag, FieldTypeLookup:
 		switch v := val.(type) {
 		case float64:
 			return int64(v)

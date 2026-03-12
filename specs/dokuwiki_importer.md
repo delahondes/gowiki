@@ -6,9 +6,33 @@ Import the complete data folder of an existing DokuWiki site into a Gowiki site.
 
 The target is to convert **>=90% of all lines** of all documents automatically. Lines that cannot be converted are preserved as-is with a marker comment and reported in a summary.
 
-## Scope exclusion
+## Migration approach
 
-**Struct/data plugin migration is excluded.** The DokuWiki struct plugin stores structured data in SQLite (`meta/struct.sqlite3`) with 20+ schemas. This requires custom, manual migration outside the general importer. Struct-related syntax (`---- struct table ----`, `---- struct lookup ----`, `{{$schema.field}}`, `@@schema.field@@`) is flagged in the report but not converted.
+The import is a **two-phase hybrid**: a mechanical script for bulk conversion, followed by AI-assisted passes for tasks requiring judgment.
+
+### Phase A: Mechanical script (importer CLI)
+
+Handles >=90% of lines automatically:
+- DokuWiki markup → Gowiki markdown conversion
+- Media file copying
+- Link rewriting
+- Metadata extraction
+- Struct syntax flagged but not converted
+
+### Phase B: AI-assisted passes
+
+After the script import, an interactive agent-assisted process handles:
+
+1. **Namespace renaming and translation** — The old wiki uses French naming (e.g., `smq/` = Système de Management de la Qualité). Most content should be translated to English, with namespace renaming to match (e.g., `smq/` → `qms/`). Technical files (studies, technical file content) are left as-is. For each page to translate:
+   - The French version is preserved as a prior version in page history
+   - A new English version is created as the current page
+   - Cross-references are updated to reflect renamed paths
+
+2. **Struct/data migration** — Schema-by-schema, interactively (see struct section below). Each schema's columns, labels, and data values may need translation or renaming to match the English namespace structure.
+
+3. **Naming consistency fixes** — The old wiki has inconsistent naming across namespaces. The agent reviews and proposes coherent naming during translation.
+
+Scope exclusions from the script: struct-related syntax (`---- struct table ----`, `---- struct lookup ----`, `{{$schema.field}}`, `@@schema.field@@`) is flagged in the report but not converted — handled in Phase B.
 
 ## Source data
 
@@ -312,15 +336,89 @@ DokuWiki: `{{changes>ns=-sidebar}}`
 
 Gowiki: `{changes}` (the Gowiki changes plugin). Direct mapping. The `ns=-sidebar` filter is DokuWiki-specific -- Gowiki excludes sidebar/footer by default.
 
-### Struct/data (excluded from scope)
+### Struct/data (~50 pages)
 
-The following are **flagged but not converted**:
-- `---- struct table ----` blocks (29 pages)
-- `---- struct lookup ----` blocks (5 occurrences)
-- `{{$schema.field}}` variable references (49 pages)
-- `@@schema.field@@` bureaucracy variables (2 pages)
+DokuWiki struct binds structured fields to pages via schemas. The following syntax forms exist in the source wiki:
+- `---- struct table ----` blocks (29 pages) — inline table rendering of struct data
+- `---- struct lookup ----` blocks (5 occurrences) — aggregation/query views
+- `{{$schema.field}}` variable references (49 pages) — inline field display
+- `@@schema.field@@` bureaucracy variables (2 pages) — form-bound references
 
-These require custom manual migration.
+#### Export format
+
+Each DokuWiki schema is exported as a pair of files in `olddata/struct/<schema_name>/`:
+- `schema.json` — schema definition (columns, types, config, visibility)
+- `data.csv` — row data with `pid` (DokuWiki page path) as key
+
+#### Column type mapping
+
+12 distinct column types found across 18 schemas (154 columns total). All types have Gowiki equivalents:
+
+| DokuWiki type | Count | Gowiki type | Notes |
+|---|---|---|---|
+| `Text` | 54 | `text` | Direct |
+| `Dropdown` | 27 | `enum` | Comma-separated `values` list |
+| `Date` | 20 | `date` | Two format variants: `Y-m-d` and `Y/m/d`; `prefilltoday` config |
+| `Decimal` | 11 | `integer` | Used exclusively as ID fields (`trimzeros=true`); map to `auto_increment` for IDs |
+| `User` | 10 | `user` | DokuWiki usernames; select from user list via `/api/users/list` |
+| `Checkbox` | 9 | `boolean` / `multi_enum` | Single value → `boolean`; multi-value (`ismulti=true`) → `multi_enum` |
+| `Status` | 6 | `tag` | Foreign key with icon/color/label from reference table |
+| `LongText` | 5 | `text` | Textarea variant; map to text |
+| `DateTime` | 4 | `datetime` | Like Date but with time (`Y/m/d H:i`) |
+| `Lookup` | 3 | `lookup` | General foreign key; self-referential supported |
+| `Color` | 3 | `color` | Direct mapping |
+| `Page` | 2 | `page_link` | DokuWiki namespace path → Gowiki page path |
+
+#### Migration strategy
+
+Struct migration is **agent-assisted, not scripted**. The data volume is small (~50 pages, handful of schemas) and each schema requires design decisions about how to represent it in Gowiki's structured data system. The process for each schema:
+
+1. Read `schema.json` — review column definitions and types
+2. Read `data.csv` — review actual data, identify edge cases
+3. Propose Gowiki field definitions — interactive discussion to map column types, handle `User` references, resolve page paths
+4. User confirms the mapping
+5. Populate page metadata from CSV — attach structured fields to the corresponding converted Gowiki pages (identified by converting `pid` namespace paths)
+
+This approach is preferred over a blind import script because:
+- Column type mappings require semantic decisions, not mechanical mapping
+- Each row is page-bound (`pid` = DokuWiki page path) — the target Gowiki page must exist and be correctly identified
+- Schema-level config (visibility, validation, i18n labels) may not map 1:1
+
+### Slider (1 page)
+
+DokuWiki:
+```
+<slider slide1.png>
+====== Title Slide ======
+Content...
+
+<slider slide2.png>
+====== Second Slide ======
+Content...
+```
+
+Each `<slider background.png>` tag acts as a slide separator with a per-slide background image. In the only usage found (`regulatory/smq/ps01/sop01/tpl01.txt`), all slides share the same background (`slide2.png`), with a different one for the title slide (`slide1confidential.png`).
+
+Gowiki: Convert the entire page to a `{slides}` directive with `background` property. Each `<slider>` becomes an `---` separator. The most common background image becomes the presentation-level `background`:
+
+```
+{slides title="Revue de Direction" background=./slide2.png}
+
+# Title Slide
+Content...
+
+---
+
+# Second Slide
+Content...
+```
+
+Conversion notes:
+- Strip `<slider ...>` tags, replace with `---` separators
+- Extract the most frequent background image, set as `background=` on the `{slides}` directive
+- Per-slide background differences are lost (Phase 1 limitation -- flag for manual review)
+- WRAP styling inside slides (flexcenter, halfhalfbigtext, etc.) is stripped; content is kept
+- `<gchart>` blocks inside slides are not supported in Phase 1 -- flag
 
 ### Template variables
 
@@ -332,7 +430,6 @@ Found only in `templates/` namespace. Convert to Gowiki: `{{PAGE}}`.
 
 | Feature | Pages | Reason |
 |---|---|---|
-| Struct/data blocks and variables | ~50 | Excluded from scope -- custom migration |
 | Interwiki links (`[[wp>...]]`) | rare | Not supported in Gowiki |
 | PDFNS directives | 9 | No Gowiki equivalent |
 
@@ -394,6 +491,7 @@ This phase should cover ~85% of all lines.
 10. Footnotes -> parenthesized text
 11. Template variables (`@!PAGE!@` -> `{{PAGE}}`)
 12. PDFNS -> drop + flag
+13. Slider -> `{slides}` with `background=` + `---` separators
 
 ### Phase 3: File operations
 

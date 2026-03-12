@@ -370,6 +370,43 @@ function renderTagBadge(tag: { label: string; icon: string; color: string }): HT
   return span
 }
 
+// ── Lookup helpers ──
+
+const lookupTableCache = new Map<string, { data: Map<number, string>; timestamp: number }>()
+
+async function getLookupOptions(tableName: string): Promise<Map<number, string>> {
+  const cached = lookupTableCache.get(tableName)
+  if (cached && Date.now() - cached.timestamp < 30000) return cached.data
+
+  const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
+  if (!resp.ok) return new Map()
+  const body = await resp.json()
+  const rows: any[] = body.rows || []
+  const result = new Map<number, string>()
+  for (const r of rows) {
+    // Use the first non-id text field as display, or fall back to id
+    const fields = r.fields || {}
+    const display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
+    result.set(r.id, String(display))
+  }
+  lookupTableCache.set(tableName, { data: result, timestamp: Date.now() })
+  return result
+}
+
+// ── User helpers ──
+
+let userListCache: { data: { username: string; display_name: string }[]; timestamp: number } | null = null
+
+async function getUserList(): Promise<{ username: string; display_name: string }[]> {
+  if (userListCache && Date.now() - userListCache.timestamp < 30000) return userListCache.data
+  const resp = await fetch("/api/users/list")
+  if (!resp.ok) return []
+  const body = await resp.json()
+  const users = body.users || []
+  userListCache = { data: users, timestamp: Date.now() }
+  return users
+}
+
 function renderColorSwatch(color: string): HTMLSpanElement {
   const span = document.createElement("span")
   span.className = "db-color-swatch"
@@ -921,6 +958,19 @@ class DatabaseQueryNodeView {
               else td.textContent = String(val)
             })
           }
+        } else if (f.type === "lookup" && f.foreign_key) {
+          if (val && Number(val) !== 0) {
+            td.textContent = "..."
+            getLookupOptions(f.foreign_key).then(opts => {
+              td.textContent = opts.get(Number(val)) || String(val)
+            })
+          }
+        } else if (f.type === "user" && val) {
+          td.textContent = String(val)
+          getUserList().then(users => {
+            const u = users.find(u => u.username === String(val))
+            if (u && u.display_name) td.textContent = u.display_name
+          })
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")
         } else {
@@ -1047,6 +1097,41 @@ class DatabaseQueryNodeView {
               const oldTag = tags.get(Number(displayValue))
               if (oldTag) td.appendChild(renderTagBadge(oldTag))
               else td.textContent = displayValue
+            }
+          },
+          onCancel: () => {},
+        })
+      })
+    } else if (field.type === "lookup" && field.foreign_key) {
+      getLookupOptions(field.foreign_key).then(opts => {
+        const options: { value: string; label: string }[] = []
+        opts.forEach((label, id) => options.push({ value: String(id), label }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: displayValue,
+          onSave: async (newVal) => {
+            td.textContent = opts.get(Number(newVal)) || newVal
+            td.className = "gowiki-database-editable-value"
+            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            if (!ok) td.textContent = opts.get(Number(displayValue)) || displayValue
+          },
+          onCancel: () => {},
+        })
+      })
+    } else if (field.type === "user") {
+      getUserList().then(users => {
+        const options = users.map(u => ({ value: u.username, label: u.display_name || u.username }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: displayValue,
+          onSave: async (newVal) => {
+            const u = users.find(u => u.username === newVal)
+            td.textContent = u?.display_name || newVal
+            td.className = "gowiki-database-editable-value"
+            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            if (!ok) {
+              const old = users.find(u => u.username === displayValue)
+              td.textContent = old?.display_name || displayValue
             }
           },
           onCancel: () => {},
@@ -1254,6 +1339,38 @@ class DatabaseNewRowNodeView {
             opt.textContent = t.label || String(id)
             sel.appendChild(opt)
           })
+        })
+      } else if (f.type === "lookup" && f.foreign_key) {
+        const sel = document.createElement("select")
+        const empty = document.createElement("option")
+        empty.value = ""
+        empty.textContent = "-- Select --"
+        sel.appendChild(empty)
+        inputs.set(f.name, sel)
+        row.appendChild(sel)
+        getLookupOptions(f.foreign_key).then(opts => {
+          opts.forEach((label, id) => {
+            const opt = document.createElement("option")
+            opt.value = String(id)
+            opt.textContent = label
+            sel.appendChild(opt)
+          })
+        })
+      } else if (f.type === "user") {
+        const sel = document.createElement("select")
+        const empty = document.createElement("option")
+        empty.value = ""
+        empty.textContent = "-- Select --"
+        sel.appendChild(empty)
+        inputs.set(f.name, sel)
+        row.appendChild(sel)
+        getUserList().then(users => {
+          for (const u of users) {
+            const opt = document.createElement("option")
+            opt.value = u.username
+            opt.textContent = u.display_name || u.username
+            sel.appendChild(opt)
+          }
         })
       } else if (f.type === "boolean") {
         const sel = document.createElement("select")
@@ -1550,6 +1667,46 @@ class DatabaseRowNodeView {
       })
       return sel
     }
+    if (f && f.type === "lookup" && f.foreign_key) {
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      isolateInput(sel)
+      getLookupOptions(f.foreign_key).then(opts => {
+        opts.forEach((label, id) => {
+          const opt = document.createElement("option")
+          opt.value = String(id)
+          opt.textContent = label
+          if (String(id) === value) opt.selected = true
+          sel.appendChild(opt)
+        })
+      })
+      return sel
+    }
+    if (f && f.type === "user") {
+      const sel = document.createElement("select")
+      sel.style.width = "100%"
+      sel.style.fontSize = "inherit"
+      const emptyOpt = document.createElement("option")
+      emptyOpt.value = ""
+      emptyOpt.textContent = "-- Select --"
+      sel.appendChild(emptyOpt)
+      isolateInput(sel)
+      getUserList().then(users => {
+        for (const u of users) {
+          const opt = document.createElement("option")
+          opt.value = u.username
+          opt.textContent = u.display_name || u.username
+          if (u.username === value) opt.selected = true
+          sel.appendChild(opt)
+        }
+      })
+      return sel
+    }
     if (f && (f.type === "enum" || f.type === "multi_enum")) {
       const sel = document.createElement("select")
       sel.style.width = "100%"
@@ -1647,6 +1804,19 @@ class DatabaseRowNodeView {
             else tdVal.textContent = String(val)
           })
         }
+      } else if (f && f.type === "lookup" && f.foreign_key) {
+        if (val && Number(val) !== 0) {
+          tdVal.textContent = "..."
+          getLookupOptions(f.foreign_key).then(opts => {
+            tdVal.textContent = opts.get(Number(val)) || String(val)
+          })
+        }
+      } else if (f && f.type === "user" && val) {
+        tdVal.textContent = String(val)
+        getUserList().then(users => {
+          const u = users.find(u => u.username === String(val))
+          if (u && u.display_name) tdVal.textContent = u.display_name
+        })
       } else {
         tdVal.textContent = String(val)
       }
@@ -1768,6 +1938,36 @@ class DatabaseRowNodeView {
             const tag = tags.get(Number(newVal))
             if (tag) td.appendChild(renderTagBadge(tag))
             else td.textContent = newVal
+            td.className = "gowiki-database-editable-value"
+            await saveToApi(newVal)
+          },
+          onCancel: () => {},
+        })
+      })
+    } else if (fieldDef && fieldDef.type === "lookup" && fieldDef.foreign_key) {
+      getLookupOptions(fieldDef.foreign_key).then(opts => {
+        const options: { value: string; label: string }[] = []
+        opts.forEach((label, id) => options.push({ value: String(id), label }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: currentValue,
+          onSave: async (newVal) => {
+            td.textContent = opts.get(Number(newVal)) || newVal
+            td.className = "gowiki-database-editable-value"
+            await saveToApi(newVal)
+          },
+          onCancel: () => {},
+        })
+      })
+    } else if (fieldDef && fieldDef.type === "user") {
+      getUserList().then(users => {
+        const options = users.map(u => ({ value: u.username, label: u.display_name || u.username }))
+        createOverlaySelectKeyed(td, {
+          options,
+          value: currentValue,
+          onSave: async (newVal) => {
+            const u = users.find(u => u.username === newVal)
+            td.textContent = u?.display_name || newVal
             td.className = "gowiki-database-editable-value"
             await saveToApi(newVal)
           },
