@@ -114,6 +114,13 @@ const blockquoteProperties: NodePropertySpec[] = [
     ],
     visible: isCustom,
   },
+  {
+    name: "image-width",
+    label: "Image width",
+    default: null,
+    parse: normalizeBlockquoteWidth,
+    serialize: (value: string | null) => String(value ?? ""),
+  },
 ]
 
 const blockquoteStyles = `
@@ -207,6 +214,18 @@ const blockquoteStyles = `
 .ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-important::before {
   background-image: url(/icons/important.svg);
 }
+
+/* image-width: percentages are relative to the blockquote width */
+.ProseMirror blockquote.gowiki-bq-img-width .gowiki-image-wrapper {
+  width: var(--gowiki-bq-img-width) !important;
+  max-width: none !important;
+  display: inline-block;
+}
+
+.ProseMirror blockquote.gowiki-bq-img-width .gowiki-image-wrapper img {
+  width: 100% !important;
+  height: auto !important;
+}
 `
 
 export const blockquotePlugin: WikiPlugin = {
@@ -221,16 +240,17 @@ export const blockquotePlugin: WikiPlugin = {
         icon: { default: null },
         width: { default: null },
         align: { default: null },
+        "image-width": { default: null },
       },
       toDOM(node: any) {
         const cls = node.attrs.class
         const domAttrs: Record<string, string> = {}
         const styles: string[] = []
+        const classes: string[] = []
 
         if (cls === "custom") {
-          const classes = ["gowiki-bq-custom"]
+          classes.push("gowiki-bq-custom")
           if (node.attrs.icon) classes.push(`gowiki-bq-icon-${node.attrs.icon}`)
-          domAttrs.class = classes.join(" ")
           if (node.attrs.color) {
             styles.push(`border-left-color: ${node.attrs.color}`)
             styles.push(`background: color-mix(in srgb, ${node.attrs.color} 10%, transparent)`)
@@ -238,12 +258,18 @@ export const blockquotePlugin: WikiPlugin = {
           if (node.attrs.width) styles.push(`width: ${node.attrs.width}`)
           if (node.attrs.align) styles.push(`text-align: ${node.attrs.align}`)
         } else if (cls) {
-          domAttrs.class = `gowiki-bq-${cls}`
+          classes.push(`gowiki-bq-${cls}`)
         }
 
-        if (styles.length > 0) {
-          domAttrs.style = styles.join("; ") + ";"
+        // image-width applies to any blockquote (% is relative to blockquote width).
+        const imgWidth = node.attrs["image-width"]
+        if (imgWidth) {
+          classes.push("gowiki-bq-img-width")
+          styles.push(`--gowiki-bq-img-width: ${imgWidth}`)
         }
+
+        if (classes.length > 0) domAttrs.class = classes.join(" ")
+        if (styles.length > 0) domAttrs.style = styles.join("; ") + ";"
 
         return ["blockquote", domAttrs, 0]
       },
@@ -263,8 +289,16 @@ export const blockquotePlugin: WikiPlugin = {
               if (style.width) result.width = style.width
               if (style.textAlign) result.align = style.textAlign
             } else {
-              const match = clsList.match(/gowiki-bq-(\S+)/)
-              if (match) result.class = match[1]
+              const match = clsList.match(/gowiki-bq-(\w+)/)
+              if (match && match[1] !== "img") result.class = match[1]
+            }
+
+            // image-width from CSS variable
+            if (clsList.includes("gowiki-bq-img-width")) {
+              const imgWidth = dom.style.getPropertyValue("--gowiki-bq-img-width").trim()
+              if (imgWidth) {
+                result["image-width"] = imgWidth
+              }
             }
 
             return result

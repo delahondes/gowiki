@@ -181,6 +181,86 @@ Object properties are represented between curly braces `{}`, the first word that
 
 `{table width=1000px}`
 
+## Blockquotes
+
+Standard Markdown blockquotes use `>` prefix:
+
+```
+> This is a blockquote.
+```
+
+### Blockquote properties
+
+The `{blockquote}` directive controls blockquote appearance. It is placed on the line immediately before the blockquote.
+
+#### Built-in classes
+
+```
+{blockquote class=tip}
+> A helpful tip.
+
+{blockquote class=note}
+> Informational note.
+
+{blockquote class=important}
+> Pay attention to this.
+
+{blockquote class=warning}
+> This is dangerous.
+```
+
+Each built-in class renders with a distinct color scheme (border, background, icon, and label):
+
+| Class | Border | Background | Label |
+| -- | -- | -- | -- |
+| `tip` | green | light green | "Tip" with lightbulb icon |
+| `note` | blue | light blue | "Note" with info icon |
+| `important` | amber | light amber | "Important" with important icon |
+| `warning` | red | light red | "Warning" with warning icon |
+
+#### Custom class
+
+The `custom` class unlocks additional properties for full control:
+
+```
+{blockquote class=custom color=magenta icon=lightbulb width=50% align=center}
+> Fully customized blockquote.
+```
+
+| Property | Values | Notes |
+| -- | -- | -- |
+| `class` | `tip`, `note`, `important`, `warning`, `custom` | Required for any styling |
+| `color` | Named color or hex (`#abc`, `#aabbcc`) | Custom only. Sets border and tinted background. |
+| `icon` | `lightbulb`, `info`, `warning`, `important` | Custom only |
+| `width` | CSS value (`50%`, `400px`) | Custom only |
+| `align` | `left`, `center`, `right` | Custom only |
+
+When no `class` is set, the blockquote renders with default styling (grey left border, no icon or label).
+
+#### Image width
+
+The `image-width` property constrains all images inside the blockquote to a uniform width. It is available on any blockquote regardless of class.
+
+```
+{blockquote image-width=20%}
+> ![](./img1.png) ![](./img2.png)
+> ![](./img3.png) ![](./img4.png)
+> *Panel A* Description of the panel...
+```
+
+The percentage refers to **blockquote width**, not the original image size. `image-width=20%` means each image occupies 20% of the blockquote's width.
+
+This is useful for **scientific figure panels** where multiple images are presented side by side at a uniform scale with a shared caption below. Combine with `class=custom` for full styling control:
+
+```
+{blockquote class=custom color=lightgrey width=70% image-width=49%}
+> ![](./panel-a.png) ![](./panel-b.png) \n![](./panel-c.png) ![](./panel-d.png)
+> **Panel 1**: Control group (top left), treatment at T+24h (top right),
+> T+48h (bottom left), follow-up at T+72h (bottom right).
+```
+
+Using `image-width=49%` gives two images per row with a thin gap between them. The `width` property controls the overall blockquote size on the page, while `image-width` controls each image within it.
+
 ## Include directive
 
 The include directive embeds the content of another page as a read-only zone. It is a **self-contained directive** (not a prefix to another block):
@@ -357,6 +437,9 @@ Status legend:
 | Table cell formulas | `=FUNC(...)` leading `=` in cell | `planned` | Evaluated at render time, sandboxed JS. Errors: #CIRC, #DIV/0, #ERR. |
 | Table cell merging | `<<` colspan, `^^` rowspan | `planned` | Chevron tokens as sole cell content. Corner merges not supported. |
 | Table line breaks | Literal `\\n` inside cell -> `<br>` | `partial` | `\\n` is converted to hard break in text pipeline; verify cell print strategy if multiline cells are required in output format. |
+| Blockquote classes | `{blockquote class=tip\|note\|important\|warning}` | `implemented` | Built-in admonition classes with icon, label, and color scheme. |
+| Blockquote custom | `{blockquote class=custom color=... icon=... width=... align=...}` | `implemented` | Full control over color, icon, width, and alignment. |
+| Blockquote image-width | `{blockquote image-width=20%}` | `implemented` | Constrains all images inside to uniform width (% of blockquote width or px). Useful for scientific figure panels. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
 | Include directive | `{include path=/path/to/page}` self-contained, supports `#section` anchor | `implemented` | Self-contained directive; supports section-targeted includes via `#anchor`. Numbered headings flow through includes. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |

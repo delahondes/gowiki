@@ -242,20 +242,31 @@ DokuWiki's WRAP plugin provides styled containers. Most common patterns:
 | Pattern | Count | Conversion |
 |---|---|---|
 | `<WRAP>...</WRAP>` (bare) | 61 | Drop wrapper, keep content |
-| `<WRAP center round important 60%>` | 25 | Convert to blockquote: `> **Important:** content` |
-| `<WRAP center round info 60%>` | ~15 | Convert to blockquote: `> **Info:** content` |
-| `<WRAP center round tip 60%>` | 7 | Convert to blockquote: `> **Tip:** content` |
+| `<WRAP center round important 60%>` | 25 | `{blockquote class=important}` + `> content` |
+| `<WRAP center round info 60%>` | ~15 | `{blockquote class=note}` + `> content` |
+| `<WRAP center round tip 60%>` | 7 | `{blockquote class=tip}` + `> content` |
+| `<WRAP center round warning 60%>` | rare | `{blockquote class=warning}` + `> content` |
 | `<WRAP group>` + `<WRAP half column>` with image | ~14 | Image+text side-by-side: convert to image with `wrap=left` or `wrap=right` property |
 | `<WRAP group>` + `<WRAP half column>` without image | ~11 | Flatten to sequential blocks. Flag. |
 | `<WRAP round white spacedx2>` | 18 | Drop wrapper, keep content |
 | `<WRAP prewrap>` | 7 | Drop wrapper, keep content |
 
 Strategy:
-- **Admonition wraps** (info, important, tip): Convert to blockquote with bold prefix. Not perfect but preserves intent.
+- **Admonition wraps** (info, important, tip, warning): Convert to Gowiki blockquote with the `{blockquote class=...}` directive. Gowiki's blockquote plugin supports built-in classes: `tip`, `note`, `important`, `warning` — each renders with a colored border, background, icon, and label. DokuWiki's `info` maps to Gowiki's `note`. If a WRAP has a custom width (e.g. `60%`), use `{blockquote class=custom color=... width=60% align=center}` with appropriate color.
 - **Image+text layout wraps** (group + half column containing an image): Convert to Gowiki image with `wrap` property for text wrapping.
 - **Other layout wraps** (group, half column without image, flexcenter): Flatten to sequential content. Flag.
 - **Bare wraps / styling wraps**: Drop `<WRAP>` / `</WRAP>` tags, keep content.
 - **Wraps inside table cells**: Extract content only, strip tags.
+
+DokuWiki WRAP class to Gowiki blockquote class mapping:
+
+| DokuWiki WRAP class | Gowiki blockquote class |
+|---|---|
+| `important` | `important` |
+| `info` | `note` |
+| `tip` | `tip` |
+| `warning` | `warning` |
+| Other styled | `custom` (with `color`, `icon`, `width`, `align` as needed) |
 
 ### Figure (37 pages, ~121 occurrences)
 
@@ -267,14 +278,21 @@ DokuWiki:
 </figure>
 ```
 
-Gowiki: Convert to image with caption as alt text.
+Gowiki: Convert to image with `caption` property. The caption supports inline markdown (**bold**, *italic*, `code`, [links](url)).
 ```
-{image size=700x}
-![Description text](./pasted/20250924-074417.png)
+{image size=700x caption="Description text"}
+![](./pasted/20250924-074417.png)
 ```
 
-- Single image in figure: extract image + caption, convert to Gowiki image with alt text.
-- Multiple images in figure (e.g. `{{img1.png}} {{img2.png}}`): convert each image separately. Flag for review.
+The `caption` property triggers auto-numbering ("Figure 1:", "Figure 2:", ...) and renders a styled figcaption below the image. An optional `label` property enables cross-references via `{ref label-name}`.
+
+- **Single image in figure**: extract image + caption, convert to Gowiki image with `caption=` property. Alt text is left empty (caption serves as the visible label).
+- **Multiple images in figure**: group inside a custom blockquote with `image-width` to constrain image sizes uniformly. Use `image-width=49%` for a 2-up grid with a thin gap:
+```
+{blockquote class=custom color=lightgrey width=70% image-width=49%}
+> ![](./pasted/img1.png) ![](./pasted/img2.png) \n![](./pasted/img3.png) ![](./pasted/img4.png)
+> **Panel 1**: In this panel we...
+```
 
 ### PDFNS (9 pages)
 
