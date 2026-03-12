@@ -24,7 +24,8 @@ const (
 // ConvertPage converts a full DokuWiki page to Gowiki Markdown.
 // pagePath is the source page path relative to pages/ (e.g. "ns/page.txt"),
 // used for resolving relative links.
-func ConvertPage(content string, pagePath string) *ConvertResult {
+// pagesDir is the root pages/ directory, used to resolve include anchors.
+func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResult {
 	currentNS := NamespaceOf(pagePath)
 	lines := strings.Split(content, "\n")
 	result := &ConvertResult{TotalLines: len(lines)}
@@ -38,7 +39,7 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 		}
 	}
 	if hasSlider {
-		out, flagged := ConvertSliderPage(lines, currentNS)
+		out, flagged := ConvertSliderPage(lines, currentNS, pagesDir)
 		result.Markdown = strings.Join(out, "\n")
 		result.Flagged = flagged
 		result.ConvertLines = result.TotalLines - len(flagged)
@@ -73,22 +74,47 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 		}
 		// Split on image markers and emit property lines before each image
 		parts := strings.Split(line, "\x01")
-		var assembled []string
+
+		// Check if image is standalone (no other text on the line)
+		hasOtherContent := false
 		for _, part := range parts {
-			if strings.HasPrefix(part, "IMG{") {
-				// Parse: IMG{size=... align=... caption=... path=...}
-				props := parseImageMarker(part)
-				propLine, imgLine := buildImageLines(props)
-				if propLine != "" {
-					output = append(output, propLine)
-				}
-				assembled = append(assembled, imgLine)
-			} else if part != "" {
-				assembled = append(assembled, part)
+			if !strings.HasPrefix(part, "IMG{") && strings.TrimSpace(part) != "" {
+				hasOtherContent = true
+				break
 			}
 		}
-		if len(assembled) > 0 {
-			output = append(output, strings.Join(assembled, ""))
+
+		if !hasOtherContent {
+			// Standalone image: emit property on separate line, then image
+			for _, part := range parts {
+				if strings.HasPrefix(part, "IMG{") {
+					props := parseImageMarker(part)
+					propLine, imgLine := buildImageLines(props)
+					if propLine != "" {
+						output = append(output, propLine)
+					}
+					output = append(output, imgLine)
+				}
+			}
+		} else {
+			// Inline image: emit {image ...}![](path) inline within the text
+			var assembled []string
+			for _, part := range parts {
+				if strings.HasPrefix(part, "IMG{") {
+					props := parseImageMarker(part)
+					propLine, imgLine := buildImageLines(props)
+					if propLine != "" {
+						assembled = append(assembled, propLine+imgLine)
+					} else {
+						assembled = append(assembled, imgLine)
+					}
+				} else if part != "" {
+					assembled = append(assembled, part)
+				}
+			}
+			if len(assembled) > 0 {
+				output = append(output, strings.Join(assembled, ""))
+			}
 		}
 	}
 
@@ -197,7 +223,7 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 			if reFoldClose.MatchString(line) {
 				// Emit accumulated content (fold wrapper stripped)
 				for _, bl := range blockBuf {
-					converted := convertNormalLine(bl, currentNS)
+					converted := convertNormalLine(bl, currentNS, pagesDir)
 					emitImageLine(converted)
 				}
 				result.ConvertLines += len(blockBuf) + 2
@@ -382,6 +408,15 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 			continue
 		}
 
+		// --- Check if we're inside a blockquote-producing WRAP ---
+		inBlockquote := false
+		for _, wt := range wrapBuf {
+			if wt == "admonition" || wt == "column" {
+				inBlockquote = true
+				break
+			}
+		}
+
 		// --- Table lines ---
 		if IsTableLine(trimmed) {
 			tableLines = append(tableLines, line)
@@ -391,7 +426,10 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 		flushTable()
 
 		// --- Normal line conversion ---
-		converted := convertNormalLine(line, currentNS)
+		converted := convertNormalLine(line, currentNS, pagesDir)
+		if inBlockquote && strings.TrimSpace(converted) != "" {
+			converted = "> " + converted
+		}
 		emitImageLine(converted)
 		result.ConvertLines++
 	}
@@ -408,12 +446,51 @@ func ConvertPage(content string, pagePath string) *ConvertResult {
 		output = append(output, blockBuf...)
 	}
 
+	// Post-process: ensure blank lines around block-level directives
+	output = ensureBlankLinesAroundDirectives(output)
+
 	result.Markdown = strings.Join(output, "\n")
 	return result
 }
 
+// isBlockDirective returns true if the line is a block-level directive
+// that needs blank lines around it.
+func isBlockDirective(line string) bool {
+	t := strings.TrimSpace(line)
+	return strings.HasPrefix(t, "{include ") ||
+		t == "{changes}" ||
+		strings.HasPrefix(t, "{reviewflow ")
+}
+
+// ensureBlankLinesAroundDirectives adds blank lines before and after
+// block-level directives ({include}, {changes}, {reviewflow}).
+func ensureBlankLinesAroundDirectives(lines []string) []string {
+	var result []string
+	prevWasDirective := false
+
+	for _, line := range lines {
+		isDir := isBlockDirective(line)
+		isBlank := strings.TrimSpace(line) == ""
+
+		// After a directive, ensure blank line before non-blank content
+		if prevWasDirective && !isBlank && !isDir {
+			result = append(result, "")
+		}
+
+		// Before a directive, ensure blank line after non-blank content
+		if isDir && len(result) > 0 && strings.TrimSpace(result[len(result)-1]) != "" {
+			result = append(result, "")
+		}
+
+		result = append(result, line)
+		prevWasDirective = isDir
+	}
+
+	return result
+}
+
 // convertNormalLine converts a single non-block line.
-func convertNormalLine(line string, currentNS string) string {
+func convertNormalLine(line string, currentNS string, pagesDir string) string {
 	trimmed := strings.TrimSpace(line)
 
 	// Empty line
@@ -455,7 +532,7 @@ func convertNormalLine(line string, currentNS string) string {
 
 	// Plugin conversions (order matters)
 	line = ConvertTag(line)
-	line = ConvertInclude(line, currentNS)
+	line = ConvertInclude(line, currentNS, pagesDir)
 	line = ConvertACK(line)
 	line = ConvertTodo(line)
 	line = ConvertChanges(line)
@@ -534,11 +611,7 @@ func buildImageLines(p imageProps) (string, string) {
 
 	var props []string
 	if p.size != "" {
-		size := p.size
-		if !strings.Contains(size, "x") {
-			size += "x"
-		}
-		props = append(props, "size="+size)
+		props = append(props, "size="+ConvertImageSize(p.size))
 	}
 	if p.align != "" {
 		props = append(props, "align="+p.align)

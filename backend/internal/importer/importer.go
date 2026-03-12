@@ -67,7 +67,7 @@ func Run(opts Options) (*Report, error) {
 		}
 
 		// Convert
-		result := ConvertPage(string(content), relPath)
+		result := ConvertPage(string(content), relPath, pagesDir)
 
 		// Build page report
 		pr := PageReport{

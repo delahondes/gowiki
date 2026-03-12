@@ -624,17 +624,13 @@ function registerMarkdownPrinters(reg: Registry) {
     return parts.join("\n")
   }
 
-  function printStandaloneImage(
-    image: PMNode,
-    recurse: (node: PMNode) => string
-  ): string {
+  function imageDirectiveStr(image: PMNode): string {
     const size = image.attrs.size ?? null
     const version = image.attrs.version ?? null
     const align = image.attrs.align ?? null
     const wrap = image.attrs.wrap ?? null
     const caption = image.attrs.caption ?? null
     const label = image.attrs.label ?? null
-    const body = recurse(image)
     const dirParts: string[] = []
     if (size) dirParts.push(size.includes(";") ? `size="${size}"` : `size=${size}`)
     if (version) dirParts.push(`version=${version}`)
@@ -643,9 +639,33 @@ function registerMarkdownPrinters(reg: Registry) {
     if (caption) dirParts.push(`caption="${String(caption).replace(/"/g, '\\"')}"`)
     if (label) dirParts.push(`label=${label}`)
     if (dirParts.length > 0) {
-      return `{image ${dirParts.join(" ")}}\n${body}\n\n`
+      return `{image ${dirParts.join(" ")}}`
+    }
+    return ""
+  }
+
+  function printStandaloneImage(
+    image: PMNode,
+    recurse: (node: PMNode) => string
+  ): string {
+    const body = recurse(image)
+    const dir = imageDirectiveStr(image)
+    if (dir) {
+      return `${dir}\n${body}\n\n`
     }
     return body + "\n\n"
+  }
+
+  function printInlineImage(
+    image: PMNode,
+    recurse: (node: PMNode) => string
+  ): string {
+    const body = recurse(image)
+    const dir = imageDirectiveStr(image)
+    if (dir) {
+      return `${dir}${body}`
+    }
+    return body
   }
 
   reg.registerPMNode("paragraph", {
@@ -659,39 +679,29 @@ function registerMarkdownPrinters(reg: Registry) {
         return printStandaloneImage(image, recurse)
       }
 
-      // Check if the paragraph contains an image with size/version alongside
-      // other content.  The {image ...} directive syntax only works for
-      // standalone images, so split the paragraph: emit the sized image as
-      // its own paragraph (with directive) and the remaining content as a
-      // separate paragraph.
-      let sizedImage: typeof node.firstChild | null = null
-      let sizedImageIndex = -1
-      node.content.forEach((child, _offset, index) => {
+      // Check if the paragraph contains an image with directive properties
+      // alongside other content. Use inline directive syntax:
+      // text {image size=500px}![alt](src) more text
+      let hasSizedImage = false
+      node.content.forEach((child) => {
         if (
-          !sizedImage &&
           child.type.name === "image" &&
           (child.attrs.size || child.attrs.version || child.attrs.align || child.attrs.wrap || child.attrs.caption || child.attrs.label)
         ) {
-          sizedImage = child
-          sizedImageIndex = index
+          hasSizedImage = true
         }
       })
 
-      if (sizedImage) {
-        const before: string[] = []
-        const after: string[] = []
-        node.content.forEach((child, _offset, index) => {
-          if (index === sizedImageIndex) return
-          if (index < sizedImageIndex) before.push(recurse(child))
-          else after.push(recurse(child))
-        })
+      if (hasSizedImage) {
         let out = ""
-        const beforeText = before.join("")
-        if (beforeText) out += beforeText + "\n\n"
-        out += printStandaloneImage(sizedImage, recurse)
-        const afterText = after.join("")
-        if (afterText) out += afterText + "\n\n"
-        return out
+        node.content.forEach((child) => {
+          if (child.type.name === "image" && imageDirectiveStr(child)) {
+            out += printInlineImage(child, recurse)
+          } else {
+            out += recurse(child)
+          }
+        })
+        return out + "\n\n"
       }
 
       let out = ""

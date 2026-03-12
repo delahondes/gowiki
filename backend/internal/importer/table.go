@@ -92,23 +92,26 @@ func ConvertTable(lines []string, currentNS string) ([]string, []FlaggedLine) {
 		}
 	}
 
-	// If no header row was detected, we need a separator after a synthetic first row
-	// Actually, in Gowiki pipe tables, a separator is mandatory.
-	// If the first row is not a header, we still add a separator after it.
+	// If no header row was detected, we need a separator after the first data row.
+	// In Gowiki pipe tables, a separator is mandatory.
 	if headerRow < 0 {
-		// Insert separator after first row
 		sep := "|"
 		for j := 0; j < maxCols; j++ {
 			sep += " --- |"
 		}
-		// Insert at position 1
-		result := make([]string, 0, len(out)+1)
-		if len(out) > 0 {
-			result = append(result, out[0])
-			result = append(result, sep)
-			result = append(result, out[1:]...)
+		// When headerCol is true, out[0] is the property line {table headers=1st_col}
+		// and out[1] is the first data row. Insert separator after the first data row.
+		insertAfter := 0
+		if headerCol {
+			insertAfter = 1
 		}
-		out = result
+		if insertAfter < len(out) {
+			result := make([]string, 0, len(out)+1)
+			result = append(result, out[:insertAfter+1]...)
+			result = append(result, sep)
+			result = append(result, out[insertAfter+1:]...)
+			out = result
+		}
 	}
 
 	return out, flagged

@@ -195,6 +195,59 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   return out
 }
 
+/**
+ * Preprocess inline token children to detect inline directives.
+ * Matches `{directivename key=value}` in a text token immediately before
+ * an image token, extracts the directive, and attaches it to the image token.
+ * This allows `{image size=500px}![alt](src)` inline within a paragraph.
+ */
+function applyInlineDirectives(children: any[], registry: Registry): any[] {
+  const result = [...children]
+  for (let i = 0; i < result.length - 1; i++) {
+    const tok = result[i]
+    if (tok.type !== "text" || !tok.content) continue
+
+    // Check if text ends with {directivename ...}
+    const match = tok.content.match(/\{([A-Za-z][A-Za-z0-9_-]*)(\s+[^}]*)?\}\s*$/)
+    if (!match) continue
+
+    const directiveName = match[1]
+    const directiveStr = match[0].trim()
+    const parsed = parseDirective(directiveStr)
+    if (!parsed) continue
+
+    // Must be a registered directive
+    const spec = registry.getDirective(parsed.name)
+    if (!spec) continue
+
+    // Next token must be a type that this directive can apply to inline
+    // (e.g., image token for {image ...})
+    const nextTok = result[i + 1]
+    if (!nextTok || nextTok.type !== "image") continue
+
+    // Parse the directive attributes
+    const parsedAttrs: Record<string, any> = {}
+    for (const [key, raw] of Object.entries(parsed.attrs)) {
+      const prop = spec.properties.find((p: any) => p.name === key)
+      if (!prop) continue
+      parsedAttrs[key] = prop.parse ? prop.parse(raw) : raw
+    }
+
+    // Attach directive to the image token
+    nextTok.meta = nextTok.meta ?? {}
+    nextTok.meta.directives = nextTok.meta.directives ?? {}
+    nextTok.meta.directives[parsed.name] = parsedAttrs
+
+    // Trim the directive from the text token
+    tok.content = tok.content.slice(0, tok.content.length - match[0].length)
+    if (!tok.content) {
+      result.splice(i, 1)
+      i--
+    }
+  }
+  return result
+}
+
 function defaultLinkTextForTarget(target: string): string {
   if (/^https?:\/\//i.test(target)) return target
   const pathOnly = target.split(/[?#]/)[0]
@@ -500,7 +553,12 @@ export function markdownToPM(
     )
   )
 
-
+  // 2b. Apply inline directives (e.g. {image size=500px}![](path) within paragraphs)
+  for (const token of tokens) {
+    if (token.type === "inline" && Array.isArray(token.children)) {
+      token.children = applyInlineDirectives(token.children, registry)
+    }
+  }
 
   // 3. Run kernel
   const ctx = new CompileContext(schema)

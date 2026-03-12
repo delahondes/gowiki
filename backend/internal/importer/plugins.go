@@ -2,6 +2,8 @@ package importer
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -82,7 +84,8 @@ var (
 )
 
 // ConvertInclude converts a DokuWiki include to Gowiki.
-func ConvertInclude(line string, currentNS string) string {
+// pagesDir is the root pages/ directory, used to resolve first-heading anchors.
+func ConvertInclude(line string, currentNS string, pagesDir string) string {
 	return reInclude.ReplaceAllStringFunc(line, func(m string) string {
 		inner := reInclude.FindStringSubmatch(m)[1]
 
@@ -107,13 +110,58 @@ func ConvertInclude(line string, currentNS string) string {
 		gowikiPath := DokuWikiLinkToPath(target, currentNS)
 
 		if hasFirstSecOnly && anchor == "" {
-			// firstseconly -> include first heading section
-			// We'd need to resolve the first heading — use a placeholder
-			anchor = "#first-heading"
+			// firstseconly -> resolve actual first heading from target page
+			if resolved := resolveFirstHeading(target, currentNS, pagesDir); resolved != "" {
+				anchor = "#" + resolved
+			} else {
+				anchor = "#first-heading"
+			}
 		}
 
 		return fmt.Sprintf("{include path=%s%s}", gowikiPath, anchor)
 	})
+}
+
+// resolveFirstHeading reads a DokuWiki page and returns the anchor slug of its first heading.
+func resolveFirstHeading(target string, currentNS string, pagesDir string) string {
+	if pagesDir == "" {
+		return ""
+	}
+
+	// Convert DokuWiki link target to file path
+	// Replace : with /
+	filePath := strings.ReplaceAll(target, ":", "/")
+
+	// Resolve relative vs absolute (same rules as DokuWikiLinkToPath)
+	if !strings.HasPrefix(filePath, "/") && !strings.Contains(filePath, "/") {
+		// Single-segment: relative to current namespace
+		if currentNS != "" {
+			filePath = currentNS + "/" + filePath
+		}
+	}
+	filePath = strings.TrimPrefix(filePath, "/")
+
+	// Try direct path, then with /start suffix
+	candidates := []string{
+		filepath.Join(pagesDir, filePath+".txt"),
+		filepath.Join(pagesDir, filePath, "start.txt"),
+	}
+
+	for _, candidate := range candidates {
+		data, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		// Find first heading in the file
+		for _, line := range strings.Split(string(data), "\n") {
+			if h, ok := ConvertHeading(strings.TrimSpace(line)); ok {
+				// Extract the title text (strip leading # marks)
+				title := strings.TrimLeft(h, "# ")
+				return HeadingAnchor(title)
+			}
+		}
+	}
+	return ""
 }
 
 // ConvertTag converts a DokuWiki tag directive to Gowiki.
@@ -126,9 +174,10 @@ func ConvertTag(line string) string {
 }
 
 // ConvertACK converts a DokuWiki ACK directive to Gowiki todo.
+// ~~ACKNOWLEDGE~~ (no groups) is a query widget — flag it, no Gowiki equivalent.
 func ConvertACK(line string) string {
 	if reACKSimple.MatchString(line) {
-		return reACKSimple.ReplaceAllString(line, `{todo title="Acknowledge" action="read" resolution=all}`)
+		return reACKSimple.ReplaceAllString(line, "`[IMPORT: ~~ACKNOWLEDGE~~ query widget — no Gowiki equivalent]`")
 	}
 	return reACK.ReplaceAllStringFunc(line, func(m string) string {
 		groups := reACK.FindStringSubmatch(m)[1]
@@ -363,10 +412,7 @@ func convertFigureImage(imgSpec string, currentNS string) (string, string) {
 
 	props := ""
 	if size != "" {
-		if !strings.Contains(size, "x") {
-			size += "x"
-		}
-		props = fmt.Sprintf("{image size=%s}", size)
+		props = fmt.Sprintf("{image size=%s}", ConvertImageSize(size))
 	}
 
 	return props, fmt.Sprintf("![%s](%s)", "", mediaPath)
@@ -401,7 +447,7 @@ func ConvertNBBlock(lines []string, isWarning bool, currentNS string) []string {
 }
 
 // ConvertSliderPage converts a full page with <slider> tags to Gowiki slides.
-func ConvertSliderPage(lines []string, currentNS string) ([]string, []FlaggedLine) {
+func ConvertSliderPage(lines []string, currentNS string, pagesDir string) ([]string, []FlaggedLine) {
 	var flagged []FlaggedLine
 	var slides [][]string
 	var currentSlide []string
@@ -500,7 +546,7 @@ func ConvertSliderPage(lines []string, currentNS string) ([]string, []FlaggedLin
 			}
 			flushSlideTable()
 			// Apply normal line conversion (headings, lists, inline markup, etc.)
-			line = convertNormalLine(line, currentNS)
+			line = convertNormalLine(line, currentNS, pagesDir)
 			trimmed = strings.TrimSpace(line)
 			if trimmed == "" && len(out) > 0 && out[len(out)-1] == "" {
 				continue // Collapse multiple empty lines

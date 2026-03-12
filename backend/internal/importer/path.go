@@ -107,7 +107,8 @@ func DokuWikiMediaToPath(mediaRef string, currentNS string) string {
 	return path.Clean("/" + mediaRef)
 }
 
-// normalizeLinkPath cleans a link path and renames start -> index.
+// normalizeLinkPath cleans a link path and renames start -> index,
+// then simplifies /path/index to /path (they resolve to the same content).
 func normalizeLinkPath(p string) string {
 	p = path.Clean(p)
 
@@ -117,6 +118,15 @@ func normalizeLinkPath(p string) string {
 	}
 	if p == "/start" {
 		p = "/index"
+	}
+
+	// Simplify /path/index to /path (they resolve to the same content)
+	if strings.HasSuffix(p, "/index") {
+		simplified := strings.TrimSuffix(p, "/index")
+		if simplified == "" {
+			simplified = "/"
+		}
+		p = simplified
 	}
 
 	return p

@@ -103,6 +103,12 @@ export class CompileContext {
   }
 
   findDirective(name: string): Record<string, string | null> | null {
+    // Check current token first (for inline directives like {image size=500px}![](path))
+    const currentDirectives = this.token?.meta?.directives
+    if (currentDirectives && currentDirectives[name]) {
+      return currentDirectives[name]
+    }
+    // Then check token stack (for block directives on separate lines)
     for (let i = this.tokenStack.length - 1; i >= 0; i--) {
       const directives = this.tokenStack[i].meta?.directives
       if (directives && directives[name]) {
