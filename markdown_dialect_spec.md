@@ -237,6 +237,27 @@ The `custom` class unlocks additional properties for full control:
 
 When no `class` is set, the blockquote renders with default styling (grey left border, no icon or label).
 
+The following properties are available on **any** blockquote regardless of class:
+
+| Property | Values | Notes |
+| -- | -- | -- |
+| `image-width` | CSS value (`20%`, `200px`) | Constrains all images to a uniform width (% of blockquote width) |
+| `wrap` | `left`, `right` | Floats the blockquote, enabling column layouts |
+
+#### Wrap
+
+The `wrap` property floats a blockquote left or right, allowing adjacent blockquotes to sit side by side as columns:
+
+```
+{blockquote wrap=left width=49%}
+> Left column content.
+
+{blockquote wrap=left width=49%}
+> Right column content.
+```
+
+Content following a sequence of wrapped blockquotes is automatically cleared. This replaces the need for a dedicated multi-column layout system.
+
 #### Image width
 
 The `image-width` property constrains all images inside the blockquote to a uniform width. It is available on any blockquote regardless of class.
@@ -440,6 +461,7 @@ Status legend:
 | Blockquote classes | `{blockquote class=tip\|note\|important\|warning}` | `implemented` | Built-in admonition classes with icon, label, and color scheme. |
 | Blockquote custom | `{blockquote class=custom color=... icon=... width=... align=...}` | `implemented` | Full control over color, icon, width, and alignment. |
 | Blockquote image-width | `{blockquote image-width=20%}` | `implemented` | Constrains all images inside to uniform width (% of blockquote width or px). Useful for scientific figure panels. |
+| Blockquote wrap | `{blockquote wrap=left\|right}` | `implemented` | Floats blockquote for column layouts. Adjacent wrapped blockquotes sit side by side. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
 | Include directive | `{include path=/path/to/page}` self-contained, supports `#section` anchor | `implemented` | Self-contained directive; supports section-targeted includes via `#anchor`. Numbered headings flow through includes. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |

@@ -148,7 +148,7 @@ Gowiki: `{include path=/ns/page}` or `{include path=/ns/page#section}` (section-
 52 pages use includes. Conversion:
 - `{{page>ns:page}}` -> `{include path=/ns/page}`
 - `{{page>ns:page&nofooter}}` -> `{include path=/ns/page}` (nofooter/noheader are DokuWiki rendering hints -- drop them)
-- `{{page>ns:page&firstseconly&noreadmore}}` -> `{include path=/ns/page}` (firstseconly changes content scope -- **flag** for manual review)
+- `{{page>ns:page&firstseconly&noreadmore}}` -> `{include path=/ns/page#first-heading}` (resolve first heading anchor from target page content; drop `noreadmore`)
 - `{{page>ns:page#section}}` -> `{include path=/ns/page#section}` (section-targeted include -- renders from the anchor heading to the next heading of same or higher level)
 - `{{page>ns:page#section&link}}` -> `{include path=/ns/page#section}` (drop DokuWiki rendering hints)
 
@@ -247,14 +247,14 @@ DokuWiki's WRAP plugin provides styled containers. Most common patterns:
 | `<WRAP center round tip 60%>` | 7 | `{blockquote class=tip}` + `> content` |
 | `<WRAP center round warning 60%>` | rare | `{blockquote class=warning}` + `> content` |
 | `<WRAP group>` + `<WRAP half column>` with image | ~14 | Image+text side-by-side: convert to image with `wrap=left` or `wrap=right` property |
-| `<WRAP group>` + `<WRAP half column>` without image | ~11 | Flatten to sequential blocks. Flag. |
+| `<WRAP group>` + `<WRAP half column>` without image | ~11 | Convert to `{blockquote wrap=left width=49%}` columns |
 | `<WRAP round white spacedx2>` | 18 | Drop wrapper, keep content |
 | `<WRAP prewrap>` | 7 | Drop wrapper, keep content |
 
 Strategy:
 - **Admonition wraps** (info, important, tip, warning): Convert to Gowiki blockquote with the `{blockquote class=...}` directive. Gowiki's blockquote plugin supports built-in classes: `tip`, `note`, `important`, `warning` — each renders with a colored border, background, icon, and label. DokuWiki's `info` maps to Gowiki's `note`. If a WRAP has a custom width (e.g. `60%`), use `{blockquote class=custom color=... width=60% align=center}` with appropriate color.
 - **Image+text layout wraps** (group + half column containing an image): Convert to Gowiki image with `wrap` property for text wrapping.
-- **Other layout wraps** (group, half column without image, flexcenter): Flatten to sequential content. Flag.
+- **Column layout wraps** (group + half/third column without image): Convert each column to a `{blockquote wrap=left width=49%}` (for half) or `{blockquote wrap=left width=32%}` (for third). Adjacent wrapped blockquotes float side by side. Content after the column group is automatically cleared.
 - **Bare wraps / styling wraps**: Drop `<WRAP>` / `</WRAP>` tags, keep content.
 - **Wraps inside table cells**: Extract content only, strip tags.
 
@@ -334,9 +334,7 @@ Found only in `templates/` namespace. Convert to Gowiki: `{{PAGE}}`.
 |---|---|---|
 | Struct/data blocks and variables | ~50 | Excluded from scope -- custom migration |
 | Interwiki links (`[[wp>...]]`) | rare | Not supported in Gowiki |
-| `firstseconly` in includes | ~10 | Gowiki has no partial-include |
 | PDFNS directives | 9 | No Gowiki equivalent |
-| WRAP column layout (non-image) | ~11 | Flattened, no multi-column in Gowiki |
 
 ## Metadata conversion
 

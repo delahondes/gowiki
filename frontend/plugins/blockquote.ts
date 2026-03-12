@@ -3,6 +3,7 @@ import type { Plugin as WikiPlugin, NodePropertySpec } from "../compiler/registr
 const VALID_CLASSES = ["tip", "note", "important", "warning", "custom"]
 const VALID_ICONS = ["lightbulb", "info", "warning", "important"]
 const VALID_ALIGNS = ["left", "center", "right"]
+const VALID_WRAPS = ["left", "right"]
 
 function normalizeBlockquoteWidth(raw: string): string | null {
   const value = String(raw ?? "").trim().toLowerCase()
@@ -121,6 +122,25 @@ const blockquoteProperties: NodePropertySpec[] = [
     parse: normalizeBlockquoteWidth,
     serialize: (value: string | null) => String(value ?? ""),
   },
+  {
+    name: "wrap",
+    label: "Wrap",
+    default: null,
+    parse: (raw: string) => {
+      const trimmed = raw.trim().toLowerCase()
+      if (!trimmed) return null
+      if (!VALID_WRAPS.includes(trimmed)) {
+        throw new Error(`Invalid wrap "${trimmed}". Use: ${VALID_WRAPS.join(", ")}`)
+      }
+      return trimmed
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "(none)" },
+      { value: "left", label: "Left" },
+      { value: "right", label: "Right" },
+    ],
+  },
 ]
 
 const blockquoteStyles = `
@@ -215,6 +235,25 @@ const blockquoteStyles = `
   background-image: url(/icons/important.svg);
 }
 
+/* wrap: float blockquotes for column layouts */
+.ProseMirror blockquote.gowiki-bq-wrap-left {
+  float: left;
+  margin-right: 1em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror blockquote.gowiki-bq-wrap-right {
+  float: right;
+  margin-left: 1em;
+  margin-bottom: 0.5em;
+}
+
+/* clearfix: clear floats after a sequence of wrapped blockquotes */
+.ProseMirror blockquote.gowiki-bq-wrap-left + :not(blockquote.gowiki-bq-wrap-left):not(blockquote.gowiki-bq-wrap-right),
+.ProseMirror blockquote.gowiki-bq-wrap-right + :not(blockquote.gowiki-bq-wrap-left):not(blockquote.gowiki-bq-wrap-right) {
+  clear: both;
+}
+
 /* image-width: percentages are relative to the blockquote width */
 .ProseMirror blockquote.gowiki-bq-img-width .gowiki-image-wrapper {
   width: var(--gowiki-bq-img-width) !important;
@@ -241,6 +280,7 @@ export const blockquotePlugin: WikiPlugin = {
         width: { default: null },
         align: { default: null },
         "image-width": { default: null },
+        wrap: { default: null },
       },
       toDOM(node: any) {
         const cls = node.attrs.class
@@ -268,6 +308,12 @@ export const blockquotePlugin: WikiPlugin = {
           styles.push(`--gowiki-bq-img-width: ${imgWidth}`)
         }
 
+        // wrap: float the blockquote left or right
+        const wrap = node.attrs.wrap
+        if (wrap) {
+          classes.push(`gowiki-bq-wrap-${wrap}`)
+        }
+
         if (classes.length > 0) domAttrs.class = classes.join(" ")
         if (styles.length > 0) domAttrs.style = styles.join("; ") + ";"
 
@@ -290,8 +336,12 @@ export const blockquotePlugin: WikiPlugin = {
               if (style.textAlign) result.align = style.textAlign
             } else {
               const match = clsList.match(/gowiki-bq-(\w+)/)
-              if (match && match[1] !== "img") result.class = match[1]
+              if (match && match[1] !== "img" && match[1] !== "wrap") result.class = match[1]
             }
+
+            // wrap from class
+            const wrapMatch = clsList.match(/gowiki-bq-wrap-(left|right)/)
+            if (wrapMatch) result.wrap = wrapMatch[1]
 
             // image-width from CSS variable
             if (clsList.includes("gowiki-bq-img-width")) {
