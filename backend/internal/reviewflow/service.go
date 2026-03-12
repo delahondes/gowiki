@@ -280,6 +280,27 @@ func (svc *Service) GetStatusForVersion(pagePath string, version int64) (*Status
 
 // computeDueDate returns a YYYY-MM-DD due date based on the shortest
 // configured deadline for any of the given roles. Returns "" if no deadlines.
+// IsPageReviewPending returns true if the page has a reviewflow with roles
+// that are not all confirmed for the current version.
+func (svc *Service) IsPageReviewPending(pagePath string) bool {
+	st, err := svc.store.Load(pagePath)
+	if err != nil || st == nil || len(st.Roles) == 0 {
+		return false // no reviewflow on this page
+	}
+	confirmed := make(map[string]bool)
+	for _, c := range st.Confirmations {
+		if c.PageVersion == st.CurrentPageVersion {
+			confirmed[c.Role] = true
+		}
+	}
+	for role := range st.Roles {
+		if !confirmed[role] {
+			return true
+		}
+	}
+	return false
+}
+
 func (svc *Service) computeDueDate(roles map[string]string) string {
 	cfg := svc.configStore.Get()
 	if !cfg.Reviewflow.Enabled || len(cfg.Reviewflow.Deadlines) == 0 {

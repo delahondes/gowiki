@@ -220,6 +220,7 @@ class TodoNodeView {
   private taskId: string | null = null
   private taskStatus: string = "open"
   private taskData: TodoTask | null = null
+  private taskInactive: boolean = false
   private eventSource: EventSource | null = null
   private unavailable: boolean = false
 
@@ -258,12 +259,15 @@ class TodoNodeView {
     cb.className = "gowiki-todo-checkbox"
     const status = this.taskStatus
     cb.checked = status === "done"
-    // Disable checkbox if no task ID, or if a wiki action is set and user is not admin.
+    // Disable checkbox if no task ID, inactive (page review pending),
+    // or if a wiki action is set and user is not admin.
     const hasWikiAction = !!(node.attrs.action)
     const user = (window as any).__gowikiCurrentUser
     const isAdmin = user?.is_admin === true
-    cb.disabled = !this.taskId || (hasWikiAction && !isAdmin)
-    if (hasWikiAction && !isAdmin) {
+    cb.disabled = !this.taskId || this.taskInactive || (hasWikiAction && !isAdmin)
+    if (this.taskInactive) {
+      cb.title = "Page review is pending — task is inactive"
+    } else if (hasWikiAction && !isAdmin) {
       cb.title = "This task is completed automatically by a wiki action"
     }
     cb.addEventListener("change", (e) => {
@@ -353,8 +357,10 @@ class TodoNodeView {
       chip.appendChild(actionBadge)
     }
 
-    // Status indicator for done/cancelled
-    if (status === "done") {
+    // Status indicator for done/cancelled/inactive
+    if (this.taskInactive) {
+      chip.classList.add("gowiki-todo-inactive")
+    } else if (status === "done") {
       chip.style.opacity = "0.7"
     } else if (status === "cancelled") {
       chip.style.opacity = "0.5"
@@ -394,6 +400,7 @@ class TodoNodeView {
         this.taskId = match.id
         this.taskStatus = match.status
         this.taskData = match
+        this.taskInactive = !!(match as any).inactive
         this.render()
       }
     } catch (err: any) {
@@ -545,6 +552,11 @@ const todoStyles = `
   border-color: #ffb74d;
   color: #e65100;
   font-style: italic;
+}
+
+.gowiki-todo-inactive {
+  opacity: 0.5;
+  border-style: dashed;
 }
 
 #app.gowiki-editing .gowiki-todo.ProseMirror-selectednode {

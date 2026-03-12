@@ -461,6 +461,35 @@ Reviewflow tasks are identifiable by:
 
 These tasks appear in the user's "My Tasks" list and follow all standard todo notification rules (email, webhooks, reminders, overdue alerts).
 
+#### Todo inactivation on pages with pending review
+
+When a page contains both a `{reviewflow}` directive and `{todo}` directives, the todo tasks are **inactive** as long as the reviewflow is not fully validated. The rationale is that the page content is in draft state and may still change, so the tasks defined in it should not be actionable until the content is approved.
+
+**Behavior:**
+
+- When the backend serves tasks for a page (`GET /tasks/page/*`), it checks whether the page has a reviewflow with at least one role not yet confirmed for the current page version. If so, all wiki-node tasks on that page (excluding reviewflow's own tasks tagged `"reviewflow"`) are marked `inactive: true` in the response.
+- The `POST /tasks/{id}/complete` endpoint also enforces this: attempting to complete an inactive task returns `409 Conflict` with the message "task is inactive: page review is pending".
+- The `inactive` field is computed at response time (like `warnings`) and is not stored in the database.
+- Once the reviewflow is fully validated, the tasks become active automatically on the next fetch.
+
+**Frontend rendering:**
+
+- Inactive tasks are shown with reduced opacity and a dashed border.
+- The checkbox is disabled, with a tooltip: "Page review is pending — task is inactive".
+
+**Interface boundary:**
+
+The todo package defines a `ReviewflowChecker` interface to avoid a circular dependency:
+
+```go
+// In package todo
+type ReviewflowChecker interface {
+    IsPageReviewPending(pagePath string) bool
+}
+```
+
+The reviewflow `Service` implements this interface. The adapter is wired in `server.go` at route registration time. If no reviewflow service is available, no inactivation check is performed.
+
 ### 8.3 ACL / User Plugin
 
 Group membership is re-evaluated live from the ACL/user plugin, so roster changes are reflected without re-creating tasks.

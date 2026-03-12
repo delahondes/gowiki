@@ -17,21 +17,21 @@ type UsernameExtractor func(r *http.Request) string
 
 // RegisterRoutes mounts all todo API routes (read + write) on the given chi router.
 // All routes are under /api/plugin/todo/v1/.
-func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
-	RegisterReadRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker)
-	RegisterWriteRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker)
+func RegisterRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker, rfChecker ReviewflowChecker) {
+	RegisterReadRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker, rfChecker)
+	RegisterWriteRoutes(r, svc, userStore, groupStore, extractUsername, pageChecker, rfChecker)
 }
 
 // RegisterReadRoutes mounts read-only todo endpoints (accessible without authentication).
-func RegisterReadRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
-	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker}
+func RegisterReadRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker, rfChecker ReviewflowChecker) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker, rfChecker: rfChecker}
 
 	r.Get("/tasks/page/*", h.handleByPage)
 }
 
 // RegisterWriteRoutes mounts todo endpoints that require authentication.
-func RegisterWriteRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker) {
-	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker}
+func RegisterWriteRoutes(r chi.Router, svc *TodoService, userStore *auth.UserStore, groupStore *auth.GroupStore, extractUsername UsernameExtractor, pageChecker PageChecker, rfChecker ReviewflowChecker) {
+	h := &handlers{svc: svc, userStore: userStore, groupStore: groupStore, extractUsername: extractUsername, pageChecker: pageChecker, rfChecker: rfChecker}
 
 	r.Get("/tasks", h.handleList)
 	r.Post("/tasks", h.handleCreate)
@@ -52,6 +52,7 @@ type handlers struct {
 	groupStore      *auth.GroupStore
 	extractUsername UsernameExtractor
 	pageChecker     PageChecker
+	rfChecker       ReviewflowChecker
 }
 
 func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +158,17 @@ func (h *handlers) handleDelete(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) handleComplete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	userID := h.extractUsername(r)
+
+	// Reject completion if the task's page has a pending reviewflow.
+	if h.rfChecker != nil {
+		task, err := h.svc.Store().Get(r.Context(), id)
+		if err == nil && task.SourcePage != "" && !strings.Contains(task.Tags, "reviewflow") {
+			if h.rfChecker.IsPageReviewPending(task.SourcePage) {
+				writeError(w, http.StatusConflict, "task is inactive: page review is pending")
+				return
+			}
+		}
+	}
 
 	var resolver GroupResolver
 	if h.groupStore != nil && h.userStore != nil {
@@ -316,8 +328,11 @@ func (h *handlers) handleStream(w http.ResponseWriter, r *http.Request) {
 	h.svc.Hub().HandleStream(w, r, userID)
 }
 
-// addWarnings populates the Warnings field on tasks based on validation checks.
+// addWarnings populates the Warnings and Inactive fields on tasks based on validation checks.
 func (h *handlers) addWarnings(tasks []*Task) {
+	// Cache reviewflow status per source page to avoid repeated checks.
+	rfPendingCache := make(map[string]bool)
+
 	for _, task := range tasks {
 		// Check assignee exists.
 		if task.Assignee.Target != "" && h.userStore != nil {
@@ -347,6 +362,19 @@ func (h *handlers) addWarnings(tasks []*Task) {
 				if !h.pageChecker.PageExists(task.WikiAction.Page) {
 					task.Warnings = append(task.Warnings, fmt.Sprintf("Action target page %q does not exist", task.WikiAction.Page))
 				}
+			}
+		}
+
+		// Mark tasks inactive if their source page has a pending reviewflow.
+		// Exclude reviewflow's own tasks (tagged "reviewflow").
+		if h.rfChecker != nil && task.SourcePage != "" && !strings.Contains(task.Tags, "reviewflow") {
+			pending, ok := rfPendingCache[task.SourcePage]
+			if !ok {
+				pending = h.rfChecker.IsPageReviewPending(task.SourcePage)
+				rfPendingCache[task.SourcePage] = pending
+			}
+			if pending {
+				task.Inactive = true
 			}
 		}
 	}

@@ -225,7 +225,7 @@ ACK is a todo with a `read` action targeting groups with `resolution=all` (every
 
 Note: group-level reporting for read acknowledgements is not yet implemented in Gowiki but can be added later.
 
-Important: on pages that also contain a `{reviewflow}`, ACK todos (and any other todos) should remain **inactive until the reviewflow is fully validated**. This is a behavioral constraint for the Gowiki todo/reviewflow interaction, not something the importer itself enforces -- but the importer should preserve the co-location of reviewflow and ACK on the same page so this behavior can be applied.
+Important: on pages that also contain a `{reviewflow}`, ACK todos (and any other todos) are automatically **inactive until the reviewflow is fully validated**. This is implemented in the Gowiki todo/reviewflow interaction (see `specs/todo_plugin.md` §8.2 "Todo inactivation on pages with pending review"): the backend marks wiki-node tasks as `inactive: true` when their source page has an unvalidated reviewflow, and the complete endpoint rejects completion attempts. The importer should preserve the co-location of reviewflow and ACK on the same page so this behavior applies correctly after import.
 
 ### TODO (3 pages)
 

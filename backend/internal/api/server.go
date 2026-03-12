@@ -298,16 +298,21 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		extractUsername := func(r *http.Request) string {
 			return UsernameFromContext(r.Context())
 		}
+		// Build a reviewflow checker for todo inactivation (nil-safe if no reviewflow service).
+		var rfChecker todo.ReviewflowChecker
+		if s.reviewflowService != nil {
+			rfChecker = s.reviewflowService
+		}
 		r.Route("/api/plugin/todo/v1", func(r chi.Router) {
 			// Read-only endpoints: accessible to anyone who can read the page.
 			r.Group(func(r chi.Router) {
 				r.Use(s.optionalAuth)
-				todo.RegisterReadRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store})
+				todo.RegisterReadRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store}, rfChecker)
 			})
 			// Write endpoints: require authentication.
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAuth)
-				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store})
+				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store}, rfChecker)
 			})
 		})
 	}

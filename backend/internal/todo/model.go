@@ -49,6 +49,7 @@ type Task struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Warnings    []string `json:"warnings,omitempty"` // populated at response time, not stored
+	Inactive    bool     `json:"inactive,omitempty"` // populated at response time, not stored
 	RecurrenceGroupID string `json:"recurrence_group_id,omitempty"`
 }
 
@@ -180,4 +181,9 @@ type GroupResolver interface {
 // PageChecker checks whether a page exists.
 type PageChecker interface {
 	PageExists(pagePath string) bool
+}
+
+// ReviewflowChecker checks whether a page has a pending (non-validated) reviewflow.
+type ReviewflowChecker interface {
+	IsPageReviewPending(pagePath string) bool
 }
