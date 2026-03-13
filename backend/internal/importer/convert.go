@@ -43,7 +43,8 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	}
 	if hasSlider {
 		out, flagged := ConvertSliderPage(lines, currentNS, pagesDir)
-		result.Markdown = strings.Join(out, "\n")
+		joined := strings.Join(out, "\n")
+		result.Markdown = strings.Join(collapseBlankLines(strings.Split(joined, "\n")), "\n")
 		result.Flagged = flagged
 		result.ConvertLines = result.TotalLines - len(flagged)
 		return result
@@ -430,7 +431,11 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	// Post-process: ensure blank lines around block-level directives
 	output = ensureBlankLinesAroundDirectives(output)
 
-	result.Markdown = strings.Join(output, "\n")
+	// Post-process: collapse consecutive blank lines into one (DokuWiki ignores
+	// extra blank lines, but in Gowiki they produce hard line breaks).
+	// Run on the joined string so embedded \n from line break conversion are handled.
+	joined := strings.Join(output, "\n")
+	result.Markdown = strings.Join(collapseBlankLines(strings.Split(joined, "\n")), "\n")
 	return result
 }
 
@@ -465,6 +470,42 @@ func ensureBlankLinesAroundDirectives(lines []string) []string {
 
 		result = append(result, line)
 		prevWasDirective = isDir
+	}
+
+	return result
+}
+
+// collapseBlankLines reduces runs of consecutive blank lines to a single blank
+// line, skipping content inside fenced code blocks where blank lines matter.
+func collapseBlankLines(lines []string) []string {
+	var result []string
+	inCode := false
+	prevBlank := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "```") {
+			inCode = !inCode
+			prevBlank = false
+			result = append(result, line)
+			continue
+		}
+
+		if inCode {
+			result = append(result, line)
+			continue
+		}
+
+		if trimmed == "" {
+			if prevBlank {
+				continue // skip extra blank line
+			}
+			prevBlank = true
+		} else {
+			prevBlank = false
+		}
+		result = append(result, line)
 	}
 
 	return result
