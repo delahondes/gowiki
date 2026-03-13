@@ -1792,7 +1792,7 @@ export const tablePlugin: GowikiPlugin = {
       attrs: {
         ...baseTable.attrs,
         width: { default: null },
-        headers: { default: "1st_row" },
+        headers: { default: "1r" },
         columns: { default: null },
         caption: { default: null },
         label: { default: null },
