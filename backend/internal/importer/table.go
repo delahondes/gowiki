@@ -49,7 +49,7 @@ func ConvertTable(lines []string, currentNS string) ([]string, []FlaggedLine) {
 	}
 
 	// Check for header column pattern: first cell of each row is header
-	if headerRow < 0 && len(rows) > 1 {
+	if headerRow < 0 && len(rows) >= 1 {
 		allFirstHeader := true
 		for _, row := range rows {
 			if len(row) > 0 && !row[0].isHeader {
