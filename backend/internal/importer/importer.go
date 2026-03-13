@@ -14,10 +14,11 @@ import (
 
 // Options configures the importer.
 type Options struct {
-	SrcDir  string // DokuWiki import root (contains data/ and conf/)
-	DestDir string // Gowiki data root (will contain content/, meta/)
-	DryRun  bool
-	Verbose bool
+	SrcDir        string // DokuWiki import root (contains data/ and conf/)
+	DestDir       string // Gowiki data root (will contain content/, meta/)
+	DryRun        bool
+	Verbose       bool
+	FallbackAdmin bool // Create an admin/admin fallback account with full permissions
 }
 
 // SrcDataDir returns the DokuWiki data directory (SrcDir/data/).

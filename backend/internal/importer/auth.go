@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ImportAuth imports DokuWiki users and ACL rules into Gowiki's JSON format.
@@ -26,7 +28,7 @@ func ImportAuth(opts Options) error {
 	// Check if at least one file exists.
 	usersExist := fileExists(usersFile)
 	aclExists := fileExists(aclFile)
-	if !usersExist && !aclExists {
+	if !usersExist && !aclExists && !opts.FallbackAdmin {
 		log.Printf("  No conf/users.auth.php or conf/acl.auth.php found, skipping auth import")
 		return nil
 	}
@@ -83,6 +85,44 @@ func ImportAuth(opts Options) error {
 			desc = "Can edit all pages"
 		}
 		groups = append(groups, gowikiGroup{Name: name, Description: desc})
+	}
+
+	// Fallback admin: create admin/admin user with full permissions.
+	if opts.FallbackAdmin {
+		hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash fallback admin password: %w", err)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		users = append(users, gowikiUser{
+			Username:     "admin",
+			PasswordHash: string(hash),
+			Email:        "",
+			DisplayName:  "",
+			Groups:       []string{"admin"},
+			Disabled:     false,
+			CreatedAt:    now,
+		})
+		rules = append(rules, gowikiACLRule{
+			Pattern:     ".*",
+			SubjectType: "group",
+			Subject:     "admin",
+			Permissions: []string{"view", "edit", "delete"},
+		})
+		groupSet["admin"] = true
+		// Rebuild groups list with admin included.
+		groups = nil
+		for name := range groupSet {
+			desc := ""
+			switch name {
+			case "admin":
+				desc = "Administrators"
+			case "editors":
+				desc = "Can edit all pages"
+			}
+			groups = append(groups, gowikiGroup{Name: name, Description: desc})
+		}
+		log.Printf("  Created fallback admin/admin account with full permissions")
 	}
 
 	if opts.DryRun {

@@ -120,7 +120,7 @@ Known smell: `frontend/compiler/core_nodes.ts` lines 114–129 contain a specifi
 
 ### Properties system
 - Defined and working for: image nodes (size, drag-resize updates property live), table nodes (size property defined, drag-resize not yet implemented), include nodes (path property)
-- Defined but not yet implemented for: headings (numbered heading property)
+- Numbered headings use `1.` prefix syntax (`## 1. Title`), not a property directive
 
 ### Rendering model
 Rendering is done entirely by ProseMirror. There is no separate rendering pipeline for view mode — the visual editor output and the rendered view are identical by construction. This is a deliberate architectural choice and should not be changed.
@@ -174,7 +174,7 @@ The backend detects and rejects circular includes at save time (not render time)
 | ATX headings | implemented |
 | `- unordered list` | implemented |
 | `1. ordered list` | implemented |
-| `{heading numbered=true/false}` | planned |
+| Numbered headings (`## 1. Title`) | implemented |
 | Pipe tables + directives | implemented |
 | Multi-body tables | rejected |
 | Properties/directives `{name key=value}` | implemented |

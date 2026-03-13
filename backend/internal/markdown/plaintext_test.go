@@ -57,7 +57,7 @@ func TestStripMarkdown(t *testing.T) {
 		},
 		{
 			name:     "directive lines removed",
-			input:    "{include path=footer}\nSome text\n{heading numbered=true}",
+			input:    "{include path=footer}\nSome text\n{blockquote class=note}",
 			expected: "Some text",
 		},
 		{

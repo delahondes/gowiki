@@ -30,13 +30,15 @@ func ConvertHeading(line string) (string, bool) {
 	prefix := strings.Repeat("#", level)
 	title := strings.TrimSpace(m[3])
 
-	// Strip DokuWiki numbered heading plugin "- " prefix.
-	// These headings use "- " as a placeholder for auto-numbering at render time.
+	// DokuWiki numbered heading plugin uses "- " as a placeholder for auto-numbering.
+	// Gowiki uses "1. " prefix after the ATX marker: "## 1. Title"
+	numbered := ""
 	if strings.HasPrefix(title, "- ") {
 		title = strings.TrimPrefix(title, "- ")
+		numbered = "1. "
 	}
 
-	return prefix + " " + title, true
+	return prefix + " " + numbered + title, true
 }
 
 // HeadingAnchor converts a heading title to a Gowiki anchor slug.
