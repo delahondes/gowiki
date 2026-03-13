@@ -14,10 +14,15 @@ import (
 
 // Options configures the importer.
 type Options struct {
-	SrcDir  string // olddata root (contains pages/, media/, meta/)
-	DestDir string // data root (will contain content/, meta/)
+	SrcDir  string // DokuWiki import root (contains data/ and conf/)
+	DestDir string // Gowiki data root (will contain content/, meta/)
 	DryRun  bool
 	Verbose bool
+}
+
+// SrcDataDir returns the DokuWiki data directory (SrcDir/data/).
+func (o Options) SrcDataDir() string {
+	return filepath.Join(o.SrcDir, "data")
 }
 
 // convertedPage holds the result of converting a single page,
@@ -34,9 +39,10 @@ type convertedPage struct {
 func Run(opts Options) (*Report, error) {
 	report := NewReport()
 
-	pagesDir := filepath.Join(opts.SrcDir, "pages")
-	mediaDir := filepath.Join(opts.SrcDir, "media")
-	metaDir := filepath.Join(opts.SrcDir, "meta")
+	dataDir := opts.SrcDataDir()
+	pagesDir := filepath.Join(dataDir, "pages")
+	mediaDir := filepath.Join(dataDir, "media")
+	metaDir := filepath.Join(dataDir, "meta")
 	contentDir := filepath.Join(opts.DestDir, "content")
 	destMetaDir := filepath.Join(opts.DestDir, "meta")
 

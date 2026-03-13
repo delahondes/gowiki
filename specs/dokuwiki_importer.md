@@ -2,7 +2,7 @@
 
 ## Goal
 
-Import the complete data folder of an existing DokuWiki site into a Gowiki site. The importer is a **one-time CLI tool** — not an ongoing service. It reads `backend/olddata/` and writes into `data/content/` and `data/meta/`.
+Import a complete DokuWiki installation into a Gowiki site. The importer is a **one-time CLI tool** — not an ongoing service. It reads from a DokuWiki export directory (`import/`) containing `data/` and `conf/` subdirectories, and writes into the Gowiki data directory (`backend/data/`).
 
 The target is to convert **>=90% of all lines** of all documents automatically. Lines that cannot be converted are preserved as-is with a marker comment and reported in a summary.
 
@@ -34,6 +34,22 @@ After the script import, an interactive agent-assisted process handles:
 
 Scope exclusions from the script: struct-related syntax (`---- struct table ----`, `---- struct lookup ----`, `{{$schema.field}}`, `@@schema.field@@`) is flagged in the report but not converted — handled in Phase B.
 
+## CLI usage
+
+```bash
+cd backend
+go run ./cmd/import/ --src ../import --dest ./data
+```
+
+Both flags are **required** (no defaults — prevents accidental writes):
+
+| Flag | Description |
+|---|---|
+| `-src` | DokuWiki import root (contains `data/` and `conf/` subdirectories) |
+| `-dest` | Gowiki data directory (will contain `content/`, `meta/`) |
+| `-dry-run` | Analyze and report without writing files |
+| `-verbose` | Log each file being processed |
+
 ## Source data
 
 | Item | Count |
@@ -43,22 +59,33 @@ Scope exclusions from the script: struct-related syntax (`---- struct table ----
 | Media files | 1,129 |
 | Namespaces (top-level) | 17 |
 | Max namespace depth | 11 |
+| Users | 16 |
+| ACL rules | 66 (57 imported, 9 %USER% template rules skipped) |
 
 Source layout:
 ```
-backend/olddata/
-  pages/        DokuWiki markup (.txt), namespace = directory
-  media/        Attachments (PNG, PDF, SVG, JPEG, XLSX, ZIP, …)
-  meta/         Serialized PHP metadata, .changes TSV changelogs
-  attic/        Gzipped historical page versions
-  media_attic/  Gzipped historical media versions
+import/                    DokuWiki import root (-src flag)
+  data/
+    pages/                 DokuWiki markup (.txt), namespace = directory
+    media/                 Attachments (PNG, PDF, SVG, JPEG, XLSX, ZIP, …)
+    meta/                  Serialized PHP metadata, .changes TSV changelogs
+    attic/                 Gzipped historical page versions
+    media_attic/           Gzipped historical media versions
+  conf/
+    users.auth.php         User accounts (login:hash:name:email:groups)
+    acl.auth.php           ACL rules (path	subject	permission_level)
 ```
 
 ## Target layout
 
 ```
-data/content/   Pages (.md) and media files, unified tree
-data/meta/      Metadata (.json), mirrors content/ structure
+backend/data/              Gowiki data directory (-dest flag)
+  content/                 Pages (.md) and media files, unified tree
+  meta/
+    *.json                 Page metadata, mirrors content/ structure
+    users.json             Imported user accounts
+    groups.json            Imported groups
+    acl.json               Imported ACL rules
 ```
 
 ## Language choice
@@ -191,8 +218,11 @@ Gowiki: `{tag label1 label2}`
 - `<code python>...</code>` -> ` ```python\n...\n``` `
 - `<code sql>...</code>` -> ` ```sql\n...\n``` `
 - `<code java>...</code>` -> ` ```java\n...\n``` `
+- `<code ->...</code>` -> ` ```\n...\n``` ` (`-` means "no syntax highlighting" in DokuWiki)
 - `<file>...</file>` -> ` ```\n...\n``` `
 - `<file txt filename.txt>...</file>` -> ` ```\n...\n``` ` (filename info dropped, flagged)
+- Inline `<code>text</code>` (without language specifier, on a single line with other content) -> `` `text` `` (backtick code span)
+- Multi-line `<code>` blocks nested inside blockquotes/notes are handled: the code block is extracted and emitted as a fenced block with `> ` prefix
 
 ### Footnotes
 
@@ -473,6 +503,68 @@ DokuWiki uses two forms: `@!PAGE!@` and `@PAGE@`. Both are converted to Gowiki `
 
 Template variables can appear in any page but are most commonly found in template files (see below).
 
+## Users and ACL import
+
+The importer reads `conf/users.auth.php` and `conf/acl.auth.php` from the DokuWiki export and generates Gowiki's `users.json`, `groups.json`, and `acl.json` in the destination `meta/` directory.
+
+### Users (`conf/users.auth.php`)
+
+DokuWiki format: `login:passwordhash:Real Name:email:group1,group2`
+
+- **Passwords**: DokuWiki bcrypt hashes (`$2y$`) are converted to Go-compatible `$2a$` prefix (same algorithm, different version tag). Non-bcrypt hashes (MD5-crypt, phpass) are dropped — those users must reset their password or use OAuth.
+- **Groups**: Imported as-is from the comma-separated list. This includes Azure AD group UUIDs synced by DokuWiki's authAD plugin — they are imported but only meaningful if OAuth group sync is configured in Gowiki.
+- **Display name and email**: Preserved directly.
+
+### Groups (`meta/groups.json`)
+
+Groups are **collected** from two sources:
+1. All groups referenced in user memberships
+2. All groups referenced in ACL rules (after URL-decoding)
+
+The `admin` and `editors` groups are always present (Gowiki defaults).
+
+### ACL rules (`conf/acl.auth.php`)
+
+DokuWiki format: `path	subject	permission_level` (tab-separated)
+
+#### Path conversion
+
+DokuWiki ACL paths use colon separators and `*` wildcards:
+
+| DokuWiki | Gowiki regex pattern |
+|---|---|
+| `*` | `.*` |
+| `ns:*` | `ns/.*` |
+| `ns:sub:*` | `ns/sub/.*` |
+| `ns:page` | `ns/page` (exact match, metacharacters escaped) |
+
+#### Subject conversion
+
+| DokuWiki | Gowiki |
+|---|---|
+| `@ALL` | `subject_type: "special"`, `subject: "@all"` |
+| `@groupname` | `subject_type: "group"`, `subject: "groupname"` |
+| `username` | `subject_type: "user"`, `subject: "username"` |
+
+URL-encoded names (e.g., `gmt%5fscience` → `gmt_science`) are decoded.
+
+#### Permission level mapping
+
+DokuWiki uses a numeric bitmask; Gowiki uses named permissions:
+
+| DokuWiki level | Gowiki permissions |
+|---|---|
+| 0 (none) | `[]` (deny) |
+| 1 (read) | `["view"]` |
+| 2 (edit) | `["view", "edit"]` |
+| 4 (create) / 8 (upload) | `["view", "edit"]` |
+| 16 (delete) | `["view", "edit", "delete"]` |
+| 255 (admin) | `["view", "edit", "delete"]` |
+
+#### Unsupported ACL features
+
+- **`%USER%` template rules**: DokuWiki's per-user placeholder ACL (e.g., `regulatory:smq:ps07:annualinterview:%USER%-*	%USER%	16`) has no Gowiki equivalent. These rules are **skipped** with a count logged. The DokuWiki wiki had 9 such rules.
+
 ## Conversion not attempted (flag only)
 
 | Feature | Pages | Reason |
@@ -503,7 +595,7 @@ Convert to Gowiki's changelog format if needed. Low priority -- the main value i
 
 ### Attic (version history)
 
-`attic/` contains gzipped historical versions. **Out of scope for v1.** The importer only converts the current version (from `pages/`). Attic import can be added later if needed.
+`data/attic/` contains gzipped historical versions. Imported in Phase 4 — each version is converted through the same markup converter and stored in Gowiki's attic format. Changelog metadata from `data/meta/*.changes` is preserved.
 
 ## Implementation plan
 
@@ -542,10 +634,18 @@ This phase should cover ~85% of all lines.
 
 ### Phase 3: File operations
 
-1. Copy all media files from `media/` to `content/` (preserving namespace structure)
+1. Copy all media files from `data/media/` to `content/` (preserving namespace structure)
 2. Write converted `.md` files to `content/`
-3. Parse DokuWiki metadata (serialized PHP in `.meta` files) and write `.json` to `meta/`
+3. Parse DokuWiki metadata (serialized PHP in `data/meta/*.meta` files) and write `.json` to `meta/`
 4. Generate conversion report
+
+### Phase 4: Version history (attic)
+
+Import gzipped historical versions from `data/attic/`. Each version is converted through the same markup converter and stored in Gowiki's attic format with changelog metadata.
+
+### Phase 5: Auth import
+
+Import users, groups, and ACL rules from `conf/users.auth.php` and `conf/acl.auth.php`. See "Users and ACL import" section above for details.
 
 ## Conversion report
 

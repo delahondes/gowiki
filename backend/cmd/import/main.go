@@ -11,12 +11,18 @@ import (
 
 func main() {
 	var (
-		srcDir  = flag.String("src", "./backend/olddata", "DokuWiki data directory (contains pages/, media/, meta/)")
-		destDir = flag.String("dest", "./backend/data", "Gowiki data directory (will contain content/, meta/)")
+		srcDir  = flag.String("src", "", "DokuWiki import root (contains data/ and conf/ subdirectories)")
+		destDir = flag.String("dest", "", "Gowiki data directory (will contain content/, meta/)")
 		dryRun  = flag.Bool("dry-run", false, "Analyze and report without writing files")
 		verbose = flag.Bool("verbose", false, "Log each file being processed")
 	)
 	flag.Parse()
+
+	if *srcDir == "" || *destDir == "" {
+		fmt.Fprintln(os.Stderr, "Both -src and -dest are required")
+		fmt.Fprintln(os.Stderr, "Usage: import -src ./import -dest ./backend/data")
+		os.Exit(1)
+	}
 
 	opts := importer.Options{
 		SrcDir:  *srcDir,
@@ -25,9 +31,9 @@ func main() {
 		Verbose: *verbose,
 	}
 
-	// Verify source directory exists
-	if _, err := os.Stat(opts.SrcDir); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "Source directory does not exist: %s\n", opts.SrcDir)
+	// Verify source data directory exists
+	if _, err := os.Stat(opts.SrcDataDir()); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Source data directory does not exist: %s\n", opts.SrcDataDir())
 		os.Exit(1)
 	}
 
@@ -46,6 +52,11 @@ func main() {
 	// Phase 4: Import DokuWiki version history (attic).
 	if err := importer.ImportAttic(opts); err != nil {
 		log.Printf("WARNING: attic import failed: %v", err)
+	}
+
+	// Phase 5: Import DokuWiki users and ACL rules (from conf/).
+	if err := importer.ImportAuth(opts); err != nil {
+		log.Printf("WARNING: auth import failed: %v", err)
 	}
 
 	// Print summary

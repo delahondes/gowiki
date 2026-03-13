@@ -39,9 +39,10 @@ var reAtticFile = regexp.MustCompile(`^(.+)\.(\d+)\.txt\.gz$`)
 // and writes into the Gowiki attic under destDir.
 // It also updates page metadata to reflect the correct version count.
 func ImportAttic(opts Options) error {
-	atticDir := filepath.Join(opts.SrcDir, "attic")
-	metaDir := filepath.Join(opts.SrcDir, "meta")
-	pagesDir := filepath.Join(opts.SrcDir, "pages")
+	dataDir := opts.SrcDataDir()
+	atticDir := filepath.Join(dataDir, "attic")
+	metaDir := filepath.Join(dataDir, "meta")
+	pagesDir := filepath.Join(dataDir, "pages")
 	destAtticDir := filepath.Join(opts.DestDir, "attic")
 	destMetaDir := filepath.Join(opts.DestDir, "meta")
 

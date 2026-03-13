@@ -19,7 +19,7 @@ backend/server
 
 # data
 backend/data/
-backend/olddata/
+/import/
 
 # other codes for reference
 reference_code/
