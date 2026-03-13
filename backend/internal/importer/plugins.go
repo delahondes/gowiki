@@ -30,8 +30,9 @@ var (
 	// Changes: {{changes>...}}
 	reChanges = regexp.MustCompile(`\{\{changes>[^}]*\}\}`)
 
-	// Template variables: @!NAME!@
-	reTemplateVar = regexp.MustCompile(`@!([A-Z_]+)!@`)
+	// Template variables: @!NAME!@ or @NAME@ (DokuWiki uses both forms)
+	reTemplateVar  = regexp.MustCompile(`@!([A-Z_]+)!@`)
+	reTemplateVar2 = regexp.MustCompile(`@([A-Z_]{2,})@`)
 
 	// ACK: ~~ACK:groups~~ or ~~ACKNOWLEDGE~~
 	reACK       = regexp.MustCompile(`~~ACK:([^~]+)~~`)
@@ -273,9 +274,12 @@ func ConvertChanges(line string) string {
 	return reChanges.ReplaceAllString(line, "{changes}")
 }
 
-// ConvertTemplateVars converts DokuWiki template variables @!NAME!@ -> {{NAME}}.
+// ConvertTemplateVars converts DokuWiki template variables to Gowiki {{NAME}}.
+// Handles both @!NAME!@ and @NAME@ forms.
 func ConvertTemplateVars(line string) string {
-	return reTemplateVar.ReplaceAllString(line, "{{${1}}}")
+	line = reTemplateVar.ReplaceAllString(line, "{{${1}}}")
+	line = reTemplateVar2.ReplaceAllString(line, "{{${1}}}")
+	return line
 }
 
 // ConvertReviewflow converts a multi-line REVIEWFLOW block to a single-line directive.

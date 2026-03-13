@@ -422,9 +422,9 @@ Conversion notes:
 
 ### Template variables
 
-DokuWiki: `@!PAGE!@`
+DokuWiki uses two forms: `@!PAGE!@` and `@PAGE@`. Both are converted to Gowiki `{{PAGE}}`.
 
-Found only in `templates/` namespace. Convert to Gowiki: `{{PAGE}}`.
+Template variables can appear in any page but are most commonly found in template files (see below).
 
 ## Conversion not attempted (flag only)
 
@@ -517,7 +517,13 @@ Report format: Markdown file written to `data/content/import_report.md` (so it's
 - **Namespace conflicts**: If both `pages/ns.txt` and `pages/ns/start.txt` exist, the importer must handle the conflict (Gowiki forbids both). Prefer the namespace index; rename the file page. Flag.
 - **Case sensitivity**: DokuWiki page names are lowercase. Gowiki paths are case-sensitive. Preserve as-is.
 - **Special pages**: `wiki/` namespace contains DokuWiki reference docs -- import but flag as potentially irrelevant.
-- **DokuWiki `templates/` namespace**: These are DokuWiki page templates. Convert to Gowiki `_template.md` convention: `templates/study.txt` -> `study/_template.md`. Template variables are converted (`@!PAGE!@` -> `{{PAGE}}`).
+- **DokuWiki template files**: DokuWiki has multiple template file conventions, all converted to Gowiki's `_template.md`:
+  - `templates/study.txt` -> `study/_template.md` (templates namespace)
+  - `ns/_template.txt` -> `ns/_template.md` (in-namespace, primary)
+  - `ns/__template.txt` -> `ns/_template.md` (in-namespace, secondary)
+  - `ns/c_template.txt` -> `ns/_template.md` (in-namespace, create variant — not used in our wiki)
+  - `ns/i_template.txt` -> `ns/_template.md` (in-namespace, import variant — not used in our wiki)
+  - Template variables are converted: `@!PAGE!@` and `@PAGE@` both become `{{PAGE}}`.
 
 ## Prerequisites
 

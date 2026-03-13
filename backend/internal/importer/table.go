@@ -179,7 +179,8 @@ func parseTableRow(line string, currentNS string) ([]tableCell, []FlaggedLine) {
 			}
 		}
 
-		// Convert inline markup in cell content
+		// Convert template variables and inline markup in cell content
+		content = ConvertTemplateVars(content)
 		content = ConvertInline(content, currentNS, "table")
 		content = strings.TrimSpace(content)
 

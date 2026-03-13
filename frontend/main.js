@@ -975,8 +975,15 @@ async function handleNonLocalImagePaste(view, md, slice, plainText) {
 
   try {
     const cleanDoc = markdownToPM(result, registry)
+    let openStart = 0
+    let openEnd = 0
+    const fc = cleanDoc.content.firstChild
+    if (cleanDoc.content.childCount === 1 && fc && fc.type === schema.nodes.paragraph) {
+      openStart = Math.min(slice.openStart, 1)
+      openEnd = Math.min(slice.openEnd, 1)
+    }
     const tr = view.state.tr.replaceSelection(
-      new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+      new Slice(cleanDoc.content, openStart, openEnd)
     )
     view.dispatch(tr)
     if (uploadedCount > 0) {
@@ -3926,8 +3933,19 @@ function renderEdit(nextEditMode) {
     handlePaste(view, event, slice) {
       const plainText = event.clipboardData?.getData("text/plain") ?? ""
 
-      // Inside a code_block: insert plain text literally
+      // When pasting table content (rows/cells) inside a table, let
+      // ProseMirror's default handling (prosemirror-tables) manage it
+      // so rows are inserted as siblings rather than nested.
       const { $from } = view.state.selection
+      if (isInTableCell(view.state)) {
+        let hasTableContent = false
+        slice.content.forEach(node => {
+          if (node.type.name === "table" || node.type.name === "table_row") hasTableContent = true
+        })
+        if (hasTableContent) return false
+      }
+
+      // Inside a code_block: insert plain text literally
       if ($from.parent.type === schema.nodes.code_block) {
         view.dispatch(view.state.tr.insertText(plainText))
         return true
@@ -3967,8 +3985,19 @@ function renderEdit(nextEditMode) {
 
       try {
         const cleanDoc = markdownToPM(md, registry)
+        // Use openStart/openEnd=0 so block-level content (tables, lists, etc.)
+        // is inserted as a complete block rather than being flattened.
+        // Only preserve the original open depths for purely inline content
+        // (single paragraph whose content can merge into the cursor paragraph).
+        let openStart = 0
+        let openEnd = 0
+        const fc = cleanDoc.content.firstChild
+        if (cleanDoc.content.childCount === 1 && fc && fc.type === schema.nodes.paragraph) {
+          openStart = Math.min(slice.openStart, 1)
+          openEnd = Math.min(slice.openEnd, 1)
+        }
         const tr = view.state.tr.replaceSelection(
-          new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+          new Slice(cleanDoc.content, openStart, openEnd)
         )
         view.dispatch(tr)
       } catch {
@@ -3995,8 +4024,15 @@ function renderEdit(nextEditMode) {
 
       try {
         const cleanDoc = markdownToPM(md, registry)
+        let openStart = 0
+        let openEnd = 0
+        const fc = cleanDoc.content.firstChild
+        if (cleanDoc.content.childCount === 1 && fc && fc.type === schema.nodes.paragraph) {
+          openStart = Math.min(slice.openStart, 1)
+          openEnd = Math.min(slice.openEnd, 1)
+        }
         const tr = view.state.tr.replaceSelection(
-          new Slice(cleanDoc.content, slice.openStart, slice.openEnd)
+          new Slice(cleanDoc.content, openStart, openEnd)
         )
         view.dispatch(tr)
       } catch {

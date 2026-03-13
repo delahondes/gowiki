@@ -1986,6 +1986,35 @@ export const tablePlugin: GowikiPlugin = {
       },
     })
 
+    // table_row: produces a complete single-row table (used when copying a row)
+    reg.registerPMNode("table_row", {
+      print(node, _ctx, recurse) {
+        const cells: string[] = []
+        node.forEach(cell => {
+          cells.push(serializeCellContent(cell, recurse))
+        })
+        const row = "| " + cells.join(" | ") + " |"
+        const sep = "| " + cells.map(() => "---").join(" | ") + " |"
+        return row + "\n" + sep + "\n\n"
+      },
+    })
+
+    // table_cell / table_header: serialize inline content (used when copying a cell)
+    reg.registerPMNode("table_cell", {
+      print(node, _ctx, recurse) {
+        let txt = ""
+        node.content.forEach(p => { txt += recurse(p).trim() })
+        return txt
+      },
+    })
+    reg.registerPMNode("table_header", {
+      print(node, _ctx, recurse) {
+        let txt = ""
+        node.content.forEach(p => { txt += recurse(p).trim() })
+        return txt
+      },
+    })
+
     // formula_display is ephemeral (managed by appendTransaction), not serialized
     reg.registerPMNode("formula_display", {
       print() {

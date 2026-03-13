@@ -497,6 +497,10 @@ func ensureBlankLinesAroundDirectives(lines []string) []string {
 
 // convertNormalLine converts a single non-block line.
 func convertNormalLine(line string, currentNS string, pagesDir string, contexts ...string) string {
+	// Template variables: convert early so they're handled in all contexts
+	// (headings, lists, tables, etc.) before any early returns.
+	line = ConvertTemplateVars(line)
+
 	trimmed := strings.TrimSpace(line)
 
 	// Empty line
@@ -544,7 +548,6 @@ func convertNormalLine(line string, currentNS string, pagesDir string, contexts 
 	line = ConvertACK(line)
 	line = ConvertTodo(line)
 	line = ConvertChanges(line)
-	line = ConvertTemplateVars(line)
 
 	// Inline conversion
 	ctx := "paragraph"

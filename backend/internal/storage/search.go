@@ -22,7 +22,8 @@ type SearchResult struct {
 
 // searchDocument is the struct indexed by Bleve.
 type searchDocument struct {
-	Path  string `json:"path"`
+	Path string `json:"path"`
+	Name string `json:"name"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
@@ -53,6 +54,12 @@ func buildIndexMapping() mapping.IndexMapping {
 	pathField.Analyzer = "keyword"
 	pathField.Store = true
 
+	// Name field: path with slashes replaced by spaces so each segment is
+	// tokenized by the standard analyzer, making page names searchable.
+	nameField := bleve.NewTextFieldMapping()
+	nameField.Analyzer = "standard"
+	nameField.Store = false
+
 	titleField := bleve.NewTextFieldMapping()
 	titleField.Analyzer = "standard"
 	titleField.Store = true
@@ -63,6 +70,7 @@ func buildIndexMapping() mapping.IndexMapping {
 
 	docMapping := bleve.NewDocumentMapping()
 	docMapping.AddFieldMappingsAt("path", pathField)
+	docMapping.AddFieldMappingsAt("name", nameField)
 	docMapping.AddFieldMappingsAt("title", titleField)
 	docMapping.AddFieldMappingsAt("body", bodyField)
 
@@ -77,10 +85,22 @@ func (s *SearchIndex) Close() error {
 	return s.index.Close()
 }
 
+// pathToName converts a page path to a searchable string by replacing
+// slashes and underscores with spaces, so each path segment becomes a
+// searchable token. e.g. "/regulatory/smq/_template" -> "regulatory smq template"
+func pathToName(pagePath string) string {
+	s := strings.TrimPrefix(pagePath, "/")
+	s = strings.ReplaceAll(s, "/", " ")
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	return s
+}
+
 // IndexPage upserts a document in the search index.
 func (s *SearchIndex) IndexPage(pagePath, title, plaintext string) error {
 	doc := searchDocument{
 		Path:  pagePath,
+		Name:  pathToName(pagePath),
 		Title: title,
 		Body:  plaintext,
 	}
@@ -210,6 +230,7 @@ func (s *SearchIndex) RebuildFromDir(contentDir string) error {
 
 		doc := searchDocument{
 			Path:  pagePath,
+			Name:  pathToName(pagePath),
 			Title: title,
 			Body:  plaintext,
 		}

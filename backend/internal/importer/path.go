@@ -23,17 +23,40 @@ func PageSourceToTarget(srcPath string) string {
 }
 
 // TemplateSourceToTarget converts a DokuWiki template path.
-// "templates/study.txt" -> "study/_template.md"
+// Handles both the templates/ namespace and in-namespace template files:
+//   - "templates/study.txt" -> "study/_template.md"
+//   - "ns/_template.txt"    -> "ns/_template.md"
+//   - "ns/__template.txt"   -> "ns/_template.md"
+//   - "ns/c_template.txt"   -> "ns/_template.md"  (ignored variant)
+//   - "ns/i_template.txt"   -> "ns/_template.md"  (ignored variant)
 func TemplateSourceToTarget(srcPath string) string {
-	// templates/X.txt -> X/_template.md
-	p := strings.TrimSuffix(srcPath, ".txt")
-	p = strings.TrimPrefix(p, "templates/")
-	return p + "/_template.md"
+	if strings.HasPrefix(srcPath, "templates/") {
+		// templates/X.txt -> X/_template.md
+		p := strings.TrimSuffix(srcPath, ".txt")
+		p = strings.TrimPrefix(p, "templates/")
+		return p + "/_template.md"
+	}
+	// In-namespace template: ns/XXX_template.txt -> ns/_template.md
+	dir := path.Dir(srcPath)
+	if dir == "." {
+		return "_template.md"
+	}
+	return dir + "/_template.md"
 }
 
-// IsTemplatePath returns true if the source path is under templates/.
+// IsTemplatePath returns true if the source path is a DokuWiki template.
+// This includes:
+//   - templates/ namespace: "templates/study.txt"
+//   - in-namespace templates: "_template.txt", "__template.txt",
+//     "c_template.txt", "i_template.txt"
 func IsTemplatePath(srcPath string) bool {
-	return strings.HasPrefix(srcPath, "templates/")
+	if strings.HasPrefix(srcPath, "templates/") {
+		return true
+	}
+	base := path.Base(srcPath)
+	base = strings.TrimSuffix(base, ".txt")
+	return base == "_template" || base == "__template" ||
+		base == "c_template" || base == "i_template"
 }
 
 // DokuWikiLinkToPath converts a DokuWiki internal link target to a Gowiki path.
