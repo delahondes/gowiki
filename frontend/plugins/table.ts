@@ -13,6 +13,7 @@ import {
   deleteTable,
   mergeCells,
   splitCell,
+  TableMap,
 } from "prosemirror-tables"
 import { Node, Schema } from "prosemirror-model"
 import type { Command } from "prosemirror-state"
@@ -156,6 +157,36 @@ type HeaderVariant = (typeof HEADER_VALUES)[number]
 function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
   const headers: HeaderVariant = tableNode.attrs.headers ?? "1st_row"
 
+  function shouldBeHeader(r: number, gridCol: number): boolean {
+    switch (headers) {
+      case "1st_row":
+        return r === 0
+      case "2_rows":
+        return r <= 1
+      case "1st_col":
+        return gridCol === 0
+      case "2_cols":
+        return gridCol <= 1
+      case "both":
+        return r === 0 || gridCol === 0
+    }
+  }
+
+  // Use TableMap for correct grid column (accounts for rowspan/colspan).
+  const map = TableMap.get(tableNode)
+
+  // Build a lookup: cell offset → grid column.
+  // map.map is a flat array [row0col0, row0col1, ..., row1col0, ...] of cell offsets.
+  const offsetToGridCol = new Map<number, number>()
+  for (let r = 0; r < map.height; r++) {
+    for (let col = 0; col < map.width; col++) {
+      const offset = map.map[r * map.width + col]
+      if (!offsetToGridCol.has(offset)) {
+        offsetToGridCol.set(offset, col)
+      }
+    }
+  }
+
   const rows: Node[][] = []
   tableNode.content.forEach(row => {
     const cells: Node[] = []
@@ -163,30 +194,19 @@ function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
     rows.push(cells)
   })
 
-  const numRows = rows.length
-  if (numRows === 0) return tableNode
+  if (rows.length === 0) return tableNode
 
-  function shouldBeHeader(r: number, c: number): boolean {
-    switch (headers) {
-      case "1st_row":
-        return r === 0
-      case "2_rows":
-        return r <= 1
-      case "1st_col":
-        return c === 0
-      case "2_cols":
-        return c <= 1
-      case "both":
-        return r === 0 || c === 0
-    }
-  }
-
+  // Compute each cell's offset within the table node.
   const newRows: Node[] = []
-  for (let r = 0; r < numRows; r++) {
+  let offset = 0
+  for (let r = 0; r < rows.length; r++) {
     const newCells: Node[] = []
+    offset += 1 // table_row open
+
     for (let c = 0; c < rows[r].length; c++) {
       const cell = rows[r][c]
-      const wantHeader = shouldBeHeader(r, c)
+      const gridCol = offsetToGridCol.get(offset) ?? c
+      const wantHeader = shouldBeHeader(r, gridCol)
       const isHeader = cell.type === schema.nodes.table_header
 
       if (wantHeader === isHeader) {
@@ -199,7 +219,9 @@ function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
           targetType.create(cell.attrs, cell.content, cell.marks)
         )
       }
+      offset += cell.nodeSize
     }
+    offset += 1 // table_row close
     newRows.push(schema.nodes.table_row.create(null, newCells))
   }
 
@@ -1133,14 +1155,23 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
           const columns: ColumnProps | null = node.attrs.columns
           if (!columns) return true
 
-          // Walk rows and cells
-          node.content.forEach((row, rowOffset) => {
-            const rowPos = pos + 1 + rowOffset
-            let colIdx = 0
+          // Use TableMap for correct column resolution (accounts for
+          // colspan/rowspan cells that shift positions in the PM node).
+          const map = TableMap.get(node)
 
-            row.content.forEach((cell, cellOffset) => {
-              const cellPos = rowPos + 1 + cellOffset
-              const colNum = colIdx + 1
+          for (let row = 0; row < map.height; row++) {
+            for (let col = 0; col < map.width; col++) {
+              const cellOffset = map.map[row * map.width + col]
+              // Skip cells that are continuations of a colspan/rowspan
+              // (they share the same offset as the origin cell).
+              if (col > 0 && map.map[row * map.width + col - 1] === cellOffset) continue
+              if (row > 0 && map.map[(row - 1) * map.width + col] === cellOffset) continue
+
+              const cellPos = pos + 1 + cellOffset
+              const cell = node.nodeAt(cellOffset)
+              if (!cell) continue
+
+              const colNum = col + 1
               const props = resolveColumnProps(columns, colNum)
 
               if (props) {
@@ -1164,10 +1195,8 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                   )
                 }
               }
-
-              colIdx += cell.attrs.colspan ?? 1
-            })
-          })
+            }
+          }
 
           return false
         })
