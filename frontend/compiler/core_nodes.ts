@@ -81,6 +81,11 @@ export function registerCoreNodes(reg: Registry) {
           attrs.class = prevClass
             ? `${prevClass} gowiki-external-link`
             : "gowiki-external-link"
+        } else if (/^mailto:/i.test(href)) {
+          const prevClass = attrs.class ? String(attrs.class) : ""
+          attrs.class = prevClass
+            ? `${prevClass} gowiki-mailto-link`
+            : "gowiki-mailto-link"
         }
         const children = hasAttrs ? rest : [maybeAttrs, ...rest]
         return [tag, attrs, ...children]
@@ -194,6 +199,7 @@ function registerParagraph(reg: Registry) {
 function registerEmphasis(reg: Registry) {
   function isAllowedLinkTarget(href: string): boolean {
     if (/^https?:\/\//i.test(href)) return true
+    if (/^mailto:/i.test(href)) return true
     // Allow #fragment (same-page anchor), and internal paths with optional fragment
     return /^(#\S+|(\/(?!\/)|\.\/|\.\.\/)\S*)$/.test(href)
   }
@@ -987,7 +993,7 @@ export { headingNumberKey }
 const linkStatusKey = new PluginKey("gowiki.linkStatus")
 
 function resolveInternalHref(href: string, pageNamespace: string): string | null {
-  if (!href || /^https?:\/\//i.test(href)) return null
+  if (!href || /^https?:\/\//i.test(href) || /^mailto:/i.test(href)) return null
   if (href.startsWith("#")) return null
   // Decode percent-encoded characters (match backend resolve.go)
   try { href = decodeURIComponent(href) } catch {}

@@ -47,6 +47,14 @@ func DokuWikiLinkToPath(link string, currentNS string) string {
 	// Replace : with /
 	link = strings.ReplaceAll(link, ":", "/")
 
+	// Normalize .foo/... to ./foo/... — DokuWiki treats .page and .:page identically
+	// as relative to the current namespace. After colon-to-slash conversion, .:page
+	// becomes ./page (handled by path.Join), but .page stays as .page which
+	// path.Join treats as a literal ".page" directory name.
+	if len(link) > 1 && link[0] == '.' && link[1] != '/' && link[1] != '.' {
+		link = "./" + link[1:]
+	}
+
 	// Handle absolute links (leading /)
 	if strings.HasPrefix(link, "/") {
 		return normalizeLinkPath(link)
@@ -78,6 +86,11 @@ func DokuWikiMediaToPath(mediaRef string, currentNS string) string {
 
 	// Replace : with /
 	mediaRef = strings.ReplaceAll(mediaRef, ":", "/")
+
+	// Normalize .foo to ./foo (same fix as DokuWikiLinkToPath)
+	if len(mediaRef) > 1 && mediaRef[0] == '.' && mediaRef[1] != '/' && mediaRef[1] != '.' {
+		mediaRef = "./" + mediaRef[1:]
+	}
 
 	// Handle absolute (leading /)
 	if strings.HasPrefix(mediaRef, "/") {

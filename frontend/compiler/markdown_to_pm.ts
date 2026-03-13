@@ -250,6 +250,7 @@ function applyInlineDirectives(children: any[], registry: Registry): any[] {
 
 function defaultLinkTextForTarget(target: string): string {
   if (/^https?:\/\//i.test(target)) return target
+  if (/^mailto:/i.test(target)) return target.replace(/^mailto:/i, "")
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
   const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
@@ -296,6 +297,7 @@ function normalizeEmptyLinkLabels(tokens: any[]) {
 function isMediaLinkHref(href: string): boolean {
   if (!href) return false
   if (/^https?:\/\//i.test(href)) return false
+  if (/^mailto:/i.test(href)) return false
   // Strip query/hash for extension check
   const pathOnly = href.split(/[?#]/)[0]
   const ext = pathOnly.match(/\.([a-zA-Z0-9]+)$/)

@@ -19,6 +19,8 @@ In the following syntax `\n` is meant to be interpreted as a new line contained 
 | # Heading 1 | `# Heading 1` | `<h1> Heading 1 </h1>` | `Heading 1 \n =======` |
 | ## Heading 2 | `## Heading 2` | `<h2> Heading 2 </h2>` | `Heading 2 \n -------` |
 | [Link](http://a.com) | `[Link](http://a.com)` | `<a href="http://a.com">Link</a>` | `[Link][1] \n... [1]: http://b.org` |
+| [](https://example.com) | `[](https://example.com)` | `<a href="https://example.com">example.com</a>` | | Auto-link: empty display text, rendered text computed from URL |
+| [](mailto:user@example.com) | `[](mailto:user@example.com)` | `<a href="mailto:user@example.com">user@example.com</a>` | | Mailto auto-link: display shows email without `mailto:` prefix |
 | ![Image](https://commonmark.org/help/images/favicon.png) | `![Image](https://commonmark.org/help/images/favicon.png)` | `<img src="https://commonmark.org/help/images/favicon.png" alt="Image"></img>` | `![Image][1]\n... [1]: http://url/b.jpg` |
 | :+1: | `:1:` | 👍 | | and a list of similar UTF like :warning: ... |
 | > Blockquote | `> Blockquote` | `<blockquote>Blockquote</blockquote>` | 
@@ -320,6 +322,50 @@ In view mode, the directive renders as a clickable link badge showing the versio
 
 If the version does not exist in the target page's history, renders as an error indicator.
 
+## Links
+
+### Standard links
+
+Standard Markdown link syntax: `[text](target)`.
+
+- **Internal links:** `[Page title](/path/to/page)` — resolved following the page and attachment rules in CLAUDE.md.
+- **External links:** `[Example](https://example.com)` — rendered with a distinct external-link icon, opens in a new tab.
+- **Anchor links:** `[Section](/path/to/page#section)` — links to a specific section.
+
+### Auto-links (empty display text)
+
+When the display text is empty, the link is an **auto-link**: the display text is computed automatically from the target at render time.
+
+```
+[](https://example.com)        → displays "example.com"
+[](/path/to/page)              → displays "page" (last path segment)
+[](mailto:user@example.com)    → displays "user@example.com"
+```
+
+Auto-links are stored with empty display text `[]` in Markdown. The `autoText` attribute on the link mark tracks this state so the serializer can distinguish auto-links from links whose display text happens to match the URL.
+
+### Mailto links
+
+Email addresses are linked using the `mailto:` scheme:
+
+```
+[](mailto:user@example.com)          → auto-link, displays "user@example.com"
+[Contact us](mailto:user@example.com) → explicit text
+```
+
+When the user types a bare email address in the editor (e.g. `user@example.com`), it is automatically wrapped as `[](mailto:user@example.com)` on blur — same behavior as bare URLs being auto-linked.
+
+In the PM→Markdown serializer, bare email addresses in plain text nodes (no marks) are automatically serialized as `[](mailto:email)` auto-links, matching the behavior for bare URLs.
+
+### Auto-link detection in serializer
+
+The serializer detects bare URLs (`https://...`) and bare email addresses in unmarked text nodes and wraps them as auto-links:
+
+- `https://example.com` → `[](https://example.com)`
+- `user@example.com` → `[](mailto:user@example.com)`
+
+This ensures round-trip stability: typing a URL or email in the editor produces the canonical auto-link syntax in the stored Markdown.
+
 ## Escaping and forbidden syntax
 
 ### Backslash escaping
@@ -484,6 +530,9 @@ Status legend:
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
 | Include directive | `{include path=/path/to/page}` self-contained, supports `#section` anchor | `implemented` | Self-contained directive; supports section-targeted includes via `#anchor`. Numbered headings flow through includes. |
 | Version link | `{version-link version=N page=/path}` self-contained | `implemented` | Links to a specific attic version by number. Resolves page title, author, date at render time. |
+| Links | `[text](target)` standard, `[](target)` auto-link | `implemented` | Auto-link display text computed at render time from target. |
+| Mailto links | `[](mailto:user@domain)` auto-link, `[text](mailto:...)` explicit | `implemented` | Bare emails auto-wrapped as `[](mailto:...)` by serializer on blur. |
+| Auto-link detection | Bare URLs and emails in plain text → auto-link syntax | `implemented` | Serializer wraps `https://...` and `user@domain` in unmarked text nodes. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |
 | HTML entities | not interpreted specially | `partial` | Not explicitly transformed by custom logic; current behavior follows markdown-it defaults. |
 | Line breaks in top-level paragraphs | single newline -> hard break | `implemented` | Implemented with context-aware `softbreak` handling. |

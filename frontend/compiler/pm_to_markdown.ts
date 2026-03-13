@@ -20,16 +20,21 @@ function escapeMarkdownText(text: string): string {
 }
 
 function serializePlainTextWithAutoLinks(text: string): string {
-  const urlRe = /https?:\/\/[^\s<>()]+/g
+  // Match both URLs and bare email addresses
+  const autoRe = /https?:\/\/[^\s<>()]+|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
   let out = ""
   let last = 0
   let m: RegExpExecArray | null
-  while ((m = urlRe.exec(text)) !== null) {
+  while ((m = autoRe.exec(text)) !== null) {
     const start = m.index
-    const url = m[0]
+    const match = m[0]
     out += escapeMarkdownText(text.slice(last, start))
-    out += `[](${url})`
-    last = start + url.length
+    if (match.includes("@")) {
+      out += `[](mailto:${match})`
+    } else {
+      out += `[](${match})`
+    }
+    last = start + match.length
   }
   out += escapeMarkdownText(text.slice(last))
   return out

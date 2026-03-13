@@ -48,6 +48,12 @@ var (
 
 	// Line break mid-line: \\  followed by more content (not at end)
 	reLineBreakMid = regexp.MustCompile(`\\\\\s+`)
+
+	// Bare URLs not already inside []() or [[]] — matches http(s)://... at word boundary
+	reBareURL = regexp.MustCompile(`(?:^|(?:\s))((https?://[^\s<>)\]]+))`)
+
+	// Bare email addresses not inside links
+	reBareEmail = regexp.MustCompile(`(?:^|(?:\s))(([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}))`)
 )
 
 // placeholder tracking for protect-and-restore
@@ -129,9 +135,18 @@ func ConvertInline(line string, currentNS string, context string) string {
 	// Step 8: Convert footnotes ((text)) -> ^[text]
 	line = reFootnote.ReplaceAllString(line, `^[${1}]`)
 
+	// Step 8b: Convert DokuWiki icons to UTF-8
+	line = convertDokuWikiIcons(line)
+
+	// Step 8c: Auto-link bare URLs (https://...) -> [](https://...)
+	line = convertBareURLs(line, prot)
+
+	// Step 8d: Auto-link bare emails (user@domain) -> [](mailto:user@domain)
+	line = convertBareEmails(line, prot)
+
 	// Step 9: Handle line breaks \\
-	if context == "table" || context == "list" {
-		// In tables and lists: \\ -> \n literal
+	if context == "table" || context == "list" || context == "blockquote" {
+		// In tables, lists, and blockquotes: \\ -> \n literal
 		line = reLineBreakMid.ReplaceAllString(line, `\n`)
 		line = reLineBreak.ReplaceAllString(line, `\n`)
 	} else {
@@ -145,6 +160,49 @@ func ConvertInline(line string, currentNS string, context string) string {
 	line = prot.restore(line)
 
 	return line
+}
+
+// convertDokuWikiIcons replaces DokuWiki icon syntax with UTF-8 equivalents.
+func convertDokuWikiIcons(line string) string {
+	replacements := []struct{ old, new string }{
+		{":!:", "\u26A0\uFE0F"},  // ⚠️
+		{":?:", "\u2139\uFE0F"},  // ℹ️
+		{"FIXME", "\u26A0\uFE0F FIXME"},
+		{"DELETEME", "\u274C DELETEME"},
+		{"TODO", "\u2611\uFE0F TODO"}, // Not used by DokuWiki natively but common in content
+	}
+	for _, r := range replacements {
+		line = strings.ReplaceAll(line, r.old, r.new)
+	}
+	return line
+}
+
+// convertBareURLs wraps bare http(s) URLs in auto-link syntax [](url).
+// Protected spans (already inside links/media) are skipped by the protector.
+func convertBareURLs(line string, prot *protector) string {
+	return reBareURL.ReplaceAllStringFunc(line, func(m string) string {
+		sub := reBareURL.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		url := sub[1]
+		// Replace just the URL portion, preserve any leading whitespace
+		converted := prot.protect("[]("+url+")")
+		return strings.Replace(m, url, converted, 1)
+	})
+}
+
+// convertBareEmails wraps bare email addresses in mailto auto-link syntax.
+func convertBareEmails(line string, prot *protector) string {
+	return reBareEmail.ReplaceAllStringFunc(line, func(m string) string {
+		sub := reBareEmail.FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		email := sub[1]
+		converted := prot.protect("[](mailto:" + email + ")")
+		return strings.Replace(m, email, converted, 1)
+	})
 }
 
 // convertItalic converts //text// to *text* while avoiding URLs.
@@ -217,6 +275,15 @@ func convertLink(inner string, currentNS string) string {
 			text = target
 		}
 		return fmt.Sprintf("[%s](%s)", text, target)
+	}
+
+	// Email addresses: DokuWiki auto-detects [[user@domain]] as mailto links
+	if strings.Contains(target, "@") && !strings.Contains(target, "/") && !strings.Contains(target, ":") {
+		mailto := "mailto:" + target
+		if text == "" {
+			return fmt.Sprintf("[](%s)", mailto)
+		}
+		return fmt.Sprintf("[%s](%s)", text, mailto)
 	}
 
 	// Handle this> links

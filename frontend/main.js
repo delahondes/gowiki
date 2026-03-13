@@ -285,6 +285,7 @@ function classifyLinkTarget(rawTarget) {
 
 function defaultLinkTextForTarget(target) {
   if (/^https?:\/\//i.test(target)) return target
+  if (/^mailto:/i.test(target)) return target.replace(/^mailto:/i, "")
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
   const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
@@ -3186,6 +3187,79 @@ function buildMenubar() {
       rawWrapSelection(rawEditor, "`", "`")
     }
   }, "code")
+
+  // Symbol dropdown
+  const defaultSymbols = [
+    { char: "\u26A0\uFE0F", label: "Warning" },
+    { char: "\u2139\uFE0F", label: "Info" },
+    { char: "\u2705", label: "Check" },
+    { char: "\u274C", label: "Cross" },
+    { char: "\u2B50", label: "Star" },
+    { char: "\u{1F4A1}", label: "Idea" },
+    { char: "\u{1F4CC}", label: "Pin" },
+    { char: "\u{1F512}", label: "Lock" },
+    { char: "\u{1F513}", label: "Unlock" },
+    { char: "\u{1F4DD}", label: "Note" },
+    { char: "\u2192", label: "Arrow right" },
+    { char: "\u2190", label: "Arrow left" },
+    { char: "\u2191", label: "Arrow up" },
+    { char: "\u2193", label: "Arrow down" },
+    { char: "\u{1F534}", label: "Red circle" },
+    { char: "\u{1F7E2}", label: "Green circle" },
+    { char: "\u{1F7E1}", label: "Yellow circle" },
+    { char: "\u{1F535}", label: "Blue circle" },
+    { char: "\u2611\uFE0F", label: "Ballot check" },
+    { char: "\u2610", label: "Ballot box" },
+    { char: "\u00A9", label: "Copyright" },
+    { char: "\u00AE", label: "Registered" },
+    { char: "\u2122", label: "Trademark" },
+    { char: "\u00B1", label: "Plus-minus" },
+    { char: "\u2260", label: "Not equal" },
+    { char: "\u2264", label: "Less or equal" },
+    { char: "\u2265", label: "Greater or equal" },
+    { char: "\u221E", label: "Infinity" },
+    { char: "\u00B0", label: "Degree" },
+    { char: "\u00B5", label: "Micro" },
+  ]
+  {
+    const symWrap = document.createElement("span")
+    symWrap.className = "gowiki-raw-menuitem gowiki-raw-menu-dropdown-wrap"
+    symWrap.title = "Insert symbol"
+    symWrap.textContent = "\u263A"
+    const symDrop = document.createElement("div")
+    symDrop.className = "gowiki-raw-dropdown-menu gowiki-symbol-grid"
+    for (const sym of defaultSymbols) {
+      const item = document.createElement("span")
+      item.className = "gowiki-symbol-item"
+      item.textContent = sym.char
+      item.title = sym.label
+      item.addEventListener("mousedown", e => {
+        e.preventDefault()
+        symDrop.style.display = "none"
+        if (editMode === "visual" && editorView) {
+          const tr = editorView.state.tr.insertText(sym.char)
+          editorView.dispatch(tr)
+          editorView.focus()
+        } else if (editMode === "raw" && rawEditor) {
+          rawEditor.focus()
+          rawInsertText(rawEditor, sym.char)
+        }
+      })
+      symDrop.appendChild(item)
+    }
+    symWrap.appendChild(symDrop)
+    symWrap.addEventListener("mousedown", e => {
+      e.preventDefault()
+      const isOpen = symDrop.style.display === "grid"
+      symDrop.style.display = isOpen ? "none" : "grid"
+    })
+    bar.appendChild(symWrap)
+    document.addEventListener("mousedown", e => {
+      if (!symWrap.contains(e.target)) {
+        symDrop.style.display = "none"
+      }
+    })
+  }
 
   addSeparator()
 

@@ -687,6 +687,27 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   background-size: contain;
 }
 
+.ProseMirror a.gowiki-mailto-link,
+.ProseMirror a.gowiki-mailto-link:has(.gowiki-link-exists),
+.ProseMirror a.gowiki-mailto-link:has(.gowiki-link-missing) {
+  color: #1565c0 !important;
+  text-decoration-color: #1565c0 !important;
+  text-decoration-thickness: from-font;
+}
+.ProseMirror a.gowiki-mailto-link::before {
+  content: "";
+  display: inline-block;
+  width: 0.83em;
+  height: 0.83em;
+  margin-right: 0.28em;
+  vertical-align: -0.08em;
+  text-decoration: none;
+  background-image: url("/icons/mail.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
 .gowiki-view .ProseMirror {
   border: none;
   min-height: 0;
@@ -811,6 +832,29 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border-top: 1px solid #eee;
   padding-top: 5px;
   margin-top: 2px;
+}
+
+.gowiki-symbol-grid {
+  display: none;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1px;
+  padding: 4px;
+  min-width: 200px;
+}
+
+.gowiki-symbol-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.gowiki-symbol-item:hover {
+  background: #e0e0e0;
 }
 
 .gowiki-link-modal-overlay {

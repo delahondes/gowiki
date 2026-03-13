@@ -428,7 +428,11 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 		flushTable()
 
 		// --- Normal line conversion ---
-		converted := convertNormalLine(line, currentNS, pagesDir)
+		inlineCtx := ""
+		if inBlockquote {
+			inlineCtx = "blockquote"
+		}
+		converted := convertNormalLine(line, currentNS, pagesDir, inlineCtx)
 		if inBlockquote && strings.TrimSpace(converted) != "" {
 			converted = "> " + converted
 		}
@@ -492,7 +496,7 @@ func ensureBlankLinesAroundDirectives(lines []string) []string {
 }
 
 // convertNormalLine converts a single non-block line.
-func convertNormalLine(line string, currentNS string, pagesDir string) string {
+func convertNormalLine(line string, currentNS string, pagesDir string, contexts ...string) string {
 	trimmed := strings.TrimSpace(line)
 
 	// Empty line
@@ -543,7 +547,11 @@ func convertNormalLine(line string, currentNS string, pagesDir string) string {
 	line = ConvertTemplateVars(line)
 
 	// Inline conversion
-	line = ConvertInline(line, currentNS, "paragraph")
+	ctx := "paragraph"
+	if len(contexts) > 0 && contexts[0] != "" {
+		ctx = contexts[0]
+	}
+	line = ConvertInline(line, currentNS, ctx)
 
 	return line
 }
