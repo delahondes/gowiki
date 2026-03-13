@@ -1531,6 +1531,33 @@ function scrollSelectionIntoContentView(view) {
   return true
 }
 
+const COPY_ICON = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+const CHECK_ICON = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
+
+function addCodeCopyButtons(container) {
+  container.querySelectorAll("pre").forEach(pre => {
+    const btn = document.createElement("button")
+    btn.className = "gowiki-code-copy-btn"
+    btn.title = "Copy code"
+    btn.innerHTML = COPY_ICON
+    btn.addEventListener("click", (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const code = pre.querySelector("code")
+      if (!code) return
+      navigator.clipboard.writeText(code.textContent || "").then(() => {
+        btn.innerHTML = CHECK_ICON
+        btn.classList.add("gowiki-code-copy-btn--copied")
+        setTimeout(() => {
+          btn.innerHTML = COPY_ICON
+          btn.classList.remove("gowiki-code-copy-btn--copied")
+        }, 1500)
+      })
+    })
+    pre.appendChild(btn)
+  })
+}
+
 function mountReadOnlyView(container, markdown, className) {
   const doc = markdownToPM(markdown, registry)
   const wrapper = document.createElement("div")
@@ -1558,6 +1585,7 @@ function mountReadOnlyView(container, markdown, className) {
     },
   })
   highlightCodeBlocks(wrapper)
+  addCodeCopyButtons(wrapper)
   // Fold spoilers by default in view mode
   wrapper.querySelectorAll("details.gowiki-spoiler[open]").forEach(d => d.removeAttribute("open"))
   // In view mode we only need the rendered DOM — not ProseMirror's event

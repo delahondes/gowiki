@@ -621,6 +621,48 @@ body.gowiki-fullscreen #main {
   margin: 0;
   padding: 0.5rem 0.75rem;
   text-indent: 0;
+  position: relative;
+}
+
+.gowiki-code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+.gowiki-code-copy-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke: #555;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+pre:hover > .gowiki-code-copy-btn {
+  opacity: 1;
+}
+.gowiki-code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(0, 0, 0, 0.3);
+}
+.gowiki-code-copy-btn:hover svg {
+  stroke: #333;
+}
+.gowiki-code-copy-btn--copied svg {
+  stroke: #16a34a;
 }
 
 .ProseMirror pre code,
