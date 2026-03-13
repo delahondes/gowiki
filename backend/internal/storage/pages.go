@@ -1064,7 +1064,14 @@ func (s *FileStore) RebuildIndexes() error {
 	refIdx := NewRefIndex(s.metaRoot)
 	incIdx := NewIncludeIndex(s.metaRoot)
 	linkIdx := NewLinkIndex(s.metaRoot)
-	tagIdx := NewTagIndex(s.metaRoot)
+	// Reuse the existing TagIndex (clear and repopulate) so that API handlers
+	// that hold a pointer to it see the updated data immediately.
+	tagIdx := s.TagIndex
+	if tagIdx == nil {
+		tagIdx = NewTagIndex(s.metaRoot)
+	} else {
+		tagIdx.Clear()
+	}
 
 	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
 		if err != nil {

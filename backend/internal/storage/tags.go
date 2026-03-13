@@ -98,6 +98,15 @@ func (idx *TagIndex) Save() error {
 	return writeFileAtomic(filePath, data)
 }
 
+// Clear resets the tag index to empty, keeping the same object.
+func (idx *TagIndex) Clear() {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	idx.PageToTags = make(map[string][]string)
+	idx.TagToPages = make(map[string][]string)
+	idx.PageTitles = make(map[string]string)
+}
+
 // UpdatePage replaces the tags for a page and updates reverse maps.
 func (idx *TagIndex) UpdatePage(pagePath string, tags []string, title string) {
 	idx.mu.Lock()
