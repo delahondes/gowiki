@@ -399,13 +399,17 @@ export const blockquotePlugin: WikiPlugin = {
           out += `{blockquote ${parts.join(" ")}}\n`
         }
 
-        node.content.forEach(child => {
+        node.content.forEach((child, _offset, index) => {
           const rendered = recurse(child).trimEnd()
           const lines = rendered.split("\n")
           for (const line of lines) {
             if (line.length > 0) {
               out += "> " + line + "\n"
             }
+          }
+          // Separate block children with blank blockquote line
+          if (index < node.content.childCount - 1) {
+            out += ">\n"
           }
         })
         return out + "\n"
