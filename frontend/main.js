@@ -1544,6 +1544,18 @@ function mountReadOnlyView(container, markdown, className) {
   const view = new EditorView(wrapper, {
     state,
     editable: () => false,
+    // Override dispatchTransaction so that after every state update (which
+    // internally calls domObserver.start()), we immediately re-stop the
+    // observer.  Without this, async plugin transactions (e.g. link status
+    // check) restart the observer and ProseMirror's selectionchange handler
+    // fights the native browser selection — causing code-block selection to
+    // blink and fail.
+    dispatchTransaction(tr) {
+      const newState = view.state.apply(tr)
+      view.updateState(newState)
+      view.dom.removeAttribute("contenteditable")
+      if (view.domObserver && view.domObserver.stop) view.domObserver.stop()
+    },
   })
   highlightCodeBlocks(wrapper)
   // Fold spoilers by default in view mode
