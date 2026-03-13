@@ -45,10 +45,10 @@ Tables follow standard Markdown rules with the following clarifications:
 
 ### Table header variants
 
-The `headers` property controls which cells are rendered as header cells. It is set via the table directive:
+The `headers` property controls which cells are rendered as header cells. It uses a compositional `NrMc` syntax where `N` is the number of header rows and `M` the number of header columns. It is set via the table directive:
 
 ```
-{table headers=1st_col}
+{table headers=1c}
 | Label | Value |
 ```
 
@@ -56,15 +56,19 @@ Supported values:
 
 | Value | Meaning |
 | -- | -- |
-| `1st_row` | First row is the header (default) |
-| `2_rows` | First two rows are headers (useful for grouped column headers) |
-| `1st_col` | First column is the header (useful for comparison or spec tables) |
-| `2_cols` | First two columns are headers (useful for matrix-style tables) |
-| `both` | First row and first column are both headers simultaneously |
+| `1r` | First row is the header (default) |
+| `2r` | First two rows are headers (useful for grouped column headers) |
+| `1c` | First column is the header (useful for comparison or spec tables) |
+| `2c` | First two columns are headers (useful for matrix-style tables) |
+| `1r1c` | First row and first column are both headers |
+| `2r1c` | First two rows and first column are headers |
+| `1r2c` | First row and first two columns are headers |
+| `2r2c` | First two rows and first two columns are headers |
+| `none` | No header cells at all |
 
-In `both` mode, the top-left corner cell is rendered as a plain header cell with no special treatment (typically left empty by convention).
+In combined modes (e.g. `1r1c`), corner cells (intersection of header rows and header columns) are rendered as header cells.
 
-When `headers=1st_row` (the default), the directive may be omitted entirely — the serializer does not emit it.
+When `headers=1r` (the default), the directive may be omitted entirely — the serializer does not emit it.
 
 ### Column properties
 
@@ -517,7 +521,7 @@ Status legend:
 | Lists (ordered) | `1. item` (CommonMark) | `implemented` | Standard ordered-list syntax is canonical. Optional raw-mode helpers may auto-renumber without changing stored syntax. |
 | Numbered headings | `## 1. Heading` prefix syntax; editor renumbers on save; hierarchical label computed at render time | `planned` | Per-heading numbering: a heading is numbered or not by presence of the `1.` prefix. Stored markdown always uses `1.` at every level; rendered label (`1.`, `1.1`, `1.1.1`) computed at render time. Consistent with ordered list handling. DokuWiki numbered heading import maps to this syntax. In the editor, `Shift+HN` creates a numbered heading. |
 | Tables | Pipe table parse/print, directive support (`{table ...}`) | `implemented` | Parse + PM round-trip works with current table plugin. |
-| Table header variants | `{table headers=...}` with 1st_row, 2_rows, 1st_col, 2_cols, both | `planned` | Default 1st_row requires no directive. |
+| Table header variants | `{table headers=...}` with NrMc syntax: 1r, 2r, 1c, 2c, 1r1c, 2r1c, 1r2c, 2r2c, none | `implemented` | Default 1r requires no directive. Compositional syntax: N header rows + M header cols. |
 | Table column properties | `{table colN.align colN.width colN.color=...}` | `planned` | Per-column alignment, width, and color rules. |
 | Table cell color | `{color=...}` as first token in cell | `planned` | Overrides column color rule. Supports background and text-color. |
 | Table cell formulas | `=FUNC(...)` leading `=` in cell | `planned` | Evaluated at render time, sandboxed JS. Errors: #CIRC, #DIV/0, #ERR. |

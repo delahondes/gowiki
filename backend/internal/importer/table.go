@@ -75,7 +75,7 @@ func ConvertTable(lines []string, currentNS string) ([]string, []FlaggedLine) {
 
 	// If header column, add property line
 	if headerCol && headerRow < 0 {
-		out = append(out, "{table headers=1st_col}")
+		out = append(out, "{table headers=1c}")
 	}
 
 	for i, row := range rows {

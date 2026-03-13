@@ -151,25 +151,47 @@ export function getCellText(cell: Node): string {
 
 // ─── Header variants ────────────────────────────────────
 
-const HEADER_VALUES = ["1st_row", "2_rows", "1st_col", "2_cols", "both"] as const
+// NrMc syntax: "1r" (default), "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none"
+// Also accepts legacy values for backward compat during parse.
+const HEADER_VALUES = [
+  "1r", "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none",
+] as const
 type HeaderVariant = (typeof HEADER_VALUES)[number]
 
+const LEGACY_HEADER_MAP: Record<string, HeaderVariant> = {
+  "1st_row": "1r",
+  "2_rows": "2r",
+  "1st_col": "1c",
+  "2_cols": "2c",
+  "both": "1r1c",
+}
+
+function parseHeaderValue(raw: string): HeaderVariant {
+  if ((HEADER_VALUES as readonly string[]).includes(raw)) return raw as HeaderVariant
+  if (raw in LEGACY_HEADER_MAP) return LEGACY_HEADER_MAP[raw]
+  throw new Error(`Invalid headers value: ${raw}`)
+}
+
+function headerRows(h: HeaderVariant): number {
+  if (h === "none" || h === "1c" || h === "2c") return 0
+  if (h === "2r" || h === "2r1c" || h === "2r2c") return 2
+  return 1 // "1r", "1r1c", "1r2c"
+}
+
+function headerCols(h: HeaderVariant): number {
+  if (h === "none" || h === "1r" || h === "2r") return 0
+  if (h === "2c" || h === "2r2c" || h === "1r2c") return 2
+  return 1 // "1c", "1r1c", "2r1c"
+}
+
 function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
-  const headers: HeaderVariant = tableNode.attrs.headers ?? "1st_row"
+  const headers: HeaderVariant = tableNode.attrs.headers ?? "1r"
+
+  const hRows = headerRows(headers)
+  const hCols = headerCols(headers)
 
   function shouldBeHeader(r: number, gridCol: number): boolean {
-    switch (headers) {
-      case "1st_row":
-        return r === 0
-      case "2_rows":
-        return r <= 1
-      case "1st_col":
-        return gridCol === 0
-      case "2_cols":
-        return gridCol <= 1
-      case "both":
-        return r === 0 || gridCol === 0
-    }
+    return r < hRows || gridCol < hCols
   }
 
   // Use TableMap for correct grid column (accounts for rowspan/colspan).
@@ -652,17 +674,18 @@ const tableProperties: NodePropertySpec[] = [
   {
     name: "headers",
     label: "Headers",
-    default: "1st_row",
-    parse: (raw: string) => {
-      if ((HEADER_VALUES as readonly string[]).includes(raw)) return raw
-      throw new Error(`Invalid headers value: ${raw}`)
-    },
+    default: "1r",
+    parse: (raw: string) => parseHeaderValue(raw),
     options: [
-      { value: "1st_row", label: "1st row" },
-      { value: "2_rows", label: "2 rows" },
-      { value: "1st_col", label: "1st column" },
-      { value: "2_cols", label: "2 columns" },
-      { value: "both", label: "Both" },
+      { value: "1r", label: "1 row" },
+      { value: "2r", label: "2 rows" },
+      { value: "1c", label: "1 column" },
+      { value: "2c", label: "2 columns" },
+      { value: "1r1c", label: "1 row, 1 column" },
+      { value: "2r1c", label: "2 rows, 1 column" },
+      { value: "1r2c", label: "1 row, 2 columns" },
+      { value: "2r2c", label: "2 rows, 2 columns" },
+      { value: "none", label: "None" },
     ],
   },
   {
@@ -1960,8 +1983,8 @@ export const tablePlugin: GowikiPlugin = {
         // Build directive line
         const directiveParts: string[] = []
 
-        const headers = node.attrs.headers ?? "1st_row"
-        if (headers !== "1st_row") {
+        const headers = node.attrs.headers ?? "1r"
+        if (headers !== "1r") {
           directiveParts.push(`headers=${headers}`)
         }
 

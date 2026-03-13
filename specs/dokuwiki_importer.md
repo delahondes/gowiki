@@ -156,7 +156,7 @@ Gowiki:
 ```
 
 Special cases:
-- **Header column** (first column with `^`, rest with `|`): Convert to `{table headers=1st_col}` property + pipe table with all `|` cells.
+- **Header column** (first column with `^`, rest with `|`): Convert to `{table headers=1c}` property + pipe table with all `|` cells.
 - **Cell merge** (`:::`): 44 pages. DokuWiki uses `:::` for vertical merge. Convert to Gowiki's merge syntax: `<<` (colspan, merge left) and `^^` (rowspan, merge up).
 - **Cell colors** (`@LightBlue:text`): 2 pages. Convert to Gowiki cell property syntax. DokuWiki uses standard CSS color names which Gowiki accepts as-is (e.g. `lightblue` -> `lightblue`). No color mapping needed.
 - **Table formulas** (`~~=sum(...)~~`): 9 pages. Gowiki has a `table_formulas` plugin. Syntax may differ; convert where possible, flag for review.

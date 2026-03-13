@@ -731,21 +731,27 @@ function isErrorResult(result: number | string): boolean {
 // ─── Header boundary helpers ─────────────────────────────
 
 function getDataBoundaries(headers: string): { dataRowStart: number; dataColStart: number } {
-  let dataRowStart = 0
-  let dataColStart = 0
-  switch (headers) {
-    case "1st_row":
-      dataRowStart = 1; dataColStart = 0; break
-    case "2_rows":
-      dataRowStart = 2; dataColStart = 0; break
-    case "1st_col":
-      dataRowStart = 0; dataColStart = 1; break
-    case "2_cols":
-      dataRowStart = 0; dataColStart = 2; break
-    case "both":
-      dataRowStart = 1; dataColStart = 1; break
+  // Parse NrMc header syntax: "1r" → 1 row, "2r1c" → 2 rows + 1 col, etc.
+  const m = headers.match(/^(\d+)r(?:(\d+)c)?$/)
+  if (m) {
+    return { dataRowStart: parseInt(m[1]), dataColStart: m[2] ? parseInt(m[2]) : 0 }
   }
-  return { dataRowStart, dataColStart }
+  const m2 = headers.match(/^(\d+)c$/)
+  if (m2) {
+    return { dataRowStart: 0, dataColStart: parseInt(m2[1]) }
+  }
+  if (headers === "none") {
+    return { dataRowStart: 0, dataColStart: 0 }
+  }
+  // Legacy fallback
+  switch (headers) {
+    case "1st_row": return { dataRowStart: 1, dataColStart: 0 }
+    case "2_rows": return { dataRowStart: 2, dataColStart: 0 }
+    case "1st_col": return { dataRowStart: 0, dataColStart: 1 }
+    case "2_cols": return { dataRowStart: 0, dataColStart: 2 }
+    case "both": return { dataRowStart: 1, dataColStart: 1 }
+    default: return { dataRowStart: 1, dataColStart: 0 }
+  }
 }
 
 // ─── Formula sync logic ──────────────────────────────────
