@@ -52,6 +52,10 @@ var (
 	reNBWarnOpen = regexp.MustCompile(`^NB!::(.*)$`)
 	reNBClose    = regexp.MustCompile(`^::NB\s*$`)
 
+	// <note> block: <note>, <note important>, <note tip>, <note warning>
+	reNoteOpen  = regexp.MustCompile(`(?i)^\s*<note\s*(\w*)\s*>\s*$`)
+	reNoteClose = regexp.MustCompile(`(?i)^\s*</note>\s*$`)
+
 	// Figure block: <figure>...</figure>
 	reFigureOpen  = regexp.MustCompile(`(?i)^\s*<figure>\s*$`)
 	reFigureClose = regexp.MustCompile(`(?i)^\s*</figure>\s*$`)
@@ -67,7 +71,7 @@ var (
 	reSlider = regexp.MustCompile(`(?i)^<slider\s+([^>]+)>`)
 
 	// Code block: <code lang>...</code>
-	reCodeOpen  = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_]*)>`)
+	reCodeOpen  = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_-]*)>`)
 	reCodeClose = regexp.MustCompile(`(?i)^</code>\s*$`)
 
 	// File block: <file lang filename>...</file>
@@ -483,14 +487,42 @@ func ConvertNBBlock(lines []string, isWarning bool, currentNS string) []string {
 	if isWarning {
 		class = "warning"
 	}
+	return convertBlockquoteLines(lines, class, currentNS)
+}
 
+// ConvertNoteBlock converts a <note> ... </note> block to a Gowiki blockquote.
+func ConvertNoteBlock(lines []string, noteType string, currentNS string) []string {
+	class := "note"
+	switch strings.ToLower(noteType) {
+	case "important":
+		class = "important"
+	case "tip":
+		class = "tip"
+	case "warning":
+		class = "warning"
+	case "":
+		class = "tip" // bare <note> defaults to tip
+	}
+	return convertBlockquoteLines(lines, class, currentNS)
+}
+
+// convertBlockquoteLines converts content lines to a {blockquote} block,
+// properly expanding image markers inside the blockquote.
+func convertBlockquoteLines(lines []string, class string, currentNS string) []string {
 	var out []string
 	out = append(out, fmt.Sprintf("{blockquote class=%s}", class))
 
 	for _, line := range lines {
-		// Convert inline markup
-		converted := ConvertInline(line, currentNS, "paragraph")
-		out = append(out, "> "+converted)
+		converted := ConvertInline(line, currentNS, "blockquote")
+		// Expand image markers inside blockquote content
+		expanded := ExpandImageMarkers(converted)
+		for i, el := range expanded {
+			if i == 0 {
+				out = append(out, "> "+el)
+			} else {
+				out = append(out, "> "+el)
+			}
+		}
 	}
 
 	return out

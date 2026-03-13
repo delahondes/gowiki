@@ -18,6 +18,7 @@ const (
 	stateFigure
 	stateNBNote
 	stateNBWarn
+	stateNote
 	stateFold
 )
 
@@ -56,7 +57,8 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	var wrapStack []WrapBlock
 	wrapDepth := 0
 	var wrapBuf []string
-	nbFirstLine := "" // first line content after NB:: marker
+	nbFirstLine := ""  // first line content after NB:: marker
+	noteType := ""     // type from <note important> tag
 
 	flushTable := func() {
 		if len(tableLines) == 0 {
@@ -69,55 +71,7 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	}
 
 	emitImageLine := func(line string) {
-		// Handle the \x01IMG{...}\x01 markers from inline conversion
-		if !strings.Contains(line, "\x01IMG{") {
-			output = append(output, line)
-			return
-		}
-		// Split on image markers and emit property lines before each image
-		parts := strings.Split(line, "\x01")
-
-		// Check if image is standalone (no other text on the line)
-		hasOtherContent := false
-		for _, part := range parts {
-			if !strings.HasPrefix(part, "IMG{") && strings.TrimSpace(part) != "" {
-				hasOtherContent = true
-				break
-			}
-		}
-
-		if !hasOtherContent {
-			// Standalone image: emit property on separate line, then image
-			for _, part := range parts {
-				if strings.HasPrefix(part, "IMG{") {
-					props := parseImageMarker(part)
-					propLine, imgLine := buildImageLines(props)
-					if propLine != "" {
-						output = append(output, propLine)
-					}
-					output = append(output, imgLine)
-				}
-			}
-		} else {
-			// Inline image: emit {image ...}![](path) inline within the text
-			var assembled []string
-			for _, part := range parts {
-				if strings.HasPrefix(part, "IMG{") {
-					props := parseImageMarker(part)
-					propLine, imgLine := buildImageLines(props)
-					if propLine != "" {
-						assembled = append(assembled, propLine+imgLine)
-					} else {
-						assembled = append(assembled, imgLine)
-					}
-				} else if part != "" {
-					assembled = append(assembled, part)
-				}
-			}
-			if len(assembled) > 0 {
-				output = append(output, strings.Join(assembled, ""))
-			}
-		}
+		output = append(output, ExpandImageMarkers(line)...)
 	}
 
 	for lineNum, line := range lines {
@@ -213,6 +167,17 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 				}
 				nbLines = append(nbLines, blockBuf...)
 				converted := ConvertNBBlock(nbLines, isWarn, currentNS)
+				output = append(output, converted...)
+				result.ConvertLines += len(blockBuf) + 2
+				state = stateNormal
+			} else {
+				blockBuf = append(blockBuf, line)
+			}
+			continue
+
+		case stateNote:
+			if reNoteClose.MatchString(strings.TrimSpace(line)) {
+				converted := ConvertNoteBlock(blockBuf, noteType, currentNS)
 				output = append(output, converted...)
 				result.ConvertLines += len(blockBuf) + 2
 				state = stateNormal
@@ -345,6 +310,16 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 		if reFoldOpen.MatchString(trimmed) {
 			flushTable()
 			state = stateFold
+			blockBuf = nil
+			result.ConvertLines++
+			continue
+		}
+
+		// <note> block: <note>, <note important>, <note tip>, <note warning>
+		if m := reNoteOpen.FindStringSubmatch(trimmed); m != nil {
+			flushTable()
+			state = stateNote
+			noteType = m[1]
 			blockBuf = nil
 			result.ConvertLines++
 			continue
@@ -557,6 +532,57 @@ func convertNormalLine(line string, currentNS string, pagesDir string, contexts 
 	line = ConvertInline(line, currentNS, ctx)
 
 	return line
+}
+
+// ExpandImageMarkers expands \x01IMG{...}\x01 markers in a line,
+// returning one or more output lines (property line + image line when needed).
+func ExpandImageMarkers(line string) []string {
+	if !strings.Contains(line, "\x01IMG{") {
+		return []string{line}
+	}
+	parts := strings.Split(line, "\x01")
+
+	// Check if image is standalone (no other text on the line)
+	hasOtherContent := false
+	for _, part := range parts {
+		if !strings.HasPrefix(part, "IMG{") && strings.TrimSpace(part) != "" {
+			hasOtherContent = true
+			break
+		}
+	}
+
+	var out []string
+	if !hasOtherContent {
+		for _, part := range parts {
+			if strings.HasPrefix(part, "IMG{") {
+				props := parseImageMarker(part)
+				propLine, imgLine := buildImageLines(props)
+				if propLine != "" {
+					out = append(out, propLine)
+				}
+				out = append(out, imgLine)
+			}
+		}
+	} else {
+		var assembled []string
+		for _, part := range parts {
+			if strings.HasPrefix(part, "IMG{") {
+				props := parseImageMarker(part)
+				propLine, imgLine := buildImageLines(props)
+				if propLine != "" {
+					assembled = append(assembled, propLine+imgLine)
+				} else {
+					assembled = append(assembled, imgLine)
+				}
+			} else if part != "" {
+				assembled = append(assembled, part)
+			}
+		}
+		if len(assembled) > 0 {
+			out = append(out, strings.Join(assembled, ""))
+		}
+	}
+	return out
 }
 
 // imageProps holds parsed image marker properties.

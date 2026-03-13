@@ -135,13 +135,16 @@ func ConvertInline(line string, currentNS string, context string) string {
 	// Step 8: Convert footnotes ((text)) -> ^[text]
 	line = reFootnote.ReplaceAllString(line, `^[${1}]`)
 
-	// Step 8b: Convert DokuWiki icons to UTF-8
+	// Step 8b: Convert custom DokuWiki entities to UTF-8
+	line = convertDokuWikiEntities(line)
+
+	// Step 8c: Convert DokuWiki icons to UTF-8
 	line = convertDokuWikiIcons(line)
 
-	// Step 8c: Auto-link bare URLs (https://...) -> [](https://...)
+	// Step 8d: Auto-link bare URLs (https://...) -> [](https://...)
 	line = convertBareURLs(line, prot)
 
-	// Step 8d: Auto-link bare emails (user@domain) -> [](mailto:user@domain)
+	// Step 8e: Auto-link bare emails (user@domain) -> [](mailto:user@domain)
 	line = convertBareEmails(line, prot)
 
 	// Step 9: Handle line breaks \\
@@ -159,6 +162,23 @@ func ConvertInline(line string, currentNS string, context string) string {
 	// Restore protected spans
 	line = prot.restore(line)
 
+	return line
+}
+
+// convertDokuWikiEntities replaces custom DokuWiki entity shortcuts with UTF-8.
+// Order matters: longer patterns must come before shorter ones to avoid partial matches.
+func convertDokuWikiEntities(line string) string {
+	replacements := []struct{ old, new string }{
+		{"<x>", "\u2612"}, // ☒ checked checkbox — must come before <>
+		{"<>", "\u2610"},  // ☐ unchecked checkbox
+		{"=>", "\u21D2"},  // ⇒ double arrow right
+		{"->", "\u2192"},  // → arrow right
+		{"<-", "\u2190"},  // ← arrow left
+		{"\\_", "\u00A0"}, // non-breaking space
+	}
+	for _, r := range replacements {
+		line = strings.ReplaceAll(line, r.old, r.new)
+	}
 	return line
 }
 

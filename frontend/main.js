@@ -2994,6 +2994,299 @@ function updateMenubarState(state, refs) {
   }
 }
 
+// --- Symbol picker (searchable panel) ---
+const symbolCatalogue = [
+  // Indicators
+  { char: "\u26A0\uFE0F", label: "Warning", cat: "Indicators", aliases: "alert caution danger" },
+  { char: "\u2139\uFE0F", label: "Info", cat: "Indicators", aliases: "information" },
+  { char: "\u2705", label: "Check", cat: "Indicators", aliases: "yes ok done" },
+  { char: "\u274C", label: "Cross", cat: "Indicators", aliases: "no wrong delete remove" },
+  { char: "\u2B50", label: "Star", cat: "Indicators", aliases: "favorite" },
+  { char: "\u{1F4A1}", label: "Idea", cat: "Indicators", aliases: "lightbulb tip" },
+  { char: "\u{1F4CC}", label: "Pin", cat: "Indicators", aliases: "pushpin" },
+  { char: "\u{1F512}", label: "Lock", cat: "Indicators", aliases: "locked secure" },
+  { char: "\u{1F513}", label: "Unlock", cat: "Indicators", aliases: "unlocked open" },
+  { char: "\u{1F4DD}", label: "Note", cat: "Indicators", aliases: "memo" },
+  { char: "\u{1F534}", label: "Red circle", cat: "Indicators", aliases: "stop" },
+  { char: "\u{1F7E2}", label: "Green circle", cat: "Indicators", aliases: "go" },
+  { char: "\u{1F7E1}", label: "Yellow circle", cat: "Indicators", aliases: "caution" },
+  { char: "\u{1F535}", label: "Blue circle", cat: "Indicators", aliases: "" },
+  // Checkboxes
+  { char: "\u2610", label: "Ballot box", cat: "Checkboxes", aliases: "unchecked empty checkbox" },
+  { char: "\u2611\uFE0F", label: "Ballot check", cat: "Checkboxes", aliases: "checked done checkbox" },
+  { char: "\u2612", label: "Ballot cross", cat: "Checkboxes", aliases: "crossed rejected checkbox" },
+  // Arrows
+  { char: "\u2192", label: "Arrow right", cat: "Arrows", aliases: "right ->" },
+  { char: "\u2190", label: "Arrow left", cat: "Arrows", aliases: "left <-" },
+  { char: "\u2191", label: "Arrow up", cat: "Arrows", aliases: "up" },
+  { char: "\u2193", label: "Arrow down", cat: "Arrows", aliases: "down" },
+  { char: "\u2194", label: "Arrow left-right", cat: "Arrows", aliases: "horizontal both" },
+  { char: "\u2195", label: "Arrow up-down", cat: "Arrows", aliases: "vertical both" },
+  { char: "\u21D2", label: "Double arrow right", cat: "Arrows", aliases: "implies =>" },
+  { char: "\u21D0", label: "Double arrow left", cat: "Arrows", aliases: "implied by <=" },
+  { char: "\u21D4", label: "Double arrow both", cat: "Arrows", aliases: "equivalent <=>" },
+  { char: "\u21B5", label: "Return arrow", cat: "Arrows", aliases: "enter newline cr" },
+  // Math
+  { char: "\u00B1", label: "Plus-minus", cat: "Math", aliases: "plusminus +/-" },
+  { char: "\u00D7", label: "Multiply", cat: "Math", aliases: "times cross x" },
+  { char: "\u00F7", label: "Divide", cat: "Math", aliases: "division" },
+  { char: "\u2260", label: "Not equal", cat: "Math", aliases: "ne !=" },
+  { char: "\u2264", label: "Less or equal", cat: "Math", aliases: "le <=" },
+  { char: "\u2265", label: "Greater or equal", cat: "Math", aliases: "ge >=" },
+  { char: "\u2248", label: "Approximately", cat: "Math", aliases: "approx almost ~" },
+  { char: "\u221E", label: "Infinity", cat: "Math", aliases: "inf" },
+  { char: "\u221A", label: "Square root", cat: "Math", aliases: "sqrt radical" },
+  { char: "\u2211", label: "Summation", cat: "Math", aliases: "sum sigma" },
+  { char: "\u220F", label: "Product", cat: "Math", aliases: "prod pi" },
+  { char: "\u2202", label: "Partial", cat: "Math", aliases: "partial derivative" },
+  { char: "\u2208", label: "Element of", cat: "Math", aliases: "in belongs member" },
+  { char: "\u2209", label: "Not element of", cat: "Math", aliases: "notin" },
+  { char: "\u2282", label: "Subset", cat: "Math", aliases: "subset" },
+  { char: "\u2283", label: "Superset", cat: "Math", aliases: "superset" },
+  { char: "\u2229", label: "Intersection", cat: "Math", aliases: "cap and" },
+  { char: "\u222A", label: "Union", cat: "Math", aliases: "cup or" },
+  { char: "\u2205", label: "Empty set", cat: "Math", aliases: "null void" },
+  { char: "\u2234", label: "Therefore", cat: "Math", aliases: "so hence" },
+  // Greek
+  { char: "\u03B1", label: "Alpha", cat: "Greek", aliases: "" },
+  { char: "\u03B2", label: "Beta", cat: "Greek", aliases: "" },
+  { char: "\u03B3", label: "Gamma", cat: "Greek", aliases: "" },
+  { char: "\u03B4", label: "Delta", cat: "Greek", aliases: "" },
+  { char: "\u03B5", label: "Epsilon", cat: "Greek", aliases: "" },
+  { char: "\u03B6", label: "Zeta", cat: "Greek", aliases: "" },
+  { char: "\u03B7", label: "Eta", cat: "Greek", aliases: "" },
+  { char: "\u03B8", label: "Theta", cat: "Greek", aliases: "" },
+  { char: "\u03BB", label: "Lambda", cat: "Greek", aliases: "" },
+  { char: "\u03BC", label: "Mu", cat: "Greek", aliases: "micro" },
+  { char: "\u03C0", label: "Pi", cat: "Greek", aliases: "" },
+  { char: "\u03C1", label: "Rho", cat: "Greek", aliases: "" },
+  { char: "\u03C3", label: "Sigma", cat: "Greek", aliases: "" },
+  { char: "\u03C4", label: "Tau", cat: "Greek", aliases: "" },
+  { char: "\u03C6", label: "Phi", cat: "Greek", aliases: "" },
+  { char: "\u03C9", label: "Omega", cat: "Greek", aliases: "" },
+  { char: "\u0394", label: "Delta (upper)", cat: "Greek", aliases: "capital" },
+  { char: "\u03A3", label: "Sigma (upper)", cat: "Greek", aliases: "capital" },
+  { char: "\u03A9", label: "Omega (upper)", cat: "Greek", aliases: "capital ohm" },
+  // Common
+  { char: "\u00A9", label: "Copyright", cat: "Common", aliases: "(c)" },
+  { char: "\u00AE", label: "Registered", cat: "Common", aliases: "(r)" },
+  { char: "\u2122", label: "Trademark", cat: "Common", aliases: "tm" },
+  { char: "\u00B0", label: "Degree", cat: "Common", aliases: "temperature" },
+  { char: "\u00B5", label: "Micro", cat: "Common", aliases: "mu" },
+  { char: "\u00B6", label: "Pilcrow", cat: "Common", aliases: "paragraph" },
+  { char: "\u00A7", label: "Section", cat: "Common", aliases: "paragraph" },
+  { char: "\u2020", label: "Dagger", cat: "Common", aliases: "cross obelisk" },
+  { char: "\u2021", label: "Double dagger", cat: "Common", aliases: "diesis" },
+  { char: "\u2022", label: "Bullet", cat: "Common", aliases: "dot" },
+  { char: "\u2026", label: "Ellipsis", cat: "Common", aliases: "dots ..." },
+  { char: "\u2013", label: "En dash", cat: "Common", aliases: "ndash" },
+  { char: "\u2014", label: "Em dash", cat: "Common", aliases: "mdash" },
+  { char: "\u00A0", label: "Non-breaking space", cat: "Common", aliases: "nbsp" },
+  // Superscript digits
+  { char: "\u2070", label: "Superscript 0", cat: "Superscript", aliases: "sup power" },
+  { char: "\u00B9", label: "Superscript 1", cat: "Superscript", aliases: "sup power" },
+  { char: "\u00B2", label: "Superscript 2", cat: "Superscript", aliases: "sup power squared" },
+  { char: "\u00B3", label: "Superscript 3", cat: "Superscript", aliases: "sup power cubed" },
+  { char: "\u2074", label: "Superscript 4", cat: "Superscript", aliases: "sup power" },
+  { char: "\u2075", label: "Superscript 5", cat: "Superscript", aliases: "sup power" },
+  { char: "\u2076", label: "Superscript 6", cat: "Superscript", aliases: "sup power" },
+  { char: "\u2077", label: "Superscript 7", cat: "Superscript", aliases: "sup power" },
+  { char: "\u2078", label: "Superscript 8", cat: "Superscript", aliases: "sup power" },
+  { char: "\u2079", label: "Superscript 9", cat: "Superscript", aliases: "sup power" },
+]
+
+let symbolPanelEl = null
+let symbolPanelAnchor = null // "toolbar" or "cursor"
+let symbolToolbarAnchor = null // DOM element of the toolbar button
+
+function insertSymbolChar(char) {
+  if (editMode === "visual" && editorView) {
+    const tr = editorView.state.tr.insertText(char)
+    editorView.dispatch(tr)
+    editorView.focus()
+  } else if (editMode === "raw" && rawEditor) {
+    rawEditor.focus()
+    rawInsertText(rawEditor, char)
+  }
+}
+
+function buildSymbolPanel() {
+  const panel = document.createElement("div")
+  panel.className = "gowiki-symbol-panel"
+
+  const search = document.createElement("input")
+  search.className = "gowiki-symbol-search"
+  search.type = "text"
+  search.placeholder = "Search symbols\u2026"
+  panel.appendChild(search)
+
+  const body = document.createElement("div")
+  body.className = "gowiki-symbol-body"
+  panel.appendChild(body)
+
+  let selectedIdx = -1
+  let visibleItems = []
+
+  function renderSymbols(filter) {
+    body.innerHTML = ""
+    visibleItems = []
+    selectedIdx = -1
+    const q = filter.toLowerCase()
+
+    if (q) {
+      // Flat filtered list
+      const matches = symbolCatalogue.filter(s => {
+        const hay = (s.label + " " + s.aliases + " " + s.cat).toLowerCase()
+        return hay.includes(q)
+      })
+      if (matches.length === 0) {
+        const empty = document.createElement("div")
+        empty.className = "gowiki-symbol-empty"
+        empty.textContent = "No matches"
+        body.appendChild(empty)
+        return
+      }
+      const grid = document.createElement("div")
+      grid.className = "gowiki-symbol-grid-inner"
+      for (const sym of matches) {
+        const item = createSymbolItem(sym)
+        grid.appendChild(item)
+        visibleItems.push({ el: item, sym })
+      }
+      body.appendChild(grid)
+      // Auto-select first item
+      if (visibleItems.length > 0) {
+        selectedIdx = 0
+        visibleItems[0].el.classList.add("gowiki-symbol-item--selected")
+      }
+    } else {
+      // Categorized view
+      const cats = []
+      const catMap = new Map()
+      for (const sym of symbolCatalogue) {
+        if (!catMap.has(sym.cat)) {
+          catMap.set(sym.cat, [])
+          cats.push(sym.cat)
+        }
+        catMap.get(sym.cat).push(sym)
+      }
+      for (const cat of cats) {
+        const header = document.createElement("div")
+        header.className = "gowiki-symbol-cat"
+        header.textContent = cat
+        body.appendChild(header)
+        const grid = document.createElement("div")
+        grid.className = "gowiki-symbol-grid-inner"
+        for (const sym of catMap.get(cat)) {
+          const item = createSymbolItem(sym)
+          grid.appendChild(item)
+          visibleItems.push({ el: item, sym })
+        }
+        body.appendChild(grid)
+      }
+    }
+  }
+
+  function createSymbolItem(sym) {
+    const item = document.createElement("span")
+    item.className = "gowiki-symbol-item"
+    item.textContent = sym.char
+    item.title = sym.label
+    item.addEventListener("mousedown", e => {
+      e.preventDefault()
+      closeSymbolPanel()
+      insertSymbolChar(sym.char)
+    })
+    return item
+  }
+
+  function moveSelection(delta) {
+    if (visibleItems.length === 0) return
+    if (selectedIdx >= 0) {
+      visibleItems[selectedIdx].el.classList.remove("gowiki-symbol-item--selected")
+    }
+    if (selectedIdx < 0) {
+      selectedIdx = delta > 0 ? 0 : visibleItems.length - 1
+    } else {
+      selectedIdx = (selectedIdx + delta + visibleItems.length) % visibleItems.length
+    }
+    visibleItems[selectedIdx].el.classList.add("gowiki-symbol-item--selected")
+    visibleItems[selectedIdx].el.scrollIntoView({ block: "nearest" })
+  }
+
+  search.addEventListener("input", () => renderSymbols(search.value))
+  search.addEventListener("keydown", e => {
+    const cols = 8 // grid columns
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      moveSelection(cols)
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault()
+      moveSelection(-cols)
+    } else if (e.key === "ArrowRight") {
+      // Only navigate grid if cursor is at end of search text
+      if (search.selectionStart === search.value.length) {
+        e.preventDefault()
+        moveSelection(1)
+      }
+    } else if (e.key === "ArrowLeft") {
+      if (search.selectionStart === 0 && search.selectionEnd === 0) {
+        e.preventDefault()
+        moveSelection(-1)
+      }
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault()
+      if (selectedIdx >= 0 && selectedIdx < visibleItems.length) {
+        closeSymbolPanel()
+        insertSymbolChar(visibleItems[selectedIdx].sym.char)
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      closeSymbolPanel()
+    }
+  })
+
+  renderSymbols("")
+  return { panel, search }
+}
+
+function openSymbolPanel(anchor) {
+  if (symbolPanelEl) closeSymbolPanel()
+  const { panel, search } = buildSymbolPanel()
+  symbolPanelEl = panel
+  symbolPanelAnchor = anchor
+
+  if (anchor === "toolbar" && symbolToolbarAnchor) {
+    symbolToolbarAnchor.appendChild(panel)
+  } else {
+    // Position near cursor in the editor
+    document.body.appendChild(panel)
+    let rect
+    if (editMode === "visual" && editorView) {
+      const coords = editorView.coordsAtPos(editorView.state.selection.from)
+      rect = { left: coords.left, top: coords.bottom }
+    } else if (editMode === "raw" && rawEditor) {
+      const r = rawEditor.getBoundingClientRect()
+      rect = { left: r.left + 20, top: r.top + 20 }
+    } else {
+      rect = { left: window.innerWidth / 2 - 150, top: window.innerHeight / 3 }
+    }
+    panel.style.position = "fixed"
+    panel.style.left = Math.min(rect.left, window.innerWidth - 320) + "px"
+    panel.style.top = Math.min(rect.top + 4, window.innerHeight - 400) + "px"
+  }
+
+  // Focus the search field after a microtask so it doesn't lose focus immediately
+  requestAnimationFrame(() => search.focus())
+}
+
+function closeSymbolPanel() {
+  if (!symbolPanelEl) return
+  symbolPanelEl.remove()
+  symbolPanelEl = null
+  symbolPanelAnchor = null
+}
+
 function buildMenubar() {
   const bar = document.createElement("div")
   bar.className = "gowiki-raw-menubar"
@@ -3235,75 +3528,28 @@ function buildMenubar() {
     }
   }, "code")
 
-  // Symbol dropdown
-  const defaultSymbols = [
-    { char: "\u26A0\uFE0F", label: "Warning" },
-    { char: "\u2139\uFE0F", label: "Info" },
-    { char: "\u2705", label: "Check" },
-    { char: "\u274C", label: "Cross" },
-    { char: "\u2B50", label: "Star" },
-    { char: "\u{1F4A1}", label: "Idea" },
-    { char: "\u{1F4CC}", label: "Pin" },
-    { char: "\u{1F512}", label: "Lock" },
-    { char: "\u{1F513}", label: "Unlock" },
-    { char: "\u{1F4DD}", label: "Note" },
-    { char: "\u2192", label: "Arrow right" },
-    { char: "\u2190", label: "Arrow left" },
-    { char: "\u2191", label: "Arrow up" },
-    { char: "\u2193", label: "Arrow down" },
-    { char: "\u{1F534}", label: "Red circle" },
-    { char: "\u{1F7E2}", label: "Green circle" },
-    { char: "\u{1F7E1}", label: "Yellow circle" },
-    { char: "\u{1F535}", label: "Blue circle" },
-    { char: "\u2611\uFE0F", label: "Ballot check" },
-    { char: "\u2610", label: "Ballot box" },
-    { char: "\u00A9", label: "Copyright" },
-    { char: "\u00AE", label: "Registered" },
-    { char: "\u2122", label: "Trademark" },
-    { char: "\u00B1", label: "Plus-minus" },
-    { char: "\u2260", label: "Not equal" },
-    { char: "\u2264", label: "Less or equal" },
-    { char: "\u2265", label: "Greater or equal" },
-    { char: "\u221E", label: "Infinity" },
-    { char: "\u00B0", label: "Degree" },
-    { char: "\u00B5", label: "Micro" },
-  ]
+  // Symbol picker toolbar button
   {
     const symWrap = document.createElement("span")
     symWrap.className = "gowiki-raw-menuitem gowiki-raw-menu-dropdown-wrap"
-    symWrap.title = "Insert symbol"
-    symWrap.textContent = "\u263A"
-    const symDrop = document.createElement("div")
-    symDrop.className = "gowiki-raw-dropdown-menu gowiki-symbol-grid"
-    for (const sym of defaultSymbols) {
-      const item = document.createElement("span")
-      item.className = "gowiki-symbol-item"
-      item.textContent = sym.char
-      item.title = sym.label
-      item.addEventListener("mousedown", e => {
-        e.preventDefault()
-        symDrop.style.display = "none"
-        if (editMode === "visual" && editorView) {
-          const tr = editorView.state.tr.insertText(sym.char)
-          editorView.dispatch(tr)
-          editorView.focus()
-        } else if (editMode === "raw" && rawEditor) {
-          rawEditor.focus()
-          rawInsertText(rawEditor, sym.char)
-        }
-      })
-      symDrop.appendChild(item)
+    {
+      const mod = isMac ? "\u2318" : "Ctrl+"
+      symWrap.title = `Insert symbol (${mod}:)`
     }
-    symWrap.appendChild(symDrop)
+    symWrap.textContent = "\u263A"
+    symbolToolbarAnchor = symWrap
     symWrap.addEventListener("mousedown", e => {
       e.preventDefault()
-      const isOpen = symDrop.style.display === "grid"
-      symDrop.style.display = isOpen ? "none" : "grid"
+      if (symbolPanelEl && symbolPanelAnchor === "toolbar") {
+        closeSymbolPanel()
+      } else {
+        openSymbolPanel("toolbar")
+      }
     })
     bar.appendChild(symWrap)
     document.addEventListener("mousedown", e => {
-      if (!symWrap.contains(e.target)) {
-        symDrop.style.display = "none"
+      if (symbolPanelEl && !symbolPanelEl.contains(e.target) && !symWrap.contains(e.target)) {
+        closeSymbolPanel()
       }
     })
   }
@@ -3814,6 +4060,12 @@ function renderEdit(nextEditMode) {
           }
         }
         autoResizeRawEditor(editorEl)
+      } else if (e.key === ";" && e.shiftKey && isMod) {
+        e.preventDefault()
+        openSymbolPanel("cursor")
+      } else if (e.key === ":" && isMod) {
+        e.preventDefault()
+        openSymbolPanel("cursor")
       } else if (e.key === "Tab" && !e.ctrlKey && !e.metaKey) {
         // Tab on heading lines adjusts level
         const { lineStart, lineEnd } = rawGetCurrentLineRange(editorEl)
@@ -3942,6 +4194,10 @@ function renderEdit(nextEditMode) {
     },
     "Mod-Shift-s": () => {
       void publishDraft()
+      return true
+    },
+    "Mod-Shift-;": () => {
+      openSymbolPanel("cursor")
       return true
     },
   })

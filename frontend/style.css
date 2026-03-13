@@ -876,27 +876,83 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   margin-top: 2px;
 }
 
-.gowiki-symbol-grid {
-  display: none;
-  grid-template-columns: repeat(6, 1fr);
+.gowiki-symbol-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  width: 300px;
+  max-height: 380px;
+  display: flex;
+  flex-direction: column;
+}
+
+.gowiki-symbol-search {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 8px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+
+.gowiki-symbol-search:focus {
+  border-color: #4a9eff;
+}
+
+.gowiki-symbol-body {
+  overflow-y: auto;
+  padding: 0 8px 8px;
+  flex: 1;
+}
+
+.gowiki-symbol-cat {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 0 2px;
+}
+
+.gowiki-symbol-grid-inner {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
   gap: 1px;
-  padding: 4px;
-  min-width: 200px;
 }
 
 .gowiki-symbol-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   font-size: 18px;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .gowiki-symbol-item:hover {
-  background: #e0e0e0;
+  background: #e8e8e8;
+}
+
+.gowiki-symbol-item--selected {
+  background: #dce8ff;
+  outline: 2px solid #4a9eff;
+  outline-offset: -2px;
+}
+
+.gowiki-symbol-empty {
+  color: #aaa;
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
 }
 
 .gowiki-link-modal-overlay {

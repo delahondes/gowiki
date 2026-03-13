@@ -420,6 +420,53 @@ Conversion notes:
 - WRAP styling inside slides (flexcenter, halfhalfbigtext, etc.) is stripped; content is kept
 - `<gchart>` blocks inside slides are not supported in Phase 1 -- flag
 
+### Note blocks (DokuWiki note plugin)
+
+DokuWiki: `<note>...</note>` or `<note important>...</note>`, `<note tip>`, `<note warning>`
+
+Gowiki: `{blockquote class=...}` + `> content`
+
+| DokuWiki | Gowiki |
+|---|---|
+| `<note>...</note>` | `{blockquote class=tip}` (bare note defaults to tip) |
+| `<note important>...</note>` | `{blockquote class=important}` |
+| `<note tip>...</note>` | `{blockquote class=tip}` |
+| `<note warning>...</note>` | `{blockquote class=warning}` |
+
+These are block-level constructs — the content between the tags is converted line by line with inline conversion, and each line is prefixed with `> `.
+
+### NB blocks (custom wiki notation)
+
+DokuWiki: `NB:: content ::NB` or `NB!:: content ::NB`
+
+Gowiki: `{blockquote class=note}` / `{blockquote class=important}` + `> content`
+
+Both single-line and multi-line NB blocks are supported. `NB::` maps to `note`, `NB!::` maps to `important`.
+
+### Entity conversions
+
+DokuWiki has built-in entity shortcuts that are converted to UTF-8 characters during import:
+
+| DokuWiki | UTF-8 | Description |
+|---|---|---|
+| `=>` | ⇒ (U+21D2) | Double arrow right |
+| `->` | → (U+2192) | Arrow right |
+| `<-` | ← (U+2190) | Arrow left |
+| `<>` | ☐ (U+2610) | Unchecked checkbox |
+| `<x>` | ☒ (U+2612) | Checked checkbox |
+| `\_` | (U+00A0) | Non-breaking space |
+
+Entity conversion runs at the inline level, after code spans and links are protected. This ensures entities inside code spans or URLs are not converted. The conversion order matters: `<x>` must be checked before `<>` to prevent partial matches.
+
+### DokuWiki icons
+
+| DokuWiki | UTF-8 |
+|---|---|
+| `:!:` | ⚠️ |
+| `:?:` | ℹ️ |
+| `FIXME` | ⚠️ FIXME |
+| `DELETEME` | ❌ DELETEME |
+
 ### Template variables
 
 DokuWiki uses two forms: `@!PAGE!@` and `@PAGE@`. Both are converted to Gowiki `{{PAGE}}`.
