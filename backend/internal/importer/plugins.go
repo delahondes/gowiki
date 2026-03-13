@@ -71,8 +71,10 @@ var (
 	reSlider = regexp.MustCompile(`(?i)^<slider\s+([^>]+)>`)
 
 	// Code block: <code lang>...</code>
-	reCodeOpen  = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_-]*)>`)
-	reCodeClose = regexp.MustCompile(`(?i)^</code>\s*$`)
+	reCodeOpen      = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_-]*)>`)
+	reCodeClose     = regexp.MustCompile(`(?i)^</code>\s*$`)
+	reCodeOpenInline = regexp.MustCompile(`(?i)<code\s*([a-z0-9_-]*)>`)   // unanchored, for mid-line detection
+	reCodeCloseInline = regexp.MustCompile(`(?i)</code>`)                  // unanchored
 
 	// File block: <file lang filename>...</file>
 	reFileOpen  = regexp.MustCompile(`(?i)^<file\s*([^>]*)>`)
@@ -507,22 +509,69 @@ func ConvertNoteBlock(lines []string, noteType string, currentNS string) []strin
 }
 
 // convertBlockquoteLines converts content lines to a {blockquote} block,
-// properly expanding image markers inside the blockquote.
+// properly expanding image markers and handling nested code blocks.
 func convertBlockquoteLines(lines []string, class string, currentNS string) []string {
 	var out []string
 	out = append(out, fmt.Sprintf("{blockquote class=%s}", class))
 
+	inCode := false
+	var codeLang string
 	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if inCode {
+			if reCodeCloseInline.MatchString(trimmed) {
+				out = append(out, "> ```")
+				inCode = false
+			} else {
+				out = append(out, "> "+line)
+			}
+			continue
+		}
+
+		// Check for <code lang> opening on this line (possibly mid-line)
+		if m := reCodeOpenInline.FindStringSubmatchIndex(trimmed); m != nil {
+			lang := ""
+			if m[2] >= 0 {
+				lang = trimmed[m[2]:m[3]]
+			}
+			before := trimmed[:m[0]]
+			after := trimmed[m[1]:]
+
+			// Check if closing </code> is also on this line (inline code)
+			if reCodeCloseInline.MatchString(after) {
+				// Inline <code>text</code> — let ConvertInline handle it
+			} else {
+				// Multi-line code block inside blockquote
+				if strings.TrimSpace(before) != "" {
+					converted := ConvertInline(before, currentNS, "blockquote")
+					expanded := ExpandImageMarkers(converted)
+					for _, el := range expanded {
+						out = append(out, "> "+el)
+					}
+				}
+				codeLang = lang
+				out = append(out, "> ```"+codeLang)
+				inCode = true
+				// If there's content after the opening tag on the same line
+				if strings.TrimSpace(after) != "" {
+					out = append(out, "> "+strings.TrimSpace(after))
+				}
+				continue
+			}
+		}
+
 		converted := ConvertInline(line, currentNS, "blockquote")
 		// Expand image markers inside blockquote content
 		expanded := ExpandImageMarkers(converted)
-		for i, el := range expanded {
-			if i == 0 {
-				out = append(out, "> "+el)
-			} else {
-				out = append(out, "> "+el)
-			}
+		for _, el := range expanded {
+			out = append(out, "> "+el)
 		}
+	}
+
+	// Handle unterminated code block
+	if inCode {
+		out = append(out, "> ```")
 	}
 
 	return out

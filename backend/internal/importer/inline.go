@@ -17,6 +17,9 @@ var (
 	// Nowiki inline: <nowiki>text</nowiki>
 	reNowikiInline = regexp.MustCompile(`(?i)<nowiki>(.*?)</nowiki>`)
 
+	// Inline code: <code>text</code> (without language specifier)
+	reCodeInline = regexp.MustCompile(`(?i)<code>(.+?)</code>`)
+
 	// Italic: //text//
 	// Must not match URLs (://), so require non-: before opening //
 	reItalic = regexp.MustCompile(`(?:^|[^:])//(.+?)//`)
@@ -97,6 +100,12 @@ func ConvertInline(line string, currentNS string, context string) string {
 	// Step 2: Protect nowiki inline
 	line = reNowikiInline.ReplaceAllStringFunc(line, func(m string) string {
 		inner := reNowikiInline.FindStringSubmatch(m)[1]
+		return prot.protect("`" + inner + "`")
+	})
+
+	// Step 2b: Convert inline <code>text</code> to backtick code spans
+	line = reCodeInline.ReplaceAllStringFunc(line, func(m string) string {
+		inner := reCodeInline.FindStringSubmatch(m)[1]
 		return prot.protect("`" + inner + "`")
 	})
 
