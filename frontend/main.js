@@ -1432,7 +1432,7 @@ function insertHardBreakCommand() {
 }
 
 function scrollSelectionIntoContentView(view) {
-  const scroller = document.querySelector("#main") || contentRoot
+  const scroller = document.querySelector("#app") || contentRoot
   if (!(scroller instanceof HTMLElement)) return false
 
   const menu = view.dom.closest(".gowiki-raw-wrapper")?.querySelector(".gowiki-raw-menubar")
@@ -1718,7 +1718,7 @@ function highlightTermsInView(container, query) {
 }
 
 function autoResizeRawEditor(editorEl) {
-  const scroller = document.querySelector("#main")
+  const scroller = document.querySelector("#app")
   const scrollTop = scroller ? scroller.scrollTop : 0
   editorEl.style.height = "0"
   editorEl.style.height = `${Math.max(editorEl.scrollHeight, 360)}px`
@@ -2469,7 +2469,7 @@ function rawReplaceLines(textarea, ctx, origTableLastLine) {
   if (endOffset > 0 && endOffset <= val.length + 1) endOffset-- // trim trailing newline
 
   const replacement = ctx.lines.slice(ctx.tableFirstLine, ctx.tableLastLine + 1).join("\n")
-  const scroller = document.querySelector("#main")
+  const scroller = document.querySelector("#app")
   const savedScroll = scroller ? scroller.scrollTop : 0
   textarea.focus()
   textarea.setSelectionRange(startOffset, Math.min(endOffset, val.length))
@@ -2840,7 +2840,7 @@ function rawInsertProperty(textarea) {
   const insertAt = /^\s*\|/.test(line) ? tableStart : lineStart
 
   // Insert directive on its own line before the target line
-  const scroller = document.querySelector("#main")
+  const scroller = document.querySelector("#app")
   const savedScroll = scroller ? scroller.scrollTop : 0
   textarea.focus()
   textarea.setSelectionRange(insertAt, insertAt)

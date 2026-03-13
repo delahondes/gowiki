@@ -20,6 +20,16 @@ type Options struct {
 	Verbose bool
 }
 
+// convertedPage holds the result of converting a single page,
+// collected before writing to disk so namespace conflicts can be resolved.
+type convertedPage struct {
+	relPath  string // source relative path
+	destPath string // destination relative path
+	markdown string // converted markdown content
+	meta     *PageMetadata
+	metaDest string // destination meta relative path
+}
+
 // Run executes the full import.
 func Run(opts Options) (*Report, error) {
 	report := NewReport()
@@ -30,8 +40,10 @@ func Run(opts Options) (*Report, error) {
 	contentDir := filepath.Join(opts.DestDir, "content")
 	destMetaDir := filepath.Join(opts.DestDir, "meta")
 
-	// Phase 1: Convert pages
+	// Phase 1a: Convert all pages (collect in memory)
 	log.Println("Phase 1: Converting pages...")
+	var pages []convertedPage
+
 	err := filepath.Walk(pagesDir, func(srcPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -79,7 +91,6 @@ func Run(opts Options) (*Report, error) {
 		}
 		report.AddPage(pr)
 
-		// Track flagged features
 		for _, f := range result.Flagged {
 			report.Flag(f.Reason)
 		}
@@ -93,37 +104,51 @@ func Run(opts Options) (*Report, error) {
 				relPath, destRelPath, result.TotalLines, pct, len(result.Flagged))
 		}
 
-		if opts.DryRun {
-			return nil
-		}
-
-		// Write converted page
-		destPath := filepath.Join(contentDir, destRelPath)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPath), err)
-		}
-		if err := os.WriteFile(destPath, []byte(result.Markdown), 0644); err != nil {
-			return fmt.Errorf("write %s: %w", destPath, err)
-		}
-
-		// Try to extract and write metadata
+		// Extract metadata
 		metaRelPath := strings.TrimSuffix(relPath, ".txt") + ".meta"
 		metaSrcPath := filepath.Join(metaDir, metaRelPath)
 		meta := extractMetadata(metaSrcPath, metaDir, relPath, result.Markdown)
-
 		metaDestRelPath := strings.TrimSuffix(destRelPath, ".md") + ".json"
-		metaDestPath := filepath.Join(destMetaDir, metaDestRelPath)
-		if err := os.MkdirAll(filepath.Dir(metaDestPath), 0755); err != nil {
-			return fmt.Errorf("mkdir meta %s: %w", filepath.Dir(metaDestPath), err)
-		}
-		if err := WriteMetaJSON(metaDestPath, meta); err != nil {
-			return fmt.Errorf("write meta %s: %w", metaDestPath, err)
-		}
+
+		pages = append(pages, convertedPage{
+			relPath:  relPath,
+			destPath: destRelPath,
+			markdown: result.Markdown,
+			meta:     meta,
+			metaDest: metaDestRelPath,
+		})
 
 		return nil
 	})
 	if err != nil {
 		return report, fmt.Errorf("page walk: %w", err)
+	}
+
+	// Phase 1b: Resolve namespace conflicts.
+	// In DokuWiki, both ns:page and ns:page:start can exist.
+	// In Gowiki, page.md and page/index.md cannot coexist.
+	// When both exist, prepend page.md content to page/index.md.
+	pages = resolveNamespaceConflicts(pages, opts.Verbose)
+
+	// Phase 1c: Write pages to disk
+	if !opts.DryRun {
+		for _, p := range pages {
+			destPath := filepath.Join(contentDir, p.destPath)
+			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+				return report, fmt.Errorf("mkdir %s: %w", filepath.Dir(destPath), err)
+			}
+			if err := os.WriteFile(destPath, []byte(p.markdown), 0644); err != nil {
+				return report, fmt.Errorf("write %s: %w", destPath, err)
+			}
+
+			metaDestPath := filepath.Join(destMetaDir, p.metaDest)
+			if err := os.MkdirAll(filepath.Dir(metaDestPath), 0755); err != nil {
+				return report, fmt.Errorf("mkdir meta %s: %w", filepath.Dir(metaDestPath), err)
+			}
+			if err := WriteMetaJSON(metaDestPath, p.meta); err != nil {
+				return report, fmt.Errorf("write meta %s: %w", metaDestPath, err)
+			}
+		}
 	}
 
 	// Phase 2: Copy media files
@@ -176,6 +201,69 @@ func Run(opts Options) (*Report, error) {
 	}
 
 	return report, nil
+}
+
+// resolveNamespaceConflicts handles two cases:
+// 1. Both page.md and page/index.md exist → merge page.md into page/index.md
+// 2. page.md exists and page/*.md exists (no index) → rename page.md to page/index.md
+func resolveNamespaceConflicts(pages []convertedPage, verbose bool) []convertedPage {
+	// Build index: destPath -> slice index
+	byDest := make(map[string]int, len(pages))
+	for i, p := range pages {
+		byDest[p.destPath] = i
+	}
+
+	// Collect all namespace prefixes (directories implied by paths)
+	namespaces := make(map[string]bool)
+	for _, p := range pages {
+		dir := filepath.Dir(p.destPath)
+		for dir != "" && dir != "." {
+			namespaces[dir] = true
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	toRemove := make(map[int]bool)
+	for i, p := range pages {
+		if strings.HasSuffix(p.destPath, "/index.md") {
+			continue
+		}
+		nsPrefix := strings.TrimSuffix(p.destPath, ".md")
+		nsIndex := nsPrefix + "/index.md"
+
+		if j, ok := byDest[nsIndex]; ok {
+			// Case 1: Both page.md and page/index.md exist → merge
+			if verbose {
+				log.Printf("  namespace conflict: %s merged into %s", p.destPath, pages[j].destPath)
+			}
+			pages[j].markdown = p.markdown + "\n\n---\n\n" + pages[j].markdown
+			toRemove[i] = true
+		} else if namespaces[nsPrefix] {
+			// Case 2: page.md exists and page/ has subpages (no index) → rename to page/index.md
+			if verbose {
+				log.Printf("  namespace conflict: %s renamed to %s", p.destPath, nsIndex)
+			}
+			pages[i].destPath = nsIndex
+			pages[i].metaDest = strings.TrimSuffix(nsIndex, ".md") + ".json"
+		}
+	}
+
+	if len(toRemove) == 0 {
+		return pages
+	}
+
+	// Filter out merged pages
+	result := make([]convertedPage, 0, len(pages)-len(toRemove))
+	for i, p := range pages {
+		if !toRemove[i] {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // extractMetadata tries to read DokuWiki metadata and build a PageMetadata.

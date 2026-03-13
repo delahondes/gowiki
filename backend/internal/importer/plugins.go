@@ -17,6 +17,9 @@ var (
 	// Tag: {{tag>label1 label2}}
 	reTag = regexp.MustCompile(`\{\{tag>([^}]+)\}\}`)
 
+	// Topic: {{topic>NAMESPACE?TAGS&OPTIONS}}
+	reTopic = regexp.MustCompile(`\{\{topic>([^}]+)\}\}`)
+
 	// NOCACHE / NOTOC
 	reNocache = regexp.MustCompile(`(?i)~~NOCACHE~~`)
 	reNotoc   = regexp.MustCompile(`(?i)~~NOTOC~~`)
@@ -170,6 +173,49 @@ func ConvertTag(line string) string {
 		inner := reTag.FindStringSubmatch(m)[1]
 		tags := strings.Fields(inner)
 		return "{tag " + strings.Join(tags, " ") + "}"
+	})
+}
+
+// ConvertTopic converts a DokuWiki topic query to a Gowiki tag-query directive.
+// Syntax: {{topic>NAMESPACE?TAGS&OPTION1&OPTION2}}
+// e.g. {{topic>.?sop&header&desc}} -> {tag-query tag=sop path=.}
+// e.g. {{topic>..:..?sop&header&desc}} -> {tag-query tag=sop path=../..}
+// e.g. {{topic>.?rec -tpl &header&desc}} -> {tag-query tag=rec,-tpl path=.}
+func ConvertTopic(line string, currentNS string) string {
+	return reTopic.ReplaceAllStringFunc(line, func(m string) string {
+		inner := reTopic.FindStringSubmatch(m)[1]
+
+		// Split namespace and query: everything before ? is namespace, after is tags&options
+		nsPath := inner
+		tagQuery := ""
+		if idx := strings.Index(inner, "?"); idx >= 0 {
+			nsPath = inner[:idx]
+			tagQuery = inner[idx+1:]
+		}
+
+		// Convert namespace path: DokuWiki uses : as separator
+		nsPath = strings.ReplaceAll(nsPath, ":", "/")
+
+		// Split tags from options (options after &)
+		parts := strings.Split(tagQuery, "&")
+		tagPart := ""
+		if len(parts) > 0 {
+			tagPart = strings.TrimSpace(parts[0])
+		}
+
+		// Normalize tag: space-separated tags, "-" for exclusion -> comma-separated
+		tags := strings.Fields(tagPart)
+		tagStr := strings.Join(tags, ",")
+
+		var props []string
+		if tagStr != "" {
+			props = append(props, "tag="+tagStr)
+		}
+		if nsPath != "" {
+			props = append(props, "path="+nsPath)
+		}
+
+		return "{tag-query " + strings.Join(props, " ") + "}"
 	})
 }
 

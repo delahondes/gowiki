@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"path/filepath"
 	"time"
 
@@ -26,6 +27,12 @@ func main() {
 		webDir   = flag.String("web-dir", "./frontend/dist", "directory that contains built frontend assets")
 	)
 	flag.Parse()
+
+	// Start pprof server for CPU profiling (access at http://localhost:6060/debug/pprof/).
+	go func() {
+		log.Printf("pprof: listening on :6060")
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 
 	contentRoot := filepath.Clean(*dataDir)
 	metaRoot := filepath.Join(filepath.Dir(contentRoot), "meta")

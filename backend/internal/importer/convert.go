@@ -27,6 +27,8 @@ const (
 // pagesDir is the root pages/ directory, used to resolve include anchors.
 func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResult {
 	currentNS := NamespaceOf(pagePath)
+	// Pre-process: join multi-line footnotes (( ... )) onto single lines.
+	content = joinMultiLineFootnotes(content)
 	lines := strings.Split(content, "\n")
 	result := &ConvertResult{TotalLines: len(lines)}
 
@@ -530,7 +532,9 @@ func convertNormalLine(line string, currentNS string, pagesDir string) string {
 		line = reStructBurVar.ReplaceAllString(line, "{{${1}}}")
 	}
 
-	// Plugin conversions (order matters)
+	// Plugin conversions (order matters — topic must come before inline,
+	// which would otherwise match {{topic>...}} as a media reference)
+	line = ConvertTopic(line, currentNS)
 	line = ConvertTag(line)
 	line = ConvertInclude(line, currentNS, pagesDir)
 	line = ConvertACK(line)
@@ -623,4 +627,77 @@ func buildImageLines(p imageProps) (string, string) {
 
 	propLine := "{image " + strings.Join(props, " ") + "}"
 	return propLine, imgLine
+}
+
+// joinMultiLineFootnotes collapses DokuWiki multi-line footnotes onto single lines.
+// DokuWiki allows (( to start on one line and )) to close on a later line.
+// This joins the content so the inline converter can handle it as a single-line footnote.
+func joinMultiLineFootnotes(content string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	var footnoteAccum string
+	inFootnote := false
+
+	for _, line := range lines {
+		if inFootnote {
+			// Check if this line contains the closing ))
+			if idx := strings.Index(line, "))"); idx >= 0 {
+				// Join accumulated footnote content + closing portion
+				before := strings.TrimSpace(line[:idx])
+				after := line[idx+2:]
+				if before != "" {
+					footnoteAccum += " " + before
+				}
+				footnoteAccum += "))" + after
+				inFootnote = false
+				// Check if the same line opens another footnote
+				if strings.Contains(after, "((") && !strings.Contains(after, "))") {
+					// Another unclosed footnote on the tail — rare, just emit as-is
+					result = append(result, footnoteAccum)
+					footnoteAccum = ""
+				} else {
+					result = append(result, footnoteAccum)
+					footnoteAccum = ""
+				}
+			} else {
+				// Continuation of footnote content
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" {
+					footnoteAccum += " " + trimmed
+				}
+			}
+			continue
+		}
+
+		// Check for unclosed (( on this line (no matching )) on same line)
+		if hasUnclosedFootnote(line) {
+			inFootnote = true
+			footnoteAccum = line
+			continue
+		}
+
+		result = append(result, line)
+	}
+
+	// If we ended mid-footnote, emit whatever we accumulated
+	if inFootnote {
+		result = append(result, footnoteAccum)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// hasUnclosedFootnote checks if a line has (( without a matching )).
+func hasUnclosedFootnote(line string) bool {
+	depth := 0
+	for i := 0; i < len(line)-1; i++ {
+		if line[i] == '(' && line[i+1] == '(' {
+			depth++
+			i++ // skip second (
+		} else if line[i] == ')' && line[i+1] == ')' {
+			depth--
+			i++ // skip second )
+		}
+	}
+	return depth > 0
 }

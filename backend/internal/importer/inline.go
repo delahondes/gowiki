@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 )
@@ -79,8 +80,11 @@ func ConvertInline(line string, currentNS string, context string) string {
 	prot := newProtector()
 
 	// Step 1: Protect code spans (monospace)
+	// Also strip <nowiki>...</nowiki> inside monospace — in DokuWiki,
+	// ''<nowiki>text</nowiki>'' is used to prevent parsing inside code spans.
 	line = reMonospace.ReplaceAllStringFunc(line, func(m string) string {
 		inner := reMonospace.FindStringSubmatch(m)[1]
+		inner = reNowikiInline.ReplaceAllString(inner, "$1")
 		return prot.protect("`" + inner + "`")
 	})
 
@@ -230,9 +234,12 @@ func convertLink(inner string, currentNS string) string {
 
 	gowikiPath := DokuWikiLinkToPath(target, currentNS)
 	if text == "" {
-		text = strings.ReplaceAll(target, ":", "/")
-		if text == "" {
+		// Use last path segment as display text (like DokuWiki does)
+		base := path.Base(gowikiPath)
+		if base == "" || base == "." || base == "/" {
 			text = gowikiPath
+		} else {
+			text = base
 		}
 	}
 

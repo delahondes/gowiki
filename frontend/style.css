@@ -190,6 +190,9 @@ mark.search-highlight {
   width: 100%;
   margin: 12px 0;
   padding: 0 8px;
+  height: calc(100vh - 48px - 24px);
+  overflow-y: auto;
+  scroll-padding-top: 72px;
 }
 
 #main {
@@ -197,9 +200,6 @@ mark.search-highlight {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: calc(100vh - 48px - 24px);
-  overflow-y: auto;
-  scroll-padding-top: 72px;
 }
 
 #content {
@@ -540,9 +540,12 @@ body.gowiki-fullscreen #app {
   padding: 0 12px;
 }
 
+body.gowiki-fullscreen #app {
+  height: 100vh;
+}
+
 body.gowiki-fullscreen #main {
   grid-column: 1;
-  height: 100vh;
 }
 
 .gowiki-fullscreen-exit {
@@ -895,7 +898,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
     display: none;
   }
 
-  #main {
+  #app {
     height: auto;
     overflow: visible;
   }

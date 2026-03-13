@@ -53,12 +53,8 @@ func DokuWikiLinkToPath(link string, currentNS string) string {
 	}
 
 	// Handle relative links (no leading /)
+	// Handles both ./page (current ns) and ../page (parent ns)
 	if strings.HasPrefix(link, ".") {
-		// Explicit relative: ./page
-		link = strings.TrimPrefix(link, ".")
-		if !strings.HasPrefix(link, "/") {
-			link = "/" + link
-		}
 		resolved := path.Join("/"+currentNS, link)
 		return normalizeLinkPath(resolved)
 	}

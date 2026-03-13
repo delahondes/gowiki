@@ -32,6 +32,11 @@
   outline: 2px solid #8cf;
 }
 
+/* Hide selection highlight in read-only views (sidebar, footer, view mode). */
+.ProseMirror:not([contenteditable="true"]) .ProseMirror-selectednode {
+  outline: none;
+}
+
 /* === Block elements === */
 
 .ProseMirror h1,

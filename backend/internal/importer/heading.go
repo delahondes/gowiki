@@ -30,6 +30,12 @@ func ConvertHeading(line string) (string, bool) {
 	prefix := strings.Repeat("#", level)
 	title := strings.TrimSpace(m[3])
 
+	// Strip DokuWiki numbered heading plugin "- " prefix.
+	// These headings use "- " as a placeholder for auto-numbering at render time.
+	if strings.HasPrefix(title, "- ") {
+		title = strings.TrimPrefix(title, "- ")
+	}
+
 	return prefix + " " + title, true
 }
 

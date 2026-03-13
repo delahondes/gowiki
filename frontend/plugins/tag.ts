@@ -144,11 +144,13 @@ class TagQueryNodeView {
 
   private resolvePathPrefix(raw: string): string {
     if (!raw) return ""
-    // Resolve relative paths (./ or ../) against the current page's namespace.
-    if (raw.startsWith("./") || raw.startsWith("../")) {
+    // Resolve relative paths (., ./, ../) against the current page's path.
+    // For tag-query, "." means "same namespace as the current page".
+    // The current page URL IS the namespace for namespace index pages.
+    if (raw === "." || raw === ".." || raw.startsWith("./") || raw.startsWith("../")) {
       const loc = window.location.pathname.replace(/^\//, "").replace(/\/$/, "")
-      const ns = loc.includes("/") ? loc.split("/").slice(0, -1).join("/") : ""
-      const parts = ns ? ns.split("/") : []
+      // Use the full path as namespace base (for namespace index pages, the URL IS the ns)
+      const parts = loc ? loc.split("/") : []
       for (const seg of raw.split("/")) {
         if (seg === ".") continue
         else if (seg === "..") parts.pop()
