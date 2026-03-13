@@ -37,6 +37,13 @@
   outline: none;
 }
 
+/* Override plugin-specific yellow outlines in sidebar/footer zones.
+   These need high specificity to beat #app.gowiki-editing selectors. */
+#left .ProseMirror-selectednode,
+#footer .ProseMirror-selectednode {
+  outline: none !important;
+}
+
 /* === Block elements === */
 
 .ProseMirror h1,

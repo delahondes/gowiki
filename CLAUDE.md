@@ -182,6 +182,8 @@ The backend detects and rejects circular includes at save time (not render time)
 | Single newline → hard break in paragraphs | implemented |
 | `\n` literal → `<br>` (lists and tables only) | implemented |
 | Code block language specifier + highlighting | implemented |
+| `{version-link version=N page=/path}` | implemented |
+| `{reviewflow-link version=X page=/path}` | implemented |
 | Deterministic round-trip | partial |
 | HTML entities not interpreted | partial |
 

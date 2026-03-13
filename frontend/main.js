@@ -133,6 +133,11 @@ let footnoteInsertCommand = null
 let spoilerInsertCommand = null
 let chartInsertCommand = null
 let slidesInsertCommand = null
+let todoInsertCommand = null
+let reviewflowInsertCommand = null
+let reviewflowLinkInsertCommand = null
+let versionLinkInsertCommand = null
+let changesInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -190,6 +195,31 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "slides") {
     if (name === "insert") slidesInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "todo") {
+    if (name === "insert") todoInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "reviewflow") {
+    if (name === "insert") reviewflowInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "reviewflow-link") {
+    if (name === "insert") reviewflowLinkInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "version-link") {
+    if (name === "insert") versionLinkInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "changes") {
+    if (name === "insert") changesInsertCommand = cmd
     return
   }
 
@@ -978,6 +1008,32 @@ function normalizeMarkdownForStorage(markdown) {
     const md3 = pmToMarkdown(doc2, registry)
     if (md3 !== normalizedMarkdown) {
       console.error("Round-trip validation failed: serialize→parse→serialize not stable")
+      // Log the diff to help diagnose which construct is unstable.
+      const lines1 = normalizedMarkdown.split("\n")
+      const lines2 = md3.split("\n")
+      const maxLines = Math.max(lines1.length, lines2.length)
+      let firstDiff = -1
+      for (let i = 0; i < maxLines; i++) {
+        const a = lines1[i] ?? "(missing)"
+        const b = lines2[i] ?? "(missing)"
+        if (a !== b) {
+          if (firstDiff === -1) {
+            firstDiff = i
+            // Show context: 5 lines before the first difference
+            console.error("  --- context before first diff ---")
+            for (let j = Math.max(0, i - 5); j < i; j++) {
+              console.error(`  line ${j + 1}: ${JSON.stringify(lines1[j])}`)
+            }
+            console.error("  --- differences ---")
+          }
+          console.error(`  line ${i + 1} differs:`)
+          console.error(`    pass1: ${JSON.stringify(a)}`)
+          console.error(`    pass2: ${JSON.stringify(b)}`)
+        }
+      }
+      if (lines1.length !== lines2.length) {
+        console.error(`  line count: pass1=${lines1.length}, pass2=${lines2.length}`)
+      }
       roundTripError = true
     }
   } catch (err) {
@@ -3490,6 +3546,90 @@ function buildMenubar() {
       rawInsertText(rawEditor, "\n\n")
     }
   })
+
+  // Todo
+  if (todoInsertCommand) {
+    addImgButton("/icons/todo.svg", "Insert todo", () => {
+      if (editMode === "visual" && editorView) {
+        todoInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{todo title=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Reviewflow
+  if (reviewflowInsertCommand) {
+    addImgButton("/icons/reviewflow.svg", "Insert reviewflow", () => {
+      if (editMode === "visual" && editorView) {
+        reviewflowInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{reviewflow version=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Reviewflow Link
+  if (reviewflowLinkInsertCommand) {
+    addImgButton("/icons/reviewflow-link.svg", "Insert reviewflow link", () => {
+      if (editMode === "visual" && editorView) {
+        reviewflowLinkInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{reviewflow-link version=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Version Link
+  if (versionLinkInsertCommand) {
+    addImgButton("/icons/version-link.svg", "Insert version link", () => {
+      if (editMode === "visual" && editorView) {
+        versionLinkInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{version-link version=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Changes
+  if (changesInsertCommand) {
+    addImgButton("/icons/changes.svg", "Insert latest changes", () => {
+      if (editMode === "visual" && editorView) {
+        changesInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{changes count=10}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        rawEditor.setSelectionRange(start + snippet.length, start + snippet.length)
+      }
+    })
+  }
 
   // Extra commands from plugins
   for (const { label, cmd } of extraCommands) {
@@ -8146,6 +8286,17 @@ async function bootstrap() {
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
+
+  // Auto-view a specific version when ?v=N is present.
+  const versionParam = new URLSearchParams(window.location.search).get("v")
+  if (versionParam && !isNewPage) {
+    const vNum = parseInt(versionParam, 10)
+    if (vNum > 0) {
+      // Clean the URL so a refresh doesn't re-trigger.
+      window.history.replaceState(null, "", window.location.pathname)
+      void viewVersion(vNum)
+    }
+  }
 
   // Auto-enter edit mode only when the user explicitly chose "Create new page".
   // Navigating to a non-existing page by accident should not auto-create it.

@@ -12,6 +12,9 @@ func RunMigrations(ctx context.Context, pool *Pool) error {
 		return fmt.Errorf("database not connected")
 	}
 
+	// Ensure search_path is set (needed after DROP/CREATE SCHEMA public).
+	_, _ = p.Exec(ctx, `SET search_path TO public`)
+
 	ddl := `
 CREATE TABLE IF NOT EXISTS database_tables (
     id SERIAL PRIMARY KEY,

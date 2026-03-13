@@ -8,6 +8,8 @@ import { databasePlugin } from "./database"
 import { tagPlugin } from "./tag"
 import { todoPlugin } from "./todo"
 import { reviewflowPlugin } from "./reviewflow"
+import { reviewflowLinkPlugin } from "./reviewflowlink"
+import { versionLinkPlugin } from "./versionlink"
 import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
 import { spoilerPlugin } from "./spoiler"
@@ -28,6 +30,8 @@ export const plugins: Plugin[] = [
   tagPlugin,
   todoPlugin,
   reviewflowPlugin,
+  reviewflowLinkPlugin,
+  versionLinkPlugin,
   changesPlugin,
   commentPlugin,
   spoilerPlugin,

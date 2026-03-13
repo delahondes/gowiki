@@ -29,6 +29,13 @@ func (p *Pool) Connect(ctx context.Context, dsn string) error {
 	}
 	cfg.MaxConns = 10
 	cfg.MinConns = 1
+	// Ensure search_path includes public — needed after DROP/CREATE SCHEMA public.
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	if _, ok := cfg.ConnConfig.RuntimeParams["search_path"]; !ok {
+		cfg.ConnConfig.RuntimeParams["search_path"] = "public"
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

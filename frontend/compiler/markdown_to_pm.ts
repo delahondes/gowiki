@@ -483,7 +483,13 @@ function injectExtraBlankParagraphs(tokens: any[]) {
     if (isTopLevelBlockStart(token) && Array.isArray(token.map)) {
       const startLine = token.map[0]
       const blockEndIndex = findBlockEndIndex(tokens, i)
-      const semanticEnd = semanticBlockEnd(tokens, i, blockEndIndex, token.map[1])
+      // Use the block's own map[1] as a floor — semanticBlockEnd may under-report
+      // for blocks like header-only tables where inline content ends before the
+      // separator row but the block itself extends further.
+      const semanticEnd = Math.max(
+        semanticBlockEnd(tokens, i, blockEndIndex, token.map[1]),
+        token.map[1]
+      )
       const directiveLineCount =
         token.meta && typeof token.meta.directiveLineCount === "number"
           ? token.meta.directiveLineCount

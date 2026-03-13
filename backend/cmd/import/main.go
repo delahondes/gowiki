@@ -43,6 +43,11 @@ func main() {
 		log.Fatalf("Import failed: %v", err)
 	}
 
+	// Phase 4: Import DokuWiki version history (attic).
+	if err := importer.ImportAttic(opts); err != nil {
+		log.Printf("WARNING: attic import failed: %v", err)
+	}
+
 	// Print summary
 	convPct := float64(0)
 	if report.TotalLines > 0 {

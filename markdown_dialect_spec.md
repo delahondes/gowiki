@@ -301,6 +301,25 @@ The include directive embeds the content of another page as a read-only zone. It
 - In edit mode, the include block shows a visual header identifying the included path and renders the content in a read-only zone.
 - Numbered headings inside included content continue the parent document's numbering sequence as if the content were inlined.
 
+## Version link directive
+
+The version-link directive inserts a reference to a specific attic version of a page. It is a **self-contained directive**:
+
+```
+{version-link version=3}
+
+{version-link version=18 page=/path/to/page}
+```
+
+| Attribute | Required | Default | Notes |
+| -- | -- | -- | -- |
+| `version` | Yes | — | Attic version number (integer). |
+| `page` | No | Current page | Absolute page path. When omitted, resolves to the page containing the directive. |
+
+In view mode, the directive renders as a clickable link badge showing the version number, page title, author and date. Clicking navigates to the version viewer for that exact archived version (using the `?v=N` URL pattern).
+
+If the version does not exist in the target page's history, renders as an error indicator.
+
 ## Escaping and forbidden syntax
 
 ### Backslash escaping
@@ -464,6 +483,7 @@ Status legend:
 | Blockquote wrap | `{blockquote wrap=left\|right}` | `implemented` | Floats blockquote for column layouts. Adjacent wrapped blockquotes sit side by side. |
 | Properties/directives | `{name key=value}` applied to next block | `implemented` | Strict directive parsing + plugin-owned mapping is active. |
 | Include directive | `{include path=/path/to/page}` self-contained, supports `#section` anchor | `implemented` | Self-contained directive; supports section-targeted includes via `#anchor`. Numbered headings flow through includes. |
+| Version link | `{version-link version=N page=/path}` self-contained | `implemented` | Links to a specific attic version by number. Resolves page title, author, date at render time. |
 | Raw HTML | forbidden | `implemented` | Markdown parser runs with `html: false`. |
 | HTML entities | not interpreted specially | `partial` | Not explicitly transformed by custom logic; current behavior follows markdown-it defaults. |
 | Line breaks in top-level paragraphs | single newline -> hard break | `implemented` | Implemented with context-aware `softbreak` handling. |

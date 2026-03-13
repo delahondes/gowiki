@@ -459,7 +459,75 @@ This phase will be designed and specified separately when prioritized.
 
 ---
 
-## 14. Decisions
+## 14. Reviewflow Link Directive
+
+### 14.1 Overview
+
+The `{reviewflow-link}` directive inserts a reference to a previously validated version of a page. In view mode it renders as a clickable link that navigates to the historical version viewer for that specific validated version. This allows documents to cross-reference a known-good snapshot of another (or the same) page.
+
+### 14.2 Markdown Syntax
+
+```markdown
+{reviewflow-link version=1.0}
+
+{reviewflow-link version=1.0 page=/path/to/page}
+```
+
+### 14.3 Attribute Reference
+
+| Attribute | Required | Default | Notes |
+|---|---|---|---|
+| `version` | Yes | — | Version tag string matching a `version_tag` in the target page's `version_history`. |
+| `page` | No | Current page | Absolute page path. When omitted, resolves to the page containing the directive. |
+
+### 14.4 Rendering
+
+**View mode / read-only:**
+
+Renders as an inline link: `[Page Title v1.0](/path/to/page?v=N)` where `N` is the `page_version` from the matching `VersionRecord` in the target page's reviewflow state. Clicking navigates to the history version viewer for that exact archived version.
+
+- If the target page has no reviewflow state or the version tag is not found in `version_history`, renders as a warning badge: `"v1.0 (not found)"` with a dotted red underline.
+- The page title is resolved from the target page's metadata at render time (not stored in the directive).
+
+**Edit mode:**
+
+Renders as an atom node showing the version tag and target page path (or "this page" when `page` is absent). Clicking selects the node and opens the property panel for editing.
+
+### 14.5 Schema
+
+```typescript
+reviewflow_link: {
+  group: "block",
+  atom: true,
+  attrs: {
+    version: { default: "" },
+    page: { default: "" },    // empty string = current page
+  },
+}
+```
+
+### 14.6 Resolution
+
+On mount (NodeView constructor), the frontend fetches `GET /api/plugin/reviewflow/v1/status/{targetPage}` and scans `version_history` for a `VersionRecord` whose `version_tag` matches the directive's `version` attribute. If found, extracts `page_version` to build the link URL. If not found, displays the error state.
+
+### 14.7 Serialization
+
+**PM → Markdown:**
+
+```
+{reviewflow-link version=X}                    (when page is empty/current)
+{reviewflow-link version=X page=/path/to/page} (when page is set)
+```
+
+`version` always first, `page` second if present. Deterministic round-trip.
+
+### 14.8 Self-Contained Directive Registration
+
+Uses `registerSelfContainedDirective("reviewflow-link", ...)` with two properties: `version` (text input, required) and `page` (text input, optional). No `collectExtra`.
+
+---
+
+## 15. Decisions (continued)
 
 1. **Storage** — File-based JSON, not database. Reviewflow state is per-page and does not need cross-page queries, joins, or transactions. This aligns with how Gowiki stores page metadata under `data/meta/`.
 

@@ -191,12 +191,13 @@ func parseTableRow(line string, currentNS string) ([]tableCell, []FlaggedLine) {
 }
 
 // splitTableRow splits a table row by | and ^ delimiters, returning parts and delimiters.
-// Handles [[ ]] links that may contain | inside them.
+// Handles [[ ]] links and {{ }} media references that may contain | inside them.
 func splitTableRow(line string) ([]string, []byte) {
 	var parts []string
 	var delimiters []byte
 	var current strings.Builder
 	inLink := 0
+	inMedia := 0
 
 	for i := 0; i < len(line); i++ {
 		ch := line[i]
@@ -213,8 +214,20 @@ func splitTableRow(line string) ([]string, []byte) {
 			continue
 		}
 
+		// Track media nesting {{ }}
+		if i+1 < len(line) && ch == '{' && line[i+1] == '{' {
+			inMedia++
+			current.WriteByte(ch)
+			continue
+		}
+		if i+1 < len(line) && ch == '}' && line[i+1] == '}' {
+			inMedia--
+			current.WriteByte(ch)
+			continue
+		}
+
 		// Delimiters only at top level
-		if inLink == 0 && (ch == '|' || ch == '^') {
+		if inLink == 0 && inMedia == 0 && (ch == '|' || ch == '^') {
 			parts = append(parts, current.String())
 			delimiters = append(delimiters, ch)
 			current.Reset()
