@@ -171,9 +171,13 @@ func parseTableRow(line string, currentNS string) ([]tableCell, []FlaggedLine) {
 		}
 
 		// Handle vertical text !!content!!
+		// Skip if content contains \\ (line break) or (( (footnote) — these don't render well vertically.
 		if vm := reVerticalText.FindStringSubmatch(content); vm != nil {
-			cell.vtext = true
-			content = vm[1]
+			inner := vm[1]
+			if !strings.Contains(inner, `\\`) && !strings.Contains(inner, "((") {
+				cell.vtext = true
+			}
+			content = inner
 		}
 
 		// Strip WRAP tags inside cells

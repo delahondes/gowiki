@@ -970,6 +970,19 @@ const tableStyles = `
   border-radius: 3px;
   padding: 0 3px;
 }
+
+/* Vertical text in cells: styles applied to inner <p>, not the <td>,
+   so that rowspan cells size correctly in the table layout algorithm. */
+.ProseMirror td[data-cell-vtext] > p,
+.ProseMirror th[data-cell-vtext] > p {
+  writing-mode: vertical-rl;
+  text-orientation: sideways;
+  white-space: nowrap;
+}
+.ProseMirror td[data-cell-vtext="upward"] > p,
+.ProseMirror th[data-cell-vtext="upward"] > p {
+  transform: rotate(180deg);
+}
 `
 
 // ─── Formula display keyboard / clipboard plugin ────────
@@ -1739,12 +1752,6 @@ export const tablePlugin: GowikiPlugin = {
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-vtext"] = value
-              const existing = attrs.style || ""
-              if (value === "upward") {
-                attrs.style = existing + "writing-mode: vertical-rl; transform: rotate(180deg); "
-              } else if (value === "downward") {
-                attrs.style = existing + "writing-mode: vertical-rl; "
-              }
             }
           },
         },
