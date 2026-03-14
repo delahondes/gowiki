@@ -8126,6 +8126,7 @@ async function showDatabaseTableModal(existing) {
 
 async function showDatabaseFieldsModal(tableId, tableName) {
   return showAdminModal(`Fields: ${tableName}`, async (body, close) => {
+    body.closest(".gowiki-admin-modal").classList.add("gowiki-admin-modal-wide")
     const resp = await authFetch(`/api/admin/database/tables/${tableId}`)
     if (!resp.ok) {
       body.innerHTML = '<div class="gowiki-admin-error">Failed to load table.</div>'
@@ -8333,6 +8334,9 @@ async function showDatabaseFieldEditModal(tableId, existing) {
 
 async function showDatabaseDataBrowser(tableName) {
   return showAdminModal(`Data: ${tableName}`, async (body, close) => {
+    // Make this modal wide for data tables.
+    body.closest(".gowiki-admin-modal").classList.add("gowiki-admin-modal-wide")
+
     let currentOffset = 0
     const limit = 50
 
@@ -8397,7 +8401,21 @@ async function showDatabaseDataBrowser(tableName) {
             for (const f of fields) {
               const td = document.createElement("td")
               const val = row.fields?.[f.name]
-              td.textContent = Array.isArray(val) ? val.join(", ") : (val != null ? String(val) : "")
+              if (Array.isArray(val)) {
+                td.textContent = val.join(", ")
+              } else if (val != null && (f.type === "date" || f.type === "datetime") && typeof val === "string") {
+                // Format ISO dates: strip time/timezone for date fields, keep datetime readable.
+                if (f.type === "date") {
+                  td.textContent = val.slice(0, 10)
+                } else {
+                  td.textContent = val.replace("T", " ").replace(/Z$/, "").replace(/\.\d+$/, "")
+                }
+              } else if (val != null && f.type === "text" && String(val).length > 60) {
+                td.textContent = String(val)
+                td.classList.add("gowiki-cell-wrap")
+              } else {
+                td.textContent = val != null ? String(val) : ""
+              }
               td.contentEditable = "true"
               td.addEventListener("blur", async () => {
                 const newVal = td.textContent.trim()

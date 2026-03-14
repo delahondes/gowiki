@@ -1769,6 +1769,27 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
+.gowiki-admin-modal.gowiki-admin-modal-wide {
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow: auto;
+}
+
+.gowiki-admin-modal-wide .gowiki-admin-table {
+  font-size: 13px;
+}
+
+.gowiki-admin-modal-wide .gowiki-admin-table th,
+.gowiki-admin-modal-wide .gowiki-admin-table td {
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.gowiki-admin-modal-wide .gowiki-admin-table td.gowiki-cell-wrap {
+  white-space: normal;
+  max-width: 300px;
+}
+
 .gowiki-admin-modal h3 {
   margin: 0 0 16px;
   font-size: 18px;

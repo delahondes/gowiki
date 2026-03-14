@@ -366,53 +366,86 @@ DokuWiki: `{{changes>ns=-sidebar}}`
 
 Gowiki: `{changes}` (the Gowiki changes plugin). Direct mapping. The `ns=-sidebar` filter is DokuWiki-specific -- Gowiki excludes sidebar/footer by default.
 
-### Struct/data (~50 pages)
+### Struct/data
 
-DokuWiki struct binds structured fields to pages via schemas. The following syntax forms exist in the source wiki:
-- `---- struct table ----` blocks (29 pages) — inline table rendering of struct data
-- `---- struct lookup ----` blocks (5 occurrences) — aggregation/query views
-- `{{$schema.field}}` variable references (49 pages) — inline field display
-- `@@schema.field@@` bureaucracy variables (2 pages) — form-bound references
+DokuWiki struct binds structured fields to pages via schemas. The following syntax forms exist:
+- `---- struct table ----` blocks — inline table rendering of struct data
+- `---- struct lookup ----` blocks — aggregation/query views
+- `{{$schema.field}}` variable references — inline field display
+- `@@schema.field@@` bureaucracy variables — form-bound references
 
 #### Export format
 
-Each DokuWiki schema is exported as a pair of files in `olddata/struct/<schema_name>/`:
-- `schema.json` — schema definition (columns, types, config, visibility)
-- `data.csv` — row data with `pid` (DokuWiki page path) as key
+Each DokuWiki schema is exported as a pair of files in `import/struct/<schema_name>/`:
+- `<schema_name>.struct.json` — schema definition (columns, types, config, visibility)
+- `<schema_name>.csv` — row data with `pid` (DokuWiki page path) as first column
+
+The DokuWiki struct SQLite database (`import/data/meta/struct.sqlite3`) can be used as a reference to verify row IDs and extract data missing from CSV exports (e.g., status tables with deleted-then-recreated rows).
 
 #### Column type mapping
 
-12 distinct column types found across 18 schemas (154 columns total). All types have Gowiki equivalents:
+All DokuWiki struct column types have Gowiki equivalents:
 
-| DokuWiki type | Count | Gowiki type | Notes |
-|---|---|---|---|
-| `Text` | 54 | `text` | Direct |
-| `Dropdown` | 27 | `enum` | Comma-separated `values` list |
-| `Date` | 20 | `date` | Two format variants: `Y-m-d` and `Y/m/d`; `prefilltoday` config |
-| `Decimal` | 11 | `integer` | Used exclusively as ID fields (`trimzeros=true`); map to `auto_increment` for IDs |
-| `User` | 10 | `user` | DokuWiki usernames; select from user list via `/api/users/list` |
-| `Checkbox` | 9 | `boolean` / `multi_enum` | Single value → `boolean`; multi-value (`ismulti=true`) → `multi_enum` |
-| `Status` | 6 | `tag` | Foreign key with icon/color/label from reference table |
-| `LongText` | 5 | `text` | Textarea variant; map to text |
-| `DateTime` | 4 | `datetime` | Like Date but with time (`Y/m/d H:i`) |
-| `Lookup` | 3 | `lookup` | General foreign key; self-referential supported |
-| `Color` | 3 | `color` | Direct mapping |
-| `Page` | 2 | `page_link` | DokuWiki namespace path → Gowiki page path |
+| DokuWiki type | Gowiki type | Notes |
+|---|---|---|
+| `Text` | `text` | Direct |
+| `LongText` | `text` | Textarea variant |
+| `Dropdown` | `enum` / `multi_enum` | `multi_enum` when `ismulti=true` |
+| `Date` | `date` | Already `YYYY-MM-DD` in CSV |
+| `DateTime` | `datetime` | ISO format in CSV |
+| `Decimal` | `integer` | Strip trailing `.0` zeros |
+| `User` | `user` | DokuWiki usernames preserved as-is |
+| `Checkbox` | `enum` / `multi_enum` / `boolean` | Multi-value → `multi_enum`; single with values → `enum`; valueless → `boolean` |
+| `Status` | `tag` | Foreign key to reference table (icon/color/label) |
+| `Lookup` | `lookup` | Foreign key; self-referential supported |
+| `Color` | `color` | Direct mapping |
+| `Page` | `page_link` | DokuWiki path converted via `dokuPathToGowiki()` |
 
-#### Migration strategy
+#### Import tool: `import-struct`
 
-Struct migration is **agent-assisted, not scripted**. The data volume is small (~50 pages, handful of schemas) and each schema requires design decisions about how to represent it in Gowiki's structured data system. The process for each schema:
+Located at `backend/cmd/import-struct/main.go`. A standalone CLI that reads from `import/struct/` and writes to the Gowiki PostgreSQL database.
 
-1. Read `schema.json` — review column definitions and types
-2. Read `data.csv` — review actual data, identify edge cases
-3. Propose Gowiki field definitions — interactive discussion to map column types, handle `User` references, resolve page paths
-4. User confirms the mapping
-5. Populate page metadata from CSV — attach structured fields to the corresponding converted Gowiki pages (identified by converting `pid` namespace paths)
+```bash
+cd backend
+go build -o import-struct ./cmd/import-struct/
+./import-struct -dir ../import/struct -dsn 'postgres://...' [-dry-run]
+```
 
-This approach is preferred over a blind import script because:
-- Column type mappings require semantic decisions, not mechanical mapping
-- Each row is page-bound (`pid` = DokuWiki page path) — the target Gowiki page must exist and be correctly identified
-- Schema-level config (visibility, validation, i18n labels) may not map 1:1
+| Flag | Description |
+|---|---|
+| `-dir` | Path to `import/struct/` directory |
+| `-dsn` | PostgreSQL connection string |
+| `-dry-run` | Show what would be imported without writing |
+
+#### Import ordering
+
+Reference/status tables (those referenced by Status or Lookup fields in other tables) must be imported first so their row IDs exist before dependent tables reference them. The tool has a hardcoded list of reference tables that are imported before all others. Edit the `referenceFirst` slice in `main()` to match your DokuWiki's status tables.
+
+Remaining tables are imported alphabetically. The tool is idempotent: existing tables are skipped.
+
+#### Foreign key handling (Status/Lookup)
+
+DokuWiki CSV encodes Status and Lookup field values as JSON arrays: `["", <rid>]` where `rid` is the DokuWiki row ID in the referenced table. The import tool parses this to extract the integer and stores it as the Gowiki row ID.
+
+This works because reference tables are imported first, and their CSV rows are ordered by DokuWiki `rid`. Since Gowiki auto-increments IDs starting from 1, the Gowiki row IDs match the DokuWiki rids — but only if the CSV contains all rows (no gaps from deleted entries). Verify against the DokuWiki SQLite database and add any missing rows to the CSV before importing.
+
+#### Namespace path translation
+
+If pages were reorganized after the initial content import (e.g., namespace renames), the `pid` paths in CSVs will be outdated. The tool has a `namespaceRenames` map that translates old path segments to new ones. Edit this map in `main.go` to match your renames.
+
+The standard DokuWiki-to-Gowiki path conversion also applies: `:` → `/`, `start` → `index`, leading `/` added.
+
+#### Field name sanitization
+
+DokuWiki column labels (which may contain accented characters and spaces) are converted to valid Gowiki field names:
+
+1. Transliterate common accented characters (`é`→`e`, `ç`→`c`, `ô`→`o`, `ñ`→`n`, etc.)
+2. Lowercase
+3. Replace non-alphanumeric runs with `_`
+4. Trim leading/trailing `_`
+5. Prefix with `f_` if starts with a digit
+
+The original DokuWiki label is preserved in the field's `label` attribute for display.
 
 ### Slider (1 page)
 
