@@ -167,6 +167,31 @@ func importTable(ctx context.Context, schemaStore *database.SchemaStore, dataSto
 		}
 	}
 
+	// Tag table normalization: Gowiki expects tag tables to have fields named
+	// "label", "icon", and "color". DokuWiki status tables often use different
+	// names (e.g., "name_en"). If a table has "icon" and "color" but no "label",
+	// rename the first text field to "label".
+	hasLabel, hasIcon, hasColor := false, false, false
+	for _, fm := range fields {
+		switch fm.gowikiName {
+		case "label":
+			hasLabel = true
+		case "icon":
+			hasIcon = true
+		case "color":
+			hasColor = true
+		}
+	}
+	if hasIcon && hasColor && !hasLabel {
+		for i, fm := range fields {
+			if fm.gowikiType == "text" && fm.gowikiName != "icon" && fm.gowikiName != "color" {
+				log.Printf("  tag table normalization: renaming field %q → \"label\"", fm.gowikiName)
+				fields[i].gowikiName = "label"
+				break
+			}
+		}
+	}
+
 	if dryRun {
 		log.Printf("  [dry-run] would create table %q with %d fields", tableName, len(fields))
 		return nil

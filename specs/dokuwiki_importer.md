@@ -447,6 +447,12 @@ DokuWiki column labels (which may contain accented characters and spaces) are co
 
 The original DokuWiki label is preserved in the field's `label` attribute for display.
 
+#### Tag table field normalization
+
+Gowiki's tag rendering expects reference tables (used by `tag`-type fields) to have fields named `label`, `icon`, and `color`. DokuWiki status schemas often use different names for the label field (e.g., `name_en`, `name`, `title`).
+
+The import tool detects tag tables by convention: if a table has `icon` and `color` fields but no `label` field, it renames the first text field to `label`. This runs automatically during import — no manual configuration needed.
+
 #### Struct block conversion: `convert_struct_blocks.py`
 
 Located at `scripts/convert_struct_blocks.py`. A standalone Python script that converts DokuWiki struct/form syntax in already-imported Gowiki markdown files into native `{database-query}` and `{database-newrow}` directives. Run after the struct data import (Phase A2).
@@ -481,6 +487,29 @@ The script also extracts table configuration from `<form>` blocks and prints the
 - `page_template_path` — the template page for new rows
 
 These must be applied to the database tables via the admin UI or SQL after running the script. The extracted paths use DokuWiki namespace conventions and may need translation if namespaces were renamed.
+
+#### Status/tag table icons
+
+DokuWiki's structstatus plugin stores SVG icons at `/var/www/dokuwiki/lib/plugins/structstatus/svg/` on the DokuWiki server. These icons are used by Status-type columns to render colored badges with icons.
+
+After importing tag tables, copy the relevant SVGs into Gowiki's content tree and update the icon field values:
+
+1. Copy SVGs from the DokuWiki server:
+   ```bash
+   scp dokuwiki-server:/var/www/dokuwiki/lib/plugins/structstatus/svg/*.svg import/svg/
+   ```
+
+2. Upload to Gowiki content (so they're served as static files):
+   ```bash
+   cp import/svg/*.svg /path/to/data/content/icons/
+   ```
+
+3. Update icon field values from bare names to content paths:
+   ```sql
+   UPDATE _my_status_table SET icon = '/icons/' || icon || '.svg';
+   ```
+
+The icon field in tag tables must contain a content path (e.g., `/icons/ovh.svg`), not a bare name. Gowiki's tag badge renderer fetches the SVG from this path.
 
 ### Slider (1 page)
 

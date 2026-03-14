@@ -124,6 +124,8 @@ go build -o import-struct ./cmd/import-struct/
 
 The tool imports reference/status tables first (to establish row IDs for foreign keys), then all remaining tables alphabetically. It is safe to re-run: existing tables are skipped.
 
+Tag/status tables are automatically normalized: if a table has `icon` and `color` fields but no `label` field, the first text field is renamed to `label` to match Gowiki's tag rendering convention.
+
 ### Verify
 
 Check the imported data in the Gowiki admin UI (Database tab) or directly:
@@ -163,6 +165,23 @@ WHERE name = 'table_name';
 
 If namespaces were renamed (e.g., `ps03` → `soft`), the extracted paths will use the old names and must be translated before applying.
 
+## 3c. Phase A4: Import status table icons
+
+DokuWiki's structstatus plugin uses SVG icons for status badges, stored on the DokuWiki server at `/var/www/dokuwiki/lib/plugins/structstatus/svg/`. After importing tag/status tables, copy these icons into Gowiki's content tree:
+
+```bash
+# Copy from DokuWiki server
+scp dokuwiki-server:/var/www/dokuwiki/lib/plugins/structstatus/svg/*.svg import/svg/
+
+# Upload to Gowiki content directory
+cp import/svg/*.svg /path/to/data/content/icons/
+
+# Update icon paths in all tag tables (bare name → content path)
+psql -U gowiki -d gowiki -c "UPDATE _my_status_table SET icon = '/icons/' || icon || '.svg';"
+```
+
+Repeat the SQL update for each tag/status table. The icon field must contain a content path (e.g., `/icons/ovh.svg`) for Gowiki's tag badge renderer to fetch the SVG.
+
 ## 4. Phase B: AI-assisted refinement
 
 After the bulk import, use an AI coding agent (e.g., Claude Code) for tasks requiring judgment:
@@ -194,6 +213,7 @@ If DokuWiki schema labels are in a non-English language, the agent can update fi
 - [ ] Verify struct foreign key references (Status/Lookup fields point to correct rows)
 - [ ] Verify struct blocks are converted (no `---- struct table ----` or `<form>` remaining in content)
 - [ ] Verify table page_folder/index_field/page_template_path are configured for page-bound tables
+- [ ] Verify tag table icons are uploaded to `content/icons/` and icon field values are content paths
 - [ ] Review the conversion report at `/import_report`
 - [ ] Delete `import/` directory when satisfied
 
