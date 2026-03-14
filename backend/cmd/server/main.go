@@ -77,8 +77,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("init group store: %v", err)
 	}
-	sessionStore := auth.NewSessionStore()
-
 	aclStore, err := auth.NewACLStore(metaRoot)
 	if err != nil {
 		log.Fatalf("init acl store: %v", err)
@@ -93,9 +91,21 @@ func main() {
 	}
 	log.Printf("config: %s", configPath)
 
+	// Session store — uses TTL from config.
+	cfg := configStore.Get()
+	sessionTTL := auth.DefaultSessionTTL
+	if cfg.Auth.SessionTTL != "" {
+		if parsed, err := time.ParseDuration(cfg.Auth.SessionTTL); err == nil {
+			sessionTTL = parsed
+		}
+	}
+	sessionStore, err := auth.NewSessionStore(metaRoot, sessionTTL)
+	if err != nil {
+		log.Fatalf("init session store: %v", err)
+	}
+
 	// Initialize database pool.
 	dbPool := database.NewPool()
-	cfg := configStore.Get()
 	if cfg.Database.Enabled && cfg.Database.DSN != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		if err := dbPool.Connect(ctx, cfg.Database.DSN); err != nil {

@@ -180,7 +180,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	// Create session — same as local login.
 	s.userStore.UpdateLastLogin(user.Username)
 	sessionID := s.sessionStore.Create(user.Username)
-	auth.SetSessionCookie(w, sessionID)
+	s.sessionStore.SetSessionCookie(w, sessionID)
 
 	// Redirect back to the page the user was on before login.
 	redirectTo := "/"

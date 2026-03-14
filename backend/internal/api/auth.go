@@ -43,7 +43,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.userStore.UpdateLastLogin(req.Username)
 	sessionID := s.sessionStore.Create(req.Username)
-	auth.SetSessionCookie(w, sessionID)
+	s.sessionStore.SetSessionCookie(w, sessionID)
 	writeJSON(w, http.StatusOK, map[string]string{"username": req.Username})
 }
 
