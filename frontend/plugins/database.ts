@@ -17,6 +17,16 @@ const databaseQueryProperties = [
     serialize: (value: string | null) => String(value ?? ""),
   },
   {
+    name: "fields",
+    label: "Fields",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => {
+      const v = String(value ?? "")
+      return v.includes(" ") || v.includes(",") ? `"${v}"` : v
+    },
+  },
+  {
     name: "filter",
     label: "Filter",
     default: "",
@@ -890,7 +900,40 @@ class DatabaseQueryNodeView {
     const existingPag = this.dom.querySelector(".gowiki-database-pagination")
     if (existingPag) existingPag.remove()
 
-    const fields = (schema.fields || []).filter((f: any) => !f.archived_at)
+    const allFields = (schema.fields || []).filter((f: any) => !f.archived_at)
+
+    // Apply fields filter: select and order columns by the fields attribute.
+    // %title% is a special token meaning the index field (page title).
+    const fieldsAttr = this.node.attrs.fields || ""
+    let fields: any[]
+    if (fieldsAttr) {
+      const colNames = fieldsAttr.split(",").map((c: string) => c.trim()).filter((c: string) => c)
+      fields = []
+      for (const col of colNames) {
+        if (col === "%title%") {
+          // %title% maps to the index field, or page_path as a synthetic field.
+          if (schema.index_field) {
+            const f = allFields.find((f: any) => f.name === schema.index_field)
+            if (f) fields.push({ ...f, _isTitle: true })
+          } else {
+            // No index field — show page path.
+            fields.push({ name: "__page_path__", label: "Page", type: "page_link", _isTitle: true })
+          }
+        } else {
+          // Match by field name or label (case-insensitive).
+          const lower = col.toLowerCase()
+          const f = allFields.find((f: any) =>
+            f.name === col || f.name === lower ||
+            (f.label && f.label.toLowerCase() === lower)
+          )
+          if (f && !fields.some((ef: any) => ef.name === f.name)) {
+            fields.push(f)
+          }
+        }
+      }
+    } else {
+      fields = allFields
+    }
 
     const tbl = document.createElement("table")
     tbl.className = "gowiki-database-table"
@@ -926,10 +969,11 @@ class DatabaseQueryNodeView {
       const rtr = document.createElement("tr")
       for (const f of fields) {
         const td = document.createElement("td")
-        const val = row.fields?.[f.name]
-        const isIndexField = schema.index_field && f.name === schema.index_field && row.page_path
+        const val = f.name === "__page_path__" ? row.page_path : row.fields?.[f.name]
+        const isIndexField = (f._isTitle && row.page_path) ||
+          (schema.index_field && f.name === schema.index_field && row.page_path)
         if (isIndexField) {
-          // Index field links to the page.
+          // Index field / %title% links to the page.
           const a = document.createElement("a")
           a.className = "gowiki-database-page-link"
           a.textContent = val != null ? String(val) : row.page_path
@@ -1191,6 +1235,7 @@ class DatabaseQueryNodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     if (node.attrs.table !== this.node.attrs.table ||
+        node.attrs.fields !== this.node.attrs.fields ||
         node.attrs.filter !== this.node.attrs.filter) {
       this.node = node
       this.currentSort = node.attrs.sort || ""
@@ -2294,6 +2339,7 @@ export const databasePlugin: WikiPlugin = {
           atom: true,
           attrs: {
             table: { default: "" },
+            fields: { default: "" },
             filter: { default: "" },
             sort: { default: "" },
             order: { default: "asc" },
@@ -2545,6 +2591,10 @@ export const databasePlugin: WikiPlugin = {
     reg.registerPMNode("database_query", {
       print(node) {
         const parts = [`table=${node.attrs.table}`]
+        if (node.attrs.fields) {
+          const c = node.attrs.fields
+          parts.push(c.includes(" ") ? `fields="${c}"` : `fields=${c}`)
+        }
         if (node.attrs.filter) {
           const f = node.attrs.filter
           parts.push(f.includes("=") || f.includes(">") || f.includes("<") ? `filter="${f}"` : `filter=${f}`)

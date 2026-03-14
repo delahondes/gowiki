@@ -280,6 +280,27 @@ The user list is fetched from the `/api/users/list` endpoint (cached for 30 seco
 {database-query table=test filter="status=1" sort=date order=desc limit=20}
 ```
 
+Attributes:
+
+| Attribute | Description | Default |
+|---|---|---|
+| `table` | Table name (required) | |
+| `fields` | Comma-separated list of fields to display, in order | all fields |
+| `filter` | Filter expression (e.g. `status=1`) | |
+| `sort` | Field name to sort by | table default |
+| `order` | `asc` or `desc` | `asc` |
+| `limit` | Rows per page | `20` |
+
+#### Field selection (`fields`)
+
+When `fields` is set, only the listed fields are displayed, in the specified order. Fields are matched by name or label (case-insensitive). The special token `%title%` refers to the index field (the field used as page name in page-bound tables); it renders as a clickable link to the page.
+
+```
+{database-query table=server fields="category, provider, %title%, description, ipv4"}
+```
+
+If `fields` is omitted, all non-archived fields are shown in their defined display order.
+
 ### New row form
 
 ```
