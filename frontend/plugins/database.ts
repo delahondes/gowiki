@@ -329,25 +329,37 @@ function isolateInput(el: HTMLElement) {
 // ── Tag helpers ──
 
 const tagTableCache = new Map<string, { data: Map<number, { label: string; icon: string; color: string }>; timestamp: number }>()
+const tagTableInflight = new Map<string, Promise<Map<number, { label: string; icon: string; color: string }>>>()
 
 async function getTagOptions(tableName: string): Promise<Map<number, { label: string; icon: string; color: string }>> {
   const cached = tagTableCache.get(tableName)
   if (cached && Date.now() - cached.timestamp < 30000) return cached.data
 
-  const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
-  if (!resp.ok) return new Map()
-  const body = await resp.json()
-  const rows: any[] = body.rows || []
-  const result = new Map<number, { label: string; icon: string; color: string }>()
-  for (const r of rows) {
-    result.set(r.id, {
-      label: String(r.fields?.label ?? ""),
-      icon: String(r.fields?.icon ?? ""),
-      color: String(r.fields?.color ?? ""),
-    })
-  }
-  tagTableCache.set(tableName, { data: result, timestamp: Date.now() })
-  return result
+  // Deduplicate in-flight requests: if a fetch for this table is already
+  // in progress, reuse its promise instead of firing another request.
+  const inflight = tagTableInflight.get(tableName)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
+    if (!resp.ok) return new Map<number, { label: string; icon: string; color: string }>()
+    const body = await resp.json()
+    const rows: any[] = body.rows || []
+    const result = new Map<number, { label: string; icon: string; color: string }>()
+    for (const r of rows) {
+      result.set(r.id, {
+        label: String(r.fields?.label ?? ""),
+        icon: String(r.fields?.icon ?? ""),
+        color: String(r.fields?.color ?? ""),
+      })
+    }
+    tagTableCache.set(tableName, { data: result, timestamp: Date.now() })
+    return result
+  })()
+
+  tagTableInflight.set(tableName, promise)
+  promise.finally(() => tagTableInflight.delete(tableName))
+  return promise
 }
 
 function isLightColor(hex: string): boolean {
@@ -383,38 +395,56 @@ function renderTagBadge(tag: { label: string; icon: string; color: string }): HT
 // ── Lookup helpers ──
 
 const lookupTableCache = new Map<string, { data: Map<number, string>; timestamp: number }>()
+const lookupTableInflight = new Map<string, Promise<Map<number, string>>>()
 
 async function getLookupOptions(tableName: string): Promise<Map<number, string>> {
   const cached = lookupTableCache.get(tableName)
   if (cached && Date.now() - cached.timestamp < 30000) return cached.data
 
-  const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
-  if (!resp.ok) return new Map()
-  const body = await resp.json()
-  const rows: any[] = body.rows || []
-  const result = new Map<number, string>()
-  for (const r of rows) {
-    // Use the first non-id text field as display, or fall back to id
-    const fields = r.fields || {}
-    const display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
-    result.set(r.id, String(display))
-  }
-  lookupTableCache.set(tableName, { data: result, timestamp: Date.now() })
-  return result
+  const inflight = lookupTableInflight.get(tableName)
+  if (inflight) return inflight
+
+  const promise = (async () => {
+    const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=500`)
+    if (!resp.ok) return new Map<number, string>()
+    const body = await resp.json()
+    const rows: any[] = body.rows || []
+    const result = new Map<number, string>()
+    for (const r of rows) {
+      const fields = r.fields || {}
+      const display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
+      result.set(r.id, String(display))
+    }
+    lookupTableCache.set(tableName, { data: result, timestamp: Date.now() })
+    return result
+  })()
+
+  lookupTableInflight.set(tableName, promise)
+  promise.finally(() => lookupTableInflight.delete(tableName))
+  return promise
 }
 
 // ── User helpers ──
 
 let userListCache: { data: { username: string; display_name: string }[]; timestamp: number } | null = null
+let userListInflight: Promise<{ username: string; display_name: string }[]> | null = null
 
 async function getUserList(): Promise<{ username: string; display_name: string }[]> {
   if (userListCache && Date.now() - userListCache.timestamp < 30000) return userListCache.data
-  const resp = await fetch("/api/users/list")
-  if (!resp.ok) return []
-  const body = await resp.json()
-  const users = body.users || []
-  userListCache = { data: users, timestamp: Date.now() }
-  return users
+  if (userListInflight) return userListInflight
+
+  const promise = (async () => {
+    const resp = await fetch("/api/users/list")
+    if (!resp.ok) return []
+    const body = await resp.json()
+    const users = body.users || []
+    userListCache = { data: users, timestamp: Date.now() }
+    return users
+  })()
+
+  userListInflight = promise
+  promise.finally(() => { userListInflight = null })
+  return promise
 }
 
 function renderColorSwatch(color: string): HTMLSpanElement {
