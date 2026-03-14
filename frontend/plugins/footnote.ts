@@ -1,7 +1,38 @@
+import MarkdownIt from "markdown-it"
 import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
 import type { Node as PMNode } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
+
+/* ─── Inline markdown renderer for footnote content ───── */
+
+const footnoteMd = new MarkdownIt("zero") // start with nothing enabled
+footnoteMd.enable(["text", "newline", "escape", "link", "emphasis", "backticks", "strikethrough"])
+
+// When link text is empty ([](url)), show a shortened URL as the visible text.
+const defaultLinkRender = footnoteMd.renderer.rules.link_open ||
+  function(tokens: any, idx: any, options: any, _env: any, self: any) { return self.renderToken(tokens, idx, options) }
+footnoteMd.renderer.rules.link_open = function(tokens: any, idx: any, options: any, env: any, self: any) {
+  const next = tokens[idx + 1]
+  // If next token is link_close (no text between open/close), inject a text label.
+  const isEmpty = next && next.type === "link_close"
+  const isEmptyText = next && next.type === "text" && next.content === ""
+  if (isEmpty || isEmptyText) {
+    const label = tokens[idx].attrGet("href") || ""
+    if (isEmpty) {
+      // Inject a text token between link_open and link_close.
+      tokens.splice(idx + 1, 0, { type: "text", content: label, tag: "", nesting: 0 } as any)
+    } else {
+      next.content = label
+    }
+  }
+  return defaultLinkRender(tokens, idx, options, env, self)
+}
+
+/** Render footnote content as inline HTML (no wrapping <p>). */
+function renderFootnoteContent(raw: string): string {
+  return footnoteMd.renderInline(raw)
+}
 
 /* ─── Footnote numbering state ─────────────────────────── */
 
@@ -64,7 +95,7 @@ class FootnoteNodeView {
     if (this.tooltip) return
     this.tooltip = document.createElement("div")
     this.tooltip.className = "gowiki-footnote-tooltip"
-    this.tooltip.textContent = this.node.attrs.content
+    this.tooltip.innerHTML = renderFootnoteContent(this.node.attrs.content)
     document.body.appendChild(this.tooltip)
     const rect = this.dom.getBoundingClientRect()
     this.tooltip.style.left = rect.left + "px"
@@ -129,7 +160,11 @@ const footnoteStyles = `
   z-index: 1000;
   pointer-events: none;
   line-height: 1.4;
-  white-space: pre-wrap;
+}
+
+.gowiki-footnote-tooltip a {
+  color: #8cb4ff;
+  text-decoration: underline;
 }
 
 .gowiki-footnote-section {
@@ -152,6 +187,10 @@ const footnoteStyles = `
 
 .gowiki-footnote-section li {
   margin-bottom: 0.25em;
+}
+
+.gowiki-footnote-section a {
+  color: var(--gowiki-link-color, #2563eb);
 }
 `
 
@@ -309,7 +348,7 @@ export const footnotePlugin: WikiPlugin = {
             const ol = document.createElement("ol")
             for (const text of footnotes) {
               const li = document.createElement("li")
-              li.textContent = text
+              li.innerHTML = renderFootnoteContent(text)
               ol.appendChild(li)
             }
             section.appendChild(ol)
