@@ -132,6 +132,37 @@ Check the imported data in the Gowiki admin UI (Database tab) or directly:
 psql -U gowiki -d gowiki -c 'SELECT name, label FROM database_tables ORDER BY name'
 ```
 
+## 3b. Phase A3: Convert struct blocks to database directives
+
+After importing the structured data, the DokuWiki struct syntax remaining in the markdown files needs to be converted to Gowiki's native `{database-query}` and `{database-newrow}` directives.
+
+The bulk content import (Phase A) preserves `---- struct table ----`, `---- struct lookup ----`, and `<form>` blocks as-is (wrapped in code fences). The conversion script replaces them with Gowiki directives:
+
+```bash
+# Dry run first
+python3 scripts/convert_struct_blocks.py /path/to/data/content --dry-run
+
+# Then apply
+python3 scripts/convert_struct_blocks.py /path/to/data/content
+```
+
+This converts:
+- `---- struct table ----` blocks → `{database-query table=... fields="..." ...}`
+- `---- struct lookup ----` blocks → `{database-query table=...}`
+- `<form>...</form>` blocks → `{database-newrow table=...}`
+
+The script also prints extracted table configuration (page folder, index field, template path) from each `<form>` block. Apply these settings to the corresponding tables via the admin Database UI or SQL:
+
+```sql
+UPDATE database_tables SET
+  page_folder = '/path/to/folder',
+  index_field = 'field_name',
+  page_template_path = '/path/to/template'
+WHERE name = 'table_name';
+```
+
+If namespaces were renamed (e.g., `ps03` → `soft`), the extracted paths will use the old names and must be translated before applying.
+
 ## 4. Phase B: AI-assisted refinement
 
 After the bulk import, use an AI coding agent (e.g., Claude Code) for tasks requiring judgment:
@@ -161,6 +192,8 @@ If DokuWiki schema labels are in a non-English language, the agent can update fi
 - [ ] Review ACL rules in admin UI
 - [ ] Check structured data tables in admin Database tab
 - [ ] Verify struct foreign key references (Status/Lookup fields point to correct rows)
+- [ ] Verify struct blocks are converted (no `---- struct table ----` or `<form>` remaining in content)
+- [ ] Verify table page_folder/index_field/page_template_path are configured for page-bound tables
 - [ ] Review the conversion report at `/import_report`
 - [ ] Delete `import/` directory when satisfied
 

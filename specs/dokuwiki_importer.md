@@ -32,7 +32,7 @@ After the script import, an interactive agent-assisted process handles:
 
 3. **Naming consistency fixes** — The old wiki has inconsistent naming across namespaces. The agent reviews and proposes coherent naming during translation.
 
-Scope exclusions from the script: struct-related syntax (`---- struct table ----`, `---- struct lookup ----`, `{{$schema.field}}`, `@@schema.field@@`) is flagged in the report but not converted — handled in Phase B.
+Scope exclusions from the script: struct variable references (`{{$schema.field}}`, `@@schema.field@@`) are flagged in the report but not converted — handled in Phase B. Struct block syntax (`---- struct table ----`, `---- struct lookup ----`, `<form>`) is converted in Phase A3 (see below).
 
 ## CLI usage
 
@@ -446,6 +446,41 @@ DokuWiki column labels (which may contain accented characters and spaces) are co
 5. Prefix with `f_` if starts with a digit
 
 The original DokuWiki label is preserved in the field's `label` attribute for display.
+
+#### Struct block conversion: `convert_struct_blocks.py`
+
+Located at `scripts/convert_struct_blocks.py`. A standalone Python script that converts DokuWiki struct/form syntax in already-imported Gowiki markdown files into native `{database-query}` and `{database-newrow}` directives. Run after the struct data import (Phase A2).
+
+```bash
+# Dry run
+python3 scripts/convert_struct_blocks.py /path/to/data/content --dry-run
+
+# Apply
+python3 scripts/convert_struct_blocks.py /path/to/data/content
+```
+
+Converts three block types:
+
+| DokuWiki syntax | Gowiki directive |
+|---|---|
+| `---- struct table ----` block | `{database-query table=... fields="..." ...}` |
+| `---- struct lookup ----` block | `{database-query table=...}` |
+| `<form>...</form>` block | `{database-newrow table=...}` |
+
+Conversion details:
+- `schema:` → `table=`
+- `cols:` → `fields="..."` (with `%pageid%` converted to `%title%`, standalone `*` removed)
+- `sort:` → `sort=` (first field only; `^` prefix → `order=desc`)
+- `filter:` → `filter="..."` (multiple filters joined with `&`)
+- Code fences (` ``` `) wrapping these blocks (import artifacts) are removed
+- Closing `---` (3 dashes) and `----` (4 dashes) are both handled
+
+The script also extracts table configuration from `<form>` blocks and prints them at the end:
+- `page_folder` — where new row pages are created
+- `index_field` — the field used as page name
+- `page_template_path` — the template page for new rows
+
+These must be applied to the database tables via the admin UI or SQL after running the script. The extracted paths use DokuWiki namespace conventions and may need translation if namespaces were renamed.
 
 ### Slider (1 page)
 
