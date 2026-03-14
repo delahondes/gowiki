@@ -123,7 +123,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/gowiki/data
+ReadWritePaths=/opt/gowiki
 PrivateTmp=true
 
 # Allow binding to ports 80 and 443
@@ -161,7 +161,25 @@ https: listening on :443 (domain: wiki.example.com)
 
 The first HTTPS request triggers certificate provisioning from Let's Encrypt. This takes a few seconds. Subsequent requests use the cached certificate.
 
-## 8. Verify
+## 8. Configuration changes
+
+Most site settings (`site.*`, `reviewflow.*`, `todo.notify.*`) are read dynamically and take effect immediately when saved from the admin UI.
+
+However, some settings are only read at startup and require a service restart:
+
+- `server.*` (addr, tls_domain, web_dir)
+- `data_dir`
+- `database.*`
+- `auth.session_ttl`
+- `site.base_url` (host filter)
+
+After changing any of these, restart the service:
+
+```bash
+sudo systemctl restart gowiki
+```
+
+## 9. Verify
 
 ```bash
 curl -I https://wiki.example.com

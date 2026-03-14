@@ -7742,6 +7742,8 @@ async function renderAdminConfigTab(container) {
       })).filter(w => w.url)
 
       const payload = {
+        data_dir: config.data_dir || "",
+        server: config.server || {},
         site: {
           title: titleInput.value.trim(),
           base_url: baseUrlInput.value.trim(),

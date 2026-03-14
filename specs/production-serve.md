@@ -186,13 +186,21 @@ rsync -a backend/data/ user@host:/opt/gowiki/data/
 # [Unit]
 # Description=Gowiki
 # After=network.target postgresql.service
+# Requires=postgresql.service
 #
 # [Service]
 # Type=simple
 # User=gowiki
+# Group=gowiki
 # ExecStart=/opt/gowiki/gowiki-server -config /opt/gowiki/config.yaml
 # Restart=on-failure
 # RestartSec=5
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ProtectHome=true
+# ReadWritePaths=/opt/gowiki
+# PrivateTmp=true
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
 #
 # [Install]
 # WantedBy=multi-user.target
