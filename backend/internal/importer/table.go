@@ -16,6 +16,9 @@ var (
 	// Cell color: @Color:content or @#hex:content
 	reCellColor = regexp.MustCompile(`@([A-Za-z]+|#[0-9a-fA-F]{3,6}):`)
 
+	// Vertical text: !!content!!
+	reVerticalText = regexp.MustCompile(`^!!(.+)!!$`)
+
 	// WRAP tags inside table cells
 	reWrapInCell = regexp.MustCompile(`(?i)</?WRAP[^>]*>`)
 )
@@ -122,6 +125,7 @@ type tableCell struct {
 	isHeader bool
 	isMerge  bool // ::: vertical merge
 	color    string
+	vtext    bool // !!text!! vertical text
 }
 
 // parseTableRow parses a DokuWiki table row into cells.
@@ -164,6 +168,12 @@ func parseTableRow(line string, currentNS string) ([]tableCell, []FlaggedLine) {
 			colorMatch := reCellColor.FindStringSubmatch(content)
 			cell.color = strings.ToLower(colorMatch[1])
 			content = content[m[1]:]
+		}
+
+		// Handle vertical text !!content!!
+		if vm := reVerticalText.FindStringSubmatch(content); vm != nil {
+			cell.vtext = true
+			content = vm[1]
 		}
 
 		// Strip WRAP tags inside cells
@@ -263,6 +273,17 @@ func renderTableRow(cells []tableCell, maxCols int) string {
 		if i < len(cells) {
 			c := cells[i]
 			b.WriteByte(' ')
+			// Emit cell directive if color or vertical text
+			var dirParts []string
+			if c.color != "" {
+				dirParts = append(dirParts, "color="+c.color)
+			}
+			if c.vtext {
+				dirParts = append(dirParts, "vtext=upward")
+			}
+			if len(dirParts) > 0 {
+				b.WriteString("{" + strings.Join(dirParts, " ") + "} ")
+			}
 			b.WriteString(c.content)
 			b.WriteString(" |")
 		} else {

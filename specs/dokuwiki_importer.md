@@ -142,6 +142,8 @@ DokuWiki link `[[ns:page|text]]` -> Gowiki `[text](/ns/page)`.
 | `<sub>text</sub>` | `~text~` | 5 | Subscript -- implemented |
 | `<sup>text</sup>` | `^text^` | 5 | Superscript -- implemented |
 | `<del>text</del>` | `~~text~~` | 3 | Strikethrough -- implemented |
+| `@color:text` (in table cell) | `{color=color} text` | 27 | Cell background color |
+| `!!text!!` (in table cell) | `{vtext=upward} text` | 9 | Vertical/rotated text in cells |
 | Empty line | Empty line (paragraph break) | -- | Same |
 
 ### Media/images
@@ -185,7 +187,8 @@ Gowiki:
 Special cases:
 - **Header column** (first column with `^`, rest with `|`): Convert to `{table headers=1c}` property + pipe table with all `|` cells.
 - **Cell merge** (`:::`): 44 pages. DokuWiki uses `:::` for vertical merge. Convert to Gowiki's merge syntax: `<<` (colspan, merge left) and `^^` (rowspan, merge up).
-- **Cell colors** (`@LightBlue:text`): 2 pages. Convert to Gowiki cell property syntax. DokuWiki uses standard CSS color names which Gowiki accepts as-is (e.g. `lightblue` -> `lightblue`). No color mapping needed.
+- **Cell colors** (`@LightBlue:text`): Convert to Gowiki cell directive: `{color=lightblue} text`. DokuWiki uses standard CSS color names and `#hex` codes, both supported as-is by Gowiki's cell color system.
+- **Vertical text** (`!!text!!`): Convert to Gowiki cell directive: `{vtext=upward} text`. DokuWiki renders `!!text!!` as rotated text in table cells (common for compact column headers).
 - **Table formulas** (`~~=sum(...)~~`): 9 pages. Gowiki has a `table_formulas` plugin. Syntax may differ; convert where possible, flag for review.
 - **WRAP inside table cells**: Extract WRAP content, keep text only. Strip `<WRAP>`/`</WRAP>` tags.
 - **Multi-line cells**: DokuWiki allows `\\` for line breaks in cells -> convert to `\n`.
