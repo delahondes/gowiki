@@ -60,7 +60,7 @@ Both flags are **required** (no defaults — prevents accidental writes):
 | Namespaces (top-level) | 17 |
 | Max namespace depth | 11 |
 | Users | 16 |
-| ACL rules | 66 (57 imported, 9 %USER% template rules skipped) |
+| ACL rules | 66 (including 9 %USER% template rules → @self) |
 
 Source layout:
 ```
@@ -561,9 +561,13 @@ DokuWiki uses a numeric bitmask; Gowiki uses named permissions:
 | 16 (delete) | `["view", "edit", "delete"]` |
 | 255 (admin) | `["view", "edit", "delete"]` |
 
-#### Unsupported ACL features
+#### Per-user ACL rules (`%USER%`)
 
-- **`%USER%` template rules**: DokuWiki's per-user placeholder ACL (e.g., `regulatory:smq:ps07:annualinterview:%USER%-*	%USER%	16`) has no Gowiki equivalent. These rules are **skipped** with a count logged. The DokuWiki wiki had 9 such rules.
+DokuWiki's `%USER%` template rules (e.g., `regulatory:smq:ps07:annualinterview:%USER%-*	%USER%	16`) are converted to Gowiki `@self` rules. The `%USER%` placeholder becomes `@self` in the pattern and is substituted with the authenticated username at evaluation time. Example conversion:
+
+| DokuWiki | Gowiki |
+|---|---|
+| `regulatory:smq:ps07:sop03:staff:%USER%:*	%USER%	16` | `pattern: "regulatory/smq/ps07/sop03/staff/@self/.*"`, `subject: "@self"`, `permissions: ["view","edit","delete"]` |
 
 ## Conversion not attempted (flag only)
 

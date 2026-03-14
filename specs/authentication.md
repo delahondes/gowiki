@@ -71,9 +71,9 @@ Storage: `data/meta/sessions.json` (JSON object keyed by session ID).
 }
 ```
 
-- `pattern`: Go regexp matched against the page path (anchored: `^(?:pattern)$`).
+- `pattern`: Go regexp matched against the page path (anchored: `^(?:pattern)$`). May contain `@self` placeholder for `@self` rules.
 - `subject_type`: `"user"`, `"group"`, or `"special"`.
-- `subject`: username, group name, `"@all"` (everyone including anonymous), or `"@authenticated"` (any logged-in user).
+- `subject`: username, group name, `"@all"` (everyone including anonymous), `"@authenticated"` (any logged-in user), or `"@self"` (per-user, with `@self` in pattern).
 - `permissions`: subset of `["view", "edit", "delete"]`. Empty array = deny all.
 
 Storage: `data/meta/acl.json` (JSON array).
@@ -202,10 +202,11 @@ The `providers` array is empty when OAuth is not configured. The frontend uses t
 
 ### Algorithm
 
-1. Collect all rules whose `pattern` regexp matches the page path.
+1. Collect all rules whose `pattern` regexp matches the page path. For `@self` rules, `@self` in the pattern is replaced with the authenticated username (regex-escaped) before matching.
 2. Filter to rules whose subject applies to the current user:
    - `"special" / "@all"`: always matches.
    - `"special" / "@authenticated"`: matches if the user is logged in.
+   - `"special" / "@self"`: matches if the user is logged in (pattern already filtered by username via `@self` substitution).
    - `"user"`: matches if `subject == username`.
    - `"group"`: matches if the subject is in the user's effective groups.
 3. Sort matches by pattern length (descending) as a proxy for specificity.
@@ -225,6 +226,30 @@ Three middleware layers enforce auth/ACL:
 | `requireAdmin` | Requires `requireAuth` + user must belong to the `admin` group. | Admin API endpoints |
 
 ACL checks (`aclStore.CheckPermission`) are called within individual handlers, not as middleware, because the page path is needed and is route-dependent.
+
+### Per-user rules (`@self`)
+
+The special subject `@self` allows ACL rules where each authenticated user gets permissions on pages that match their own username. The pattern uses `@self` as a placeholder that is substituted with the requesting user's username at evaluation time.
+
+```json
+{
+  "pattern": "staff/@self/.*",
+  "subject_type": "special",
+  "subject": "@self",
+  "permissions": ["view", "edit", "delete"]
+}
+```
+
+This gives each user full control over their own `staff/<username>/` namespace. For example, user `alice` can edit `staff/alice/notes` but not `staff/bob/notes`.
+
+The `@self` placeholder is regex-escaped at evaluation time, so usernames with special characters (`.`, `+`, etc.) are matched literally.
+
+Typical use cases:
+- Personal namespaces: `staff/@self/.*` — each user owns their folder
+- Per-user documents: `interviews/@self-.*` — pages prefixed with the username (e.g., `alice-2024`)
+- Anonymous users never match `@self` rules
+
+This is the Gowiki equivalent of DokuWiki's `%USER%` ACL template rules.
 
 ### Default ACL rules
 
@@ -291,5 +316,5 @@ All stores use atomic writes (temp file + rename) to prevent corruption on crash
 The importer (`backend/cmd/import/`) can import DokuWiki users and ACLs:
 
 - **Users**: parsed from `conf/users.auth.php`. Bcrypt `$2y$` hashes are converted to `$2a$` (same algorithm, Go-compatible prefix). Non-bcrypt hashes (MD5, phpass) are discarded — those users must reset their password.
-- **ACL rules**: parsed from `conf/acl.auth.php`. DokuWiki colon paths are converted to regex patterns. Numeric permission levels are mapped: 1→view, 2→view+edit, 16+→view+edit+delete. `%USER%` template rules are skipped (no Gowiki equivalent).
+- **ACL rules**: parsed from `conf/acl.auth.php`. DokuWiki colon paths are converted to regex patterns. Numeric permission levels are mapped: 1→view, 2→view+edit, 16+→view+edit+delete. DokuWiki's `%USER%` template rules are converted to `@self` rules.
 - **`--fallback-admin`**: creates an admin/admin account with full `.*` permissions when no users exist in the source.

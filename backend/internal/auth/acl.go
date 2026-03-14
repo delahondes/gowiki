@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -30,6 +31,7 @@ var ValidSubjectTypes = map[string]bool{
 var ValidSpecialSubjects = map[string]bool{
 	"@all":           true,
 	"@authenticated": true,
+	"@self":          true,
 }
 
 // ACLRule represents a single access control entry.
@@ -167,8 +169,18 @@ func (s *ACLStore) CheckPermission(username string, groups []string, pagePath st
 	var matches []matchedRule
 
 	for _, rule := range s.rules {
+		// For @self rules, substitute @self in the pattern with the actual username.
+		// Anonymous users can never match @self rules.
+		pattern := rule.Pattern
+		if rule.SubjectType == "special" && rule.Subject == "@self" {
+			if username == "" {
+				continue
+			}
+			pattern = strings.ReplaceAll(pattern, "@self", regexp.QuoteMeta(username))
+		}
+
 		// Check if the pattern matches the page path.
-		re, err := regexp.Compile("^(?:" + rule.Pattern + ")$")
+		re, err := regexp.Compile("^(?:" + pattern + ")$")
 		if err != nil {
 			// Invalid pattern — skip it (should not happen after validation).
 			continue
@@ -223,6 +235,8 @@ func subjectMatches(rule ACLRule, username string, groups []string) bool {
 			return true
 		case "@authenticated":
 			return username != ""
+		case "@self":
+			return username != ""
 		}
 	case "user":
 		return rule.Subject == username
@@ -240,7 +254,13 @@ func subjectMatches(rule ACLRule, username string, groups []string) bool {
 func validateRules(rules []ACLRule) error {
 	for i, rule := range rules {
 		// Validate pattern is a valid Go regexp.
-		if _, err := regexp.Compile(rule.Pattern); err != nil {
+		// For @self rules, @self in the pattern is a placeholder substituted at
+		// evaluation time, so replace it with a dummy value for validation.
+		patternToValidate := rule.Pattern
+		if rule.SubjectType == "special" && rule.Subject == "@self" {
+			patternToValidate = strings.ReplaceAll(patternToValidate, "@self", "dummy")
+		}
+		if _, err := regexp.Compile(patternToValidate); err != nil {
 			return fmt.Errorf("rule %d: invalid pattern %q: %w", i, rule.Pattern, err)
 		}
 

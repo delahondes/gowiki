@@ -55,10 +55,9 @@ func ImportAuth(opts Options) error {
 
 	// Parse ACL rules.
 	var rules []gowikiACLRule
-	skippedUserRules := 0
 	if aclExists {
 		var err error
-		rules, skippedUserRules, err = parseDokuWikiACL(aclFile)
+		rules, err = parseDokuWikiACL(aclFile)
 		if err != nil {
 			return fmt.Errorf("parse acl: %w", err)
 		}
@@ -69,9 +68,6 @@ func ImportAuth(opts Options) error {
 			}
 		}
 		log.Printf("  Parsed %d ACL rules", len(rules))
-		if skippedUserRules > 0 {
-			log.Printf("  Skipped %d %%USER%% template ACL rules (not supported)", skippedUserRules)
-		}
 	}
 
 	// Build groups list.
@@ -289,16 +285,14 @@ func dokuPermToGowiki(level int) []string {
 
 // parseDokuWikiACL parses conf/acl.auth.php.
 // Format: path\t@group_or_user\tpermission_level
-// Returns (rules, skippedUserTemplateCount, error).
-func parseDokuWikiACL(path string) ([]gowikiACLRule, int, error) {
+func parseDokuWikiACL(path string) ([]gowikiACLRule, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer f.Close()
 
 	var rules []gowikiACLRule
-	skippedUserRules := 0
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -317,12 +311,9 @@ func parseDokuWikiACL(path string) ([]gowikiACLRule, int, error) {
 		subject := fields[1]
 		levelStr := fields[2]
 
-		// Skip %USER% template rules — DokuWiki per-user ACL placeholders
-		// that have no direct equivalent in Gowiki's regex-based ACL.
-		if strings.Contains(dokuPath, "%USER%") || subject == "%USER%" {
-			skippedUserRules++
-			continue
-		}
+		// Detect %USER% template rules — DokuWiki per-user ACL placeholders.
+		// These are converted to @self rules with %USER% kept in the pattern.
+		isUserTemplate := strings.Contains(dokuPath, "%USER%") || subject == "%USER%"
 
 		level, err := strconv.Atoi(levelStr)
 		if err != nil {
@@ -331,23 +322,38 @@ func parseDokuWikiACL(path string) ([]gowikiACLRule, int, error) {
 		}
 
 		// URL-decode path and subject (DokuWiki uses %5f for _, etc.)
-		dokuPath = dokuURLDecode(dokuPath)
-		subject = dokuURLDecode(subject)
+		// But preserve %USER% — it must not be URL-decoded.
+		if isUserTemplate {
+			// Temporarily replace %USER% to protect it from URL decoding,
+			// then convert to Gowiki's @self placeholder.
+			dokuPath = strings.ReplaceAll(dokuPath, "%USER%", "\x00USER\x00")
+			dokuPath = dokuURLDecode(dokuPath)
+			dokuPath = strings.ReplaceAll(dokuPath, "\x00USER\x00", "@self")
+			subject = dokuURLDecode(strings.ReplaceAll(subject, "%USER%", ""))
+		} else {
+			dokuPath = dokuURLDecode(dokuPath)
+			subject = dokuURLDecode(subject)
+		}
 
 		// Convert DokuWiki path to Gowiki regex pattern.
 		pattern := dokuACLPathToPattern(dokuPath)
 
-		// Convert subject: @group -> group subject, else user subject.
-		subjectType := "user"
-		subjectName := subject
-		if strings.HasPrefix(subject, "@") {
+		// Determine subject type and name.
+		var subjectType, subjectName string
+		if isUserTemplate {
+			subjectType = "special"
+			subjectName = "@self"
+		} else if strings.HasPrefix(subject, "@") {
 			subjectType = "group"
 			subjectName = strings.TrimPrefix(subject, "@")
-		}
-		// DokuWiki uses @ALL for unauthenticated/all users.
-		if strings.EqualFold(subjectName, "ALL") && subjectType == "group" {
-			subjectType = "special"
-			subjectName = "@all"
+			// DokuWiki uses @ALL for unauthenticated/all users.
+			if strings.EqualFold(subjectName, "ALL") {
+				subjectType = "special"
+				subjectName = "@all"
+			}
+		} else {
+			subjectType = "user"
+			subjectName = subject
 		}
 
 		permissions := dokuPermToGowiki(level)
@@ -361,10 +367,10 @@ func parseDokuWikiACL(path string) ([]gowikiACLRule, int, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, 0, fmt.Errorf("read acl file: %w", err)
+		return nil, fmt.Errorf("read acl file: %w", err)
 	}
 
-	return rules, skippedUserRules, nil
+	return rules, nil
 }
 
 // dokuURLDecode decodes DokuWiki's URL-encoded strings (e.g., %5f -> _).
@@ -380,21 +386,23 @@ func dokuURLDecode(s string) string {
 //
 // DokuWiki uses colon as namespace separator:
 //
-//	*          -> .* (all pages, root)
-//	ns:*       -> ns/.* (all pages under ns/)
-//	ns:page    -> ns/page (exact page)
-//	ns:sub:*   -> ns/sub/.* (all pages under ns/sub/)
+//	*              -> .* (all pages, root)
+//	ns:*           -> ns/.* (all pages under ns/)
+//	ns:page        -> ns/page (exact page)
+//	ns:sub:*       -> ns/sub/.* (all pages under ns/sub/)
+//	ns:%USER%-*    -> ns/%USER%-.* (per-user wildcard)
 func dokuACLPathToPattern(dokuPath string) string {
 	// Replace colon separators with slashes.
 	p := strings.ReplaceAll(dokuPath, ":", "/")
 
-	// Handle wildcard.
-	if p == "*" {
-		return ".*"
-	}
-	if strings.HasSuffix(p, "/*") {
-		// ns/* -> ns/.*
-		return strings.TrimSuffix(p, "/*") + "/.*"
+	// If the path contains wildcards, split on *, escape each segment,
+	// and rejoin with .* to produce a valid regex.
+	if strings.Contains(p, "*") {
+		parts := strings.Split(p, "*")
+		for i, part := range parts {
+			parts[i] = regexpEscapePath(part)
+		}
+		return strings.Join(parts, ".*")
 	}
 
 	// Exact page match — escape regex metacharacters in the path.

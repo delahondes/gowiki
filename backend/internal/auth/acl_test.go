@@ -412,6 +412,111 @@ func TestValidateRules(t *testing.T) {
 	}
 }
 
+func TestCheckPermission_SelfRules(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Simulate DokuWiki %USER% rules: each user can edit pages under their own namespace.
+	err = store.Replace([]ACLRule{
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: "staff/@self/.*", SubjectType: "special", Subject: "@self", Permissions: []string{"view", "edit", "delete"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Alice can edit her own pages.
+	if !store.CheckPermission("alice", nil, "staff/alice/notes", "edit") {
+		t.Error("alice should be able to edit staff/alice/notes via @self")
+	}
+	if !store.CheckPermission("alice", nil, "staff/alice/notes", "delete") {
+		t.Error("alice should be able to delete staff/alice/notes via @self")
+	}
+
+	// Alice cannot edit bob's pages.
+	if store.CheckPermission("alice", nil, "staff/bob/notes", "edit") {
+		t.Error("alice should not be able to edit staff/bob/notes")
+	}
+
+	// Bob can edit his own pages.
+	if !store.CheckPermission("bob", nil, "staff/bob/notes", "edit") {
+		t.Error("bob should be able to edit staff/bob/notes via @self")
+	}
+
+	// Unauthenticated user cannot match @self rules.
+	if store.CheckPermission("", nil, "staff/alice/notes", "edit") {
+		t.Error("unauthenticated should not match @self rules")
+	}
+
+	// Everyone can view via @all.
+	if !store.CheckPermission("", nil, "public/page", "view") {
+		t.Error("@all should allow view for public pages")
+	}
+}
+
+func TestCheckPermission_SelfRulesWithWildcard(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Pattern like DokuWiki's %USER%-* (user-prefixed pages).
+	err = store.Replace([]ACLRule{
+		{Pattern: "interviews/@self-.*", SubjectType: "special", Subject: "@self", Permissions: []string{"view", "edit"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Alice can edit her interview pages.
+	if !store.CheckPermission("alice", nil, "interviews/alice-2024", "edit") {
+		t.Error("alice should be able to edit interviews/alice-2024 via @self")
+	}
+
+	// Alice cannot edit bob's interview pages.
+	if store.CheckPermission("alice", nil, "interviews/bob-2024", "edit") {
+		t.Error("alice should not be able to edit interviews/bob-2024")
+	}
+}
+
+func TestCheckPermission_SelfRulesRegexEscaping(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// A username with regex metacharacters should be escaped.
+	err = store.Replace([]ACLRule{
+		{Pattern: "staff/@self/.*", SubjectType: "special", Subject: "@self", Permissions: []string{"view", "edit"}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// User "a.b" should only match literally, not "axb".
+	if !store.CheckPermission("a.b", nil, "staff/a.b/notes", "edit") {
+		t.Error("a.b should match staff/a.b/notes")
+	}
+	if store.CheckPermission("a.b", nil, "staff/axb/notes", "edit") {
+		t.Error("a.b should not match staff/axb/notes (dot should be escaped)")
+	}
+}
+
+func TestValidateRules_SelfPattern(t *testing.T) {
+	// @self rules with @self in pattern should pass validation.
+	rules := []ACLRule{
+		{Pattern: "staff/@self/.*", SubjectType: "special", Subject: "@self", Permissions: []string{"view"}},
+	}
+	if err := validateRules(rules); err != nil {
+		t.Fatalf("expected @self rule to be valid: %v", err)
+	}
+}
+
 func TestList_ReturnsCopy(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewACLStore(dir)
