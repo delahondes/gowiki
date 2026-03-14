@@ -9,7 +9,7 @@ dev:
 	./scripts/dev.sh
 
 dev-backend: build-backend
-	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data/content
+	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data
 
 dev-frontend:
 	npm --prefix frontend run dev
@@ -21,4 +21,4 @@ build-frontend:
 	npm --prefix frontend run build
 
 run-prod: build-backend
-	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data/content -serve-web -web-dir ./frontend/dist
+	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data -serve-web -web-dir ./frontend/dist

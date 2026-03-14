@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -166,6 +167,28 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
+
+	// Host filtering: if site.base_url is configured, reject requests for other hostnames.
+	if baseURL := configStore.Get().Site.BaseURL; baseURL != "" {
+		if parsed, err := url.Parse(baseURL); err == nil && parsed.Hostname() != "" {
+			allowedHost := parsed.Hostname()
+			log.Printf("host filter: accepting requests for %s only", allowedHost)
+			r.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					host := r.Host
+					// Strip port if present.
+					if i := strings.LastIndex(host, ":"); i != -1 {
+						host = host[:i]
+					}
+					if host != allowedHost {
+						http.NotFound(w, r)
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+			})
+		}
+	}
 
 	// Auth endpoints (public).
 	r.Post("/api/auth/login", s.handleLogin)

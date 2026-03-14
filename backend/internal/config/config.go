@@ -12,12 +12,21 @@ import (
 
 // Config holds the full site configuration.
 type Config struct {
+	DataDir    string           `yaml:"data_dir" json:"data_dir"`       // root data directory (contains content/, meta/, attic/, etc.)
+	Server     ServerConfig     `yaml:"server" json:"server"`
 	Site       SiteConfig       `yaml:"site" json:"site"`
 	Auth       AuthConfig       `yaml:"auth" json:"auth"`
 	Drafts     DraftsConfig     `yaml:"drafts" json:"drafts"`
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	Todo       TodoConfig       `yaml:"todo" json:"todo"`
 	Reviewflow ReviewflowConfig `yaml:"reviewflow" json:"reviewflow"`
+}
+
+// ServerConfig holds network/serving settings.
+type ServerConfig struct {
+	Addr      string `yaml:"addr" json:"addr"`             // HTTP listen address (default ":8080")
+	TLSDomain string `yaml:"tls_domain" json:"tls_domain"` // domain for Let's Encrypt auto-TLS
+	WebDir    string `yaml:"web_dir" json:"web_dir"`       // directory containing built frontend assets
 }
 
 // ReviewflowConfig holds document validation workflow settings.
@@ -104,6 +113,9 @@ type DraftsConfig struct {
 // DefaultConfig returns the configuration with all default values.
 func DefaultConfig() Config {
 	return Config{
+		Server: ServerConfig{
+			Addr: ":8080",
+		},
 		Site: SiteConfig{
 			Title:       "Gowiki",
 			FooterPage:  "footer",

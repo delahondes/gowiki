@@ -18,7 +18,7 @@ trap cleanup EXIT INT TERM
 # servers that hold the bolt database lock.
 (cd backend && go build -o "${BINARY}" ./cmd/server)
 
-"${BINARY}" -addr :8080 -data-dir ./backend/data/content &
+"${BINARY}" -addr :8080 -data-dir ./backend/data &
 BACKEND_PID=$!
 
 npm --prefix frontend run dev

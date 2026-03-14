@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 
 	"gowiki/backend/internal/api"
 	"gowiki/backend/internal/auth"
@@ -21,21 +27,85 @@ import (
 
 func main() {
 	var (
-		addr     = flag.String("addr", ":8080", "HTTP listen address")
-		dataDir  = flag.String("data-dir", "./backend/data/content", "filesystem root for wiki content files (pages + attachments)")
-		serveWeb = flag.Bool("serve-web", false, "serve built frontend assets from disk")
-		webDir   = flag.String("web-dir", "./frontend/dist", "directory that contains built frontend assets")
+		configFile = flag.String("config", "", "path to config file (YAML)")
+		addr       = flag.String("addr", "", "HTTP listen address (overrides config)")
+		dataDir    = flag.String("data-dir", "", "data root directory (overrides config)")
+		serveWeb   = flag.Bool("serve-web", false, "serve built frontend assets from disk")
+		webDir     = flag.String("web-dir", "", "directory containing built frontend assets (overrides config)")
+		tlsDomain  = flag.String("tls-domain", "", "domain for automatic TLS via Let's Encrypt (overrides config)")
 	)
 	flag.Parse()
 
-	// Start pprof server for CPU profiling (access at http://localhost:6060/debug/pprof/).
-	go func() {
-		log.Printf("pprof: listening on :6060")
-		log.Println(http.ListenAndServe(":6060", nil))
-	}()
+	// Load config: from -config flag, or from data-dir/config.yaml (legacy), or defaults.
+	var configPath string
+	var configStore *config.Store
+	if *configFile != "" {
+		configPath = filepath.Clean(*configFile)
+		var err error
+		configStore, err = config.Load(configPath)
+		if err != nil {
+			log.Fatalf("init config: %v", err)
+		}
+	}
 
-	contentRoot := filepath.Clean(*dataDir)
-	metaRoot := filepath.Join(filepath.Dir(contentRoot), "meta")
+	// Resolve data root: CLI flag > config > legacy default.
+	dataRoot := *dataDir
+	if dataRoot == "" && configStore != nil {
+		dataRoot = configStore.Get().DataDir
+	}
+	if dataRoot == "" {
+		// Legacy default: ./backend/data (content root was ./backend/data/content).
+		dataRoot = "./backend/data"
+	}
+	dataRoot = filepath.Clean(dataRoot)
+
+	contentRoot := filepath.Join(dataRoot, "content")
+	metaRoot := filepath.Join(dataRoot, "meta")
+
+	// If no -config was given, load config from data root (legacy behavior).
+	if configStore == nil {
+		configPath = filepath.Join(dataRoot, "config.yaml")
+		var err error
+		configStore, err = config.Load(configPath)
+		if err != nil {
+			log.Fatalf("init config: %v", err)
+		}
+	}
+	log.Printf("config: %s", configPath)
+
+	cfg := configStore.Get()
+
+	// Resolve server settings: CLI flags override config.
+	listenAddr := cfg.Server.Addr
+	if *addr != "" {
+		listenAddr = *addr
+	}
+	if listenAddr == "" {
+		listenAddr = ":8080"
+	}
+
+	resolvedTLSDomain := cfg.Server.TLSDomain
+	if *tlsDomain != "" {
+		resolvedTLSDomain = *tlsDomain
+	}
+
+	resolvedWebDir := cfg.Server.WebDir
+	if *webDir != "" {
+		resolvedWebDir = *webDir
+	}
+	if resolvedWebDir == "" {
+		resolvedWebDir = "./frontend/dist"
+	}
+
+	serveWebEnabled := *serveWeb || cfg.Server.WebDir != ""
+
+	// Start pprof server only when not in TLS mode (avoid exposing debug on public servers).
+	if resolvedTLSDomain == "" {
+		go func() {
+			log.Printf("pprof: listening on :6060")
+			log.Println(http.ListenAndServe(":6060", nil))
+		}()
+	}
 
 	store, err := storage.NewFileStore(contentRoot)
 	if err != nil {
@@ -65,8 +135,7 @@ func main() {
 	store.MediaVersionStore = mediaVersionStore
 
 	// Initialize media attic for archiving old media versions.
-	mediaDataDir := filepath.Dir(contentRoot)
-	mediaAttic := storage.NewMediaAttic(mediaDataDir)
+	mediaAttic := storage.NewMediaAttic(dataRoot)
 	mediaStore.MediaAttic = mediaAttic
 
 	userStore, err := auth.NewUserStore(metaRoot)
@@ -82,17 +151,7 @@ func main() {
 		log.Fatalf("init acl store: %v", err)
 	}
 
-	// Load site configuration (creates default config.yaml if absent).
-	dataRoot := filepath.Dir(contentRoot)
-	configPath := filepath.Join(dataRoot, "config.yaml")
-	configStore, err := config.Load(configPath)
-	if err != nil {
-		log.Fatalf("init config: %v", err)
-	}
-	log.Printf("config: %s", configPath)
-
 	// Session store — uses TTL from config.
-	cfg := configStore.Get()
 	sessionTTL := auth.DefaultSessionTTL
 	if cfg.Auth.SessionTTL != "" {
 		if parsed, err := time.ParseDuration(cfg.Auth.SessionTTL); err == nil {
@@ -179,11 +238,11 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, *serveWeb, filepath.Clean(*webDir), todoService, reviewflowService, commentService)
-	log.Printf("gowiki backend listening on %s", *addr)
-	if *serveWeb {
-		log.Printf("serving frontend assets from %s", *webDir)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService)
+	if serveWebEnabled {
+		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}
+	log.Printf("data root: %s", dataRoot)
 	log.Printf("content root: %s", contentRoot)
 	log.Printf("meta root: %s", metaRoot)
 
@@ -204,7 +263,78 @@ func main() {
 		}
 	}()
 
-	if err := http.ListenAndServe(*addr, router); err != nil {
-		log.Fatalf("http server failed: %v", err)
+	// Graceful shutdown on SIGINT/SIGTERM.
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	if resolvedTLSDomain != "" {
+		// TLS mode: autocert on :443, HTTP redirect + ACME on :80.
+		certDir := filepath.Join(dataRoot, "certs")
+		if err := os.MkdirAll(certDir, 0o700); err != nil {
+			log.Fatalf("create cert dir: %v", err)
+		}
+
+		m := &autocert.Manager{
+			Cache:      autocert.DirCache(certDir),
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(resolvedTLSDomain),
+		}
+
+		// HTTP server: ACME challenges + redirect.
+		httpServer := &http.Server{
+			Addr:    ":80",
+			Handler: m.HTTPHandler(nil), // nil = redirect non-ACME to HTTPS
+		}
+		go func() {
+			log.Printf("http: listening on :80 (ACME + redirect)")
+			if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("http server failed: %v", err)
+			}
+		}()
+
+		// HTTPS server.
+		httpsServer := &http.Server{
+			Addr:    ":443",
+			Handler: router,
+			TLSConfig: &tls.Config{
+				GetCertificate: m.GetCertificate,
+				MinVersion:     tls.VersionTLS12,
+			},
+		}
+
+		go func() {
+			log.Printf("https: listening on :443 (domain: %s)", resolvedTLSDomain)
+			if err := httpsServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+				log.Fatalf("https server failed: %v", err)
+			}
+		}()
+
+		<-shutdown
+		log.Printf("shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		httpsServer.Shutdown(ctx)
+		httpServer.Shutdown(ctx)
+	} else {
+		// Plain HTTP mode.
+		log.Printf("http: listening on %s", listenAddr)
+		server := &http.Server{
+			Addr:    listenAddr,
+			Handler: router,
+		}
+
+		go func() {
+			if err := server.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatalf("http server failed: %v", err)
+			}
+		}()
+
+		<-shutdown
+		log.Printf("shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.Shutdown(ctx)
 	}
+
+	log.Printf("server stopped")
 }
