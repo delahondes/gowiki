@@ -371,6 +371,11 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 		args = append(args, "%"+opts.Tag+"%")
 		argN++
 	}
+	if opts.DueBefore != "" {
+		conditions = append(conditions, fmt.Sprintf("due_date <= $%d", argN))
+		args = append(args, opts.DueBefore)
+		argN++
+	}
 	if opts.Priority != "" {
 		conditions = append(conditions, fmt.Sprintf("priority = $%d", argN))
 		args = append(args, string(opts.Priority))

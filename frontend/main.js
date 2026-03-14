@@ -134,6 +134,7 @@ let spoilerInsertCommand = null
 let chartInsertCommand = null
 let slidesInsertCommand = null
 let todoInsertCommand = null
+let todoListInsertCommand = null
 let reviewflowInsertCommand = null
 let reviewflowLinkInsertCommand = null
 let versionLinkInsertCommand = null
@@ -200,6 +201,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "todo") {
     if (name === "insert") todoInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "todo-list") {
+    if (name === "insert") todoListInsertCommand = cmd
     return
   }
 
@@ -3931,6 +3937,19 @@ function buildMenubar() {
     })
   }
 
+  // Todo List
+  if (todoListInsertCommand) {
+    addImgButton("/icons/todo.svg", "Insert todo list", () => {
+      if (editMode === "visual" && editorView) {
+        todoListInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawEditor.focus()
+        rawInsertText(rawEditor, "{todo-list}\n\n")
+      }
+    })
+  }
+
   // Reviewflow
   if (reviewflowInsertCommand) {
     addImgButton("/icons/reviewflow.svg", "Insert reviewflow", () => {
@@ -6595,7 +6614,7 @@ function renderAdminPage() {
   const tabContent = document.createElement("div")
   tabContent.className = "gowiki-admin-content"
 
-  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration", "Database"]
+  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration", "Database", "Todo"]
   let activeTab = "Users"
 
   function renderTabBar() {
@@ -6624,6 +6643,7 @@ function renderAdminPage() {
       case "Locks": renderAdminLocksTab(tabContent); break
       case "Configuration": renderAdminConfigTab(tabContent); break
       case "Database": renderAdminDatabaseTab(tabContent); break
+      case "Todo": renderAdminTodoTab(tabContent); break
     }
   }
 
@@ -8448,6 +8468,234 @@ async function showDatabaseDataBrowser(tableName) {
 
     await loadData()
   })
+}
+
+// ── Admin: Todo Tab ──────────────────────────────────
+
+async function renderAdminTodoTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading tasks...</div>'
+
+  // Filter state
+  let filterStatus = ""
+  let filterAssignee = ""
+  let filterPriority = ""
+  let filterPage = ""
+  let cursor = ""
+
+  async function loadAndRender() {
+    const params = new URLSearchParams()
+    if (filterStatus) params.set("status", filterStatus)
+    if (filterAssignee) params.set("assignee", filterAssignee)
+    if (filterPriority) params.set("priority", filterPriority)
+    if (filterPage) params.set("page", filterPage)
+    if (cursor) params.set("cursor", cursor)
+    params.set("limit", "50")
+
+    try {
+      const resp = await authFetch("/api/plugin/todo/v1/tasks?" + params.toString())
+      if (!resp.ok) {
+        container.innerHTML = '<div class="gowiki-admin-error">Failed to load tasks.</div>'
+        return
+      }
+      const data = await resp.json()
+      const tasks = data.tasks || []
+      const nextCursor = data.cursor || ""
+
+      container.innerHTML = ""
+
+      // Filter bar
+      const filterBar = document.createElement("div")
+      filterBar.className = "gowiki-admin-toolbar"
+      filterBar.style.gap = "8px"
+      filterBar.style.flexWrap = "wrap"
+
+      const statusSelect = document.createElement("select")
+      statusSelect.className = "gowiki-admin-input"
+      statusSelect.style.width = "auto"
+      for (const [val, label] of [["", "All statuses"], ["open", "Open"], ["in_progress", "In progress"], ["done", "Done"], ["cancelled", "Cancelled"]]) {
+        const opt = document.createElement("option")
+        opt.value = val
+        opt.textContent = label
+        if (val === filterStatus) opt.selected = true
+        statusSelect.appendChild(opt)
+      }
+      statusSelect.addEventListener("change", () => { filterStatus = statusSelect.value; cursor = ""; loadAndRender() })
+      filterBar.appendChild(statusSelect)
+
+      const prioritySelect = document.createElement("select")
+      prioritySelect.className = "gowiki-admin-input"
+      prioritySelect.style.width = "auto"
+      for (const [val, label] of [["", "All priorities"], ["urgent", "Urgent"], ["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
+        const opt = document.createElement("option")
+        opt.value = val
+        opt.textContent = label
+        if (val === filterPriority) opt.selected = true
+        prioritySelect.appendChild(opt)
+      }
+      prioritySelect.addEventListener("change", () => { filterPriority = prioritySelect.value; cursor = ""; loadAndRender() })
+      filterBar.appendChild(prioritySelect)
+
+      const assigneeInput = document.createElement("input")
+      assigneeInput.className = "gowiki-admin-input"
+      assigneeInput.style.width = "140px"
+      assigneeInput.placeholder = "Assignee..."
+      assigneeInput.value = filterAssignee
+      let assigneeTimer = null
+      assigneeInput.addEventListener("input", () => {
+        clearTimeout(assigneeTimer)
+        assigneeTimer = setTimeout(() => { filterAssignee = assigneeInput.value.trim(); cursor = ""; loadAndRender() }, 400)
+      })
+      filterBar.appendChild(assigneeInput)
+
+      const pageInput = document.createElement("input")
+      pageInput.className = "gowiki-admin-input"
+      pageInput.style.width = "160px"
+      pageInput.placeholder = "Source page..."
+      pageInput.value = filterPage
+      let pageTimer = null
+      pageInput.addEventListener("input", () => {
+        clearTimeout(pageTimer)
+        pageTimer = setTimeout(() => { filterPage = pageInput.value.trim(); cursor = ""; loadAndRender() }, 400)
+      })
+      filterBar.appendChild(pageInput)
+
+      const refreshBtn = document.createElement("button")
+      refreshBtn.className = "gowiki-admin-btn"
+      refreshBtn.textContent = "Refresh"
+      refreshBtn.addEventListener("click", () => { cursor = ""; loadAndRender() })
+      filterBar.appendChild(refreshBtn)
+
+      container.appendChild(filterBar)
+
+      // Empty state
+      if (tasks.length === 0) {
+        const empty = document.createElement("div")
+        empty.className = "gowiki-admin-empty"
+        empty.textContent = cursor ? "No more tasks." : "No tasks found."
+        container.appendChild(empty)
+        return
+      }
+
+      // Table
+      const table = document.createElement("table")
+      table.className = "gowiki-admin-table"
+
+      const thead = document.createElement("thead")
+      const headerRow = document.createElement("tr")
+      for (const col of ["Title", "Assignee", "Status", "Priority", "Due", "Source", "Created by", "Created"]) {
+        const th = document.createElement("th")
+        th.textContent = col
+        headerRow.appendChild(th)
+      }
+      thead.appendChild(headerRow)
+      table.appendChild(thead)
+
+      const tbody = document.createElement("tbody")
+      const today = new Date().toISOString().slice(0, 10)
+
+      for (const task of tasks) {
+        const tr = document.createElement("tr")
+
+        // Title
+        const tdTitle = document.createElement("td")
+        if (task.source_page) {
+          const a = document.createElement("a")
+          a.href = task.source_page
+          a.textContent = task.title
+          a.style.color = "var(--gowiki-link-color, #2563eb)"
+          tdTitle.appendChild(a)
+        } else {
+          tdTitle.textContent = task.title
+        }
+        tr.appendChild(tdTitle)
+
+        // Assignee
+        const tdAssignee = document.createElement("td")
+        if (task.assignee && task.assignee.target) {
+          tdAssignee.textContent = (task.assignee.type === "group" ? "@" : "") + task.assignee.target
+        }
+        tr.appendChild(tdAssignee)
+
+        // Status
+        const tdStatus = document.createElement("td")
+        const statusBadge = document.createElement("span")
+        statusBadge.textContent = (task.status || "open").replace("_", " ")
+        statusBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
+        const statusColors = { open: "#dbeafe", in_progress: "#fef3c7", done: "#d1fae5", cancelled: "#f3f4f6" }
+        statusBadge.style.background = statusColors[task.status] || "#f3f4f6"
+        tdStatus.appendChild(statusBadge)
+        tr.appendChild(tdStatus)
+
+        // Priority
+        const tdPriority = document.createElement("td")
+        if (task.priority && task.priority !== "normal") {
+          const priBadge = document.createElement("span")
+          priBadge.textContent = task.priority
+          priBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
+          const priColors = { urgent: "#fecaca", high: "#fed7aa", low: "#e5e7eb" }
+          priBadge.style.background = priColors[task.priority] || ""
+          tdPriority.appendChild(priBadge)
+        } else {
+          tdPriority.textContent = task.priority || ""
+        }
+        tr.appendChild(tdPriority)
+
+        // Due date
+        const tdDue = document.createElement("td")
+        if (task.due_date) {
+          tdDue.textContent = task.due_date
+          if (task.due_date < today && task.status !== "done" && task.status !== "cancelled") {
+            tdDue.style.color = "#dc2626"
+            tdDue.style.fontWeight = "600"
+          }
+        }
+        tr.appendChild(tdDue)
+
+        // Source page
+        const tdSource = document.createElement("td")
+        if (task.source_page) {
+          const a = document.createElement("a")
+          a.href = task.source_page
+          a.textContent = task.source_page
+          a.style.color = "var(--gowiki-link-color, #2563eb)"
+          a.style.fontSize = "0.9em"
+          tdSource.appendChild(a)
+        }
+        tr.appendChild(tdSource)
+
+        // Created by
+        const tdCreator = document.createElement("td")
+        tdCreator.textContent = task.created_by || ""
+        tr.appendChild(tdCreator)
+
+        // Created at
+        const tdCreated = document.createElement("td")
+        tdCreated.textContent = task.created_at ? new Date(task.created_at).toLocaleDateString() : ""
+        tdCreated.style.fontSize = "0.9em"
+        tr.appendChild(tdCreated)
+
+        tbody.appendChild(tr)
+      }
+      table.appendChild(tbody)
+      container.appendChild(table)
+
+      // Pagination
+      if (nextCursor) {
+        const pager = document.createElement("div")
+        pager.style.cssText = "margin-top:12px;text-align:center;"
+        const nextBtn = document.createElement("button")
+        nextBtn.className = "gowiki-admin-btn"
+        nextBtn.textContent = "Load more"
+        nextBtn.addEventListener("click", () => { cursor = nextCursor; loadAndRender() })
+        pager.appendChild(nextBtn)
+        container.appendChild(pager)
+      }
+    } catch {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load tasks.</div>'
+    }
+  }
+
+  await loadAndRender()
 }
 
 async function bootstrap() {

@@ -61,13 +61,14 @@ func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
 		page = "/" + page
 	}
 	opts := ListOptions{
-		Status:   Status(r.URL.Query().Get("status")),
-		Assignee: r.URL.Query().Get("assignee"),
-		Page:     page,
-		Tag:      r.URL.Query().Get("tag"),
-		Priority: Priority(r.URL.Query().Get("priority")),
-		Cursor:   r.URL.Query().Get("cursor"),
-		Limit:    parseInt(r.URL.Query().Get("limit")),
+		Status:    Status(r.URL.Query().Get("status")),
+		Assignee:  r.URL.Query().Get("assignee"),
+		Page:      page,
+		Tag:       r.URL.Query().Get("tag"),
+		DueBefore: r.URL.Query().Get("due_before"),
+		Priority:  Priority(r.URL.Query().Get("priority")),
+		Cursor:    r.URL.Query().Get("cursor"),
+		Limit:     parseInt(r.URL.Query().Get("limit")),
 	}
 
 	tasks, cursor, err := h.svc.Store().List(r.Context(), opts)

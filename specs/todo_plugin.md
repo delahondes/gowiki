@@ -70,7 +70,7 @@ At startup the plugin checks for a live PostgreSQL connection. If none is config
 | `wiki_action` | `WikiAction` | | See §3.4 |
 | `source_page` | `page_path` | | Page where the task node lives (wiki_node tasks only) |
 | `tags` | `[]string` | | Free-form labels |
-| `priority` | `enum` | | `low \| normal \| high \| critical` |
+| `priority` | `enum` | | `low \| normal \| high \| urgent` |
 
 ### 3.2 Assignee
 
@@ -180,11 +180,51 @@ Tasks are declared as curly-brace block nodes, consistent with all other Gowiki 
 | `resolution` | `any` \| `all` | Only for group assignees; default `any` |
 | `due` | `YYYY-MM-DD` | Optional |
 | `recur` | `Nd` (e.g. `3d`) \| `daily` \| `weekly` \| `monthly` \| `yearly` \| `NM` (e.g. `3months`) | Requires `due` |
-| `priority` | `low` \| `normal` \| `high` \| `critical` | Default `normal` |
+| `priority` | `low` \| `normal` \| `high` \| `urgent` | Default `normal` |
 | `action` | `read:path`, `edit:path`, `create:pattern`, `set_meta:path:schema:field:value` | Optional |
 | `tags` | comma-separated strings | Optional |
 
 The Go parser extracts `{todo}` nodes on page save and creates/updates corresponding task records. Removing the node from the page cancels the task. The TS plugin renders the node as an interactive widget in the page view.
+
+### 4.2 Todo List Node
+
+The `{todo-list}` node renders a live list of tasks for the viewing user. It is a **read-only display** — content is fetched from the backend at render time and varies per viewer (each authenticated user sees their own tasks).
+
+**Basic form** (all open tasks assigned to the current user):
+
+```
+{todo-list}
+```
+
+**Filtered form:**
+
+```
+{todo-list assign="@quality-team" status="open,in_progress" priority="high,urgent"}
+```
+
+**Attribute reference:**
+
+| Attribute | Values | Default | Notes |
+|---|---|---|---|
+| `assign` | `@username` or `@groupname` | current user | Whose tasks to show |
+| `status` | comma-separated: `open`, `in_progress`, `done`, `cancelled` | `open,in_progress` | Filter by status |
+| `priority` | comma-separated: `low`, `normal`, `high`, `urgent` | (all) | Filter by priority |
+| `tag` | comma-separated strings | (all) | Filter by tag |
+| `due_before` | `YYYY-MM-DD` | (unset) | Only tasks due before this date |
+| `limit` | integer 1–100 | `20` | Maximum tasks shown |
+
+**Rendering behavior:**
+
+- **Authenticated user with tasks**: renders a compact table of matching tasks (title, assignee, due date, priority, status). Each title links to the source page. Checkboxes allow quick completion.
+- **Authenticated user with no matching tasks**: renders a subtle placeholder ("No pending tasks") that takes minimal vertical space.
+- **Unauthenticated user / no `assign` filter**: renders nothing (hidden).
+- **Todo plugin inactive** (no database): renders nothing.
+
+The node is **not stored in the backend** — it has no corresponding task record. It is purely a frontend rendering directive. The backend serves the data via the existing `GET /tasks` endpoint; the frontend fetches and renders client-side.
+
+**Editor behavior:**
+
+In visual mode, `{todo-list}` renders as a placeholder block ("Todo List" label with filter summary). The properties panel allows editing filters. In raw mode, it serializes as a single-line directive.
 
 ---
 
@@ -218,7 +258,7 @@ All endpoints require a valid Gowiki session cookie or Bearer token. Responses a
 | `page` | wiki page path | (all) |
 | `tag` | tag string | (all) |
 | `due_before` | ISO 8601 date | (unset) |
-| `priority` | `low,normal,high,critical` | (all) |
+| `priority` | `low,normal,high,urgent` | (all) |
 | `limit` | integer 1–200 | `50` |
 | `cursor` | opaque string | (first page) |
 
@@ -256,15 +296,17 @@ svc := core.Service("todo").(todoplugin.Service)
 ```
 plugins/todo/
 ├── src/
-│   ├── index.ts          // plugin entry — registers with Gowiki TS core
-│   ├── gate.ts           // TodoGate: typed fetch wrapper + SSE client
-│   ├── syntax.ts         // {todo …} node → DOM renderer
+│   ├── index.ts            // plugin entry — registers with Gowiki TS core
+│   ├── gate.ts             // TodoGate: typed fetch wrapper + SSE client
+│   ├── syntax.ts           // {todo …} and {todo-list …} nodes → DOM renderers
 │   ├── components/
-│   │   ├── TodoWidget.ts // inline task chip rendered in page body
-│   │   ├── TodoPanel.ts  // sidebar dashboard
-│   │   ├── TodoModal.ts  // create / edit task dialog
-│   │   └── TodoBadge.ts  // notification badge in nav bar
-│   └── types.ts          // mirrors Go data model
+│   │   ├── TodoWidget.ts   // inline task chip rendered in page body
+│   │   ├── TodoListView.ts // {todo-list} filtered task table
+│   │   ├── TodoPanel.ts    // sidebar dashboard
+│   │   ├── TodoModal.ts    // create / edit task dialog
+│   │   ├── TodoBadge.ts    // notification badge in nav bar
+│   │   └── TodoAdmin.ts    // admin panel tab (all tasks table)
+│   └── types.ts            // mirrors Go data model
 ├── styles/
 │   └── todo.css
 └── manifest.json
@@ -304,9 +346,55 @@ Replaces inline `{todo …}` nodes with an interactive chip:
 
 A collapsible sidebar section listing the calling user's open tasks, sorted by due date. Supports quick-complete, filter by tag/priority, and a "New task" button.
 
-### 6.5 Editor Integration
+### 6.5 TodoListView
 
-When the Gowiki page editor is open, the TS plugin registers a toolbar button that inserts a `{todo …}` block at the cursor and opens `TodoModal` to fill in details.
+Renders `{todo-list}` nodes. Unlike `TodoWidget` (which maps 1:1 to a backend task), `TodoListView` fetches a filtered list from the API and renders a compact task table.
+
+- Calls `gate.list(opts)` with filters derived from the node's attributes
+- If `assign` is absent, defaults to the current user's username (from `window.__gowiki_user`)
+- Renders each task as a row: checkbox, title (linked to source page), assignee, due date pill, priority badge
+- Checkbox triggers `gate.complete(id)` and removes the row optimistically
+- If the result set is empty, renders a muted "No pending tasks" placeholder
+- If the todo plugin is inactive or the user is unauthenticated, renders nothing (empty DOM)
+- Subscribes to SSE for live updates (task completed elsewhere → row disappears)
+
+### 6.6 Editor Integration
+
+When the Gowiki page editor is open, the TS plugin registers toolbar buttons:
+- **Todo**: inserts a `{todo …}` block at the cursor and opens `TodoModal` to fill in details
+- **Todo List**: inserts a `{todo-list}` block with default filters and opens the properties panel
+
+### 6.7 Admin Panel — Todo Tab
+
+When the todo plugin is active, an additional **"Todo"** tab appears in the admin panel. This tab provides a read-only overview of all tasks across the wiki.
+
+**Table columns:**
+
+| Column | Content |
+|---|---|
+| Title | Task title, linked to source page (if any) |
+| Assignee | Username or group name |
+| Status | `open` / `in_progress` / `done` / `cancelled` |
+| Priority | Color-coded badge |
+| Due date | Date, highlighted red if overdue |
+| Source | `wiki_node` or `api` |
+| Created by | Username |
+| Created at | Timestamp |
+
+**Filters** (above the table):
+
+- Status: multi-select (default: `open`, `in_progress`)
+- Assignee: text input (username or group name)
+- Priority: multi-select
+- Source page: text input
+
+**Behavior:**
+
+- Fetches via `GET /api/plugin/todo/v1/tasks` with admin-level access (returns all tasks, not just the caller's)
+- Paginated (50 per page) with cursor-based navigation
+- No edit/complete/cancel actions from the admin table — view only for now
+- Sortable by due date and created date
+- The tab is only visible when the todo plugin is active (database connected)
 
 ---
 
@@ -512,10 +600,12 @@ Tasks created programmatically via the Go Service API are **not** written to the
 |---|---|
 | View tasks assigned to self | Authenticated user |
 | View tasks on a page | Read access to that page |
+| View `{todo-list}` on a page | Authenticated user (sees own tasks only, unless `assign` filter specifies another target) |
 | View individual completions on a group "all" task | Task creator or admin only |
 | Create a task | `editor` or above |
 | Assign to another user | `editor` or above |
 | Edit / delete any task | `admin` or task creator |
+| View admin Todo tab (all tasks) | `admin` |
 | Manage plugin config | `admin` |
 
 ---

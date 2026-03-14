@@ -142,13 +142,14 @@ func (p Patch) IsEmpty() bool {
 
 // ListOptions controls task listing with filtering and pagination.
 type ListOptions struct {
-	Status   Status `json:"status,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-	Page     string `json:"page,omitempty"`
-	Tag      string `json:"tag,omitempty"`
-	Priority Priority `json:"priority,omitempty"`
-	Cursor   string `json:"cursor,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	Status    Status   `json:"status,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
+	Page      string   `json:"page,omitempty"`
+	Tag       string   `json:"tag,omitempty"`
+	DueBefore string   `json:"due_before,omitempty"` // YYYY-MM-DD
+	Priority  Priority `json:"priority,omitempty"`
+	Cursor    string   `json:"cursor,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
 }
 
 // ParsedDirective is the result of extracting a {todo ...} directive from markdown.

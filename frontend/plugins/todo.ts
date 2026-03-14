@@ -447,6 +447,249 @@ class TodoNodeView {
   }
 }
 
+// --- Todo List Properties ---
+
+const todoListProperties = [
+  {
+    name: "assign",
+    label: "Assignee filter",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "e.g. @alice or @quality-team (empty = current user)",
+  },
+  {
+    name: "status",
+    label: "Status filter",
+    default: "open,in_progress",
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? "open,in_progress"),
+    helpText: "Comma-separated: open, in_progress, done, cancelled",
+  },
+  {
+    name: "priority",
+    label: "Priority filter",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Comma-separated: low, normal, high, urgent",
+  },
+  {
+    name: "tag",
+    label: "Tag filter",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? ""),
+  },
+  {
+    name: "due_before",
+    label: "Due before",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "YYYY-MM-DD",
+  },
+  {
+    name: "limit",
+    label: "Max items",
+    default: "20",
+    parse: (raw: string) => {
+      const n = parseInt(raw.trim(), 10)
+      return (isNaN(n) || n < 1) ? "20" : n > 100 ? "100" : String(n)
+    },
+    serialize: (value: string | null) => String(value ?? "20"),
+  },
+]
+
+// --- Todo List NodeView ---
+
+class TodoListNodeView {
+  dom: HTMLElement
+  private node: PMNode
+  private view: EditorView
+  private getPos: () => number | undefined
+  private eventSource: EventSource | null = null
+
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+    this.node = node
+    this.view = view
+    this.getPos = getPos
+
+    this.dom = document.createElement("div")
+    this.dom.className = "gowiki-todo-list"
+    this.dom.contentEditable = "false"
+
+    this.fetchAndRender()
+  }
+
+  private async fetchAndRender() {
+    const user = (window as any).__gowikiCurrentUser
+    if (!user?.username) {
+      this.dom.innerHTML = ""
+      return
+    }
+
+    const attrs = this.node.attrs
+    const params: Record<string, string> = {}
+    params.assignee = attrs.assign ? attrs.assign.replace(/^@/, "") : user.username
+    if (attrs.status) params.status = attrs.status
+    if (attrs.priority) params.priority = attrs.priority
+    if (attrs.tag) params.tag = attrs.tag
+    if (attrs.due_before) params.due_before = attrs.due_before
+    params.limit = attrs.limit || "20"
+
+    try {
+      const data = await gate.list(params)
+      this.renderTasks(data.tasks || [])
+    } catch {
+      // Plugin unavailable or error — render nothing
+      this.dom.innerHTML = ""
+    }
+
+    // Connect SSE for live updates
+    if (!this.eventSource) {
+      this.eventSource = gate.connectSSE(() => {
+        this.fetchAndRender()
+      })
+    }
+  }
+
+  private renderTasks(tasks: TodoTask[]) {
+    this.dom.innerHTML = ""
+
+    if (tasks.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-todo-list-empty"
+      empty.textContent = "No pending tasks"
+      this.dom.appendChild(empty)
+      return
+    }
+
+    const table = document.createElement("table")
+    table.className = "gowiki-todo-list-table"
+
+    const thead = document.createElement("thead")
+    const hr = document.createElement("tr")
+    for (const col of ["", "Title", "Assignee", "Due", "Priority", "Status"]) {
+      const th = document.createElement("th")
+      th.textContent = col
+      hr.appendChild(th)
+    }
+    thead.appendChild(hr)
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+    for (const task of tasks) {
+      const tr = document.createElement("tr")
+      tr.className = "gowiki-todo-list-row"
+
+      // Checkbox
+      const tdCb = document.createElement("td")
+      const cb = document.createElement("input")
+      cb.type = "checkbox"
+      cb.checked = task.status === "done"
+      cb.disabled = task.status === "done" || task.status === "cancelled"
+      cb.addEventListener("change", async (e) => {
+        e.preventDefault()
+        try {
+          if (cb.checked) {
+            await gate.complete(task.id)
+          } else {
+            await gate.reopen(task.id)
+          }
+          this.fetchAndRender()
+        } catch {
+          cb.checked = !cb.checked
+        }
+      })
+      tdCb.appendChild(cb)
+      tr.appendChild(tdCb)
+
+      // Title (linked to source page)
+      const tdTitle = document.createElement("td")
+      if (task.source_page) {
+        const link = document.createElement("a")
+        link.href = "/" + task.source_page
+        link.textContent = task.title
+        link.addEventListener("click", (e) => {
+          e.preventDefault()
+          window.location.href = "/" + task.source_page
+        })
+        tdTitle.appendChild(link)
+      } else {
+        tdTitle.textContent = task.title
+      }
+      if (task.status === "done") tdTitle.style.textDecoration = "line-through"
+      tr.appendChild(tdTitle)
+
+      // Assignee
+      const tdAssign = document.createElement("td")
+      tdAssign.textContent = task.assignee?.target || ""
+      tr.appendChild(tdAssign)
+
+      // Due date
+      const tdDue = document.createElement("td")
+      if (task.due_date) {
+        const dateStr = task.due_date.slice(0, 10)
+        tdDue.textContent = dateStr
+        const today = new Date().toISOString().slice(0, 10)
+        if (dateStr < today && task.status !== "done") {
+          tdDue.className = "gowiki-todo-list-overdue"
+        }
+      }
+      tr.appendChild(tdDue)
+
+      // Priority
+      const tdPri = document.createElement("td")
+      const priority = task.priority || "normal"
+      if (priority !== "normal") {
+        const badge = document.createElement("span")
+        badge.className = "gowiki-todo-priority"
+        const colors = PRIORITY_COLORS[priority] || PRIORITY_COLORS.normal
+        badge.style.background = colors.bg
+        badge.style.color = colors.fg
+        badge.textContent = priority
+        tdPri.appendChild(badge)
+      }
+      tr.appendChild(tdPri)
+
+      // Status
+      const tdStatus = document.createElement("td")
+      tdStatus.textContent = task.status
+      tr.appendChild(tdStatus)
+
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    this.dom.appendChild(table)
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    const attrsChanged = JSON.stringify(node.attrs) !== JSON.stringify(this.node.attrs)
+    this.node = node
+    if (attrsChanged) this.fetchAndRender()
+    return true
+  }
+
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
+    return true
+  }
+
+  ignoreMutation(): boolean {
+    return true
+  }
+
+  destroy() {
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
+    }
+  }
+}
+
 // --- Styles ---
 
 const todoStyles = `
@@ -597,6 +840,63 @@ const todoStyles = `
 .gowiki-todo-panel-empty {
   color: #999;
   font-style: italic;
+}
+
+/* Todo list */
+.gowiki-todo-list {
+  margin: 8px 0;
+}
+
+.gowiki-todo-list-empty {
+  color: #999;
+  font-style: italic;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.gowiki-todo-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.gowiki-todo-list-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  color: #666;
+  padding: 4px 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.gowiki-todo-list-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.gowiki-todo-list-table a {
+  color: #1a56db;
+  text-decoration: none;
+}
+
+.gowiki-todo-list-table a:hover {
+  text-decoration: underline;
+}
+
+.gowiki-todo-list-overdue {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.gowiki-todo-list-row input[type="checkbox"] {
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+}
+
+#app.gowiki-editing .gowiki-todo-list.ProseMirror-selectednode {
+  outline: 2px solid #ffd43b;
+  outline-offset: 1px;
 }
 
 /* Badge */
@@ -763,6 +1063,115 @@ export const todoPlugin: WikiPlugin = {
           } catch {
             // Leave default selection if NodeSelection fails
           }
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
+
+    // --- Todo List node ---
+
+    reg.registerSchema({
+      nodes: {
+        todo_list: {
+          group: "block",
+          atom: true,
+          attrs: {
+            assign: { default: "" },
+            status: { default: "open,in_progress" },
+            priority: { default: "" },
+            tag: { default: "" },
+            due_before: { default: "" },
+            limit: { default: "20" },
+          },
+          toDOM(node: PMNode) {
+            const summary = node.attrs.assign ? `for ${node.attrs.assign}` : "for current user"
+            return [
+              "div",
+              { class: "gowiki-todo-list", "data-assign": node.attrs.assign || "" },
+              `Todo List (${summary})`,
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "div.gowiki-todo-list",
+              getAttrs(dom: HTMLElement) {
+                return { assign: dom.getAttribute("data-assign") || "" }
+              },
+            },
+          ],
+        },
+      },
+    })
+
+    reg.registerSelfContainedDirective("todo-list", {
+      tokenType: "todo_list",
+      nodeType: "todo_list",
+      properties: todoListProperties,
+    })
+
+    reg.registerText("todo_list", {
+      run(ctx, tok) {
+        const attrs = tok.meta?.attrs ?? {}
+        ctx.push(
+          ctx.schema.nodes.todo_list.create({
+            assign: attrs.assign ?? "",
+            status: attrs.status ?? "open,in_progress",
+            priority: attrs.priority ?? "",
+            tag: attrs.tag ?? "",
+            due_before: attrs.due_before ?? "",
+            limit: attrs.limit ?? "20",
+          })
+        )
+      },
+    })
+
+    reg.registerPMNode("todo_list", {
+      print(node) {
+        const parts: string[] = []
+        if (node.attrs.assign) parts.push(`assign="${node.attrs.assign}"`)
+        if (node.attrs.status && node.attrs.status !== "open,in_progress") parts.push(`status="${node.attrs.status}"`)
+        if (node.attrs.priority) parts.push(`priority="${node.attrs.priority}"`)
+        if (node.attrs.tag) parts.push(`tag="${node.attrs.tag}"`)
+        if (node.attrs.due_before) parts.push(`due_before=${node.attrs.due_before}`)
+        if (node.attrs.limit && node.attrs.limit !== "20") parts.push(`limit=${node.attrs.limit}`)
+        return `{todo-list${parts.length ? " " + parts.join(" ") : ""}}\n\n`
+      },
+    })
+
+    reg.registerEditorPlugin((_schema: Schema) => {
+      return new PMPlugin({
+        key: new PluginKey("gowiki.todolist"),
+        props: {
+          nodeViews: {
+            todo_list(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new TodoListNodeView(node, view, getPos)
+            },
+          },
+        },
+      })
+    })
+
+    reg.registerCommand("todo-list", "insert", (state, dispatch) => {
+      const listType = reg.schema.nodes.todo_list
+      if (!listType) return false
+      if (dispatch) {
+        const node = listType.create({})
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 200),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === listType) insertedAt = pos
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch { /* leave default selection */ }
         }
         dispatch(tr.scrollIntoView())
       }
