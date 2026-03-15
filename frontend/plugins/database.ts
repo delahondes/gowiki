@@ -1032,9 +1032,8 @@ class DatabaseQueryNodeView {
           }
         } else if (f.type === "user" && val) {
           td.textContent = String(val)
-          getUserList().then(users => {
-            const u = users.find(u => u.username === String(val))
-            if (u && u.display_name) td.textContent = u.display_name
+          fetchUserInfo(String(val)).then(info => {
+            if (info.label) td.textContent = info.label
           })
         } else if ((f.type === "date" || f.type === "datetime") && val) {
           // Format ISO dates as YYYY-MM-DD.
@@ -1870,9 +1869,8 @@ class DatabaseRowNodeView {
         }
       } else if (f && f.type === "user" && val) {
         tdVal.textContent = String(val)
-        getUserList().then(users => {
-          const u = users.find(u => u.username === String(val))
-          if (u && u.display_name) tdVal.textContent = u.display_name
+        fetchUserInfo(String(val)).then(info => {
+          if (info.label) tdVal.textContent = info.label
         })
       } else {
         tdVal.textContent = String(val)
@@ -2097,11 +2095,11 @@ class DatabaseRowNodeView {
 
 const ALL_CAPS_RE = /^[A-Z_]+$/
 
-// Cache for user display info: username -> { display_name, email }
-const userInfoCache: Record<string, { display_name: string; email: string }> = {}
+// Cache for user display info: username -> { display_name, email, label }
+const userInfoCache: Record<string, { display_name: string; email: string; label: string }> = {}
 
-async function fetchUserInfo(username: string): Promise<{ display_name: string; email: string }> {
-  if (!username) return { display_name: "", email: "" }
+async function fetchUserInfo(username: string): Promise<{ display_name: string; email: string; label: string }> {
+  if (!username) return { display_name: "", email: "", label: "" }
   if (userInfoCache[username]) return userInfoCache[username]
   try {
     const resp = await fetch(`/api/users/display?users=${encodeURIComponent(username)}`)
@@ -2112,12 +2110,13 @@ async function fetchUserInfo(username: string): Promise<{ display_name: string; 
         userInfoCache[username] = {
           display_name: info.display_name || username,
           email: info.email || "",
+          label: info.label || username,
         }
         return userInfoCache[username]
       }
     }
   } catch { /* best effort */ }
-  return { display_name: username, email: "" }
+  return { display_name: username, email: "", label: username }
 }
 
 function extractTitle(view: EditorView): string {
@@ -2219,16 +2218,36 @@ function resolveGlobalVar(name: string, view: EditorView): string | null | undef
 
 // ── Template Variable NodeView ──
 
-function resolveTemplateFields(state: EditorState): Record<string, string> {
+// Cache table field types for template variable user resolution.
+const tableFieldTypeCache: Map<string, Map<string, string>> = new Map()
+
+async function getFieldTypes(tableName: string): Promise<Map<string, string>> {
+  if (tableFieldTypeCache.has(tableName)) return tableFieldTypeCache.get(tableName)!
+  try {
+    const resp = await fetch(`/api/database/${encodeURIComponent(tableName)}/schema`)
+    if (!resp.ok) return new Map()
+    const schema = await resp.json()
+    const types = new Map<string, string>()
+    for (const f of (schema.fields || [])) {
+      if (!f.archived_at) types.set(f.name, f.type)
+    }
+    tableFieldTypeCache.set(tableName, types)
+    return types
+  } catch { return new Map() }
+}
+
+function resolveTemplateFields(state: EditorState): { fields: Record<string, string>; table: string } {
   const fields: Record<string, string> = {}
+  let table = ""
   state.doc.descendants((node) => {
     if (node.type.name === "database_row" && node.attrs._fields) {
+      if (node.attrs.table && !table) table = node.attrs.table
       for (const [k, v] of Object.entries(node.attrs._fields as Record<string, any>)) {
         if (!(k in fields)) fields[k] = String(v)
       }
     }
   })
-  return fields
+  return { fields, table }
 }
 
 class TemplateVarNodeView {
@@ -2241,10 +2260,11 @@ class TemplateVarNodeView {
     this.view = view
     this.dom = document.createElement("span")
     this.dom.contentEditable = "false"
-    this.renderResolved(resolveTemplateFields(view.state))
+    const { fields, table } = resolveTemplateFields(view.state)
+    this.renderResolved(fields, table)
   }
 
-  private renderResolved(fields: Record<string, string>) {
+  private renderResolved(fields: Record<string, string>, table: string) {
     const name = this.node.attrs.name || ""
     const fallback = this.node.attrs.fallback || ""
 
@@ -2293,6 +2313,8 @@ class TemplateVarNodeView {
       this.dom.className = "gowiki-template-var"
       this.dom.textContent = resolved
       this.dom.title = `{{${name}}}`
+      // If the field is a user type, resolve to display label
+      this.resolveUserFieldAsync(table, name, resolved)
     } else if (fallback) {
       // Unresolved database var with fallback → show fallback
       this.dom.className = "gowiki-template-var"
@@ -2304,6 +2326,18 @@ class TemplateVarNodeView {
       this.dom.textContent = `ERR: {{${name}}}`
       this.dom.title = `Unresolved variable: ${name}`
     }
+  }
+
+  private resolveUserFieldAsync(table: string, fieldName: string, username: string) {
+    if (!table || !username) return
+    getFieldTypes(table).then(types => {
+      if (types.get(fieldName) !== "user") return
+      fetchUserInfo(username).then(info => {
+        if (info.label && info.label !== username) {
+          this.dom.textContent = info.label
+        }
+      })
+    })
   }
 
   private resolveAuthorDisplayAsync(name: string) {
@@ -2330,7 +2364,8 @@ class TemplateVarNodeView {
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
-    this.renderResolved(resolveTemplateFields(this.view.state))
+    const { fields, table } = resolveTemplateFields(this.view.state)
+    this.renderResolved(fields, table)
     return true
   }
 
@@ -2698,7 +2733,7 @@ export const databasePlugin: WikiPlugin = {
         view() {
           return {
             update(view: EditorView) {
-              const fields = resolveTemplateFields(view.state)
+              const { fields, table } = resolveTemplateFields(view.state)
               const changed = Object.keys(fields).length !== Object.keys(lastFields).length ||
                 Object.entries(fields).some(([k, v]) => lastFields[k] !== v)
               if (!changed) return
@@ -2746,6 +2781,17 @@ export const databasePlugin: WikiPlugin = {
                       domNode.className = "gowiki-template-var"
                       domNode.textContent = resolved
                       domNode.title = `{{${name}}}`
+                      // Resolve user fields to display label
+                      if (table && resolved) {
+                        getFieldTypes(table).then(types => {
+                          if (types.get(name) !== "user") return
+                          fetchUserInfo(resolved).then(info => {
+                            if (info.label && info.label !== resolved) {
+                              domNode.textContent = info.label
+                            }
+                          })
+                        })
+                      }
                     } else if (fallback) {
                       domNode.className = "gowiki-template-var"
                       domNode.textContent = fallback
