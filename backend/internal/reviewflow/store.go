@@ -18,9 +18,11 @@ func NewStore(metaRoot string) *Store {
 }
 
 // statePath derives the reviewflow state file path for a page.
-// /foo/bar → meta/foo/bar.reviewflow.json
+// /foo/bar  → meta/foo/bar.reviewflow.json
+// /foo/bar/ → meta/foo/bar.reviewflow.json  (trailing slash stripped)
 func (s *Store) statePath(pagePath string) string {
 	clean := strings.TrimPrefix(pagePath, "/")
+	clean = strings.TrimRight(clean, "/")
 	if clean == "" {
 		clean = "index"
 	}

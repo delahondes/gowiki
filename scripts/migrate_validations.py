@@ -25,6 +25,20 @@ from datetime import datetime, timezone
 
 import phpserialize
 
+
+def reviewflow_state_rel(page_relpath: str) -> str:
+    """Derive the .reviewflow.json relative path matching the store convention.
+
+    For namespace index pages (e.g. sop01/index.md), the state file lives at
+    sop01.reviewflow.json (parent level), not sop01/index.reviewflow.json.
+    """
+    rf = page_relpath.replace(".md", ".reviewflow.json")
+    # Fix namespace index pages: dir/index.reviewflow.json → dir.reviewflow.json
+    if rf.endswith("/index.reviewflow.json"):
+        rf = rf[: -len("/index.reviewflow.json")] + ".reviewflow.json"
+    return rf
+
+
 # ── Display name → login mapping ──
 
 DISPLAY_TO_LOGIN = {
@@ -423,7 +437,7 @@ def process_page(
         state = create_reviewflow_state(roles, version_tag, confirmed_by, page_version)
 
         # Write .reviewflow.json
-        rf_rel = page_relpath.replace(".md", ".reviewflow.json")
+        rf_rel = reviewflow_state_rel(page_relpath)
         rf_path = os.path.join(gowiki_meta_root, rf_rel)
         if dry_run:
             return f"DRY-A {page_relpath}: would create {rf_rel} (validated)"
@@ -479,7 +493,7 @@ def process_page(
         if confirmed_by:
             page_version = get_page_version(gowiki_meta_root, page_relpath)
             state = create_reviewflow_state(roles, version_tag, confirmed_by, page_version)
-            rf_rel = page_relpath.replace(".md", ".reviewflow.json")
+            rf_rel = reviewflow_state_rel(page_relpath)
             rf_path = os.path.join(gowiki_meta_root, rf_rel)
             os.makedirs(os.path.dirname(rf_path), exist_ok=True)
             with open(rf_path, "w") as f:
