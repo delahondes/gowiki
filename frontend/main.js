@@ -1274,6 +1274,7 @@ function clearContent() {
   destroyComments()
   document.removeEventListener("gowiki:node-rendered", debouncedReapplyComments)
   if (reapplyTimer) { clearTimeout(reapplyTimer); reapplyTimer = null }
+  if (CSS.highlights) CSS.highlights.delete("search-highlight")
   contentRoot.innerHTML = ""
 }
 
@@ -1594,11 +1595,15 @@ function mountReadOnlyView(container, markdown, className) {
   addCodeCopyButtons(wrapper)
   // Fold spoilers by default in view mode
   wrapper.querySelectorAll("details.gowiki-spoiler[open]").forEach(d => d.removeAttribute("open"))
-  // In view mode we only need the rendered DOM — not ProseMirror's event
-  // handling or selection tracking. Remove contenteditable and stop the
-  // internal DOM/selection observer so the browser handles selection natively.
   view.dom.removeAttribute("contenteditable")
   if (view.domObserver && view.domObserver.stop) view.domObserver.stop()
+  // ProseMirror registers copy/cut/paste handlers on view.dom that call
+  // preventDefault(), which suppresses the browser's native copy even when
+  // the editor is non-editable.  Add a capture-phase handler that stops
+  // the event from reaching ProseMirror's handler.
+  for (const evt of ["copy", "cut", "paste"]) {
+    view.dom.addEventListener(evt, (e) => e.stopImmediatePropagation(), true)
+  }
   return view
 }
 
@@ -1703,8 +1708,11 @@ function renderView() {
     })
   }
 
-  // Re-anchor comments when async nodes (database, etc.) finish rendering.
+  // Re-anchor comments and re-apply highlights when async nodes finish rendering.
   document.addEventListener("gowiki:node-rendered", debouncedReapplyComments)
+  if (highlight) {
+    document.addEventListener("gowiki:node-rendered", () => highlightTermsInView(contentRoot, highlight))
+  }
 }
 
 async function checkReadAck(path, currentVersion, container) {
@@ -1795,35 +1803,50 @@ function highlightTermsInView(container, query) {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return
 
+  // Use CSS Custom Highlight API — it styles ranges without modifying the DOM,
+  // so ProseMirror's async DOM reconciliation cannot discard our highlights.
+  if (!CSS.highlights) return
+
+  const ranges = []
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-  const matches = []
 
   while (walker.nextNode()) {
     const textNode = walker.currentNode
-    // Skip code blocks and script/style elements.
     const parent = textNode.parentElement
     if (!parent) continue
     if (parent.closest("pre, code, script, style")) continue
 
     const text = textNode.textContent.toLowerCase()
+
+    const hits = []
     for (const term of terms) {
       let idx = 0
       while ((idx = text.indexOf(term, idx)) !== -1) {
-        matches.push({ node: textNode, start: idx, length: term.length })
+        hits.push({ start: idx, length: term.length })
         idx += term.length
       }
     }
+    if (hits.length === 0) continue
+
+    hits.sort((a, b) => a.start - b.start)
+    const merged = [hits[0]]
+    for (let i = 1; i < hits.length; i++) {
+      const prev = merged[merged.length - 1]
+      if (hits[i].start < prev.start + prev.length) continue
+      merged.push(hits[i])
+    }
+
+    for (const { start, length } of merged) {
+      const range = new Range()
+      range.setStart(textNode, start)
+      range.setEnd(textNode, start + length)
+      ranges.push(range)
+    }
   }
 
-  // Apply highlights in reverse order to preserve positions.
-  for (let i = matches.length - 1; i >= 0; i--) {
-    const { node, start, length } = matches[i]
-    const range = document.createRange()
-    range.setStart(node, start)
-    range.setEnd(node, start + length)
-    const mark = document.createElement("mark")
-    mark.className = "search-highlight"
-    range.surroundContents(mark)
+  if (ranges.length > 0) {
+    const hl = new Highlight(...ranges)
+    CSS.highlights.set("search-highlight", hl)
   }
 }
 

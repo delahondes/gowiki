@@ -172,10 +172,8 @@ body {
   border-radius: 2px;
 }
 
-mark.search-highlight {
-  background: #fff3bf;
-  padding: 0 1px;
-  border-radius: 2px;
+::highlight(search-highlight) {
+  background-color: #fff3bf;
 }
 
 /* ── App layout ────────────────────────────────────── */
