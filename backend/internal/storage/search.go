@@ -112,9 +112,25 @@ func (s *SearchIndex) DeletePage(pagePath string) error {
 	return s.index.Delete(pagePath)
 }
 
+// escapeQueryString escapes Bleve query-string special characters so they
+// are treated as literal text rather than operators.
+func escapeQueryString(q string) string {
+	// Characters with special meaning in Bleve query string syntax.
+	const specials = `+-=&|><!(){}[]^"~*?:\/`
+	var b strings.Builder
+	b.Grow(len(q))
+	for _, r := range q {
+		if strings.ContainsRune(specials, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // Search queries the index and returns results with path, title, and snippet.
 func (s *SearchIndex) Search(query string, limit int) ([]SearchResult, error) {
-	q := bleve.NewQueryStringQuery(query)
+	q := bleve.NewQueryStringQuery(escapeQueryString(query))
 	req := bleve.NewSearchRequestOptions(q, limit, 0, false)
 	req.Fields = []string{"path", "title", "body"}
 	req.Highlight = bleve.NewHighlightWithStyle(ansi.Name)
