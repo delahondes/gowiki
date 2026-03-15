@@ -345,6 +345,12 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
 
 // ─── Cell directive parsing ──────────────────────────────
 
+// Escape markdown-significant characters in formula text so that e.g. * is
+// not interpreted as italic when the cell is re-parsed.
+function escapeFormulaText(text: string): string {
+  return text.replace(/[\\*_`~^]/g, ch => "\\" + ch)
+}
+
 // Generic cell directive: {key=value key=value ...} at start of cell text.
 // Supported keys: color, text-color, valign, vtext
 const CELL_DIRECTIVE_RE = /^\{([^}]+)\}\s*/
@@ -401,9 +407,14 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
     changed = true
   }
 
-  // Formula detection — store formula in attr, empty cell text
-  if (newText.trimStart().startsWith("=") && newText.trim().length > 1) {
-    newAttrs.formula = newText.trim().slice(1)
+  // Formula detection — store formula in attr, empty cell text.
+  // Use full paragraph textContent to handle cases where markdown special chars
+  // (e.g. * in formulas) were interpreted as marks during parsing.
+  const fullParaText = directiveMatch
+    ? firstBlock.textContent.slice(directiveMatch[0].length)
+    : firstBlock.textContent
+  if (fullParaText.trimStart().startsWith("=") && fullParaText.trim().length > 1) {
+    newAttrs.formula = fullParaText.trim().slice(1)
     newText = ""
     changed = true
   }
@@ -412,7 +423,10 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
 
   // Rebuild cell with modified text and attrs
   let newFirstBlock: Node
-  if (newText === "") {
+  if (newText === "" && newAttrs.formula != null) {
+    // Formula cell: clear entire paragraph content (formula is in attr)
+    newFirstBlock = schema.nodes.paragraph.create()
+  } else if (newText === "") {
     if (firstBlock.childCount === 1) {
       newFirstBlock = schema.nodes.paragraph.create()
     } else {
@@ -908,7 +922,7 @@ function serializeCellContent(
   if (dirParts.length > 0) prefix = `{${dirParts.join(" ")}} `
 
   if (cell.attrs.formula) {
-    return prefix + `=${cell.attrs.formula}`
+    return prefix + `=${escapeFormulaText(cell.attrs.formula)}`
   }
 
   let txt = ""
