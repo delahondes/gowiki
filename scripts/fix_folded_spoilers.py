@@ -36,6 +36,21 @@ def find_code_fence_end(lines, start):
     return -1
 
 
+def max_backtick_run(lines, start, end):
+    """Return the longest consecutive backtick run in lines[start:end]."""
+    max_run = 0
+    for line in lines[start:end]:
+        cur = 0
+        for ch in line:
+            if ch == '`':
+                cur += 1
+                if cur > max_run:
+                    max_run = cur
+            else:
+                cur = 0
+    return max_run
+
+
 def wrap_in_spoiler(lines, title, start, end):
     """Insert spoiler fences around lines[start:end]."""
     # Trim empty lines at boundaries
@@ -50,7 +65,10 @@ def wrap_in_spoiler(lines, title, start, end):
     if start > 0 and '```spoiler' in lines[start - 1]:
         return lines, False
 
-    result = lines[:start] + [f'```spoiler {title}'] + lines[start:end] + ['```'] + lines[end:]
+    # Use enough backticks to avoid collision with inner fences
+    inner_max = max_backtick_run(lines, start, end)
+    ticks = '`' * max(3, inner_max + 1)
+    result = lines[:start] + [f'{ticks}spoiler {title}'] + lines[start:end] + [ticks] + lines[end:]
     return result, True
 
 
@@ -257,9 +275,10 @@ def process_ioscope(filepath):
     # Apply in reverse
     for start, end in reversed(folded_blocks):
         # Check if already wrapped
-        if start > 0 and '```spoiler' in lines[start - 1]:
+        if start > 0 and 'spoiler' in lines[start - 1]:
             continue
-        lines = lines[:start] + ['```spoiler Source code'] + lines[start:end] + ['```'] + lines[end:]
+        # Use 4 backticks since these wrap code blocks
+        lines = lines[:start] + ['````spoiler Source code'] + lines[start:end] + ['````'] + lines[end:]
         changes += 1
         print(f"  WRAPPED 'Source code' (lines {start+1}-{end})")
 

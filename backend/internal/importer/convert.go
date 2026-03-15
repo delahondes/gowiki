@@ -54,7 +54,7 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	var state blockState
 	var blockBuf []string
 	var blockLang string // for code blocks
-	var foldTitle string // for fold/spoiler blocks
+	inFold := false // true when inside a fold/spoiler block
 	var tableLines []string
 	var wrapStack []WrapBlock
 	wrapDepth := 0
@@ -189,19 +189,8 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 			continue
 
 		case stateFold:
-			if reFoldClose.MatchString(line) {
-				// Emit as spoiler block
-				output = append(output, fmt.Sprintf("```spoiler %s", foldTitle))
-				for _, bl := range blockBuf {
-					converted := convertNormalLine(bl, currentNS, pagesDir)
-					emitImageLine(converted)
-				}
-				output = append(output, "```")
-				result.ConvertLines += len(blockBuf) + 2
-				state = stateNormal
-			} else {
-				blockBuf = append(blockBuf, line)
-			}
+			// stateFold is no longer used; fold blocks are handled inline.
+			// This case is kept only to avoid a compile error for the enum value.
 			continue
 
 		case stateNormal:
@@ -310,12 +299,22 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 			continue
 		}
 
-		// Fold block → spoiler
+		// Fold block → spoiler (emit fence inline, content flows through normal processing)
 		if m := reFoldOpen.FindStringSubmatch(trimmed); m != nil {
 			flushTable()
-			state = stateFold
-			foldTitle = strings.TrimSpace(m[1])
-			blockBuf = nil
+			title := strings.TrimSpace(m[1])
+			// Use 4 backticks so inner code blocks (```) don't collide
+			output = append(output, fmt.Sprintf("````spoiler %s", title))
+			inFold = true
+			result.ConvertLines++
+			continue
+		}
+
+		// Fold close → emit spoiler closing fence
+		if inFold && reFoldClose.MatchString(trimmed) {
+			flushTable()
+			output = append(output, "````")
+			inFold = false
 			result.ConvertLines++
 			continue
 		}

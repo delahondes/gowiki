@@ -38,6 +38,21 @@ const spoilerStyles = `
 }
 `
 
+/** Return the length of the longest consecutive backtick sequence in text. */
+function longestBacktickRun(text: string): number {
+  let max = 0
+  let cur = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "`") {
+      cur++
+      if (cur > max) max = cur
+    } else {
+      cur = 0
+    }
+  }
+  return max
+}
+
 export const spoilerPlugin: WikiPlugin = {
   register(reg) {
     // ── Schema ──
@@ -180,13 +195,16 @@ export const spoilerPlugin: WikiPlugin = {
     reg.registerPMNode("spoiler", {
       print(node, _ctx, recurse) {
         const title = node.attrs.title || ""
-        let out = "```spoiler" + (title ? " " + title : "") + "\n"
         let body = ""
         node.content.forEach(child => {
           body += recurse(child)
         })
+        // Use enough backticks to avoid collision with inner fences
+        const maxRun = longestBacktickRun(body)
+        const ticks = "`".repeat(Math.max(3, maxRun + 1))
+        let out = ticks + "spoiler" + (title ? " " + title : "") + "\n"
         out += body.trimEnd() + "\n"
-        out += "```\n\n"
+        out += ticks + "\n\n"
         return out
       },
     })
