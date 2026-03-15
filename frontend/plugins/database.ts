@@ -927,7 +927,7 @@ class DatabaseQueryNodeView {
     const allFields = (schema.fields || []).filter((f: any) => !f.archived_at)
 
     // Apply fields filter: select and order columns by the fields attribute.
-    // %title% is a special token meaning the index field (page title).
+    // %title% is a special token: renders the row id as a clickable link to the page.
     const fieldsAttr = this.node.attrs.fields || ""
     let fields: any[]
     if (fieldsAttr) {
@@ -935,14 +935,8 @@ class DatabaseQueryNodeView {
       fields = []
       for (const col of colNames) {
         if (col === "%title%") {
-          // %title% maps to the index field, or page_path as a synthetic field.
-          if (schema.index_field) {
-            const f = allFields.find((f: any) => f.name === schema.index_field)
-            if (f) fields.push({ ...f, _isTitle: true })
-          } else {
-            // No index field — show page path.
-            fields.push({ name: "__page_path__", label: "Page", type: "page_link", _isTitle: true })
-          }
+          // %title% shows the row id as a link to the page.
+          fields.push({ name: "__title__", label: "ID", type: "text", _isTitle: true })
         } else {
           // Match by field name or label (case-insensitive).
           const lower = col.toLowerCase()
@@ -993,14 +987,12 @@ class DatabaseQueryNodeView {
       const rtr = document.createElement("tr")
       for (const f of fields) {
         const td = document.createElement("td")
-        const val = f.name === "__page_path__" ? row.page_path : row.fields?.[f.name]
-        const isIndexField = (f._isTitle && row.page_path) ||
-          (schema.index_field && f.name === schema.index_field && row.page_path)
-        if (isIndexField) {
-          // Index field / %title% links to the page.
+        const val = f.name === "__title__" ? row.id : row.fields?.[f.name]
+        if (f._isTitle && row.page_path) {
+          // %title%: row id as a clickable link to the page.
           const a = document.createElement("a")
           a.className = "gowiki-database-page-link"
-          a.textContent = val != null ? String(val) : row.page_path
+          a.textContent = String(row.id)
           a.href = row.page_path
           td.appendChild(a)
         } else if (f.type === "page_link" && val) {
@@ -1045,8 +1037,8 @@ class DatabaseQueryNodeView {
           td.textContent = val != null ? String(val) : ""
         }
 
-        // Double-click inline editing — forbidden for auto_increment and index fields.
-        if (f.type !== "auto_increment" && !(schema.index_field && f.name === schema.index_field)) {
+        // Double-click inline editing — forbidden for auto_increment and %title% synthetic fields.
+        if (f.type !== "auto_increment" && !f._isTitle) {
           td.className = "gowiki-database-editable-value"
           td.addEventListener("dblclick", () => {
             this.inlineEditCell(td, tableName, row.id, f, val)
@@ -1545,7 +1537,6 @@ class DatabaseRowNodeView {
   private view: EditorView
   private getPos: () => number | undefined
   private registry: Registry
-  private indexField: string = ""
   private schemaFields: any[] = []
   private selfUpdate = false // flag to skip re-render on our own attr changes
 
@@ -1584,7 +1575,6 @@ class DatabaseRowNodeView {
       const resp = await fetch(`/api/database/${encodeURIComponent(table)}/schema`)
       if (resp.ok) {
         const schema = await resp.json()
-        this.indexField = schema.index_field || ""
         this.schemaFields = (schema.fields || []).filter((f: any) => !f.archived_at)
       }
     } catch { /* ignore */ }
@@ -1618,8 +1608,8 @@ class DatabaseRowNodeView {
 
       const tdVal = document.createElement("td")
 
-      if (key === this.indexField || (f && f.type === "auto_increment")) {
-        // Index / auto_increment: read-only.
+      if (f && f.type === "auto_increment") {
+        // auto_increment: read-only.
         tdVal.textContent = String(val)
       } else {
         // Editable input, type-aware.
@@ -1890,8 +1880,8 @@ class DatabaseRowNodeView {
         tdVal.textContent = String(val)
       }
 
-      // Inline editing forbidden for index and auto_increment fields.
-      if (key !== this.indexField && !(f && f.type === "auto_increment")) {
+      // Inline editing forbidden for auto_increment fields.
+      if (!(f && f.type === "auto_increment")) {
         tdVal.className = "gowiki-database-editable-value"
         tdVal.addEventListener("dblclick", () => {
           this.inlineEdit(tdVal, f, String(key), String(val))

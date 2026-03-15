@@ -223,7 +223,7 @@ def main():
             if cfg["page_folder"]:
                 print(f"--   page_folder:        {cfg['page_folder']}")
             if cfg["index_field"]:
-                print(f"--   index_field:         {cfg['index_field']}")
+                print(f"--   (dokuwiki index_field: {cfg['index_field']} — not used in gowiki, pages are named by row id)")
             if cfg["template_path"]:
                 print(f"--   page_template_path:  {cfg['template_path']}")
             if cfg["submit_label"]:

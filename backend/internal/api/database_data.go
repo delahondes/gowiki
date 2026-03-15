@@ -55,7 +55,7 @@ func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request)
 }
 
 // handleDatabaseInsertRow inserts a new row.
-// If the table has page_folder + index_field, also creates the wiki page.
+// If the table has page_folder, also creates the wiki page using the row's id.
 // POST /api/database/{table}/rows
 func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request) {
 	if s.dataStore == nil || s.schemaStore == nil {
@@ -75,30 +75,28 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// If this table has page_folder + index_field, auto-create the wiki page.
+	// If this table has page_folder, auto-create the wiki page using the row's id.
 	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
-	if err == nil && table.PageFolder != "" && table.IndexField != "" {
-		if indexVal, ok := row.Fields[table.IndexField]; ok && indexVal != nil {
-			pageFolder := strings.TrimSuffix(table.PageFolder, "/")
-			if len(pageFolder) == 0 || pageFolder[0] != '/' {
-				pageFolder = "/" + pageFolder
-			}
-			pagePath := pageFolder + "/" + fmt.Sprintf("%v", indexVal)
+	if err == nil && table.PageFolder != "" {
+		pageFolder := strings.TrimSuffix(table.PageFolder, "/")
+		if len(pageFolder) == 0 || pageFolder[0] != '/' {
+			pageFolder = "/" + pageFolder
+		}
+		pagePath := pageFolder + "/" + strconv.Itoa(row.ID)
 
-			// Update page_path on the row in the database.
-			row.PagePath = pagePath
-			if err := s.dataStore.UpdatePagePath(r.Context(), tableName, row.ID, pagePath); err != nil {
-				log.Printf("database: failed to set page_path for row %d: %v", row.ID, err)
-			}
+		// Update page_path on the row in the database.
+		row.PagePath = pagePath
+		if err := s.dataStore.UpdatePagePath(r.Context(), tableName, row.ID, pagePath); err != nil {
+			log.Printf("database: failed to set page_path for row %d: %v", row.ID, err)
+		}
 
-			// Build page markdown content.
-			markdown := s.buildPageContent(table, &row)
+		// Build page markdown content.
+		markdown := s.buildPageContent(table, &row)
 
-			// Create the wiki page on disk.
-			author := UsernameFromContext(r.Context())
-			if _, err := s.store.Put(pagePath, markdown, author); err != nil {
-				log.Printf("database: failed to create page %s: %v", pagePath, err)
-			}
+		// Create the wiki page on disk.
+		author := UsernameFromContext(r.Context())
+		if _, err := s.store.Put(pagePath, markdown, author); err != nil {
+			log.Printf("database: failed to create page %s: %v", pagePath, err)
 		}
 	}
 
@@ -205,17 +203,10 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Reject updates to the index field.
 	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
-	}
-	if table.IndexField != "" {
-		if _, ok := body.Fields[table.IndexField]; ok {
-			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
-			return
-		}
 	}
 
 	// Check for draft lock on the page-bound row before modifying anything.
@@ -303,7 +294,7 @@ func (s *Server) handleDatabaseGetRowByPage(w http.ResponseWriter, r *http.Reque
 }
 
 // handleDatabaseUpsertRowByPage upserts a row by page path.
-// Rejects index field modifications and syncs changes to the page.
+// Syncs changes to the page.
 // Blocks the update if a draft exists for the page (unless ?force=true).
 // PUT /api/database/{table}/page/*
 func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Request) {
@@ -326,17 +317,10 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Reject updates to the index field.
 	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
-	}
-	if table.IndexField != "" {
-		if _, ok := body.Fields[table.IndexField]; ok {
-			writeError(w, http.StatusBadRequest, "cannot modify index field "+table.IndexField)
-			return
-		}
 	}
 
 	// Check for draft lock before modifying anything.

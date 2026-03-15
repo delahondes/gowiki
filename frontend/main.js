@@ -8121,7 +8121,6 @@ async function showDatabaseTableModal(existing) {
     const labelInput = adminFormField(body, "Label", "text", existing ? existing.label : "")
     const scopeInput = adminFormField(body, "Scope Regexp", "text", existing ? existing.scope_regexp : ".*")
     const folderInput = adminFormField(body, "Page Folder", "text", existing ? existing.page_folder : "")
-    const indexInput = adminFormField(body, "Index Field", "text", existing ? existing.index_field : "")
     const sortFieldInput = adminFormField(body, "Default Sort Field", "text", existing ? existing.default_sort_field : "")
     const sortOrderSelect = adminFormSelect(body, "Default Sort Order", [
       { value: "asc", label: "Ascending" },
@@ -8135,7 +8134,6 @@ async function showDatabaseTableModal(existing) {
         label: labelInput.value.trim(),
         scope_regexp: scopeInput.value.trim() || ".*",
         page_folder: folderInput.value.trim(),
-        index_field: indexInput.value.trim(),
         default_sort_field: sortFieldInput.value.trim(),
         default_sort_order: sortOrderSelect.value,
         page_template_path: templateInput.value.trim(),

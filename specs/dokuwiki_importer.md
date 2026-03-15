@@ -485,8 +485,7 @@ Conversion details:
 - Closing `---` (3 dashes) and `----` (4 dashes) are both handled
 
 The script also extracts table configuration from `<form>` blocks and prints them at the end:
-- `page_folder` — where new row pages are created
-- `index_field` — the field used as page name
+- `page_folder` — where new row pages are created (page name = row id)
 - `page_template_path` — the template page for new rows
 
 These must be applied to the database tables via the admin UI or SQL after running the script. The extracted paths use DokuWiki namespace conventions and may need translation if namespaces were renamed.

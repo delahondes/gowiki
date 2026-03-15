@@ -308,7 +308,7 @@ Database data is stored in PostgreSQL. Two schema categories exist:
 ```sql
 database_tables(
   id, name, scope_regexp, page_folder,
-  index_field, default_sort_field, default_sort_order,
+  default_sort_field, default_sort_order,
   page_template_path, created_at, updated_at
 )
 

@@ -34,7 +34,7 @@ func (s *SchemaStore) ListTables(ctx context.Context) ([]TableDef, error) {
 		return nil, fmt.Errorf("database not connected")
 	}
 
-	rows, err := p.Query(ctx, `SELECT id, name, label, scope_regexp, page_folder, index_field, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables ORDER BY name`)
+	rows, err := p.Query(ctx, `SELECT id, name, label, scope_regexp, page_folder, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -43,7 +43,7 @@ func (s *SchemaStore) ListTables(ctx context.Context) ([]TableDef, error) {
 	var tables []TableDef
 	for rows.Next() {
 		var t TableDef
-		if err := rows.Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.IndexField, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan table: %w", err)
 		}
 		tables = append(tables, t)
@@ -59,8 +59,8 @@ func (s *SchemaStore) GetTable(ctx context.Context, id int) (*TableDef, error) {
 	}
 
 	var t TableDef
-	err := p.QueryRow(ctx, `SELECT id, name, label, scope_regexp, page_folder, index_field, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables WHERE id = $1`, id).
-		Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.IndexField, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt)
+	err := p.QueryRow(ctx, `SELECT id, name, label, scope_regexp, page_folder, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables WHERE id = $1`, id).
+		Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get table: %w", err)
 	}
@@ -81,8 +81,8 @@ func (s *SchemaStore) GetTableByName(ctx context.Context, name string) (*TableDe
 	}
 
 	var t TableDef
-	err := p.QueryRow(ctx, `SELECT id, name, label, scope_regexp, page_folder, index_field, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables WHERE name = $1`, name).
-		Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.IndexField, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt)
+	err := p.QueryRow(ctx, `SELECT id, name, label, scope_regexp, page_folder, default_sort_field, default_sort_order, page_template_path, created_at, updated_at FROM database_tables WHERE name = $1`, name).
+		Scan(&t.ID, &t.Name, &t.Label, &t.ScopeRegexp, &t.PageFolder, &t.DefaultSortField, &t.DefaultSortOrder, &t.PageTemplatePath, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get table by name: %w", err)
 	}
@@ -119,8 +119,8 @@ func (s *SchemaStore) CreateTable(ctx context.Context, t *TableDef, changedBy st
 	}
 	defer tx.Rollback(ctx)
 
-	err = tx.QueryRow(ctx, `INSERT INTO database_tables (name, label, scope_regexp, page_folder, index_field, default_sort_field, default_sort_order, page_template_path) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at, updated_at`,
-		t.Name, t.Label, t.ScopeRegexp, t.PageFolder, t.IndexField, t.DefaultSortField, t.DefaultSortOrder, t.PageTemplatePath).
+	err = tx.QueryRow(ctx, `INSERT INTO database_tables (name, label, scope_regexp, page_folder, default_sort_field, default_sort_order, page_template_path) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at, updated_at`,
+		t.Name, t.Label, t.ScopeRegexp, t.PageFolder, t.DefaultSortField, t.DefaultSortOrder, t.PageTemplatePath).
 		Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert table def: %w", err)
@@ -154,8 +154,8 @@ func (s *SchemaStore) UpdateTable(ctx context.Context, t *TableDef, changedBy st
 		return fmt.Errorf("database not connected")
 	}
 
-	_, err := p.Exec(ctx, `UPDATE database_tables SET label=$1, scope_regexp=$2, page_folder=$3, index_field=$4, default_sort_field=$5, default_sort_order=$6, page_template_path=$7, updated_at=NOW() WHERE id=$8`,
-		t.Label, t.ScopeRegexp, t.PageFolder, t.IndexField, t.DefaultSortField, t.DefaultSortOrder, t.PageTemplatePath, t.ID)
+	_, err := p.Exec(ctx, `UPDATE database_tables SET label=$1, scope_regexp=$2, page_folder=$3, default_sort_field=$4, default_sort_order=$5, page_template_path=$6, updated_at=NOW() WHERE id=$7`,
+		t.Label, t.ScopeRegexp, t.PageFolder, t.DefaultSortField, t.DefaultSortOrder, t.PageTemplatePath, t.ID)
 	if err != nil {
 		return fmt.Errorf("update table: %w", err)
 	}

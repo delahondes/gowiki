@@ -14,7 +14,19 @@ Tables can be scoped to page paths via `scope_regexp` and optionally bound to a 
 
 Pages can embed field values using `{{field_name}}` syntax. Global variables use ALL_CAPS names: `{{AUTHOR}}`, `{{TITLE}}`, `{{CREATED}}`, `{{VERSIONDATE}}`, `{{VERSIONTAG}}`, `{{YEAR}}`.
 
-## 2. Table definition
+## 2. Row identity
+
+Every data table has a mandatory `id` column (`SERIAL PRIMARY KEY`), automatically created and managed by the system. This column:
+
+- Is the sole primary key for every table — there is no user-defined index
+- Is auto-incrementing and read-only (users cannot set or modify it)
+- Is used by all API routes (`/api/database/{table}/rows/{id}`)
+- Is the foreign key target for junction tables (multi-enum) and relationship types (tag, lookup)
+- Is used for page-to-row binding when the table has a `page_folder` (see below)
+
+The `id` column is not listed in the field definitions — it exists at the system level alongside `page_path`, `created_at`, and `updated_at`.
+
+## 3. Table definition
 
 ```go
 type TableDef struct {
@@ -22,15 +34,23 @@ type TableDef struct {
     Name              string    // unique identifier
     Label             string    // display label
     ScopeRegexp       string    // page path pattern for query/row binding
-    PageFolder        string    // if set, new rows create pages here
-    IndexField        string    // field used as page name when creating pages
+    PageFolder        string    // page path pattern for auto-created pages (see below)
     DefaultSortField  string
     DefaultSortOrder  string    // "asc" or "desc"
     PageTemplatePath  string    // template page for auto-created pages
 }
 ```
 
-## 3. Field definition
+### Page folder and page naming
+
+When `page_folder` is set, creating a row auto-generates a wiki page. The `page_folder` value determines how the page path is derived from the row's `id`:
+
+- **Plain folder** (no `@id`): page path = `{page_folder}/{id}`. Example: `page_folder = "/regulatory/capa"` → row 3 creates page `/regulatory/capa/3`.
+- **Pattern with `@id`** (not yet implemented): `@id` is replaced by the row's integer id. Example: `page_folder = "/regulatory/capa/CAPA@id"` → row 3 creates page `/regulatory/capa/CAPA3`.
+
+The reverse binding (page → row) works the same way: when a page has `{database-row table=...}`, the system extracts the `id` from the page path using the table's `page_folder` pattern.
+
+## 4. Field definition
 
 ```go
 type FieldDef struct {
@@ -48,9 +68,9 @@ type FieldDef struct {
 }
 ```
 
-## 4. Column types
+## 5. Column types
 
-### 4.1 Text
+### 5.1 Text
 
 Basic string field. Rendered as a single-line text input.
 
@@ -60,7 +80,7 @@ Basic string field. Rendered as a single-line text input.
 | Input | `<input type="text">` |
 | Display | Plain text |
 
-### 4.2 Integer
+### 5.2 Integer
 
 Whole number field.
 
@@ -70,7 +90,7 @@ Whole number field.
 | Input | `<input type="number">` |
 | Display | Numeric text |
 
-### 4.3 Float
+### 5.3 Float
 
 Floating-point number field.
 
@@ -80,7 +100,7 @@ Floating-point number field.
 | Input | `<input type="number" step="any">` |
 | Display | Numeric text |
 
-### 4.4 Boolean
+### 5.4 Boolean
 
 True/false field.
 
@@ -90,7 +110,7 @@ True/false field.
 | Input | `<select>` with Yes/No options |
 | Display | "Yes" or "No" |
 
-### 4.5 Date
+### 5.5 Date
 
 Date without time component.
 
@@ -100,7 +120,7 @@ Date without time component.
 | Input | `<input type="date">` |
 | Display | ISO date string |
 
-### 4.6 Datetime
+### 5.6 Datetime
 
 Date with time component.
 
@@ -110,7 +130,7 @@ Date with time component.
 | Input | `<input type="datetime-local">` |
 | Display | ISO datetime string |
 
-### 4.7 Page Link
+### 5.7 Page Link
 
 Reference to a wiki page. Stored as the page path string.
 
@@ -120,7 +140,7 @@ Reference to a wiki page. Stored as the page path string.
 | Input | `<input type="text">` |
 | Display | Clickable link to the referenced page |
 
-### 4.8 Enum
+### 5.8 Enum
 
 Single-select from a predefined list of values. Values are defined per-field in `enum_values`.
 
@@ -130,7 +150,7 @@ Single-select from a predefined list of values. Values are defined per-field in 
 | Input | `<select>` dropdown |
 | Display | Plain text |
 
-### 4.9 Multi-enum
+### 5.9 Multi-enum
 
 Multi-select from a predefined list. Uses a junction table rather than a column in the data table.
 
@@ -140,9 +160,9 @@ Multi-select from a predefined list. Uses a junction table rather than a column 
 | Input | Multi-select `<select>` |
 | Display | Comma-separated values |
 
-### 4.10 Auto-increment
+### 5.10 Auto-increment
 
-System-generated incrementing ID. Read-only — the user cannot set or edit this field.
+User-defined auto-incrementing counter field. Read-only — the user cannot set or edit this field. This is distinct from the system `id` column (section 2): it is a visible field that can be used for display purposes such as ticket numbers.
 
 | Property | Value |
 |---|---|
@@ -150,7 +170,7 @@ System-generated incrementing ID. Read-only — the user cannot set or edit this
 | Input | None (read-only) |
 | Display | Numeric text |
 
-### 4.11 Image
+### 5.11 Image
 
 Stores a path to an image attachment. Supports browse via the media manager.
 
@@ -160,7 +180,7 @@ Stores a path to an image attachment. Supports browse via the media manager.
 | Input | Text input + "Browse" button (opens media manager) |
 | Display | Inline `<img>` thumbnail |
 
-### 4.12 Color
+### 5.12 Color
 
 Hex color value with visual picker.
 
@@ -172,7 +192,7 @@ Hex color value with visual picker.
 
 Preset swatches: gray (#adb5bd), red (#ffa8a8), pink (#fcc2d7), purple (#eebefa), indigo (#bac8ff), blue (#a5d8ff), cyan (#99e9f2), teal (#96f2d7), green (#b2f2bb), lime (#d8f5a2), yellow (#ffec99), orange (#ffd8a8).
 
-### 4.13 Tag
+### 5.13 Tag
 
 Foreign key reference to another table, displayed as a colored badge with optional icon. The referenced table is expected to have `label`, `icon`, and `color` fields.
 
@@ -195,7 +215,7 @@ This is used for status fields, categories, or any enumeration that needs rich v
 - id=1, label="Open", icon="/icons/circle-outline.svg", color="#b2f2bb"
 - id=2, label="Closed", icon="/icons/check-circle.svg", color="#adb5bd"
 
-### 4.14 Lookup
+### 5.14 Lookup
 
 A general foreign key to another table. Unlike `tag`, lookup displays the referenced row's value as plain text, without badge/icon/color styling. The display value is the first text field from the referenced row (heuristic — no explicit display field configuration needed).
 
@@ -210,7 +230,7 @@ Self-referential lookups (table references itself) are supported — used for li
 
 The lookup type fetches all rows from the referenced table (cached for 30 seconds) and uses the first string-valued field as the display label. Falls back to the row ID if no text field is found.
 
-### 4.15 User
+### 5.15 User
 
 A field that references a Gowiki user account. Stored as the username string.
 
@@ -222,7 +242,7 @@ A field that references a Gowiki user account. Stored as the username string.
 
 The user list is fetched from the `/api/users/list` endpoint (cached for 30 seconds). Disabled users are excluded from the list.
 
-## 5. DokuWiki struct type mapping
+## 6. DokuWiki struct type mapping
 
 | DokuWiki type | Gowiki type | Notes |
 |---|---|---|
@@ -239,7 +259,7 @@ The user list is fetched from the `/api/users/list` endpoint (cached for 30 seco
 | `Page` | `page_link` | Direct mapping |
 | `Media` | `image` | Direct mapping |
 
-## 6. API
+## 7. API
 
 ### User APIs
 
@@ -272,7 +292,7 @@ The user list is fetched from the `/api/users/list` endpoint (cached for 30 seco
 | DELETE | `/api/admin/database/tables/{id}/fields/{fid}` | Archive field |
 | GET | `/api/admin/database/tables/{id}/history` | Schema change history |
 
-## 7. Markdown syntax
+## 8. Markdown syntax
 
 ### Query
 
@@ -322,7 +342,7 @@ Multiple conditions are combined with AND. All filters apply to the SQL query �
 
 #### Field selection (`fields`)
 
-When `fields` is set, only the listed fields are displayed, in the specified order. Fields are matched by name or label (case-insensitive). The special token `%title%` refers to the index field (the field used as page name in page-bound tables); it renders as a clickable link to the page.
+When `fields` is set, only the listed fields are displayed, in the specified order. Fields are matched by name or label (case-insensitive). The special token `%title%` refers to the row's `id`; for tables with a `page_folder`, it renders as a clickable link to the associated page.
 
 ```
 {database-query table=server fields="category, provider, %title%, description, ipv4"}

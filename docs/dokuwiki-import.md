@@ -153,12 +153,11 @@ This converts:
 - `---- struct lookup ----` blocks → `{database-query table=...}`
 - `<form>...</form>` blocks → `{database-newrow table=...}`
 
-The script also prints extracted table configuration (page folder, index field, template path) from each `<form>` block. Apply these settings to the corresponding tables via the admin Database UI or SQL:
+The script also prints extracted table configuration (page folder, template path) from each `<form>` block. Apply these settings to the corresponding tables via the admin Database UI or SQL:
 
 ```sql
 UPDATE database_tables SET
   page_folder = '/path/to/folder',
-  index_field = 'field_name',
   page_template_path = '/path/to/template'
 WHERE name = 'table_name';
 ```
@@ -212,7 +211,7 @@ If DokuWiki schema labels are in a non-English language, the agent can update fi
 - [ ] Check structured data tables in admin Database tab
 - [ ] Verify struct foreign key references (Status/Lookup fields point to correct rows)
 - [ ] Verify struct blocks are converted (no `---- struct table ----` or `<form>` remaining in content)
-- [ ] Verify table page_folder/index_field/page_template_path are configured for page-bound tables
+- [ ] Verify table page_folder/page_template_path are configured for page-bound tables
 - [ ] Verify tag table icons are uploaded to `content/icons/` and icon field values are content paths
 - [ ] Review the conversion report at `/import_report`
 - [ ] Delete `import/` directory when satisfied
