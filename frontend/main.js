@@ -57,9 +57,17 @@ function resolvePagePathFromLocation(loc) {
 
 const pagePath = resolvePagePathFromLocation(window.location)
 const pageDisplayPath = pagePath === "index" ? "/" : `/${pagePath}`
-let pageNamespace = pagePath.includes("/")
-  ? pagePath.split("/").slice(0, -1).join("/")
-  : ""
+// For namespace index pages (URL ends with /), the namespace IS the pagePath.
+// For leaf pages, the namespace is the parent directory.
+const urlIsNamespaceIndex = (() => {
+  const raw = decodeURIComponent(window.location.pathname || "/")
+  return raw.endsWith("/") || raw.endsWith("/index")
+})()
+let pageNamespace = urlIsNamespaceIndex
+  ? (pagePath === "index" ? "" : pagePath)
+  : pagePath.includes("/")
+    ? pagePath.split("/").slice(0, -1).join("/")
+    : ""
 const defaultMarkdown = `
 ## Gowiki
 
@@ -6009,6 +6017,10 @@ async function reloadPageContent() {
   }
 
   isNamespaceIndex = !!(page && page.is_namespace_index)
+  // Update pageNamespace based on authoritative backend flag.
+  if (isNamespaceIndex) {
+    pageNamespace = pagePath === "index" ? "" : pagePath
+  }
 
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("view")
