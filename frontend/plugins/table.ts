@@ -345,12 +345,6 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
 
 // ─── Cell directive parsing ──────────────────────────────
 
-// Escape markdown-significant characters in formula text so that e.g. * is
-// not interpreted as italic when the cell is re-parsed.
-function escapeFormulaText(text: string): string {
-  return text.replace(/[\\*_`~^]/g, ch => "\\" + ch)
-}
-
 // Generic cell directive: {key=value key=value ...} at start of cell text.
 // Supported keys: color, text-color, valign, vtext
 const CELL_DIRECTIVE_RE = /^\{([^}]+)\}\s*/
@@ -407,14 +401,9 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
     changed = true
   }
 
-  // Formula detection — store formula in attr, empty cell text.
-  // Use full paragraph textContent to handle cases where markdown special chars
-  // (e.g. * in formulas) were interpreted as marks during parsing.
-  const fullParaText = directiveMatch
-    ? firstBlock.textContent.slice(directiveMatch[0].length)
-    : firstBlock.textContent
-  if (fullParaText.trimStart().startsWith("=") && fullParaText.trim().length > 1) {
-    newAttrs.formula = fullParaText.trim().slice(1)
+  // Formula detection — store formula in attr, empty cell text
+  if (newText.trimStart().startsWith("=") && newText.trim().length > 1) {
+    newAttrs.formula = newText.trim().slice(1)
     newText = ""
     changed = true
   }
@@ -423,10 +412,7 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
 
   // Rebuild cell with modified text and attrs
   let newFirstBlock: Node
-  if (newText === "" && newAttrs.formula != null) {
-    // Formula cell: clear entire paragraph content (formula is in attr)
-    newFirstBlock = schema.nodes.paragraph.create()
-  } else if (newText === "") {
+  if (newText === "") {
     if (firstBlock.childCount === 1) {
       newFirstBlock = schema.nodes.paragraph.create()
     } else {
@@ -922,7 +908,7 @@ function serializeCellContent(
   if (dirParts.length > 0) prefix = `{${dirParts.join(" ")}} `
 
   if (cell.attrs.formula) {
-    return prefix + `=${escapeFormulaText(cell.attrs.formula)}`
+    return prefix + `=${cell.attrs.formula}`
   }
 
   let txt = ""
@@ -1704,6 +1690,33 @@ export const tablePlugin: GowikiPlugin = {
         rowspan: false,
         headerless: false,
         multibody: false,
+      })
+
+      // Protect formula content in table cells from inline markdown parsing.
+      // Formulas start with "=" and may contain *, _, ~, ^, ` which would
+      // otherwise be interpreted as markdown formatting (italic, underline, etc.).
+      // This core rule runs BEFORE the "inline" core rule, escaping those chars
+      // so that markdown-it's inline parser treats them as literals.
+      md.core.ruler.before("inline", "formula_protect", (state: any) => {
+        const tokens = state.tokens
+        for (let i = 1; i < tokens.length; i++) {
+          if (tokens[i].type !== "inline") continue
+          const prev = tokens[i - 1]
+          if (prev.type !== "td_open" && prev.type !== "th_open") continue
+
+          const content: string = tokens[i].content
+          // Skip optional cell directive {key=value ...} at the start
+          let formulaStart = 0
+          const dirMatch = content.match(/^\{[^}]+\}\s*/)
+          if (dirMatch) formulaStart = dirMatch[0].length
+
+          if (content.charAt(formulaStart) !== "=" || content.length <= formulaStart + 1) continue
+
+          // Escape markdown-significant chars in the formula part
+          const prefix = content.slice(0, formulaStart)
+          const formula = content.slice(formulaStart)
+          tokens[i].content = prefix + formula.replace(/([*_~^`\[\]])/g, "\\$1")
+        }
       })
     })
 
