@@ -15,6 +15,36 @@ import (
 	"gowiki/backend/internal/markdown"
 )
 
+// resolvePageFolder computes a page path from a page_folder pattern and row data.
+// If the folder contains @tokens, they are replaced: @id → row id, @field → field value.
+// If the folder has no @tokens, the page name is the row id: {folder}/{id}.
+var pageFolderTokenRe = regexp.MustCompile(`@([a-z][a-z0-9_]*)`)
+
+func resolvePageFolder(pageFolder string, rowID int, fields map[string]any) string {
+	folder := strings.TrimSuffix(pageFolder, "/")
+	if len(folder) == 0 || folder[0] != '/' {
+		folder = "/" + folder
+	}
+
+	if !strings.Contains(folder, "@") {
+		// Plain folder — page name is the row id.
+		return folder + "/" + strconv.Itoa(rowID)
+	}
+
+	// Pattern folder — replace @tokens.
+	result := pageFolderTokenRe.ReplaceAllStringFunc(folder, func(match string) string {
+		token := match[1:] // strip leading @
+		if token == "id" {
+			return strconv.Itoa(rowID)
+		}
+		if v, ok := fields[token]; ok && v != nil {
+			return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", v)))
+		}
+		return match // leave unresolved tokens as-is
+	})
+	return result
+}
+
 // handleDatabaseSchema returns the schema (fields) for a data table.
 // GET /api/database/{table}/schema
 func (s *Server) handleDatabaseSchema(w http.ResponseWriter, r *http.Request) {
@@ -75,14 +105,10 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// If this table has page_folder, auto-create the wiki page using the row's id.
+	// If this table has page_folder, auto-create the wiki page.
 	table, err := s.schemaStore.GetTableByName(r.Context(), tableName)
 	if err == nil && table.PageFolder != "" {
-		pageFolder := strings.TrimSuffix(table.PageFolder, "/")
-		if len(pageFolder) == 0 || pageFolder[0] != '/' {
-			pageFolder = "/" + pageFolder
-		}
-		pagePath := pageFolder + "/" + strconv.Itoa(row.ID)
+		pagePath := resolvePageFolder(table.PageFolder, row.ID, row.Fields)
 
 		// Update page_path on the row in the database.
 		row.PagePath = pagePath
@@ -523,9 +549,9 @@ func parseFilter(raw string) *database.Filter {
 				normalizedOp = "!="
 			}
 			return &database.Filter{
-				Field:    raw[:idx],
+				Field:    strings.TrimSpace(raw[:idx]),
 				Operator: normalizedOp,
-				Value:    raw[idx+len(op):],
+				Value:    strings.TrimSpace(raw[idx+len(op):]),
 			}
 		}
 	}
@@ -534,9 +560,9 @@ func parseFilter(raw string) *database.Filter {
 		idx := strings.Index(raw, op)
 		if idx > 0 {
 			return &database.Filter{
-				Field:    raw[:idx],
+				Field:    strings.TrimSpace(raw[:idx]),
 				Operator: op,
-				Value:    raw[idx+len(op):],
+				Value:    strings.TrimSpace(raw[idx+len(op):]),
 			}
 		}
 	}

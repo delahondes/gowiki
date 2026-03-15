@@ -43,12 +43,16 @@ type TableDef struct {
 
 ### Page folder and page naming
 
-When `page_folder` is set, creating a row auto-generates a wiki page. The `page_folder` value determines how the page path is derived from the row's `id`:
+When `page_folder` is set, creating a row auto-generates a wiki page. The `page_folder` value determines how the page path is derived from the row:
 
-- **Plain folder** (no `@id`): page path = `{page_folder}/{id}`. Example: `page_folder = "/regulatory/capa"` → row 3 creates page `/regulatory/capa/3`.
-- **Pattern with `@id`** (not yet implemented): `@id` is replaced by the row's integer id. Example: `page_folder = "/regulatory/capa/CAPA@id"` → row 3 creates page `/regulatory/capa/CAPA3`.
+- **Plain folder** (no `@` tokens): page path = `{page_folder}/{id}`. Example: `page_folder = "/regulatory/capa"` → row 3 creates page `/regulatory/capa/3`.
+- **Pattern with `@` tokens**: tokens like `@id` or `@field_name` are replaced by the row's id or field values. Example: `page_folder = "/regulatory/interviews/@name-@year"` with `name=john` and `year=2024` → creates page `/regulatory/interviews/john-2024`.
 
-The reverse binding (page → row) works the same way: when a page has `{database-row table=...}`, the system extracts the `id` from the page path using the table's `page_folder` pattern.
+Supported tokens:
+- `@id` — the row's system integer id
+- `@field_name` — the value of the named field (must be a non-empty text/date/integer field)
+
+The reverse binding (page → row) uses the `page_path` column stored on each row. When a page has `{database-row table=...}`, the system looks up the row by its `page_path`.
 
 ## 4. Field definition
 

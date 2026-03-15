@@ -392,7 +392,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	}
 
 	r.Get("/media/*", s.handleServeMedia)
-	r.Get(`/{path:.*\..*}`, s.handleFilePath)
+	r.Get(`/{path:[^/]*\.[^/]*}`, s.handleFilePath)
 
 	if serveWeb {
 		r.NotFound(s.handleFrontend)

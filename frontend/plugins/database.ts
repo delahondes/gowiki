@@ -837,14 +837,16 @@ class DatabaseQueryNodeView {
   private node: PMNode
   private currentSort: string
   private currentOrder: string
-  private currentOffset: number
+  private initialLimit: number
+  private displayLimit: number
   private refreshHandler: ((e: Event) => void) | null = null
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
-    this.currentSort = node.attrs.sort || ""
+    this.currentSort = node.attrs.sort === "id" ? "__title__" : (node.attrs.sort || "")
     this.currentOrder = node.attrs.order || "asc"
-    this.currentOffset = 0
+    this.initialLimit = parseInt(node.attrs.limit) || 20
+    this.displayLimit = this.initialLimit
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-database-query"
@@ -881,7 +883,6 @@ class DatabaseQueryNodeView {
   private async fetchData() {
     const table = this.node.attrs.table
     const filter = this.node.attrs.filter || ""
-    const limit = parseInt(this.node.attrs.limit) || 20
 
     const params = new URLSearchParams()
     if (filter) {
@@ -889,10 +890,10 @@ class DatabaseQueryNodeView {
         params.append("filter", f)
       }
     }
-    if (this.currentSort) params.set("sort", this.currentSort)
+    if (this.currentSort) params.set("sort", this.currentSort === "__title__" ? "id" : this.currentSort)
     if (this.currentOrder) params.set("order", this.currentOrder)
-    params.set("limit", String(limit))
-    params.set("offset", String(this.currentOffset))
+    params.set("limit", String(this.displayLimit))
+    params.set("offset", "0")
 
     try {
       const schemaResp = await fetch(`/api/database/${encodeURIComponent(table)}/schema`)
@@ -908,14 +909,14 @@ class DatabaseQueryNodeView {
         return
       }
       const data = await resp.json()
-      this.renderTable(schema, data.rows || [], data.total || 0, limit)
+      this.renderTable(schema, data.rows || [], data.total || 0)
       document.dispatchEvent(new Event("gowiki:node-rendered"))
     } catch (err) {
       this.showError("Network error")
     }
   }
 
-  private renderTable(schema: any, rows: any[], total: number, limit: number) {
+  private renderTable(schema: any, rows: any[], total: number) {
     // Remove loading, keep label.
     const existing = this.dom.querySelector(".gowiki-database-loading")
     if (existing) existing.remove()
@@ -925,18 +926,21 @@ class DatabaseQueryNodeView {
     if (existingPag) existingPag.remove()
 
     const allFields = (schema.fields || []).filter((f: any) => !f.archived_at)
+    const idField = { name: "__title__", label: "ID", type: "text", _isTitle: true }
 
     // Apply fields filter: select and order columns by the fields attribute.
-    // %title% is a special token: renders the row id as a clickable link to the page.
+    // %title% is a special token: positions the ID column explicitly.
+    // If %title% is not used, the ID column is always prepended as the first column.
     const fieldsAttr = this.node.attrs.fields || ""
     let fields: any[]
+    let hasExplicitTitle = false
     if (fieldsAttr) {
       const colNames = fieldsAttr.split(",").map((c: string) => c.trim()).filter((c: string) => c)
       fields = []
       for (const col of colNames) {
         if (col === "%title%") {
-          // %title% shows the row id as a link to the page.
-          fields.push({ name: "__title__", label: "ID", type: "text", _isTitle: true })
+          hasExplicitTitle = true
+          fields.push(idField)
         } else {
           // Match by field name or label (case-insensitive).
           const lower = col.toLowerCase()
@@ -949,8 +953,9 @@ class DatabaseQueryNodeView {
           }
         }
       }
+      if (!hasExplicitTitle) fields.unshift(idField)
     } else {
-      fields = allFields
+      fields = [idField, ...allFields]
     }
 
     const tbl = document.createElement("table")
@@ -972,7 +977,7 @@ class DatabaseQueryNodeView {
           this.currentSort = f.name
           this.currentOrder = "asc"
         }
-        this.currentOffset = 0
+        this.displayLimit = this.initialLimit
         this.fetchData()
       })
       tr.appendChild(th)
@@ -1031,6 +1036,10 @@ class DatabaseQueryNodeView {
             const u = users.find(u => u.username === String(val))
             if (u && u.display_name) td.textContent = u.display_name
           })
+        } else if ((f.type === "date" || f.type === "datetime") && val) {
+          // Format ISO dates as YYYY-MM-DD.
+          const s = String(val)
+          td.textContent = s.length >= 10 ? s.substring(0, 10) : s
         } else if (Array.isArray(val)) {
           td.textContent = val.join(", ")
         } else {
@@ -1052,34 +1061,22 @@ class DatabaseQueryNodeView {
     tbl.appendChild(tbody)
     this.dom.appendChild(tbl)
 
-    // Pagination.
-    if (total > limit) {
+    // Show more.
+    if (total > rows.length) {
       const pag = document.createElement("div")
       pag.className = "gowiki-database-pagination"
 
-      const prev = document.createElement("button")
-      prev.textContent = "\u2190 Previous"
-      prev.disabled = this.currentOffset === 0
-      prev.addEventListener("click", () => {
-        this.currentOffset = Math.max(0, this.currentOffset - limit)
-        this.fetchData()
-      })
-      pag.appendChild(prev)
-
       const info = document.createElement("span")
-      const start = this.currentOffset + 1
-      const end = Math.min(this.currentOffset + limit, total)
-      info.textContent = `${start}\u2013${end} of ${total}`
+      info.textContent = `Showing ${rows.length} of ${total}`
       pag.appendChild(info)
 
-      const next = document.createElement("button")
-      next.textContent = "Next \u2192"
-      next.disabled = this.currentOffset + limit >= total
-      next.addEventListener("click", () => {
-        this.currentOffset += limit
+      const more = document.createElement("button")
+      more.textContent = "Show more"
+      more.addEventListener("click", () => {
+        this.displayLimit += this.initialLimit
         this.fetchData()
       })
-      pag.appendChild(next)
+      pag.appendChild(more)
 
       this.dom.appendChild(pag)
     }
@@ -1254,9 +1251,10 @@ class DatabaseQueryNodeView {
         node.attrs.fields !== this.node.attrs.fields ||
         node.attrs.filter !== this.node.attrs.filter) {
       this.node = node
-      this.currentSort = node.attrs.sort || ""
+      this.currentSort = node.attrs.sort === "id" ? "__title__" : (node.attrs.sort || "")
       this.currentOrder = node.attrs.order || "asc"
-      this.currentOffset = 0
+      this.initialLimit = parseInt(node.attrs.limit) || 20
+      this.displayLimit = this.initialLimit
       this.render()
       return true
     }

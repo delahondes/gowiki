@@ -285,29 +285,46 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 	active := activeFieldMap(table.Fields)
 	cols := buildSelectColumns(table.Fields)
 
+	// Build label→field name map for filter resolution.
+	labelToName := make(map[string]string)
+	for _, fd := range table.Fields {
+		if fd.ArchivedAt == nil && fd.Label != "" {
+			labelToName[strings.ToLower(fd.Label)] = fd.Name
+		}
+	}
+
 	// Build WHERE clause.
 	var whereClauses []string
 	var args []any
 	argIdx := 1
 
 	for _, f := range params.Filters {
-		fd, ok := active[f.Field]
+		fieldName := f.Field
+		fd, ok := active[fieldName]
+		if !ok {
+			// Try matching by label (case-insensitive).
+			if name, found := labelToName[strings.ToLower(fieldName)]; found {
+				fieldName = name
+				fd = active[name]
+				ok = true
+			}
+		}
 		if !ok {
 			// Allow filtering by standard columns too.
-			if f.Field != "page_path" && f.Field != "id" {
+			if fieldName != "page_path" && fieldName != "id" {
 				continue
 			}
-			fd = FieldDef{Name: f.Field, Type: FieldTypeText}
+			fd = FieldDef{Name: fieldName, Type: FieldTypeText}
 		}
 
 		op := f.Operator
 		switch op {
 		case "=", "!=", "<", ">", "<=", ">=":
-			whereClauses = append(whereClauses, fmt.Sprintf("%s %s $%d", quoteIdent(f.Field), op, argIdx))
+			whereClauses = append(whereClauses, fmt.Sprintf("%s %s $%d", quoteIdent(fieldName), op, argIdx))
 			args = append(args, convertValue(fd.Type, f.Value))
 			argIdx++
 		case "~":
-			whereClauses = append(whereClauses, fmt.Sprintf("%s ILIKE $%d", quoteIdent(f.Field), argIdx))
+			whereClauses = append(whereClauses, fmt.Sprintf("%s ILIKE $%d", quoteIdent(fieldName), argIdx))
 			v := f.Value
 			if !strings.Contains(v, "%") {
 				v = "%" + v + "%"
@@ -334,13 +351,19 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 	// Build ORDER BY.
 	orderSQL := " ORDER BY id ASC"
 	if params.Sort != "" {
-		_, validSort := active[params.Sort]
-		if validSort || params.Sort == "id" || params.Sort == "page_path" || params.Sort == "created_at" || params.Sort == "updated_at" {
+		sortField := params.Sort
+		if _, ok := active[sortField]; !ok {
+			if name, found := labelToName[strings.ToLower(sortField)]; found {
+				sortField = name
+			}
+		}
+		_, validSort := active[sortField]
+		if validSort || sortField == "id" || sortField == "page_path" || sortField == "created_at" || sortField == "updated_at" {
 			dir := "ASC"
 			if strings.ToLower(params.Order) == "desc" {
 				dir = "DESC"
 			}
-			orderSQL = fmt.Sprintf(" ORDER BY %s %s", quoteIdent(params.Sort), dir)
+			orderSQL = fmt.Sprintf(" ORDER BY %s %s", quoteIdent(sortField), dir)
 		}
 	}
 

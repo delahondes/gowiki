@@ -32,9 +32,11 @@ func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if canServeAsAttachmentPath(requestPath) {
-		if _, err := s.mediaStore.ResolvePath(requestPath); err == nil {
-			s.serveMediaWithVersioning(w, r, requestPath)
-			return
+		if resolved, err := s.mediaStore.ResolvePath(requestPath); err == nil {
+			if info, statErr := os.Stat(resolved); statErr == nil && !info.IsDir() {
+				s.serveMediaWithVersioning(w, r, requestPath)
+				return
+			}
 		}
 	}
 
