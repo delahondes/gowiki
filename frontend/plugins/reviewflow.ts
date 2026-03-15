@@ -233,7 +233,7 @@ class ReviewflowNodeView {
         // Role name
         const tdRole = document.createElement("td")
         tdRole.className = "gowiki-rf-cell-role"
-        tdRole.textContent = role
+        tdRole.textContent = role.charAt(0).toUpperCase() + role.slice(1)
         tr.appendChild(tdRole)
 
         // Assignee
@@ -556,7 +556,7 @@ export const reviewflowPlugin: WikiPlugin = {
         const version = attrs.version ?? ""
         const roles: Record<string, string> = {}
         for (const [k, v] of Object.entries(attrs)) {
-          if (k !== "version") {
+          if (k !== "version" && k !== "_args") {
             roles[k] = String(v)
           }
         }

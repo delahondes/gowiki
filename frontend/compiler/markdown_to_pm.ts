@@ -27,7 +27,7 @@ function parseDirective(line: string): DirectiveToken | null {
   const attrs: Record<string, string> = {}
   // Parse attributes, supporting quoted values: key="value with spaces or ="
   const attrStr = inner.slice(parts[0].length).trim()
-  const attrRe = /([A-Za-z_][A-Za-z0-9_.+-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g
+  const attrRe = /([\p{L}_][\p{L}\p{N}_.+-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/gu
   let m: RegExpExecArray | null
   // Track which parts of attrStr are consumed by key=value pairs
   const consumed = new Set<number>()
