@@ -3,8 +3,16 @@ import { Decoration, DecorationSet } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Registry, NodePropertySpec } from "./registry"
 
+type StickyTarget = {
+  pos: number
+  nodeTypeName: string
+}
+
 type PanelState = {
   enabled: boolean
+  /** Remembers the last NodeSelection target so the panel survives
+   *  when focus moves to a panel control (e.g. a <select>). */
+  sticky: StickyTarget | null
 }
 
 const panelKey = new PluginKey<PanelState>("gowiki.nodePropertiesPanel")
@@ -426,31 +434,53 @@ type PropertyTarget = {
   autoShow: boolean
 }
 
+function addNodeSelectionTarget(
+  targets: PropertyTarget[],
+  node: any,
+  nodePos: number,
+  $from: any,
+  registry: Registry,
+) {
+  const props = registry.getNodeProperties(node.type.name)
+  if (props.length === 0) return
+
+  const isStandaloneImageParagraph =
+    node.type.name === "image" &&
+    $from.parent?.type?.name === "paragraph" &&
+    $from.parent.childCount === 1
+
+  const isTableCell =
+    node.type.name === "table_cell" || node.type.name === "table_header"
+
+  const anchorPos =
+    isStandaloneImageParagraph && $from.depth > 0
+      ? $from.before($from.depth)
+      : isTableCell
+      ? nodePos + 1
+      : nodePos
+
+  targets.push({ node, pos: nodePos, anchorPos, props, autoShow: false })
+}
+
 function findPropertyNodes(state: any, registry: Registry): PropertyTarget[] {
   const targets: PropertyTarget[] = []
 
   if (state.selection instanceof NodeSelection) {
     const node = state.selection.node
-    const props = registry.getNodeProperties(node.type.name)
-    if (props.length > 0) {
-      const nodePos = state.selection.from
-      const $from = state.selection.$from
-      const isStandaloneImageParagraph =
-        node.type.name === "image" &&
-        $from.parent?.type?.name === "paragraph" &&
-        $from.parent.childCount === 1
-
-      const isTableCell =
-        node.type.name === "table_cell" || node.type.name === "table_header"
-
-      const anchorPos =
-        isStandaloneImageParagraph && $from.depth > 0
-          ? $from.before($from.depth)
-          : isTableCell
-          ? nodePos + 1
-          : nodePos
-
-      targets.push({ node, pos: nodePos, anchorPos, props, autoShow: false })
+    const nodePos = state.selection.from
+    const $from = state.selection.$from
+    addNodeSelectionTarget(targets, node, nodePos, $from, registry)
+  } else {
+    // No NodeSelection — check if there's a sticky target from a recent
+    // NodeSelection (e.g. focus moved to a panel <select>).
+    const pluginState = panelKey.getState(state)
+    const sticky = pluginState?.sticky
+    if (sticky) {
+      const node = state.doc.nodeAt(sticky.pos)
+      if (node && node.type.name === sticky.nodeTypeName) {
+        const $from = state.doc.resolve(sticky.pos)
+        addNodeSelectionTarget(targets, node, sticky.pos, $from, registry)
+      }
     }
   }
 
@@ -617,12 +647,38 @@ function propertiesPlugin(reg: Registry) {
     key: panelKey,
     state: {
       init() {
-        return { enabled: false }
+        return { enabled: false, sticky: null }
       },
       apply(tr, prev) {
         const meta = tr.getMeta(panelKey)
+        let enabled = prev.enabled
         if (meta && typeof meta.enabled === "boolean") {
-          return { enabled: meta.enabled }
+          enabled = meta.enabled
+        }
+
+        // Track the last NodeSelection target with properties.
+        let sticky = prev.sticky
+        const sel = tr.selection
+        if (sel instanceof NodeSelection) {
+          const node = sel.node
+          const props = registry.getNodeProperties(node.type.name)
+          if (props.length > 0) {
+            sticky = { pos: sel.from, nodeTypeName: node.type.name }
+          } else {
+            sticky = null
+          }
+        } else if (sticky) {
+          // Selection moved away from a NodeSelection.  Keep the sticky
+          // target alive only if the node is still at that position (the
+          // user might just be interacting with a panel control).
+          const node = tr.doc.nodeAt(sticky.pos)
+          if (!node || node.type.name !== sticky.nodeTypeName) {
+            sticky = null
+          }
+        }
+
+        if (enabled !== prev.enabled || sticky !== prev.sticky) {
+          return { enabled, sticky }
         }
         return prev
       },
