@@ -3729,7 +3729,17 @@ function buildMenubar() {
     if (editMode === "visual" && editorView) {
       const codeBlockType = schema.nodes.code_block
       if (codeBlockType) {
-        editorView.dispatch(editorView.state.tr.replaceSelectionWith(codeBlockType.create()).scrollIntoView())
+        const { state } = editorView
+        const { from, to } = state.selection
+        const text = from < to ? state.doc.textBetween(from, to, "\n") : ""
+        const node = codeBlockType.create(null, text ? schema.text(text) : null)
+        // Use delete + insert: replaceSelectionWith/replaceRangeWith
+        // lose text content when selection spans block boundaries
+        const tr = state.tr
+        tr.deleteSelection()
+        const pos = tr.selection.from
+        tr.replaceWith(pos, pos, node)
+        editorView.dispatch(tr.scrollIntoView())
       }
       editorView.focus()
     } else if (editMode === "raw" && rawEditor) {
