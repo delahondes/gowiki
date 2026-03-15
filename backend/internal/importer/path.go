@@ -144,6 +144,9 @@ func DokuWikiMediaToPath(mediaRef string, currentNS string) string {
 func normalizeLinkPath(p string) string {
 	p = path.Clean(p)
 
+	// DokuWiki links are case-insensitive; Gowiki pages are stored lowercase.
+	p = strings.ToLower(p)
+
 	// Rename trailing /start to /index
 	if strings.HasSuffix(p, "/start") {
 		p = p[:len(p)-len("start")] + "index"
