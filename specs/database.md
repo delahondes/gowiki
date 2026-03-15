@@ -286,10 +286,39 @@ Attributes:
 |---|---|---|
 | `table` | Table name (required) | |
 | `fields` | Comma-separated list of fields to display, in order | all fields |
-| `filter` | Filter expression (e.g. `status=1`) | |
+| `filter` | Filter expression (see below) | |
 | `sort` | Field name to sort by | table default |
 | `order` | `asc` or `desc` | `asc` |
 | `limit` | Rows per page | `20` |
+
+#### Filter expressions (`filter`)
+
+A filter is one or more conditions joined by `&` (logical AND). Each condition has the form `field<op>value`.
+
+Supported operators:
+
+| Operator | SQL equivalent | Description |
+|---|---|---|
+| `=` | `=` | Equal |
+| `!=` | `!=` | Not equal |
+| `<>` | `!=` | Not equal (SQL alias, normalized to `!=`) |
+| `<` | `<` | Less than |
+| `>` | `>` | Greater than |
+| `<=` | `<=` | Less than or equal |
+| `>=` | `>=` | Greater than or equal |
+| `~` | `ILIKE` | Pattern match (case-insensitive). Uses `%` as wildcard. If no `%` is present in the value, the value is wrapped as `%value%` (substring match). |
+
+Examples:
+
+```
+filter="status=1"
+filter="status!=0&priority>2"
+filter="archived<>Y&kpiid~K1%"
+filter="name~alice"                 (substring: matches "Alice", "alice smith", etc.)
+filter="code~PRJ%"                  (prefix: matches "PRJ001", "PRJ-alpha", etc.)
+```
+
+Multiple conditions are combined with AND. All filters apply to the SQL query — no client-side filtering.
 
 #### Field selection (`fields`)
 

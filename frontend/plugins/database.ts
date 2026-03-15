@@ -21,20 +21,14 @@ const databaseQueryProperties = [
     label: "Fields",
     default: "",
     parse: (raw: string) => raw.trim() || null,
-    serialize: (value: string | null) => {
-      const v = String(value ?? "")
-      return v.includes(" ") || v.includes(",") ? `"${v}"` : v
-    },
+    serialize: (value: string | null) => String(value ?? ""),
   },
   {
     name: "filter",
     label: "Filter",
     default: "",
     parse: (raw: string) => raw.trim() || null,
-    serialize: (value: string | null) => {
-      const v = String(value ?? "")
-      return v.includes("=") || v.includes(">") || v.includes("<") ? `"${v}"` : v
-    },
+    serialize: (value: string | null) => String(value ?? ""),
   },
   {
     name: "sort",

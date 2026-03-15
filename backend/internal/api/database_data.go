@@ -531,12 +531,16 @@ func parseQueryParams(r *http.Request) database.QueryParams {
 
 func parseFilter(raw string) *database.Filter {
 	// Try two-char operators first.
-	for _, op := range []string{"!=", "<=", ">="} {
+	for _, op := range []string{"!=", "<>", "<=", ">="} {
 		idx := strings.Index(raw, op)
 		if idx > 0 {
+			normalizedOp := op
+			if op == "<>" {
+				normalizedOp = "!="
+			}
 			return &database.Filter{
 				Field:    raw[:idx],
-				Operator: op,
+				Operator: normalizedOp,
 				Value:    raw[idx+len(op):],
 			}
 		}

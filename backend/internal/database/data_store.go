@@ -308,7 +308,11 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 			argIdx++
 		case "~":
 			whereClauses = append(whereClauses, fmt.Sprintf("%s ILIKE $%d", quoteIdent(f.Field), argIdx))
-			args = append(args, "%"+f.Value+"%")
+			v := f.Value
+			if !strings.Contains(v, "%") {
+				v = "%" + v + "%"
+			}
+			args = append(args, v)
 			argIdx++
 		default:
 			continue
