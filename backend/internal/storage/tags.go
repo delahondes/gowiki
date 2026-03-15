@@ -150,8 +150,9 @@ func (idx *TagIndex) RemovePage(pagePath string) {
 }
 
 // GetPagesForTag returns all pages that have the given tag, optionally
-// filtered by a path prefix. Results are sorted by path.
-func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string) []PageEntry {
+// filtered by a path prefix and excluding pages that have any of the
+// specified tags. Results are sorted by path.
+func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string, excludeTags []string) []PageEntry {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -160,6 +161,12 @@ func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string) []PageEntry {
 	for _, p := range pages {
 		if pathPrefix != "" && !hasPathPrefix(p, pathPrefix) {
 			continue
+		}
+		if len(excludeTags) > 0 {
+			pageTags := idx.PageToTags[p]
+			if hasAnyTag(pageTags, excludeTags) {
+				continue
+			}
 		}
 		title := idx.PageTitles[p]
 		if title == "" {
@@ -171,6 +178,18 @@ func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string) []PageEntry {
 		return result[i].Path < result[j].Path
 	})
 	return result
+}
+
+// hasAnyTag returns true if pageTags contains any of the tags in check.
+func hasAnyTag(pageTags, check []string) bool {
+	for _, c := range check {
+		for _, t := range pageTags {
+			if t == c {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasPathPrefix(pagePath, prefix string) bool {

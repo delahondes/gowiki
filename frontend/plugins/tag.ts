@@ -23,6 +23,12 @@ const tagQueryProperties = [
     parse: (raw: string) => raw.trim(),
   },
   {
+    name: "exclude",
+    label: "Exclude tags",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+  },
+  {
     name: "path",
     label: "Path prefix",
     default: "",
@@ -173,6 +179,8 @@ class TagQueryNodeView {
 
     try {
       const params = new URLSearchParams({ tag })
+      const exclude = (this.node.attrs.exclude || "").trim()
+      if (exclude) params.set("exclude", exclude)
       const path = this.resolvePathPrefix(this.node.attrs.path)
       if (path) params.set("path", path)
 
@@ -248,6 +256,7 @@ class TagQueryNodeView {
     if (node.type !== this.node.type) return false
     if (
       node.attrs.tag !== this.node.attrs.tag ||
+      node.attrs.exclude !== this.node.attrs.exclude ||
       node.attrs.path !== this.node.attrs.path ||
       node.attrs.render !== this.node.attrs.render
     ) {
@@ -310,6 +319,7 @@ export const tagPlugin: WikiPlugin = {
           atom: true,
           attrs: {
             tag: { default: "" },
+            exclude: { default: "" },
             path: { default: "" },
             render: { default: "table" },
           },
@@ -319,6 +329,7 @@ export const tagPlugin: WikiPlugin = {
               {
                 class: "gowiki-tag-query",
                 "data-tag": node.attrs.tag || "",
+                "data-exclude": node.attrs.exclude || "",
                 "data-path": node.attrs.path || "",
                 "data-render": node.attrs.render || "table",
               },
@@ -331,6 +342,7 @@ export const tagPlugin: WikiPlugin = {
               getAttrs(dom: HTMLElement) {
                 return {
                   tag: dom.getAttribute("data-tag") || "",
+                  exclude: dom.getAttribute("data-exclude") || "",
                   path: dom.getAttribute("data-path") || "",
                   render: dom.getAttribute("data-render") || "table",
                 }
@@ -370,6 +382,7 @@ export const tagPlugin: WikiPlugin = {
         ctx.push(
           ctx.schema.nodes.tag_query.create({
             tag: attrs.tag ?? "",
+            exclude: attrs.exclude ?? "",
             path: attrs.path ?? "",
             render: attrs.render ?? "table",
           })
@@ -389,6 +402,7 @@ export const tagPlugin: WikiPlugin = {
       print(node) {
         const parts: string[] = []
         if (node.attrs.tag) parts.push(`tag=${node.attrs.tag}`)
+        if (node.attrs.exclude) parts.push(`exclude=${node.attrs.exclude}`)
         if (node.attrs.path) parts.push(`path=${node.attrs.path}`)
         if (node.attrs.render && node.attrs.render !== "table") {
           parts.push(`render=${node.attrs.render}`)
@@ -446,7 +460,7 @@ export const tagPlugin: WikiPlugin = {
       const queryType = reg.schema.nodes.tag_query
       if (!queryType) return false
       if (dispatch) {
-        const node = queryType.create({ tag: "", path: "", render: "table" })
+        const node = queryType.create({ tag: "", exclude: "", path: "", render: "table" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null

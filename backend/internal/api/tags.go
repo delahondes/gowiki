@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"gowiki/backend/internal/markdown"
 )
@@ -28,12 +29,22 @@ func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	pathPrefix := r.URL.Query().Get("path")
 
+	var excludeTags []string
+	if exc := r.URL.Query().Get("exclude"); exc != "" {
+		for _, t := range strings.Split(exc, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				excludeTags = append(excludeTags, t)
+			}
+		}
+	}
+
 	if s.tagIndex == nil {
 		http.Error(w, "tag queries not supported", http.StatusNotImplemented)
 		return
 	}
 
-	entries := s.tagIndex.GetPagesForTag(tag, pathPrefix)
+	entries := s.tagIndex.GetPagesForTag(tag, pathPrefix, excludeTags)
 
 	pages := make([]tagQueryPage, 0, len(entries))
 	for _, e := range entries {
