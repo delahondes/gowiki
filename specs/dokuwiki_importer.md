@@ -597,6 +597,21 @@ Entity conversion runs at the inline level, after code spans and links are prote
 | `FIXME` | ⚠️ FIXME |
 | `DELETEME` | ❌ DELETEME |
 
+### Folded plugin (14 pages)
+
+DokuWiki:
+```
+++++ Title |
+Hidden content (paragraphs, tables, code blocks, etc.)
+++++
+```
+
+Gowiki: `` ```spoiler Title `` ... `` ``` ``
+
+The folded plugin creates collapsible content blocks. The importer initially stripped the `++++` markers but preserved the content inline.
+
+**Post-import fix (2026-03-15):** `scripts/fix_folded_spoilers.py` reintroduced the folded blocks as Gowiki spoiler blocks. The script uses the original DokuWiki source (`import/data/pages/`) to identify which pages had folded blocks and their titles, then uses distinctive text anchors to locate the content in the current (potentially edited/translated) Gowiki pages and wraps it in spoiler fences. 20 spoiler blocks across 12 files. Pages `regulatory/smq/soft/sop06/rec01.md` and `regulatory/smq/qara/sop05/rec01.md` were already fixed manually.
+
 ### Template variables
 
 DokuWiki uses two forms: `@!PAGE!@` and `@PAGE@`. Both are converted to Gowiki `{{PAGE}}`.

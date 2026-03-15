@@ -54,6 +54,7 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	var state blockState
 	var blockBuf []string
 	var blockLang string // for code blocks
+	var foldTitle string // for fold/spoiler blocks
 	var tableLines []string
 	var wrapStack []WrapBlock
 	wrapDepth := 0
@@ -189,11 +190,13 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 
 		case stateFold:
 			if reFoldClose.MatchString(line) {
-				// Emit accumulated content (fold wrapper stripped)
+				// Emit as spoiler block
+				output = append(output, fmt.Sprintf("```spoiler %s", foldTitle))
 				for _, bl := range blockBuf {
 					converted := convertNormalLine(bl, currentNS, pagesDir)
 					emitImageLine(converted)
 				}
+				output = append(output, "```")
 				result.ConvertLines += len(blockBuf) + 2
 				state = stateNormal
 			} else {
@@ -307,10 +310,11 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 			continue
 		}
 
-		// Fold block
-		if reFoldOpen.MatchString(trimmed) {
+		// Fold block → spoiler
+		if m := reFoldOpen.FindStringSubmatch(trimmed); m != nil {
 			flushTable()
 			state = stateFold
+			foldTitle = strings.TrimSpace(m[1])
 			blockBuf = nil
 			result.ConvertLines++
 			continue
