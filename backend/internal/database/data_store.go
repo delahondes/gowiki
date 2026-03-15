@@ -318,6 +318,39 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 		}
 
 		op := f.Operator
+
+		// Multi-enum fields live in a junction table — use EXISTS subquery.
+		if fd.Type == FieldTypeMultiEnum {
+			jt := fmt.Sprintf("%s__%s", dtName, fd.Name)
+			switch op {
+			case "=":
+				whereClauses = append(whereClauses,
+					fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE row_id = %s.id AND value = $%d)",
+						quoteIdent(jt), quoteIdent(dtName), argIdx))
+				args = append(args, f.Value)
+				argIdx++
+			case "!=":
+				whereClauses = append(whereClauses,
+					fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE row_id = %s.id AND value = $%d)",
+						quoteIdent(jt), quoteIdent(dtName), argIdx))
+				args = append(args, f.Value)
+				argIdx++
+			case "~":
+				v := f.Value
+				if !strings.Contains(v, "%") {
+					v = "%" + v + "%"
+				}
+				whereClauses = append(whereClauses,
+					fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE row_id = %s.id AND value ILIKE $%d)",
+						quoteIdent(jt), quoteIdent(dtName), argIdx))
+				args = append(args, v)
+				argIdx++
+			default:
+				continue
+			}
+			continue
+		}
+
 		switch op {
 		case "=", "!=", "<", ">", "<=", ">=":
 			whereClauses = append(whereClauses, fmt.Sprintf("%s %s $%d", quoteIdent(fieldName), op, argIdx))
