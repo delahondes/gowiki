@@ -226,6 +226,7 @@ Gowiki: `{tag label1 label2}`
 - `<file txt filename.txt>...</file>` -> ` ```\n...\n``` ` (filename info dropped, flagged)
 - Inline `<code>text</code>` (without language specifier, on a single line with other content) -> `` `text` `` (backtick code span)
 - Multi-line `<code>` blocks nested inside blockquotes/notes are handled: the code block is extracted and emitted as a fenced block with `> ` prefix
+- **Post-import fix (2026-03-15):** 172 code blocks across 40 files were not caught by the importer (mostly inside list items and `<codeprism>` tags). Fixed by `scripts/fix_code_blocks.py` which transforms remaining `<code LANG>...</code>` and `<codeprism lang=X>...</codeprism>` into fenced blocks, handles escaped variants (`\>`), re-indents content in list contexts, and normalizes language names (`sudo`→`bash`, `R`→`r`, etc.). `wiki/syntax.md` excluded (DokuWiki syntax doc).
 
 ### Footnotes
 
