@@ -8847,6 +8847,7 @@ async function bootstrap() {
 
   // Sitemap page: virtual route
   if (pagePath === "_sitemap") {
+    await checkAuth()
     await renderSitemapPage()
     fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
       sidebarView = v
