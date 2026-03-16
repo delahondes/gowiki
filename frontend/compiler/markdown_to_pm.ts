@@ -119,15 +119,34 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
           }
           parsedAttrs[key] = prop.parse ? prop.parse(raw) : raw
         }
-        out.push({
-          type: selfContained.tokenType,
-          tag: "",
-          nesting: 0,
-          block: true,
-          level: 0,
-          map: token.map,
-          meta: { directiveName: meta.name, attrs: parsedAttrs },
-        })
+        if (selfContained.inline) {
+          // Inline self-contained directives: wrap in a paragraph so the
+          // kernel processes them as inline content.
+          out.push({ type: "paragraph_open", tag: "p", nesting: 1, block: true, level: 0, map: token.map })
+          out.push({
+            type: "inline",
+            content: "",
+            children: [{
+              type: selfContained.tokenType,
+              tag: "",
+              nesting: 0,
+              meta: { directiveName: meta.name, attrs: parsedAttrs },
+            }],
+            level: 1,
+            map: token.map,
+          })
+          out.push({ type: "paragraph_close", tag: "p", nesting: -1, block: true, level: 0 })
+        } else {
+          out.push({
+            type: selfContained.tokenType,
+            tag: "",
+            nesting: 0,
+            block: true,
+            level: 0,
+            map: token.map,
+            meta: { directiveName: meta.name, attrs: parsedAttrs },
+          })
+        }
         continue
       }
 
@@ -439,6 +458,67 @@ function convertCaptionRefTokens(tokens: any[]) {
   return tokens
 }
 
+/**
+ * Convert inline self-contained directives in text tokens.
+ * Scans text for {name key=value} patterns where name is a registered
+ * inline self-contained directive, and replaces them with synthetic tokens.
+ */
+function convertInlineSelfContainedDirectiveChildren(children: any[], registry: Registry): any[] {
+  const directiveRe = /\{([A-Za-z][A-Za-z0-9_-]*)(?:\s[^}]*)?\}/
+  const out: any[] = []
+  for (const tok of children) {
+    if (tok?.type !== "text" || !tok.content || !directiveRe.test(tok.content)) {
+      out.push(tok)
+      continue
+    }
+    const re = /\{([A-Za-z][A-Za-z0-9_-]*)(?:\s[^}]*)?\}/g
+    let lastIndex = 0
+    let m: RegExpExecArray | null
+    let changed = false
+    const parts: any[] = []
+    while ((m = re.exec(tok.content)) !== null) {
+      const directiveName = m[1]
+      const spec = registry.getSelfContainedDirective(directiveName)
+      if (!spec || !spec.inline) continue
+
+      const parsed = parseDirective(m[0])
+      if (!parsed) continue
+
+      changed = true
+      if (m.index > lastIndex) {
+        parts.push({ type: "text", content: tok.content.slice(lastIndex, m.index) })
+      }
+
+      const parsedAttrs: Record<string, string | null> = {}
+      for (const [key, raw] of Object.entries(parsed.attrs)) {
+        if (key === "_args") { parsedAttrs[key] = raw; continue }
+        const prop = spec.properties.find(p => p.name === key)
+        if (!prop) {
+          if (spec.collectExtra) { parsedAttrs[key] = raw; continue }
+          continue
+        }
+        parsedAttrs[key] = prop.parse ? prop.parse(raw) : raw
+      }
+
+      parts.push({
+        type: spec.tokenType,
+        content: "",
+        meta: { directiveName: parsed.name, attrs: parsedAttrs },
+      })
+      lastIndex = m.index + m[0].length
+    }
+    if (!changed) {
+      out.push(tok)
+      continue
+    }
+    if (lastIndex < tok.content.length) {
+      parts.push({ type: "text", content: tok.content.slice(lastIndex) })
+    }
+    out.push(...parts)
+  }
+  return out
+}
+
 function isTopLevelBlockStart(token: any) {
   if (!token?.block || token.level !== 0) return false
   return token.nesting === 1 || token.nesting === 0
@@ -565,6 +645,7 @@ export function markdownToPM(
   for (const token of tokens) {
     if (token.type === "inline" && Array.isArray(token.children)) {
       token.children = applyInlineDirectives(token.children, registry)
+      token.children = convertInlineSelfContainedDirectiveChildren(token.children, registry)
     }
   }
 

@@ -48,7 +48,7 @@ class VersionLinkNodeView {
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
-    this.dom = document.createElement("div")
+    this.dom = document.createElement("span")
     this.dom.className = "gowiki-version-link"
     this.dom.contentEditable = "false"
     this.render()
@@ -205,8 +205,7 @@ class VersionLinkNodeView {
 
 const versionLinkStyles = `
 .gowiki-version-link {
-  display: inline-block;
-  margin: 4px 0;
+  display: inline;
 }
 
 .gowiki-vl-loading {
@@ -271,7 +270,8 @@ export const versionLinkPlugin: WikiPlugin = {
     reg.registerSchema({
       nodes: {
         version_link: {
-          group: "block",
+          group: "inline",
+          inline: true,
           atom: true,
           attrs: {
             version: { default: "" },
@@ -279,18 +279,18 @@ export const versionLinkPlugin: WikiPlugin = {
           },
           toDOM(node: PMNode) {
             return [
-              "div",
+              "span",
               {
                 class: "gowiki-version-link",
                 "data-version": node.attrs.version || "",
                 "data-page": node.attrs.page || "",
               },
-              `Version link: v${node.attrs.version || "?"}${node.attrs.page ? ` (${node.attrs.page})` : ""}`,
+              `v${node.attrs.version || "?"}`,
             ]
           },
           parseDOM: [
             {
-              tag: "div.gowiki-version-link",
+              tag: "span.gowiki-version-link",
               getAttrs(dom: HTMLElement) {
                 return {
                   version: dom.getAttribute("data-version") || "",
@@ -308,6 +308,7 @@ export const versionLinkPlugin: WikiPlugin = {
       tokenType: "version_link",
       nodeType: "version_link",
       properties: versionLinkProperties,
+      inline: true,
     })
 
     // Markdown → PM
@@ -334,8 +335,8 @@ export const versionLinkPlugin: WikiPlugin = {
           parts.push(`page=${node.attrs.page}`)
         }
         return parts.length
-          ? `{version-link ${parts.join(" ")}}\n\n`
-          : `{version-link}\n\n`
+          ? `{version-link ${parts.join(" ")}}`
+          : `{version-link}`
       },
     })
 
@@ -359,25 +360,12 @@ export const versionLinkPlugin: WikiPlugin = {
       if (!nodeType) return false
       if (dispatch) {
         const node = nodeType.create({ version: "", page: "" })
-        let tr = state.tr.replaceSelectionWith(node)
-        const approxPos = tr.mapping.map(state.selection.from)
-        let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === nodeType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
-          }
-        )
-        if (insertedAt !== null) {
-          try {
-            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
-            tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
-        }
+        const { from } = state.selection
+        let tr = state.tr.insert(from, node)
+        try {
+          tr = tr.setSelection(NodeSelection.create(tr.doc, from))
+          tr = enablePropertiesPanel(tr)
+        } catch { /* leave default selection */ }
         dispatch(tr.scrollIntoView())
       }
       return true

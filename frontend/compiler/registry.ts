@@ -96,6 +96,8 @@ export type SelfContainedDirectiveSpec = {
   properties: NodePropertySpec[]
   /** When true, unknown key=value pairs are passed through as raw strings. */
   collectExtra?: boolean
+  /** When true, the directive creates an inline node and can appear inside paragraphs/table cells. */
+  inline?: boolean
 }
 
 export class Registry {

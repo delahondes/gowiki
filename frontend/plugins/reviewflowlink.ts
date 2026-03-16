@@ -50,7 +50,7 @@ class ReviewflowLinkNodeView {
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
-    this.dom = document.createElement("div")
+    this.dom = document.createElement("span")
     this.dom.className = "gowiki-reviewflow-link"
     this.dom.contentEditable = "false"
     this.render()
@@ -86,26 +86,33 @@ class ReviewflowLinkNodeView {
     }
 
     const a = document.createElement("a")
-    a.className = "gowiki-rfl-link gowiki-link-exists"
     a.href = `${this.resolved.pagePath}?v=${this.resolved.pageVersion}`
-    a.title = `Validated version ${version} of ${this.resolved.pagePath}`
 
-    // Shield icon
-    const icon = document.createElement("span")
-    icon.className = "gowiki-rfl-icon"
-    icon.textContent = "\u{1F6E1}\uFE0F"
-    a.appendChild(icon)
+    if (isLocal) {
+      // Simple inline badge for local page — just show the version tag
+      a.className = "gowiki-rfl-inline-badge gowiki-link-exists"
+      a.title = `Validated version ${version}`
+      a.textContent = version
+    } else {
+      // Full display for cross-page links
+      a.className = "gowiki-rfl-link gowiki-link-exists"
+      a.title = `Validated version ${version} of ${this.resolved.pagePath}`
 
-    // Title + version badge
-    const label = document.createElement("span")
-    label.className = "gowiki-rfl-label"
-    label.textContent = isLocal ? "This page" : this.resolved.title || this.resolved.pagePath
-    a.appendChild(label)
+      const icon = document.createElement("span")
+      icon.className = "gowiki-rfl-icon"
+      icon.textContent = "\u{1F6E1}\uFE0F"
+      a.appendChild(icon)
 
-    const badge = document.createElement("span")
-    badge.className = "gowiki-rfl-version-badge"
-    badge.textContent = `v${version}`
-    a.appendChild(badge)
+      const label = document.createElement("span")
+      label.className = "gowiki-rfl-label"
+      label.textContent = this.resolved.title || this.resolved.pagePath
+      a.appendChild(label)
+
+      const badge = document.createElement("span")
+      badge.className = "gowiki-rfl-version-badge"
+      badge.textContent = `v${version}`
+      a.appendChild(badge)
+    }
 
     this.dom.appendChild(a)
   }
@@ -197,8 +204,7 @@ class ReviewflowLinkNodeView {
 
 const reviewflowLinkStyles = `
 .gowiki-reviewflow-link {
-  display: inline-block;
-  margin: 4px 0;
+  display: inline;
 }
 
 .gowiki-rfl-loading {
@@ -248,6 +254,22 @@ const reviewflowLinkStyles = `
   border-radius: 8px;
 }
 
+.gowiki-rfl-inline-badge {
+  display: inline-block;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gowiki-rfl-inline-badge:hover {
+  background: #bbdefb;
+}
+
 #app.gowiki-editing .gowiki-reviewflow-link.ProseMirror-selectednode {
   outline: 2px solid #ffd43b;
   outline-offset: 1px;
@@ -262,7 +284,8 @@ export const reviewflowLinkPlugin: WikiPlugin = {
     reg.registerSchema({
       nodes: {
         reviewflow_link: {
-          group: "block",
+          group: "inline",
+          inline: true,
           atom: true,
           attrs: {
             version: { default: "" },
@@ -270,18 +293,18 @@ export const reviewflowLinkPlugin: WikiPlugin = {
           },
           toDOM(node: PMNode) {
             return [
-              "div",
+              "span",
               {
                 class: "gowiki-reviewflow-link",
                 "data-version": node.attrs.version || "",
                 "data-page": node.attrs.page || "",
               },
-              `Reviewflow link: v${node.attrs.version || "?"}${node.attrs.page ? ` (${node.attrs.page})` : ""}`,
+              `v${node.attrs.version || "?"}`,
             ]
           },
           parseDOM: [
             {
-              tag: "div.gowiki-reviewflow-link",
+              tag: "span.gowiki-reviewflow-link",
               getAttrs(dom: HTMLElement) {
                 return {
                   version: dom.getAttribute("data-version") || "",
@@ -299,6 +322,7 @@ export const reviewflowLinkPlugin: WikiPlugin = {
       tokenType: "reviewflow_link",
       nodeType: "reviewflow_link",
       properties: reviewflowLinkProperties,
+      inline: true,
     })
 
     // Markdown → PM: handle the synthetic token
@@ -325,8 +349,8 @@ export const reviewflowLinkPlugin: WikiPlugin = {
           parts.push(`page=${node.attrs.page}`)
         }
         return parts.length
-          ? `{reviewflow-link ${parts.join(" ")}}\n\n`
-          : `{reviewflow-link}\n\n`
+          ? `{reviewflow-link ${parts.join(" ")}}`
+          : `{reviewflow-link}`
       },
     })
 
@@ -350,25 +374,12 @@ export const reviewflowLinkPlugin: WikiPlugin = {
       if (!nodeType) return false
       if (dispatch) {
         const node = nodeType.create({ version: "", page: "" })
-        let tr = state.tr.replaceSelectionWith(node)
-        const approxPos = tr.mapping.map(state.selection.from)
-        let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === nodeType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
-          }
-        )
-        if (insertedAt !== null) {
-          try {
-            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
-            tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
-        }
+        const { from } = state.selection
+        let tr = state.tr.insert(from, node)
+        try {
+          tr = tr.setSelection(NodeSelection.create(tr.doc, from))
+          tr = enablePropertiesPanel(tr)
+        } catch { /* leave default selection */ }
         dispatch(tr.scrollIntoView())
       }
       return true
