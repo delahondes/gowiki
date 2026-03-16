@@ -216,7 +216,7 @@ class TagQueryNodeView {
         const table = document.createElement("table")
         const thead = document.createElement("thead")
         const headerRow = document.createElement("tr")
-        for (const h of ["Page", "Extract", "Version", "Author"]) {
+        for (const h of ["Page", "Version", "Author"]) {
           const th = document.createElement("th")
           th.textContent = h
           headerRow.appendChild(th)
@@ -234,12 +234,16 @@ class TagQueryNodeView {
           tdTitle.appendChild(a)
           row.appendChild(tdTitle)
 
-          const tdExtract = document.createElement("td")
-          tdExtract.textContent = p.extract || ""
-          row.appendChild(tdExtract)
-
           const tdVersion = document.createElement("td")
-          tdVersion.textContent = p.version ? String(p.version) : ""
+          if (p.validated_version_tag) {
+            // Reviewflow page: show validated version tag, linked to that version.
+            const va = document.createElement("a")
+            va.href = `${p.path}?v=${p.validated_page_version}`
+            va.textContent = p.validated_version_tag
+            tdVersion.appendChild(va)
+          } else {
+            tdVersion.textContent = p.version ? String(p.version) : ""
+          }
           row.appendChild(tdVersion)
 
           const tdAuthor = document.createElement("td")
