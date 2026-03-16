@@ -40,15 +40,18 @@ func (svc *TodoService) CreateTask(ctx context.Context, req CreateRequest) (*Tas
 		return nil, err
 	}
 
-	svc.hub.Publish(task.Assignee.Target, Event{Type: "task.created", Task: task})
+	svc.publishToAllTargets(task.Assignee.Target, Event{Type: "task.created", Task: task})
 
 	if svc.dispatcher != nil && task.Assignee.Target != "" {
-		svc.dispatcher.Notify(NotifyEvent{
-			Type:      "assigned",
-			Task:      task,
-			Recipient: task.Assignee.Target,
-			UserID:    task.Assignee.Target,
-		})
+		for _, t := range SplitTargets(task.Assignee.Target) {
+			name := CleanTargetName(t)
+			svc.dispatcher.Notify(NotifyEvent{
+				Type:      "assigned",
+				Task:      task,
+				Recipient: name,
+				UserID:    name,
+			})
+		}
 		// Record that the "assigned" notification has been sent (once only).
 		_ = svc.store.RecordNotificationSent(ctx, task.ID, "assigned")
 	}
@@ -63,7 +66,7 @@ func (svc *TodoService) CompleteTask(ctx context.Context, taskID, userID string,
 		return nil, err
 	}
 
-	svc.hub.Publish(task.Assignee.Target, Event{Type: "task.completed", Task: task})
+	svc.publishToAllTargets(task.Assignee.Target, Event{Type: "task.completed", Task: task})
 
 	// Handle recurrence if task was fully promoted to done.
 	if promoted && !task.Recurrence.IsZero() {
@@ -72,14 +75,17 @@ func (svc *TodoService) CompleteTask(ctx context.Context, taskID, userID string,
 		if err != nil {
 			log.Printf("todo: spawn recurrence failed for %s: %v", task.ID, err)
 		} else {
-			svc.hub.Publish(newTask.Assignee.Target, Event{Type: "task.created", Task: newTask})
+			svc.publishToAllTargets(newTask.Assignee.Target, Event{Type: "task.created", Task: newTask})
 			if svc.dispatcher != nil {
-				svc.dispatcher.Notify(NotifyEvent{
-					Type:      "recurrence_spawned",
-					Task:      newTask,
-					Recipient: newTask.Assignee.Target,
-					UserID:    newTask.Assignee.Target,
-				})
+				for _, t := range SplitTargets(newTask.Assignee.Target) {
+					name := CleanTargetName(t)
+					svc.dispatcher.Notify(NotifyEvent{
+						Type:      "recurrence_spawned",
+						Task:      newTask,
+						Recipient: name,
+						UserID:    name,
+					})
+				}
 			}
 		}
 	}
@@ -93,7 +99,7 @@ func (svc *TodoService) ReopenTask(ctx context.Context, taskID string) (*Task, e
 	if err != nil {
 		return nil, err
 	}
-	svc.hub.Publish(task.Assignee.Target, Event{Type: "task.reopened", Task: task})
+	svc.publishToAllTargets(task.Assignee.Target, Event{Type: "task.reopened", Task: task})
 	return task, nil
 }
 
@@ -113,7 +119,7 @@ func (svc *TodoService) ReopenReadTasks(ctx context.Context, pagePath string) {
 			log.Printf("todo: reopen read task %s failed: %v", task.ID, err)
 			continue
 		}
-		svc.hub.Publish(reopened.Assignee.Target, Event{Type: "task.reopened", Task: reopened})
+		svc.publishToAllTargets(reopened.Assignee.Target, Event{Type: "task.reopened", Task: reopened})
 	}
 }
 
@@ -124,7 +130,7 @@ func (svc *TodoService) AcknowledgeTask(ctx context.Context, taskID, userID stri
 		return nil, err
 	}
 
-	svc.hub.Publish(task.Assignee.Target, Event{Type: "task.completed", Task: task})
+	svc.publishToAllTargets(task.Assignee.Target, Event{Type: "task.completed", Task: task})
 
 	// Handle recurrence if task was fully promoted to done.
 	if promoted && !task.Recurrence.IsZero() {
@@ -133,7 +139,7 @@ func (svc *TodoService) AcknowledgeTask(ctx context.Context, taskID, userID stri
 		if err != nil {
 			log.Printf("todo: spawn recurrence failed for %s: %v", task.ID, err)
 		} else {
-			svc.hub.Publish(newTask.Assignee.Target, Event{Type: "task.created", Task: newTask})
+			svc.publishToAllTargets(newTask.Assignee.Target, Event{Type: "task.created", Task: newTask})
 		}
 	}
 
@@ -166,8 +172,8 @@ func (svc *TodoService) AutoCompleteCreateAction(ctx context.Context, pagePath, 
 	}
 
 	for _, task := range tasks {
-		// Check the assignee matches the user who created the page.
-		if task.Assignee.Target != userID {
+		// Check the assignee matches the user who created the page (supports multi-target).
+		if !TargetContains(task.Assignee.Target, userID) {
 			continue
 		}
 
@@ -184,5 +190,13 @@ func (svc *TodoService) AutoCompleteCreateAction(ctx context.Context, pagePath, 
 		if _, err := svc.CompleteTask(ctx, task.ID, userID, nil); err != nil {
 			log.Printf("todo: auto-complete create action for task %s failed: %v", task.ID, err)
 		}
+	}
+}
+
+// publishToAllTargets publishes an SSE event to each target in a comma-separated target string.
+// Strips group: prefixes since SSE subscriptions use bare names.
+func (svc *TodoService) publishToAllTargets(target string, event Event) {
+	for _, t := range SplitTargets(target) {
+		svc.hub.Publish(CleanTargetName(t), event)
 	}
 }

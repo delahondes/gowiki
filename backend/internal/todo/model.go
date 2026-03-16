@@ -1,6 +1,9 @@
 package todo
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Status represents the lifecycle state of a task.
 type Status string
@@ -54,10 +57,107 @@ type Task struct {
 }
 
 // Assignee describes who is responsible for a task.
+// Target may be a single name or a comma-separated list (e.g. "managers,regulatory"
+// for multi-group, or "alice,bob" for multi-user).
 type Assignee struct {
 	Type       string `json:"type"`       // "user" or "group"
-	Target     string `json:"target"`     // username or group name
+	Target     string `json:"target"`     // username/group or comma-separated list
 	Resolution string `json:"resolution"` // "any" or "all"
+}
+
+// GroupTargetPrefix is the prefix used in target strings to explicitly mark a group.
+// Example: "group:admin" means the "admin" group, while bare "admin" means user "admin".
+const GroupTargetPrefix = "group:"
+
+// IsGroupTarget returns true if the target string has an explicit group: prefix.
+func IsGroupTarget(target string) bool {
+	return strings.HasPrefix(target, GroupTargetPrefix)
+}
+
+// CleanTargetName strips the group: prefix if present, returning the bare name.
+func CleanTargetName(target string) string {
+	return strings.TrimPrefix(target, GroupTargetPrefix)
+}
+
+// SplitTargets splits a comma-separated target string into individual targets.
+// Targets may include "group:" prefixes (e.g. "group:admin,alice").
+func SplitTargets(target string) []string {
+	if target == "" {
+		return nil
+	}
+	if !strings.Contains(target, ",") {
+		return []string{target}
+	}
+	parts := strings.Split(target, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// TargetContains checks if a comma-separated target string contains a specific value.
+// Matches both the raw target and the cleaned (prefix-stripped) name.
+func TargetContains(target, value string) bool {
+	for _, t := range SplitTargets(target) {
+		if t == value || CleanTargetName(t) == value {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveAllMembers resolves all members across comma-separated targets.
+// Targets with "group:" prefix are always expanded as groups.
+// Bare targets are auto-detected: if GroupResolver returns members, it's treated
+// as a group (backward compat); otherwise it's a direct user.
+func ResolveAllMembers(target string, resolver GroupResolver) []string {
+	seen := make(map[string]bool)
+	var members []string
+	for _, t := range SplitTargets(target) {
+		if IsGroupTarget(t) {
+			// Explicit group: prefix — always expand.
+			groupName := CleanTargetName(t)
+			for _, m := range resolver.GroupMembers(groupName) {
+				if !seen[m] {
+					seen[m] = true
+					members = append(members, m)
+				}
+			}
+		} else {
+			// Bare name — auto-detect via GroupResolver for backward compat.
+			groupMembers := resolver.GroupMembers(t)
+			if len(groupMembers) > 0 {
+				for _, m := range groupMembers {
+					if !seen[m] {
+						seen[m] = true
+						members = append(members, m)
+					}
+				}
+			} else {
+				if !seen[t] {
+					seen[t] = true
+					members = append(members, t)
+				}
+			}
+		}
+	}
+	return members
+}
+
+// BuildTargetsArray builds the identity array for SQL overlap queries.
+// Includes the userID, each group name (bare for backward compat), and
+// group:-prefixed versions for new-format targets.
+func BuildTargetsArray(userID string, groups []string) []string {
+	targets := []string{userID}
+	for _, g := range groups {
+		targets = append(targets, g)
+		targets = append(targets, GroupTargetPrefix+g)
+	}
+	return targets
 }
 
 // Recurrence describes how a task repeats after completion.

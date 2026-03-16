@@ -936,8 +936,7 @@ type pageCheckerAdapter struct {
 }
 
 func (a *pageCheckerAdapter) PageExists(pagePath string) bool {
-	_, err := a.store.Get(pagePath)
-	return err == nil
+	return a.store.Exists(pagePath)
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

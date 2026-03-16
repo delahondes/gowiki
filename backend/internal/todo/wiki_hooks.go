@@ -54,19 +54,24 @@ func (ts *TodoSyncer) SyncPageRows(pagePath, markdown string) {
 	}
 	for _, task := range tasks {
 		if task.Status == StatusOpen {
-			ts.hub.Publish(task.Assignee.Target, Event{
-				Type: "task.updated",
-				Task: task,
-			})
+			for _, t := range SplitTargets(task.Assignee.Target) {
+				ts.hub.Publish(CleanTargetName(t), Event{
+					Type: "task.updated",
+					Task: task,
+				})
+			}
 		}
 		// Send email/webhook notification for newly created tasks.
 		if !existingIDs[task.ID] && ts.dispatcher != nil && task.Assignee.Target != "" {
-			ts.dispatcher.Notify(NotifyEvent{
-				Type:      "assigned",
-				Task:      task,
-				Recipient: task.Assignee.Target,
-				UserID:    task.Assignee.Target,
-			})
+			for _, t := range SplitTargets(task.Assignee.Target) {
+				name := CleanTargetName(t)
+				ts.dispatcher.Notify(NotifyEvent{
+					Type:      "assigned",
+					Task:      task,
+					Recipient: name,
+					UserID:    name,
+				})
+			}
 		}
 	}
 }
@@ -85,10 +90,12 @@ func (ts *TodoSyncer) RemovePageRows(pagePath string) {
 	}
 
 	for _, task := range tasks {
-		ts.hub.Publish(task.Assignee.Target, Event{
-			Type: "task.updated",
-			Task: task,
-		})
+		for _, t := range SplitTargets(task.Assignee.Target) {
+			ts.hub.Publish(CleanTargetName(t), Event{
+				Type: "task.updated",
+				Task: task,
+			})
+		}
 	}
 }
 

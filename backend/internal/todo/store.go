@@ -266,8 +266,10 @@ func (s *TodoStore) Complete(ctx context.Context, id, userID string, resolver Gr
 
 	// Check if task should be promoted to done.
 	promoted := false
-	if task.Assignee.Type == "group" && task.Assignee.Resolution == "all" && resolver != nil {
-		members := resolver.GroupMembers(task.Assignee.Target)
+	if task.Assignee.Resolution == "all" && resolver != nil {
+		// resolution=all: resolve all targets (groups expanded to members,
+		// users kept as-is) and check all have completed.
+		requiredMembers := ResolveAllMembers(task.Assignee.Target, resolver)
 		completions, err := s.ListCompletions(ctx, id)
 		if err != nil {
 			return nil, false, err
@@ -277,17 +279,17 @@ func (s *TodoStore) Complete(ctx context.Context, id, userID string, resolver Gr
 			completedUsers[c.UserID] = true
 		}
 		allDone := true
-		for _, m := range members {
+		for _, m := range requiredMembers {
 			if !completedUsers[m] {
 				allDone = false
 				break
 			}
 		}
-		if allDone && len(members) > 0 {
+		if allDone && len(requiredMembers) > 0 {
 			promoted = true
 		}
 	} else {
-		// For "any" resolution or user tasks, immediate completion.
+		// For "any" resolution or single-user tasks.
 		promoted = true
 	}
 
@@ -357,7 +359,7 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 		argN++
 	}
 	if opts.Assignee != "" {
-		conditions = append(conditions, fmt.Sprintf("assignee_target = $%d", argN))
+		conditions = append(conditions, fmt.Sprintf("$%d = ANY(string_to_array(assignee_target, ','))", argN))
 		args = append(args, opts.Assignee)
 		argN++
 	}
@@ -476,8 +478,7 @@ func (s *TodoStore) ListMine(ctx context.Context, userID string, groups []string
 		return nil, fmt.Errorf("database not connected")
 	}
 
-	targets := []string{userID}
-	targets = append(targets, groups...)
+	targets := BuildTargetsArray(userID, groups)
 
 	rows, err := p.Query(ctx, `
 		SELECT id, title, description, status, source, source_page, node_key,
@@ -489,7 +490,7 @@ func (s *TodoStore) ListMine(ctx context.Context, userID string, groups []string
 			tags, priority, created_by, created_at, updated_at
 		FROM todo_tasks
 		WHERE status IN ('open', 'in_progress')
-		  AND assignee_target = ANY($1)
+		  AND string_to_array(assignee_target, ',') && $1::text[]
 		ORDER BY due_date ASC NULLS LAST, priority DESC, created_at ASC`, targets)
 	if err != nil {
 		return nil, fmt.Errorf("list my tasks: %w", err)
@@ -552,15 +553,36 @@ func (s *TodoStore) UpsertForPage(ctx context.Context, pagePath string, directiv
 		nodeKey := computeNodeKey(pagePath, d.Title, d.Assign)
 		seenKeys[nodeKey] = true
 
-		// Parse assignee.
+		// Parse assignee, supporting multi-target (comma-separated) with optional group: prefix.
+		// Syntax: bare name = user (default), "group:X" = explicit group.
+		// Examples: "alice", "group:admin", "group:admin,alice", "group:managers,group:regulatory"
 		assignee := Assignee{Type: "user", Target: "", Resolution: "any"}
 		if d.Assign != "" {
-			target := strings.TrimPrefix(d.Assign, "@")
-			if strings.HasPrefix(target, "group:") {
+			raw := strings.TrimPrefix(d.Assign, "@")
+			parts := strings.Split(raw, ",")
+			var cleaned []string
+			hasGroup := false
+			hasUser := false
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				p = strings.TrimPrefix(p, "@")
+				if p == "" {
+					continue
+				}
+				if IsGroupTarget(p) {
+					hasGroup = true
+				} else {
+					hasUser = true
+				}
+				cleaned = append(cleaned, p)
+			}
+			assignee.Target = strings.Join(cleaned, ",")
+			if hasGroup && hasUser {
+				assignee.Type = "mixed"
+			} else if hasGroup {
 				assignee.Type = "group"
-				assignee.Target = strings.TrimPrefix(target, "group:")
 			} else {
-				assignee.Target = target
+				assignee.Type = "user"
 			}
 		}
 		if d.Resolution != "" {
@@ -799,8 +821,7 @@ func (s *TodoStore) ListPendingAcks(ctx context.Context, pagePath, userID string
 		return nil, fmt.Errorf("database not connected")
 	}
 
-	targets := []string{userID}
-	targets = append(targets, groups...)
+	targets := BuildTargetsArray(userID, groups)
 
 	rows, err := p.Query(ctx, `
 		SELECT t.id, t.title, COALESCE(c.acknowledged_version, 0) AS prev_ack_version
@@ -809,7 +830,7 @@ func (s *TodoStore) ListPendingAcks(ctx context.Context, pagePath, userID string
 		WHERE t.status IN ('open', 'in_progress')
 		  AND t.wiki_action_type = 'read'
 		  AND t.wiki_action_page = $1
-		  AND t.assignee_target = ANY($2)`,
+		  AND string_to_array(t.assignee_target, ',') && $2::text[]`,
 		pagePath, targets, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list pending acks: %w", err)
@@ -856,8 +877,8 @@ func (s *TodoStore) Acknowledge(ctx context.Context, id, userID string, version 
 
 	// Check if task should be promoted to done (same logic as Complete).
 	promoted := false
-	if task.Assignee.Type == "group" && task.Assignee.Resolution == "all" && resolver != nil {
-		members := resolver.GroupMembers(task.Assignee.Target)
+	if task.Assignee.Resolution == "all" && resolver != nil {
+		requiredMembers := ResolveAllMembers(task.Assignee.Target, resolver)
 		completions, err := s.ListCompletions(ctx, id)
 		if err != nil {
 			return nil, false, err
@@ -867,13 +888,13 @@ func (s *TodoStore) Acknowledge(ctx context.Context, id, userID string, version 
 			completedUsers[c.UserID] = true
 		}
 		allDone := true
-		for _, m := range members {
+		for _, m := range requiredMembers {
 			if !completedUsers[m] {
 				allDone = false
 				break
 			}
 		}
-		if allDone && len(members) > 0 {
+		if allDone && len(requiredMembers) > 0 {
 			promoted = true
 		}
 	} else {

@@ -1732,6 +1732,9 @@ async function checkReadAck(path, currentVersion, container) {
     if (tasks.length === 0) return
 
     for (const task of tasks) {
+      // Skip tasks the user already acknowledged at the current (or later) version.
+      if (task.previous_ack_version >= currentVersion) continue
+
       const banner = document.createElement("div")
       banner.className = "gowiki-ack-banner"
 

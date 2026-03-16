@@ -335,23 +335,38 @@ func (h *handlers) addWarnings(tasks []*Task) {
 	rfPendingCache := make(map[string]bool)
 
 	for _, task := range tasks {
-		// Check assignee exists.
+		// Check assignee exists (supports comma-separated multi-target with group: prefix).
 		if task.Assignee.Target != "" && h.userStore != nil {
-			if task.Assignee.Type == "user" {
-				if _, err := h.userStore.Get(task.Assignee.Target); err != nil {
-					task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee user %q does not exist", task.Assignee.Target))
-				}
-			} else if task.Assignee.Type == "group" {
-				if h.groupStore != nil {
+			for _, t := range SplitTargets(task.Assignee.Target) {
+				if IsGroupTarget(t) {
+					// Explicit group: prefix — check group store only.
+					groupName := CleanTargetName(t)
 					found := false
-					for _, g := range h.groupStore.List() {
-						if g.Name == task.Assignee.Target {
-							found = true
-							break
+					if h.groupStore != nil {
+						for _, g := range h.groupStore.List() {
+							if g.Name == groupName {
+								found = true
+								break
+							}
 						}
 					}
 					if !found {
-						task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee group %q does not exist", task.Assignee.Target))
+						task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee group %q does not exist", groupName))
+					}
+				} else {
+					// Bare name — check user store, then group store.
+					_, userErr := h.userStore.Get(t)
+					isGroup := false
+					if h.groupStore != nil {
+						for _, g := range h.groupStore.List() {
+							if g.Name == t {
+								isGroup = true
+								break
+							}
+						}
+					}
+					if userErr != nil && !isGroup {
+						task.Warnings = append(task.Warnings, fmt.Sprintf("Assignee %q is not a known user or group", t))
 					}
 				}
 			}

@@ -77,17 +77,42 @@ At startup the plugin checks for a live PostgreSQL connection. If none is config
 ```jsonc
 {
   "type": "user" | "group",
-  "target": "<username or group name>",
-  // only meaningful when type == "group":
+  "target": "<username or group name, or comma-separated list>",
   "resolution": "any" | "all"
-  // "any"  → task is done when at least one member completes it
-  // "all"  → every member must individually mark it done
+  // "any"  → task is done when at least one target/member completes it
+  // "all"  → every target/member must individually mark it done
 }
 ```
+
+**Multi-target support**: The `target` field supports comma-separated values for assigning a single task to multiple targets. Each target is independently classified as a user or group using the `group:` prefix convention:
+
+- Bare name = **user** (default): `"alice"`, `"alice,bob"`
+- `group:` prefix = **group** (explicit): `"group:admin"`, `"group:managers,group:regulatory"`
+- Mixed: `"group:admin,alice"` — admin is a group, alice is a user
+
+The `type` field reflects the composition: `"user"` (all bare), `"group"` (all prefixed), or `"mixed"` (both).
+
+**Backward compatibility**: Bare names that happen to match a group name are auto-detected at resolution time (via GroupResolver). The `group:` prefix is only required to disambiguate when a name exists as both a user and a group.
+
+**Resolution semantics with multi-target:**
+
+| Target | Resolution | Behavior |
+|---|---|---|
+| Single user | `any` | Done when the user completes it |
+| Multi-user | `any` | Done when any named user completes it |
+| Multi-user | `all` | Done when every named user completes it |
+| Single group | `any` | Done when any group member completes it |
+| Single group | `all` | Done when every group member completes it |
+| Multi-group | `any` | Done when any member of any group completes it |
+| Multi-group | `all` | Done when every member of every group (union) completes it |
+| Mixed (group+user) | `any` | Done when any member/user completes it |
+| Mixed (group+user) | `all` | Done when every member of every group and every named user completes it |
 
 When `resolution == "all"`, the store tracks per-member completion in a `completions` join table. The task's top-level `status` becomes `done` automatically once all current members have completed it. Individual completion records are visible only to the task creator and admins.
 
 Group membership is re-evaluated live from the ACL/user plugin — roster changes are reflected without re-creating tasks.
+
+**SQL matching**: `ListMine` and `ListPendingAcks` use PostgreSQL's array overlap operator (`&&`) to match tasks where any part of the comma-separated `assignee_target` matches any of the user's identities. The identity array includes the username, bare group names (backward compat), and `group:`-prefixed group names (new format): `string_to_array(assignee_target, ',') && $1::text[]`.
 
 ### 3.3 DueDate and Recurrence
 
@@ -171,12 +196,34 @@ Tasks are declared as curly-brace block nodes, consistent with all other Gowiki 
 {todo title="Review draft" assign="@alice" due="2026-04-30"}
 ```
 
+**Multi-target forms** (comma-separated):
+
+```
+{todo title="Acknowledge SOP update" assign="group:managers,group:regulatory" resolution="all" action="read:./sop01"}
+{todo title="Peer review" assign="alice,bob" resolution="any"}
+{todo title="Mixed target" assign="group:admin,alice" resolution="all" action="read:."}
+```
+
+**Disambiguation with `group:` prefix:**
+
+By default, a bare name in `assign` is treated as a **user**. To explicitly specify a group, prefix it with `group:`:
+
+| Syntax | Interpretation |
+|---|---|
+| `assign="alice"` | User `alice` |
+| `assign="group:admin"` | Group `admin` |
+| `assign="alice,bob"` | Users `alice` and `bob` |
+| `assign="group:managers,group:regulatory"` | Groups `managers` and `regulatory` |
+| `assign="group:admin,alice"` | Group `admin` + user `alice` (mixed) |
+
+**Backward compatibility**: Bare names that match a group are still auto-detected at resolution time. The `group:` prefix is only required when a name is ambiguous (exists as both a user and a group).
+
 **Attribute reference:**
 
 | Attribute | Values | Notes |
 |---|---|---|
 | `title` | string | Required |
-| `assign` | `@username` or `@groupname` | Required |
+| `assign` | username, `group:groupname`, or comma-separated (e.g. `alice,bob` or `group:managers,group:regulatory` or `group:admin,alice`) | Required |
 | `resolution` | `any` \| `all` | Only for group assignees; default `any` |
 | `due` | `YYYY-MM-DD` | Optional |
 | `recur` | `Nd` (e.g. `3d`) \| `daily` \| `weekly` \| `monthly` \| `yearly` \| `NM` (e.g. `3months`) | Requires `due` |

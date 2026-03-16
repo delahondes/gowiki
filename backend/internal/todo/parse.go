@@ -160,7 +160,8 @@ func parseAction(raw string) WikiAction {
 
 // resolveActionPath resolves an action path relative to the source page.
 // Absolute paths (starting with /) are returned as-is.
-// Relative paths (starting with ./ or without /) are resolved against the source page's namespace.
+// "." means the source page itself.
+// Other relative paths are resolved against the source page's namespace.
 func resolveActionPath(sourcePage, actionPath string) string {
 	actionPath = strings.TrimSpace(actionPath)
 	if actionPath == "" {
@@ -169,6 +170,13 @@ func resolveActionPath(sourcePage, actionPath string) string {
 	// Already absolute.
 	if strings.HasPrefix(actionPath, "/") {
 		return actionPath
+	}
+	// "." means the current page itself.
+	if actionPath == "." {
+		if !strings.HasPrefix(sourcePage, "/") {
+			return "/" + sourcePage
+		}
+		return sourcePage
 	}
 	// Resolve relative to source page namespace.
 	namespace := path.Dir(sourcePage)
