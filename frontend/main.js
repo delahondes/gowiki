@@ -7468,7 +7468,7 @@ async function renderAdminLocksTab(container) {
       discardBtn.addEventListener("click", async () => {
         if (confirm("Force discard draft for \"" + lock.page + "\" owned by " + lock.owner + "?")) {
           const pagePath = lock.page
-          const r = await authFetch("/api/admin/drafts/" + encodeURIComponent(pagePath), { method: "DELETE" })
+          const r = await authFetch("/api/admin/drafts/" + encodePagePath(pagePath), { method: "DELETE" })
           if (r.ok) {
             renderAdminLocksTab(container)
           } else {
