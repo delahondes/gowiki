@@ -162,23 +162,32 @@ func (s *SessionStore) cleanupLoop() {
 	}
 }
 
-func (s *SessionStore) SetSessionCookie(w http.ResponseWriter, sessionID string) {
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+func (s *SessionStore) SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    sessionID,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(s.ttl.Seconds()),
 	})
 }
 
-func ClearSessionCookie(w http.ResponseWriter) {
+func ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})

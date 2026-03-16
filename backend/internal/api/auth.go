@@ -43,7 +43,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.userStore.UpdateLastLogin(req.Username)
 	sessionID := s.sessionStore.Create(req.Username)
-	s.sessionStore.SetSessionCookie(w, sessionID)
+	s.sessionStore.SetSessionCookie(w, r, sessionID)
 	writeJSON(w, http.StatusOK, map[string]string{"username": req.Username})
 }
 
@@ -52,7 +52,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		s.sessionStore.Delete(cookie.Value)
 	}
-	auth.ClearSessionCookie(w)
+	auth.ClearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
 
@@ -64,7 +64,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, ok := s.sessionStore.Get(cookie.Value)
 	if !ok {
-		auth.ClearSessionCookie(w)
+		auth.ClearSessionCookie(w, r)
 		writeError(w, http.StatusUnauthorized, "session expired")
 		return
 	}
@@ -90,7 +90,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		}
 		sess, ok := s.sessionStore.Get(cookie.Value)
 		if !ok {
-			auth.ClearSessionCookie(w)
+			auth.ClearSessionCookie(w, r)
 			writeError(w, http.StatusUnauthorized, "session expired")
 			return
 		}
