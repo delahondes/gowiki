@@ -150,13 +150,17 @@ class TagQueryNodeView {
 
   private resolvePathPrefix(raw: string): string {
     if (!raw) return ""
-    // Resolve relative paths (., ./, ../) against the current page's path.
-    // For tag-query, "." means "same namespace as the current page".
-    // The current page URL IS the namespace for namespace index pages.
+    // Resolve relative paths (., ./, ../) against the current page's namespace.
+    // "." means "same namespace as the current page".
+    // Namespace index pages have a trailing slash in the URL; leaf pages don't.
     if (raw === "." || raw === ".." || raw.startsWith("./") || raw.startsWith("../")) {
-      const loc = window.location.pathname.replace(/^\//, "").replace(/\/$/, "")
-      // Use the full path as namespace base (for namespace index pages, the URL IS the ns)
+      const pathname = window.location.pathname
+      const loc = pathname.replace(/^\//, "").replace(/\/$/, "")
       const parts = loc ? loc.split("/") : []
+      // For leaf pages (URL without trailing slash), drop the page name
+      // to get the parent namespace. Namespace index pages (trailing slash)
+      // already represent their namespace.
+      if (!pathname.endsWith("/")) parts.pop()
       for (const seg of raw.split("/")) {
         if (seg === ".") continue
         else if (seg === "..") parts.pop()
