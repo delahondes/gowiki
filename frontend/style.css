@@ -1439,6 +1439,13 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border-radius: 10px;
   font-size: 12px;
   font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gowiki-history-version-tag:hover {
+  background: #bbdefb;
+  text-decoration: none;
 }
 
 /* ── Version view ─────────────────────────────────── */

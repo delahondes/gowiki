@@ -5168,9 +5168,15 @@ function renderHistoryPage(versions, draft) {
             badge.textContent = "Validated"
             tdStatus.appendChild(badge)
             if (rfMeta.version_tag) {
-              const tag = document.createElement("span")
+              const tag = document.createElement("a")
               tag.className = "gowiki-history-version-tag"
               tag.textContent = rfMeta.version_tag
+              tag.href = `${window.location.pathname}?v=${v.version}`
+              tag.title = `View validated version ${rfMeta.version_tag}`
+              tag.addEventListener("click", (e) => {
+                e.preventDefault()
+                void viewVersion(v.version)
+              })
               tdStatus.appendChild(tag)
             }
           } else {
