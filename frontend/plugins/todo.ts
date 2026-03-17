@@ -2,7 +2,7 @@ import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
-import { enablePropertiesPanel } from "../compiler/core_ui"
+import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // --- Properties ---
 
@@ -1040,6 +1040,7 @@ export const todoPlugin: WikiPlugin = {
       if (!todoType) return false
       if (dispatch) {
         const node = todoType.create({ title: "" })
+        requestInputFocus("title")
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         // Search backward from the mapped position to find the just-inserted todo.

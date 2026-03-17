@@ -23,10 +23,10 @@ let pendingInputRefocus: {
   end: number | null
 } | null = null
 
-/** Tracks whether the user has manually expanded the "+" hidden properties.
- *  Persists across panel rebuilds (decoration key changes) until the panel
- *  is closed or the user clicks "−". */
-let panelUserExpanded = false
+/** Tracks which panel instances the user has manually expanded.
+ *  Keyed by a stable identifier derived from node type + position + attrs,
+ *  so expanding one node doesn't expand others. */
+let panelExpandedKeys = new Set<string>()
 
 export function requestInputFocus(propName: string) {
   pendingInputRefocus = { propName, start: null, end: null }
@@ -326,6 +326,7 @@ function buildPanel(
   pos: number,
   properties: NodePropertySpec[],
   collapsible = false,
+  panelKey = "",
 ) {
   const wrap = document.createElement("div")
   wrap.className = "gowiki-props-panel"
@@ -387,7 +388,9 @@ function buildPanel(
   }
 
   // Honour the user's manual expand across panel rebuilds.
-  const shouldExpand = forceExpand || panelUserExpanded
+  // Use a stable key (node type + pos) rather than just pos, since pos can shift.
+  const expandKey = panelKey || `${node.type.name}:${pos}`
+  const shouldExpand = forceExpand || panelExpandedKeys.has(expandKey)
 
   for (const prop of activeProps) {
     wrap.appendChild(buildPropGroup(view, node, pos, prop))
@@ -416,7 +419,11 @@ function buildPanel(
     expandBtn.addEventListener("click", (e) => {
       e.preventDefault()
       const isHidden = hiddenContainer.style.display === "none"
-      panelUserExpanded = isHidden
+      if (isHidden) {
+        panelExpandedKeys.add(expandKey)
+      } else {
+        panelExpandedKeys.delete(expandKey)
+      }
       hiddenContainer.style.display = isHidden ? "contents" : "none"
       expandBtn.textContent = isHidden ? "\u2212" : "+"
       expandBtn.title = isHidden ? "Hide default properties" : "Show all properties"
@@ -428,8 +435,8 @@ function buildPanel(
       }
     })
 
-    wrap.appendChild(expandBtn)
     wrap.appendChild(hiddenContainer)
+    wrap.appendChild(expandBtn)
   }
 
   return wrap
@@ -663,7 +670,7 @@ function propertiesPlugin(reg: Registry) {
         let enabled = prev.enabled
         if (meta && typeof meta.enabled === "boolean") {
           enabled = meta.enabled
-          if (!enabled) panelUserExpanded = false
+          if (!enabled) panelExpandedKeys.clear()
         }
 
         // Track the last NodeSelection target with properties.
@@ -729,7 +736,7 @@ function propertiesPlugin(reg: Registry) {
               }
               // Clean up any stale vtext overlay at this position (e.g. switched to horizontal).
               cleanupVtextOverlay(target.pos)
-              const panel = buildPanel(view, target.node, target.pos, target.props, collapsible)
+              const panel = buildPanel(view, target.node, target.pos, target.props, collapsible, `${target.node.type.name}:${target.pos}`)
               if (target.anchorPos !== target.pos) {
                 panel.classList.add("gowiki-props-panel--block")
               }

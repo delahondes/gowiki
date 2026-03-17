@@ -3,7 +3,7 @@ import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
-import { enablePropertiesPanel } from "../compiler/core_ui"
+import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 const tagProperties = [
   {
@@ -439,6 +439,7 @@ export const tagPlugin: WikiPlugin = {
       if (!tagType) return false
       if (dispatch) {
         const node = tagType.create({ values: "" })
+        requestInputFocus("values")
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
@@ -469,6 +470,7 @@ export const tagPlugin: WikiPlugin = {
       if (!queryType) return false
       if (dispatch) {
         const node = queryType.create({ tag: "", exclude: "", path: "", render: "table" })
+        requestInputFocus("tag")
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
