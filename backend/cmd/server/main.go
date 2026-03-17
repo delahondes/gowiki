@@ -20,6 +20,7 @@ import (
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
+	"gowiki/backend/internal/manual"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
@@ -110,6 +111,11 @@ func main() {
 	store, err := storage.NewFileStore(contentRoot)
 	if err != nil {
 		log.Fatalf("init page storage: %v", err)
+	}
+
+	// Bootstrap embedded user manual (only writes missing files).
+	if n := manual.Bootstrap(contentRoot); n > 0 {
+		log.Printf("manual: bootstrapped %d pages to wiki/manual/", n)
 	}
 
 	// Open search index.
