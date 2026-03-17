@@ -1438,8 +1438,10 @@ async function setEditMode(nextEditMode) {
             const currentScreenY = textareaRect.top + cursorOffset.y
             // Scroll so cursor is in the middle of the viewport.
             if (scroller) scroller.scrollTop += currentScreenY - window.innerHeight / 2
-            // Show "you are here" beacon at cursor position.
-            showCursorBeacon(textareaRect.left + cursorOffset.x, window.innerHeight / 2)
+            // Re-measure after scroll for actual cursor position (may differ near top/bottom).
+            const finalRect = rawEditor.getBoundingClientRect()
+            const finalOffset = getTextareaCursorOffset(rawEditor, pos)
+            showCursorBeacon(finalRect.left + finalOffset.x, finalRect.top + finalOffset.y)
           })
         } else {
           rawEditor.focus()
@@ -1457,18 +1459,22 @@ async function setEditMode(nextEditMode) {
             // then adjust to center it.
             editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
             // Delay to let images/includes load and shift layout.
-            const scrollToCenter = () => {
+            const scrollToCenter = (showBeacon) => {
               try {
                 const coords = editorView.coordsAtPos(clampedPos)
                 const offset = coords.top - window.innerHeight / 2
                 if (scroller) scroller.scrollTop += offset
-                showCursorBeacon(coords.left, window.innerHeight / 2)
+                if (showBeacon) {
+                  // Re-measure after scroll — cursor may not be at center near top/bottom.
+                  const finalCoords = editorView.coordsAtPos(clampedPos)
+                  showCursorBeacon(finalCoords.left, finalCoords.top)
+                }
               } catch {}
             }
-            // Try multiple times as layout settles.
+            // Try multiple times as layout settles. Beacon on the final pass.
             requestAnimationFrame(() => {
-              scrollToCenter()
-              setTimeout(scrollToCenter, 150)
+              scrollToCenter(false)
+              setTimeout(() => scrollToCenter(true), 150)
             })
           }
           editorView.focus()
