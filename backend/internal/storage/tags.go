@@ -149,6 +149,19 @@ func (idx *TagIndex) RemovePage(pagePath string) {
 	delete(idx.PageTitles, pagePath)
 }
 
+// GetTagsForPage returns the tags associated with a page path.
+func (idx *TagIndex) GetTagsForPage(pagePath string) []string {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	tags := idx.PageToTags[pagePath]
+	if tags == nil {
+		return []string{}
+	}
+	result := make([]string, len(tags))
+	copy(result, tags)
+	return result
+}
+
 // GetPagesForTag returns all pages that have the given tag, optionally
 // filtered by a path prefix and excluding pages that have any of the
 // specified tags. Results are sorted by path.

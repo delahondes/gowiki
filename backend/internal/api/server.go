@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 
+	_ "embed"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
@@ -27,6 +29,9 @@ import (
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
 )
+
+//go:embed openapi.json
+var openapiJSON []byte
 
 // Version is the Gowiki software version string.
 const Version = "0.4.0"
@@ -111,6 +116,8 @@ type Server struct {
 	// Tracks pages where a forced inline edit modified the published content
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
+	tokenStore          *auth.TokenStore
+	rateLimiter         *RateLimiter
 	oauthClient         *auth.OAuthClient
 	todoService         *todo.TodoService
 	reviewflowService   *reviewflow.Service
@@ -119,7 +126,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -144,6 +151,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		todoService:       todoService,
 		reviewflowService: reviewflowService,
 		commentService:    commentService,
+		tokenStore:        tokenStore,
+		rateLimiter:       NewRateLimiter(),
 		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
 	}
@@ -199,6 +208,11 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Get("/api/auth/oauth/callback", s.handleOAuthCallback)
 
 	r.Get("/api/health", s.handleHealth)
+	r.Get("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write(openapiJSON)
+	})
 
 	// Read endpoints — optional auth + ACL "view" permission.
 	r.Group(func(r chi.Router) {
@@ -296,6 +310,35 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Put("/api/admin/database/tables/{id}/fields/{fid}", s.handleUpdateDatabaseField)
 		r.Delete("/api/admin/database/tables/{id}/fields/{fid}", s.handleArchiveDatabaseField)
 		r.Get("/api/admin/database/tables/{id}/history", s.handleDatabaseTableHistory)
+	})
+
+	// Token management — session auth only (not API token).
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireSessionAuth)
+		r.Get("/api/tokens", s.handleListTokens)
+		r.Post("/api/tokens", s.handleCreateToken)
+		r.Delete("/api/tokens/{id}", s.handleDeleteToken)
+	})
+
+	// Admin token management.
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.requireAdmin)
+		r.Get("/api/admin/tokens", s.handleAdminListTokens)
+		r.Delete("/api/admin/tokens/{id}", s.handleAdminDeleteToken)
+	})
+
+	// AI conventions — public (no auth), like the OpenAPI spec.
+	r.Get("/api/ai/v1/conventions", s.handleAIConventions)
+
+	// AI API endpoints — require auth (session or token).
+	r.Route("/api/ai/v1", func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.rateLimitToken)
+		r.Get("/namespace/*", s.handleAINamespace)
+		r.Post("/batch/read", s.handleAIBatchRead)
+		r.Post("/preview/*", s.handleAIPreview)
+		r.Get("/meta/*", s.handleAIMeta)
 	})
 
 	// Database data endpoints — read (optional auth).

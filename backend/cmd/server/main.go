@@ -234,11 +234,20 @@ func main() {
 	store.CommentStore = commentStore
 	log.Printf("comment plugin: active")
 
+	// Initialize API token store for AI Content API.
+	tokenStore, err := auth.NewTokenStore(metaRoot)
+	if err != nil {
+		log.Fatalf("init token store: %v", err)
+	}
+	if cfg.AIAPI.Enabled {
+		log.Printf("ai api: enabled (token auth active)")
+	}
+
 	// Initialize headless Chrome for PDF export.
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore)
 	if serveWebEnabled {
 		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}

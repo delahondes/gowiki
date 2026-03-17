@@ -20,6 +20,7 @@ type Config struct {
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	Todo       TodoConfig       `yaml:"todo" json:"todo"`
 	Reviewflow ReviewflowConfig `yaml:"reviewflow" json:"reviewflow"`
+	AIAPI      AIAPIConfig      `yaml:"ai_api" json:"ai_api"`
 }
 
 // ServerConfig holds network/serving settings.
@@ -104,6 +105,15 @@ type OAuthConfig struct {
 	DefaultGroups   []string `yaml:"default_groups" json:"default_groups"`    // Groups for auto-created users
 }
 
+// AIAPIConfig holds settings for the AI Content API (token-based access).
+type AIAPIConfig struct {
+	Enabled          bool `yaml:"enabled" json:"enabled"`
+	RateLimitRead    int  `yaml:"rate_limit_read" json:"rate_limit_read"`
+	RateLimitWrite   int  `yaml:"rate_limit_write" json:"rate_limit_write"`
+	MaxTokensPerUser int  `yaml:"max_tokens_per_user" json:"max_tokens_per_user"`
+	RequireSummary   bool `yaml:"require_summary" json:"require_summary"`
+}
+
 // DraftsConfig holds draft/lock settings.
 type DraftsConfig struct {
 	AutoSaveInterval string `yaml:"auto_save_interval" json:"auto_save_interval"` // e.g. "2m"
@@ -129,6 +139,13 @@ func DefaultConfig() Config {
 		Drafts: DraftsConfig{
 			AutoSaveInterval: "2m",
 			StaleLockTimeout: "24h",
+		},
+		AIAPI: AIAPIConfig{
+			Enabled:          false,
+			RateLimitRead:    120,
+			RateLimitWrite:   30,
+			MaxTokensPerUser: 5,
+			RequireSummary:   true,
 		},
 	}
 }

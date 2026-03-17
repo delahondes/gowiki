@@ -1,0 +1,565 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Gowiki AI Content API",
+    "version": "1.0.0",
+    "description": "API for AI assistants to read and manage wiki content on behalf of authenticated users. Authentication is via personal API tokens (Bearer gwk_...). IMPORTANT: Before performing any content operations, fetch GET /api/ai/v1/conventions for wiki-specific rules, markdown dialect constraints, and content guidelines that you MUST follow.",
+    "x-ai-conventions-url": "/api/ai/v1/conventions",
+    "x-ai-instructions": "Always fetch /api/ai/v1/conventions before your first content operation and follow the rules described there."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This Gowiki instance"
+    }
+  ],
+  "security": [
+    { "bearerToken": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Personal API token. Format: gwk_<base64url>. Create one via the web UI under API Tokens."
+      },
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "gowiki_session",
+        "description": "Browser session cookie (for web UI, not for AI clients)."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        },
+        "required": ["error"]
+      },
+      "PageEntry": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "example": "/regulatory/qms/dir/mq01" },
+          "title": { "type": "string", "example": "Quality Manual" },
+          "version": { "type": "integer", "example": 70 },
+          "last_modified": { "type": "string", "format": "date-time" },
+          "author": { "type": "string" }
+        }
+      },
+      "NamespaceEntry": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "example": "/regulatory/qms/dir" },
+          "page_count": { "type": "integer", "example": 12 }
+        }
+      },
+      "BatchReadResult": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "title": { "type": "string" },
+          "markdown": { "type": "string" },
+          "version": { "type": "integer" },
+          "ok": { "type": "boolean" },
+          "error": { "type": "string" }
+        }
+      },
+      "DiffHunk": {
+        "type": "object",
+        "properties": {
+          "op": { "type": "string", "enum": ["equal", "insert", "delete"] },
+          "content": { "type": "string" }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "tok_4bc2367268d2" },
+          "user": { "type": "string" },
+          "name": { "type": "string", "example": "Claude assistant" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_used_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/ai/v1/conventions": {
+      "get": {
+        "operationId": "getConventions",
+        "summary": "AI conventions and content rules",
+        "description": "Returns wiki-specific rules that AI agents MUST follow: markdown dialect constraints, naming conventions, content structure requirements, and forbidden patterns. Fetch this before performing any content operations.",
+        "tags": ["AI Content API"],
+        "responses": {
+          "200": {
+            "description": "Conventions document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dialect": {
+                      "type": "object",
+                      "description": "Markdown dialect rules — what syntax is allowed and what is forbidden"
+                    },
+                    "content_rules": {
+                      "type": "object",
+                      "description": "Content organization rules — link resolution, namespace constraints, metadata"
+                    },
+                    "conventions": {
+                      "type": "object",
+                      "description": "AI-specific conventions — summary format, change attribution"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/namespace/{path}": {
+      "get": {
+        "operationId": "listNamespace",
+        "summary": "List pages and sub-namespaces",
+        "description": "Returns pages and sub-namespaces under the given path. ACL-filtered per page.",
+        "tags": ["AI Content API"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Namespace path (e.g. regulatory/qms/dir). Use empty for root."
+          },
+          {
+            "name": "depth",
+            "in": "query",
+            "schema": { "type": "integer", "enum": [0, 1], "default": 1 },
+            "description": "1 = immediate children only, 0 = recursive."
+          },
+          {
+            "name": "include_meta",
+            "in": "query",
+            "schema": { "type": "boolean", "default": false },
+            "description": "Include last_modified and author per page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Namespace listing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "namespace": { "type": "string" },
+                    "pages": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/PageEntry" }
+                    },
+                    "namespaces": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/NamespaceEntry" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Authentication required" }
+        }
+      }
+    },
+    "/api/ai/v1/batch/read": {
+      "post": {
+        "operationId": "batchRead",
+        "summary": "Read multiple pages",
+        "description": "Read up to 20 pages in a single request. Each page is ACL-checked independently.",
+        "tags": ["AI Content API"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paths": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "maxItems": 20,
+                    "example": ["/regulatory/qms/dir/mq01", "/regulatory/qms/dir/sop01"]
+                  }
+                },
+                "required": ["paths"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch read results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pages": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/BatchReadResult" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/preview/{path}": {
+      "post": {
+        "operationId": "previewChanges",
+        "summary": "Preview changes (dry-run diff)",
+        "description": "Submit markdown and get a diff against the current page content without saving.",
+        "tags": ["AI Content API"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "markdown": { "type": "string" },
+                  "summary": { "type": "string" }
+                },
+                "required": ["markdown"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Diff preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "current_version": { "type": "integer" },
+                    "diff": {
+                      "type": "object",
+                      "properties": {
+                        "added": { "type": "integer" },
+                        "removed": { "type": "integer" },
+                        "hunks": {
+                          "type": "array",
+                          "items": { "$ref": "#/components/schemas/DiffHunk" }
+                        }
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/v1/meta/{path}": {
+      "get": {
+        "operationId": "getPageMeta",
+        "summary": "Get page metadata",
+        "description": "Returns structured metadata: title, version, tags, reviewflow status, backlinks.",
+        "tags": ["AI Content API"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "title": { "type": "string" },
+                    "version": { "type": "integer" },
+                    "last_modified": { "type": "string", "format": "date-time" },
+                    "author": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "backlinks": { "type": "array", "items": { "type": "string" } },
+                    "reviewflow": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Page not found" }
+        }
+      }
+    },
+    "/api/pages/{path}": {
+      "get": {
+        "operationId": "getPage",
+        "summary": "Get page content",
+        "description": "Returns raw markdown and metadata for a page.",
+        "tags": ["Pages"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": { "type": "string" },
+                    "markdown": { "type": "string" },
+                    "meta": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Page not found" }
+        }
+      },
+      "put": {
+        "operationId": "putPage",
+        "summary": "Write page content",
+        "description": "Save markdown content for a page. When using token auth, the summary field is required.",
+        "tags": ["Pages"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "markdown": { "type": "string" },
+                  "summary": { "type": "string", "description": "Required for token auth." }
+                },
+                "required": ["markdown"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Page saved" },
+          "403": { "description": "Access denied" },
+          "409": { "description": "Version conflict" }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "operationId": "search",
+        "summary": "Full-text search",
+        "tags": ["Search"],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": { "type": "string" },
+                          "title": { "type": "string" },
+                          "snippet": { "type": "string" },
+                          "score": { "type": "number" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/history/{path}": {
+      "get": {
+        "operationId": "getHistory",
+        "summary": "Page version history",
+        "tags": ["Pages"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "version": { "type": "integer" },
+                          "timestamp": { "type": "string", "format": "date-time" },
+                          "author": { "type": "string" },
+                          "summary": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens": {
+      "get": {
+        "operationId": "listMyTokens",
+        "summary": "List your API tokens",
+        "description": "Returns tokens for the authenticated user. Session auth only (not token auth).",
+        "tags": ["Token Management"],
+        "security": [{ "sessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Token list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tokens": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Token" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createToken",
+        "summary": "Create an API token",
+        "description": "Creates a new token. The plaintext is returned once and never stored. Session auth only.",
+        "tags": ["Token Management"],
+        "security": [{ "sessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "example": "Claude assistant" }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Token created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "token": { "type": "string", "description": "The plaintext token — shown once only." },
+                    "created_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "409": { "description": "Maximum tokens reached" }
+        }
+      }
+    },
+    "/api/tokens/{id}": {
+      "delete": {
+        "operationId": "revokeToken",
+        "summary": "Revoke an API token",
+        "tags": ["Token Management"],
+        "security": [{ "sessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Token revoked" },
+          "404": { "description": "Token not found" }
+        }
+      }
+    }
+  }
+}

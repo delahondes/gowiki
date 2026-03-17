@@ -5813,6 +5813,13 @@ function renderBannerUser() {
       })
       el.appendChild(adminLink)
     }
+    const tokensLink = document.createElement("a")
+    tokensLink.textContent = "API Tokens"
+    tokensLink.addEventListener("click", (e) => {
+      e.preventDefault()
+      showMyTokensModal()
+    })
+    el.appendChild(tokensLink)
     const logout = document.createElement("a")
     logout.textContent = "Logout"
     logout.addEventListener("click", async (e) => {
@@ -5836,6 +5843,110 @@ function renderBannerUser() {
     })
     el.appendChild(login)
   }
+}
+
+async function showMyTokensModal() {
+  const overlay = document.createElement("div")
+  overlay.className = "gowiki-login-overlay"
+  const dialog = document.createElement("div")
+  dialog.className = "gowiki-login-dialog"
+  dialog.style.maxWidth = "500px"
+
+  const title = document.createElement("h3")
+  title.textContent = "API Tokens"
+  dialog.appendChild(title)
+
+  const content = document.createElement("div")
+  dialog.appendChild(content)
+
+  async function loadTokens() {
+    content.innerHTML = "Loading..."
+    try {
+      const resp = await authFetch("/api/tokens")
+      if (!resp.ok) { content.textContent = "Failed to load tokens."; return }
+      const data = await resp.json()
+      content.innerHTML = ""
+
+      const tokens = data.tokens || []
+      if (tokens.length === 0) {
+        const p = document.createElement("p")
+        p.textContent = "No API tokens yet."
+        p.style.color = "#666"
+        content.appendChild(p)
+      } else {
+        for (const token of tokens) {
+          const row = document.createElement("div")
+          row.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #eee"
+          const info = document.createElement("span")
+          info.style.flex = "1"
+          info.innerHTML = "<b>" + (token.name || "unnamed") + "</b><br><small style='color:#888'>" +
+            (token.last_used_at ? "Last used: " + new Date(token.last_used_at).toLocaleString() : "Never used") + "</small>"
+          row.appendChild(info)
+          const del = document.createElement("button")
+          del.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+          del.textContent = "Revoke"
+          del.addEventListener("click", async () => {
+            if (!confirm("Revoke token \"" + token.name + "\"?")) return
+            const r = await authFetch("/api/tokens/" + token.id, { method: "DELETE" })
+            if (r.ok) loadTokens()
+            else alert("Failed to revoke token.")
+          })
+          row.appendChild(del)
+          content.appendChild(row)
+        }
+      }
+
+      // Create button
+      const createBtn = document.createElement("button")
+      createBtn.className = "gowiki-content-btn"
+      createBtn.textContent = "Create New Token"
+      createBtn.style.marginTop = "12px"
+      createBtn.addEventListener("click", async () => {
+        const name = prompt("Token name (e.g. 'Claude assistant'):")
+        if (!name) return
+        const r = await authFetch("/api/tokens", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        })
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}))
+          alert(err.error || "Failed to create token.")
+          return
+        }
+        const result = await r.json()
+        // Show the plaintext token
+        const tokenDisplay = document.createElement("div")
+        tokenDisplay.style.cssText = "margin-top:12px;padding:12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px"
+        tokenDisplay.innerHTML = "<b>Token created! Copy it now — it will not be shown again:</b>"
+        const code = document.createElement("code")
+        code.style.cssText = "display:block;margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;word-break:break-all;font-size:13px;user-select:all"
+        code.textContent = result.token
+        tokenDisplay.appendChild(code)
+        content.appendChild(tokenDisplay)
+        // Reload the list above (but keep the token display visible)
+        setTimeout(() => loadTokens(), 0)
+        // Re-append the display since loadTokens clears content
+        setTimeout(() => content.appendChild(tokenDisplay), 100)
+      })
+      content.appendChild(createBtn)
+    } catch {
+      content.textContent = "Failed to load tokens."
+    }
+  }
+
+  await loadTokens()
+
+  const closeBtn = document.createElement("button")
+  closeBtn.className = "gowiki-content-btn"
+  closeBtn.textContent = "Close"
+  closeBtn.style.marginTop = "12px"
+  closeBtn.addEventListener("click", () => overlay.remove())
+  dialog.appendChild(closeBtn)
+
+  overlay.appendChild(dialog)
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove() })
+  document.body.appendChild(overlay)
 }
 
 function showLoginDialog(onSuccess) {
@@ -6668,7 +6779,7 @@ function renderAdminPage() {
   const tabContent = document.createElement("div")
   tabContent.className = "gowiki-admin-content"
 
-  const tabs = ["Users", "Groups", "ACL", "Locks", "Configuration", "Database", "Todo"]
+  const tabs = ["Users", "Groups", "ACL", "Locks", "Tokens", "Configuration", "Database", "Todo"]
   let activeTab = "Users"
 
   function renderTabBar() {
@@ -6695,6 +6806,7 @@ function renderAdminPage() {
       case "Groups": renderAdminGroupsTab(tabContent); break
       case "ACL": renderAdminACLTab(tabContent); break
       case "Locks": renderAdminLocksTab(tabContent); break
+      case "Tokens": renderAdminTokensTab(tabContent); break
       case "Configuration": renderAdminConfigTab(tabContent); break
       case "Database": renderAdminDatabaseTab(tabContent); break
       case "Todo": renderAdminTodoTab(tabContent); break
@@ -7489,6 +7601,95 @@ async function renderAdminLocksTab(container) {
   }
 }
 
+// ── Admin: Tokens Tab ──────────────────────────────────
+
+async function renderAdminTokensTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading tokens...</div>'
+
+  try {
+    const resp = await authFetch("/api/admin/tokens")
+    if (!resp.ok) {
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load tokens.</div>'
+      return
+    }
+    const data = await resp.json()
+    container.innerHTML = ""
+
+    const refreshBtn = document.createElement("button")
+    refreshBtn.className = "gowiki-admin-btn-small"
+    refreshBtn.textContent = "Refresh"
+    refreshBtn.addEventListener("click", () => renderAdminTokensTab(container))
+    container.appendChild(refreshBtn)
+
+    const tokens = data.tokens || []
+    if (tokens.length === 0) {
+      const p = document.createElement("p")
+      p.textContent = "No API tokens."
+      p.style.color = "#666"
+      container.appendChild(p)
+      return
+    }
+
+    const table = document.createElement("table")
+    table.className = "gowiki-admin-table"
+    const thead = document.createElement("thead")
+    thead.innerHTML = "<tr><th>ID</th><th>User</th><th>Name</th><th>Created</th><th>Last Used</th><th>Actions</th></tr>"
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+    for (const token of tokens) {
+      const tr = document.createElement("tr")
+
+      const tdID = document.createElement("td")
+      tdID.textContent = token.id
+      tdID.style.fontFamily = "monospace"
+      tdID.style.fontSize = "0.85em"
+      tr.appendChild(tdID)
+
+      const tdUser = document.createElement("td")
+      tdUser.textContent = token.user
+      tr.appendChild(tdUser)
+
+      const tdName = document.createElement("td")
+      tdName.textContent = token.name
+      tr.appendChild(tdName)
+
+      const tdCreated = document.createElement("td")
+      tdCreated.textContent = token.created_at ? new Date(token.created_at).toLocaleString() : ""
+      tr.appendChild(tdCreated)
+
+      const tdUsed = document.createElement("td")
+      tdUsed.textContent = token.last_used_at ? new Date(token.last_used_at).toLocaleString() : "Never"
+      tr.appendChild(tdUsed)
+
+      const tdActions = document.createElement("td")
+      tdActions.className = "gowiki-admin-actions-cell"
+      const revokeBtn = document.createElement("button")
+      revokeBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+      revokeBtn.textContent = "Revoke"
+      revokeBtn.addEventListener("click", async () => {
+        if (confirm("Revoke token \"" + token.name + "\" for user " + token.user + "?")) {
+          const r = await authFetch("/api/admin/tokens/" + token.id, { method: "DELETE" })
+          if (r.ok) {
+            renderAdminTokensTab(container)
+          } else {
+            alert("Failed to revoke token.")
+          }
+        }
+      })
+      tdActions.appendChild(revokeBtn)
+      tr.appendChild(tdActions)
+
+      tbody.appendChild(tr)
+    }
+    table.appendChild(tbody)
+    container.appendChild(table)
+
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load tokens.</div>'
+  }
+}
+
 // ── Admin: Configuration Tab ──────────────────────────
 
 async function renderAdminConfigTab(container) {
@@ -7728,6 +7929,44 @@ async function renderAdminConfigTab(container) {
     })
     form.appendChild(addWebhookBtn)
 
+    // AI API section
+    const aiHeading = document.createElement("h3")
+    aiHeading.textContent = "AI Content API"
+    form.appendChild(aiHeading)
+
+    const aiConfig = config.ai_api || {}
+
+    const aiEnabledCheckbox = document.createElement("input")
+    aiEnabledCheckbox.type = "checkbox"
+    aiEnabledCheckbox.checked = !!aiConfig.enabled
+    const aiEnabledLabel = document.createElement("label")
+    aiEnabledLabel.style.display = "flex"
+    aiEnabledLabel.style.alignItems = "center"
+    aiEnabledLabel.style.gap = "8px"
+    aiEnabledLabel.style.margin = "8px 0"
+    aiEnabledLabel.appendChild(aiEnabledCheckbox)
+    aiEnabledLabel.appendChild(document.createTextNode("Enable AI Content API (token-based access for AI assistants)"))
+    form.appendChild(aiEnabledLabel)
+
+    const aiRateLimitReadInput = adminFormField(form, "Read rate limit (requests/minute per token)", "number", String(aiConfig.rate_limit_read ?? 120))
+    aiRateLimitReadInput.min = "1"
+    const aiRateLimitWriteInput = adminFormField(form, "Write rate limit (requests/minute per token)", "number", String(aiConfig.rate_limit_write ?? 30))
+    aiRateLimitWriteInput.min = "1"
+    const aiMaxTokensInput = adminFormField(form, "Max tokens per user", "number", String(aiConfig.max_tokens_per_user ?? 5))
+    aiMaxTokensInput.min = "1"
+
+    const aiRequireSummaryCheckbox = document.createElement("input")
+    aiRequireSummaryCheckbox.type = "checkbox"
+    aiRequireSummaryCheckbox.checked = aiConfig.require_summary !== false
+    const aiRequireSummaryLabel = document.createElement("label")
+    aiRequireSummaryLabel.style.display = "flex"
+    aiRequireSummaryLabel.style.alignItems = "center"
+    aiRequireSummaryLabel.style.gap = "8px"
+    aiRequireSummaryLabel.style.margin = "8px 0"
+    aiRequireSummaryLabel.appendChild(aiRequireSummaryCheckbox)
+    aiRequireSummaryLabel.appendChild(document.createTextNode("Require summary for token-authenticated writes"))
+    form.appendChild(aiRequireSummaryLabel)
+
     // Reviewflow section
     const rfHeading = document.createElement("h3")
     rfHeading.textContent = "Reviewflow Plugin"
@@ -7833,6 +8072,13 @@ async function renderAdminConfigTab(container) {
             })
             return d
           })(),
+        },
+        ai_api: {
+          enabled: aiEnabledCheckbox.checked,
+          rate_limit_read: parseInt(aiRateLimitReadInput.value, 10) || 120,
+          rate_limit_write: parseInt(aiRateLimitWriteInput.value, 10) || 30,
+          max_tokens_per_user: parseInt(aiMaxTokensInput.value, 10) || 5,
+          require_summary: aiRequireSummaryCheckbox.checked,
         },
         todo: {
           enabled: todoConfig.enabled || false,
