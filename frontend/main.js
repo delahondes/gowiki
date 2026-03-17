@@ -1234,9 +1234,162 @@ function setMode(nextMode) {
   renderActions()
 }
 
+/**
+ * Measure the exact pixel offset of a cursor position within a textarea,
+ * accounting for wrapped lines. Uses a hidden mirror div with identical styling.
+ */
+function getTextareaCursorOffset(textarea, pos) {
+  const mirror = document.createElement("div")
+  const style = getComputedStyle(textarea)
+  mirror.style.position = "absolute"
+  mirror.style.left = "-9999px"
+  mirror.style.top = "0"
+  mirror.style.visibility = "hidden"
+  mirror.style.whiteSpace = "pre-wrap"
+  mirror.style.wordWrap = "break-word"
+  mirror.style.overflowWrap = "break-word"
+  mirror.style.width = style.width
+  mirror.style.font = style.font
+  mirror.style.fontSize = style.fontSize
+  mirror.style.lineHeight = style.lineHeight
+  mirror.style.letterSpacing = style.letterSpacing
+  mirror.style.padding = style.padding
+  mirror.style.border = style.border
+  mirror.style.boxSizing = style.boxSizing
+  // Text before cursor
+  const textNode = document.createTextNode(textarea.value.substring(0, pos))
+  mirror.appendChild(textNode)
+  // Marker at cursor position
+  const marker = document.createElement("span")
+  marker.textContent = "\u200b" // zero-width space
+  mirror.appendChild(marker)
+  document.body.appendChild(mirror)
+  const y = marker.offsetTop
+  const x = marker.offsetLeft
+  document.body.removeChild(mirror)
+  return { x, y }
+}
+
+/** Show a pulsing "you are here" beacon at the given screen coordinates. */
+function showCursorBeacon(screenX, screenY) {
+  const el = document.createElement("div")
+  el.className = "gowiki-cursor-beacon"
+  el.style.left = screenX + "px"
+  el.style.top = screenY + "px"
+  document.body.appendChild(el)
+  // Remove after animation completes.
+  el.addEventListener("animationend", () => el.remove())
+  setTimeout(() => el.remove(), 2000) // fallback
+}
+
+/**
+ * Extract a text snippet around the cursor position for landmark-based
+ * cursor restoration when switching between raw and visual modes.
+ * Returns { before, after } — short text fragments flanking the cursor.
+ */
+function extractCursorContext(text, cursorPos) {
+  // Take up to 60 chars before and 40 after, trimmed to word boundaries.
+  const before = text.substring(Math.max(0, cursorPos - 60), cursorPos)
+  const after = text.substring(cursorPos, cursorPos + 40)
+  return { before, after }
+}
+
+/**
+ * Find the best matching position in `text` for the given context.
+ * Searches for the longest suffix of `before` followed by a prefix of `after`.
+ */
+function findContextPosition(text, ctx) {
+  // Try progressively shorter suffixes of `before` until we find a match.
+  const before = ctx.before
+  const after = ctx.after
+  for (let len = before.length; len >= 8; len--) {
+    const suffix = before.substring(before.length - len)
+    const idx = text.indexOf(suffix)
+    if (idx !== -1) {
+      return idx + suffix.length
+    }
+  }
+  // Fallback: try matching `after` prefix
+  for (let len = Math.min(after.length, 30); len >= 8; len--) {
+    const prefix = after.substring(0, len)
+    const idx = text.indexOf(prefix)
+    if (idx !== -1) {
+      return idx
+    }
+  }
+  return -1
+}
+
+/**
+ * Extract the full text content from a PM doc with position mapping,
+ * so we can map between text offsets and PM positions.
+ */
+function pmDocTextWithPositions(doc) {
+  const chunks = [] // { text, pmPos }
+  let textLen = 0
+  doc.descendants((node, pos) => {
+    if (node.isText) {
+      chunks.push({ text: node.text, pmPos: pos, textOffset: textLen })
+      textLen += node.text.length
+    } else if (node.isBlock && textLen > 0) {
+      // Add a newline between blocks for context matching
+      chunks.push({ text: "\n", pmPos: pos, textOffset: textLen })
+      textLen += 1
+    }
+  })
+  const fullText = chunks.map(c => c.text).join("")
+  return { fullText, chunks }
+}
+
+/** Convert a PM selection position to a text offset in the serialized text. */
+function pmPosToTextOffset(doc, pmPos) {
+  const { fullText, chunks } = pmDocTextWithPositions(doc)
+  // Find the chunk that contains or is just before pmPos
+  let textOffset = 0
+  for (const chunk of chunks) {
+    if (chunk.pmPos >= pmPos) break
+    if (chunk.pmPos + (chunk.text || "").length > pmPos) {
+      textOffset = chunk.textOffset + (pmPos - chunk.pmPos)
+      break
+    }
+    textOffset = chunk.textOffset + chunk.text.length
+  }
+  return { fullText, textOffset }
+}
+
+/** Find a PM position from a text offset in the doc's text content. */
+function textOffsetToPmPos(doc, targetOffset) {
+  const { chunks } = pmDocTextWithPositions(doc)
+  for (const chunk of chunks) {
+    if (targetOffset <= chunk.textOffset + chunk.text.length) {
+      const delta = Math.max(0, targetOffset - chunk.textOffset)
+      return chunk.pmPos + delta
+    }
+  }
+  return doc.content.size > 0 ? doc.content.size - 1 : 0
+}
+
 async function setEditMode(nextEditMode) {
   if (mode !== "edit") return
   if (nextEditMode === editMode) return
+
+  // Capture text context around the cursor for landmark-based restoration,
+  // and the cursor's pixel distance from the top of the viewport.
+  let cursorContext = null
+  let cursorScreenTop = 200 // pixels from viewport top — the target after switch
+  if (editMode === "visual" && editorView) {
+    const { fullText, textOffset } = pmPosToTextOffset(editorView.state.doc, editorView.state.selection.from)
+    cursorContext = extractCursorContext(fullText, textOffset)
+    try {
+      cursorScreenTop = editorView.coordsAtPos(editorView.state.selection.from).top
+    } catch {}
+  } else if (editMode === "raw" && rawEditor) {
+    cursorContext = extractCursorContext(rawEditor.value, rawEditor.selectionStart)
+    // Measure exact cursor position using mirror div (handles wrapped lines).
+    const cursorOffset = getTextareaCursorOffset(rawEditor, rawEditor.selectionStart)
+    const textareaRect = rawEditor.getBoundingClientRect()
+    cursorScreenTop = textareaRect.top + cursorOffset.y
+  }
 
   let markdown = currentMarkdown
   if (editMode === "visual" && editorView) {
@@ -1267,6 +1420,64 @@ async function setEditMode(nextEditMode) {
   editMode = nextEditMode
   renderEdit(editMode)
   renderActions()
+
+  // Restore cursor position using text context matching.
+  if (cursorContext) {
+    requestAnimationFrame(() => {
+      const scroller = document.querySelector("#app")
+      if (nextEditMode === "raw" && rawEditor) {
+        const pos = findContextPosition(rawEditor.value, cursorContext)
+        if (pos >= 0) {
+          rawEditor.setSelectionRange(pos, pos)
+          rawEditor.focus()
+          // Wait for textarea auto-resize, then scroll #app so cursor
+          // appears at the same screen Y as before the switch.
+          requestAnimationFrame(() => {
+            const cursorOffset = getTextareaCursorOffset(rawEditor, pos)
+            const textareaRect = rawEditor.getBoundingClientRect()
+            const currentScreenY = textareaRect.top + cursorOffset.y
+            // Scroll so cursor is in the middle of the viewport.
+            if (scroller) scroller.scrollTop += currentScreenY - window.innerHeight / 2
+            // Show "you are here" beacon at cursor position.
+            showCursorBeacon(textareaRect.left + cursorOffset.x, window.innerHeight / 2)
+          })
+        } else {
+          rawEditor.focus()
+        }
+      } else if (nextEditMode === "visual" && editorView) {
+        try {
+          const { fullText } = pmDocTextWithPositions(editorView.state.doc)
+          const textPos = findContextPosition(fullText, cursorContext)
+          if (textPos >= 0) {
+            const pmPos = textOffsetToPmPos(editorView.state.doc, textPos)
+            const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
+            const $pos = editorView.state.doc.resolve(clampedPos)
+            const sel = TextSelection.near($pos)
+            // Use scrollIntoView to let PM place cursor on screen reliably,
+            // then adjust to center it.
+            editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
+            // Delay to let images/includes load and shift layout.
+            const scrollToCenter = () => {
+              try {
+                const coords = editorView.coordsAtPos(clampedPos)
+                const offset = coords.top - window.innerHeight / 2
+                if (scroller) scroller.scrollTop += offset
+                showCursorBeacon(coords.left, window.innerHeight / 2)
+              } catch {}
+            }
+            // Try multiple times as layout settles.
+            requestAnimationFrame(() => {
+              scrollToCenter()
+              setTimeout(scrollToCenter, 150)
+            })
+          }
+          editorView.focus()
+        } catch {
+          editorView.focus()
+        }
+      }
+    })
+  }
 }
 
 function clearContent() {
