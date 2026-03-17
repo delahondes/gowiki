@@ -23,6 +23,11 @@ let pendingInputRefocus: {
   end: number | null
 } | null = null
 
+/** Tracks whether the user has manually expanded the "+" hidden properties.
+ *  Persists across panel rebuilds (decoration key changes) until the panel
+ *  is closed or the user clicks "−". */
+let panelUserExpanded = false
+
 export function requestInputFocus(propName: string) {
   pendingInputRefocus = { propName, start: null, end: null }
 }
@@ -381,18 +386,21 @@ function buildPanel(
     forceExpand = true
   }
 
+  // Honour the user's manual expand across panel rebuilds.
+  const shouldExpand = forceExpand || panelUserExpanded
+
   for (const prop of activeProps) {
     wrap.appendChild(buildPropGroup(view, node, pos, prop))
   }
 
-  const isMinimal = collapsible && activeProps.length === 0 && !forceExpand
+  const isMinimal = collapsible && activeProps.length === 0 && !shouldExpand
   if (isMinimal) {
     wrap.classList.add("gowiki-props-panel--minimal")
   }
 
   if (collapsible && hiddenProps.length > 0) {
     const hiddenContainer = document.createElement("span")
-    hiddenContainer.style.display = forceExpand ? "contents" : "none"
+    hiddenContainer.style.display = shouldExpand ? "contents" : "none"
 
     for (const prop of hiddenProps) {
       hiddenContainer.appendChild(buildPropGroup(view, node, pos, prop))
@@ -400,14 +408,15 @@ function buildPanel(
 
     const expandBtn = document.createElement("button")
     expandBtn.className = "gowiki-props-expand"
-    expandBtn.textContent = forceExpand ? "\u2212" : "+"
-    expandBtn.title = forceExpand ? "Hide default properties" : "Show all properties"
+    expandBtn.textContent = shouldExpand ? "\u2212" : "+"
+    expandBtn.title = shouldExpand ? "Hide default properties" : "Show all properties"
     expandBtn.addEventListener("mousedown", (e) => {
       e.preventDefault() // don't steal focus from editor
     })
     expandBtn.addEventListener("click", (e) => {
       e.preventDefault()
       const isHidden = hiddenContainer.style.display === "none"
+      panelUserExpanded = isHidden
       hiddenContainer.style.display = isHidden ? "contents" : "none"
       expandBtn.textContent = isHidden ? "\u2212" : "+"
       expandBtn.title = isHidden ? "Hide default properties" : "Show all properties"
@@ -654,6 +663,7 @@ function propertiesPlugin(reg: Registry) {
         let enabled = prev.enabled
         if (meta && typeof meta.enabled === "boolean") {
           enabled = meta.enabled
+          if (!enabled) panelUserExpanded = false
         }
 
         // Track the last NodeSelection target with properties.
