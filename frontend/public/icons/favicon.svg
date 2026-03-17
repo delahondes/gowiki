@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3bbfb3"/>
+      <stop offset="100%" stop-color="#1a6b5a"/>
+    </linearGradient>
+  </defs>
+  <!-- Document page -->
+  <rect x="1" y="3" width="18" height="24" rx="2" fill="white" stroke="#1a6b5a" stroke-width="1.2"/>
+  <!-- Folded corner -->
+  <path d="M14 3 L19 3 L14 8 Z" fill="#d4ece8" stroke="#1a6b5a" stroke-width="0.8" stroke-linejoin="round"/>
+  <!-- Text lines -->
+  <line x1="4" y1="11" x2="15" y2="11" stroke="#2fa89e" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="4" y1="15" x2="13" y2="15" stroke="#2fa89e" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="4" y1="19" x2="14" y2="19" stroke="#2fa89e" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="4" y1="23" x2="10" y2="23" stroke="#2fa89e" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Gopher body peeking from right -->
+  <ellipse cx="26" cy="18" rx="8" ry="10" fill="url(#g)"/>
+  <!-- Ears -->
+  <circle cx="22" cy="9" r="3" fill="#3bbfb3"/>
+  <circle cx="22" cy="9" r="1.5" fill="#1a6b5a"/>
+  <circle cx="30" cy="11" r="2.5" fill="#3bbfb3"/>
+  <circle cx="30" cy="11" r="1.2" fill="#1a6b5a"/>
+  <!-- Eyes -->
+  <circle cx="23" cy="15" r="2.8" fill="white"/>
+  <circle cx="29" cy="16" r="2.2" fill="white"/>
+  <circle cx="23.6" cy="15" r="1.4" fill="#222"/>
+  <circle cx="29.4" cy="16" r="1.1" fill="#222"/>
+  <!-- Muzzle -->
+  <ellipse cx="26" cy="22" rx="3.5" ry="2.8" fill="#e8dcc8"/>
+  <!-- Nose -->
+  <ellipse cx="25.5" cy="20.8" rx="1.2" ry="0.8" fill="#6b4c3b"/>
+  <!-- Teeth -->
+  <rect x="24.5" y="22" width="1" height="1.8" rx="0.3" fill="white"/>
+  <rect x="25.8" y="22" width="1" height="1.8" rx="0.3" fill="white"/>
+</svg>
