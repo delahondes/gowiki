@@ -354,9 +354,20 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 	argN := 1
 
 	if opts.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status = $%d", argN))
-		args = append(args, string(opts.Status))
-		argN++
+		statuses := strings.Split(string(opts.Status), ",")
+		if len(statuses) == 1 {
+			conditions = append(conditions, fmt.Sprintf("status = $%d", argN))
+			args = append(args, statuses[0])
+			argN++
+		} else {
+			placeholders := make([]string, len(statuses))
+			for i, st := range statuses {
+				placeholders[i] = fmt.Sprintf("$%d", argN)
+				args = append(args, strings.TrimSpace(st))
+				argN++
+			}
+			conditions = append(conditions, fmt.Sprintf("status IN (%s)", strings.Join(placeholders, ",")))
+		}
 	}
 	if opts.Assignee != "" {
 		conditions = append(conditions, fmt.Sprintf("$%d = ANY(string_to_array(assignee_target, ','))", argN))
@@ -379,9 +390,20 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 		argN++
 	}
 	if opts.Priority != "" {
-		conditions = append(conditions, fmt.Sprintf("priority = $%d", argN))
-		args = append(args, string(opts.Priority))
-		argN++
+		priorities := strings.Split(string(opts.Priority), ",")
+		if len(priorities) == 1 {
+			conditions = append(conditions, fmt.Sprintf("priority = $%d", argN))
+			args = append(args, priorities[0])
+			argN++
+		} else {
+			placeholders := make([]string, len(priorities))
+			for i, pr := range priorities {
+				placeholders[i] = fmt.Sprintf("$%d", argN)
+				args = append(args, strings.TrimSpace(pr))
+				argN++
+			}
+			conditions = append(conditions, fmt.Sprintf("priority IN (%s)", strings.Join(placeholders, ",")))
+		}
 	}
 
 	// Cursor decode: base64 of "updated_at|id".

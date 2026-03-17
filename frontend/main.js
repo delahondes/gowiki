@@ -4091,6 +4091,17 @@ function renderEdit(nextEditMode) {
 
     editorEl.addEventListener("keydown", e => {
       const isMod = e.metaKey || e.ctrlKey
+      // Save/publish shortcuts
+      if ((e.key === "s" || e.key === "S") && isMod) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.shiftKey) {
+          void publishDraft()
+        } else {
+          void saveDraftExplicit()
+        }
+        return
+      }
       if (e.key === "Enter" && !e.shiftKey && !isMod) {
         if (rawHandleEnterInList(editorEl)) {
           e.preventDefault()

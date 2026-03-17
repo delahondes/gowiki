@@ -1,13 +1,88 @@
 import { Plugin as PMPlugin, PluginKey, NodeSelection, EditorState } from "prosemirror-state"
-import type { Node as PMNode, Schema } from "prosemirror-model"
+import type { Node as PMNode, Schema, Mark } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import type { Registry } from "../compiler/registry"
+import { Fragment } from "prosemirror-model"
 import { markdownToPM } from "../compiler/markdown_to_pm"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 import { highlightCodeBlocks } from "../highlight"
 import { slugify } from "../compiler/slugify"
 import { headingNumberKey, computeHeadingNumbers, getHeadingCountersAt, INCLUDE_HEADING_META } from "../compiler/core_nodes"
+
+/**
+ * Rewrite relative links in a ProseMirror doc so they resolve against
+ * the included page's namespace, not the outer page's.
+ */
+function rebaseRelativeLinks(doc: PMNode, includedPagePath: string, isNamespaceIndex: boolean): PMNode {
+  const ns = includedPagePath.replace(/^\/+|\/+$/g, "")
+  // For namespace index pages, the page IS the namespace (./foo resolves inside it).
+  // For regular pages, the namespace is the parent directory.
+  const pageNamespace = isNamespaceIndex
+    ? ns
+    : ns.includes("/") ? ns.split("/").slice(0, -1).join("/") : ""
+  if (!pageNamespace) return doc
+
+  function resolveHref(href: string): string {
+    if (!href || href.startsWith("/") || href.startsWith("#") || /^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
+      return href
+    }
+    // Relative link: resolve against included page's namespace
+    const base = pageNamespace + "/" + href
+    const parts = base.split("/")
+    const out: string[] = []
+    for (const p of parts) {
+      if (p === "..") out.pop()
+      else if (p !== "." && p !== "") out.push(p)
+    }
+    return "/" + out.join("/")
+  }
+
+  function rebaseNode(node: PMNode): PMNode {
+    if (node.isText) {
+      const newMarks = node.marks.map((mark: Mark) => {
+        if (mark.type.name === "link" && mark.attrs.href) {
+          const resolved = resolveHref(mark.attrs.href)
+          if (resolved !== mark.attrs.href) {
+            return mark.type.create({ ...mark.attrs, href: resolved })
+          }
+        }
+        return mark
+      })
+      if (newMarks.some((m: Mark, i: number) => m !== node.marks[i])) {
+        return (node as any).mark(newMarks)
+      }
+      return node
+    }
+    // Image nodes with relative src
+    let attrs = node.attrs
+    if (node.type.name === "image" && attrs.src) {
+      const resolved = resolveHref(attrs.src)
+      if (resolved !== attrs.src) {
+        attrs = { ...attrs, src: resolved }
+      }
+    }
+    // Recurse into children
+    const children: PMNode[] = []
+    let changed = attrs !== node.attrs
+    node.content.forEach(child => {
+      const newChild = rebaseNode(child)
+      if (newChild !== child) changed = true
+      children.push(newChild)
+    })
+    if (!changed) return node
+    return node.type.create(attrs, Fragment.fromArray(children), node.marks)
+  }
+
+  const children: PMNode[] = []
+  let changed = false
+  doc.content.forEach(child => {
+    const newChild = rebaseNode(child)
+    if (newChild !== child) changed = true
+    children.push(newChild)
+  })
+  return changed ? doc.copy(Fragment.fromArray(children)) : doc
+}
 
 const includeProperties = [
   {
@@ -211,7 +286,9 @@ class IncludeNodeView {
       const data = await resp.json()
       const markdown = data.markdown ?? ""
 
+      const isNamespaceIndex = !!data.is_namespace_index
       let doc = markdownToPM(markdown, this.registry)
+      doc = rebaseRelativeLinks(doc, pagePath, isNamespaceIndex)
       if (anchor) {
         doc = extractSection(doc, anchor, this.registry.schema)
       }

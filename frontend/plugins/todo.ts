@@ -570,7 +570,7 @@ class TodoListNodeView {
 
     const thead = document.createElement("thead")
     const hr = document.createElement("tr")
-    for (const col of ["", "Title", "Assignee", "Due", "Priority", "Status"]) {
+    for (const col of ["TODO", "Title", "Assignee", "Due", "Priority", "Status"]) {
       const th = document.createElement("th")
       th.textContent = col
       hr.appendChild(th)
