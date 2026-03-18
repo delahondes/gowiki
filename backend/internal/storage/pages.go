@@ -1119,6 +1119,14 @@ func (s *FileStore) RebuildIndexes() error {
 		title := markdown.ExtractTitle(contentStr)
 		tagIdx.UpdatePage(pagePath, tags, title)
 
+		// Sync todo and reviewflow from existing content.
+		if s.TodoSync != nil {
+			s.TodoSync.SyncPageRows(pagePath, contentStr)
+		}
+		if s.ReviewflowSync != nil {
+			_ = s.ReviewflowSync.SyncFromMarkdown(pagePath, 0, contentStr)
+		}
+
 		return nil
 	})
 	if err != nil {
