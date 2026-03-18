@@ -99,3 +99,13 @@ Every table has an auto-incrementing `id` column (system-managed, read-only). Ro
 ## 1. CSV export
 
 Each table can be exported as CSV via the admin panel (click **Data** on a table) or the API (`GET /api/database/{table}/export/csv`).
+
+## 1. Completing the integration
+
+{blockquote class=important}
+> Creating a table in the admin is only the first step. For users to interact with the data, you need to create wiki pages with the appropriate directives:
+> 1. **A page with `{database-query}` and `{database-newrow}`** — this is the main data page where users view existing rows and add new ones.
+> 2. **(Optional) A page template** — if the table has a **Page folder** configured, create a template page at the **Page template path** you specified. This template controls the layout of auto-generated row-bound pages. Without a template, row-bound pages get a minimal default layout.
+> 3. **(Optional) A reference table page** — if you use **Tag** fields that reference another table (like the status table example above), create a page to manage that reference table's rows too.
+
+See the [Database (User Guide)](./database) for step-by-step instructions on creating these pages.

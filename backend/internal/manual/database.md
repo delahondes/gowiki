@@ -2,6 +2,13 @@
 
 The database plugin lets you embed structured data in wiki pages — query tables, insert rows, and bind pages to database records.
 
+{blockquote class=important}
+> Before using any database directive on a wiki page, an administrator must first create the table in [Admin > Database](./admin-database). The directives reference tables by name — if the table doesn't exist, the directive will show an error.
+> For a table to be fully functional, you need at minimum:
+> - A `{database-query}` node on a page — to display the data
+> - A `{database-newrow}` node on a page — to let users add rows
+> A page template for row-bound pages is optional but recommended for tables with a **Page folder** configured.
+
 ## 1. Querying data
 
 Display a table of rows using `{database-query}`:
