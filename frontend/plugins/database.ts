@@ -84,6 +84,8 @@ const databaseStyles = `
 .gowiki-database-newrow,
 .gowiki-database-row {
   margin: 0.5em 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #app.gowiki-editing .gowiki-database-query,
@@ -195,6 +197,8 @@ const databaseStyles = `
   font-size: 13px;
   border: 1px solid #ced4da;
   border-radius: 3px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .gowiki-database-form-actions {
@@ -1262,7 +1266,10 @@ class DatabaseQueryNodeView {
   }
 
   stopEvent(event: Event): boolean {
-    // If the event targets an input/select, stop ProseMirror from stealing focus.
+    // Stop mouse events to prevent ProseMirror from creating text selections
+    // across the document when clicking inside database tables.
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click" || type === "dblclick") return true
     const tag = (event.target as HTMLElement)?.tagName
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true
     return false
@@ -2081,7 +2088,10 @@ class DatabaseRowNodeView {
   }
 
   stopEvent(event: Event): boolean {
-    // If the event targets an input/select, stop ProseMirror from stealing focus.
+    // Stop mouse events to prevent ProseMirror from creating text selections
+    // across the document when clicking inside database tables.
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click" || type === "dblclick") return true
     const tag = (event.target as HTMLElement)?.tagName
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true
     return false
