@@ -4,6 +4,51 @@ import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
 import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
+// --- User display resolution ---
+
+const todoUserDisplayCache: Record<string, string> = {}
+
+async function resolveAssigneeLabels(raw: string): Promise<string> {
+  if (!raw) return ""
+  const parts = raw.split(",").map(s => s.trim()).filter(Boolean)
+  const userParts = parts.filter(p => !p.startsWith("group:"))
+
+  // Resolve user display names if needed.
+  const unknown = userParts.filter(u => !(u in todoUserDisplayCache))
+  if (unknown.length > 0) {
+    try {
+      const resp = await fetch(`/api/users/display?users=${encodeURIComponent(unknown.join(","))}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        for (const [name, info] of Object.entries(data.users || {})) {
+          todoUserDisplayCache[name] = (info as any).label || name
+        }
+      }
+    } catch { /* best effort */ }
+  }
+
+  // Build display string.
+  return parts.map(p => {
+    if (p.startsWith("group:")) {
+      // Capitalize group name: "group:editors" → "Editors"
+      const name = p.substring(6)
+      return name.charAt(0).toUpperCase() + name.slice(1)
+    }
+    return todoUserDisplayCache[p] || p
+  }).join(", ")
+}
+
+function formatAssigneeSync(raw: string): string {
+  if (!raw) return ""
+  return raw.split(",").map(s => s.trim()).filter(Boolean).map(p => {
+    if (p.startsWith("group:")) {
+      const name = p.substring(6)
+      return name.charAt(0).toUpperCase() + name.slice(1)
+    }
+    return todoUserDisplayCache[p] || p
+  }).join(", ")
+}
+
 // --- Properties ---
 
 const todoProperties = [
@@ -301,7 +346,9 @@ class TodoNodeView {
     if (assign) {
       const badge = document.createElement("span")
       badge.className = "gowiki-todo-assignee"
-      badge.textContent = assign
+      badge.textContent = formatAssigneeSync(assign)
+      // Resolve display names asynchronously and update.
+      resolveAssigneeLabels(assign).then(label => { badge.textContent = label })
       chip.appendChild(badge)
     }
 
@@ -609,11 +656,12 @@ class TodoListNodeView {
       const tdTitle = document.createElement("td")
       if (task.source_page) {
         const link = document.createElement("a")
-        link.href = "/" + task.source_page
+        const pagePath = task.source_page.startsWith("/") ? task.source_page : "/" + task.source_page
+        link.href = pagePath
         link.textContent = task.title
         link.addEventListener("click", (e) => {
           e.preventDefault()
-          window.location.href = "/" + task.source_page
+          window.location.href = pagePath
         })
         tdTitle.appendChild(link)
       } else {
@@ -624,7 +672,11 @@ class TodoListNodeView {
 
       // Assignee
       const tdAssign = document.createElement("td")
-      tdAssign.textContent = task.assignee?.target || ""
+      const assignTarget = task.assignee?.target || ""
+      tdAssign.textContent = formatAssigneeSync(assignTarget)
+      if (assignTarget) {
+        resolveAssigneeLabels(assignTarget).then(label => { tdAssign.textContent = label })
+      }
       tr.appendChild(tdAssign)
 
       // Due date

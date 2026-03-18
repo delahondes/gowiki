@@ -383,13 +383,17 @@ function buildPanel(
 
   // When a specific property is being focused (e.g. variable insert, cell
   // formula button), force-expand the panel so that property is visible.
-  if (collapsible && pendingInputRefocus && hiddenProps.some(p => p.name === pendingInputRefocus!.propName)) {
-    forceExpand = true
-  }
-
   // Honour the user's manual expand across panel rebuilds.
   // Use a stable key (node type + pos) rather than just pos, since pos can shift.
   const expandKey = panelKey || `${node.type.name}:${pos}`
+
+  if (collapsible && pendingInputRefocus && hiddenProps.some(p => p.name === pendingInputRefocus!.propName)) {
+    forceExpand = true
+    // Persist so the panel stays expanded across subsequent rebuilds
+    // (e.g. when the user starts typing in the focused field).
+    panelExpandedKeys.add(expandKey)
+  }
+
   const shouldExpand = forceExpand || panelExpandedKeys.has(expandKey)
 
   for (const prop of activeProps) {
