@@ -1270,6 +1270,92 @@ function getTextareaCursorOffset(textarea, pos) {
   return { x, y }
 }
 
+/** Save cursor context to localStorage for draft resume. */
+function saveCursorToLocalStorage() {
+  if (mode !== "edit" || !pagePath) return
+  try {
+    let ctx = null
+    if (editMode === "visual" && editorView) {
+      const { fullText, textOffset } = pmPosToTextOffset(editorView.state.doc, editorView.state.selection.from)
+      ctx = extractCursorContext(fullText, textOffset, false)
+      ctx.editMode = "visual"
+    } else if (editMode === "raw" && rawEditor) {
+      ctx = extractCursorContext(rawEditor.value, rawEditor.selectionStart, true)
+      ctx.editMode = "raw"
+    }
+    if (ctx) {
+      localStorage.setItem("gowiki:cursor:" + pagePath, JSON.stringify(ctx))
+    }
+  } catch {}
+}
+
+/** Restore cursor from localStorage after entering edit mode. */
+function restoreCursorFromLocalStorage() {
+  if (!pagePath) return
+  try {
+    const stored = localStorage.getItem("gowiki:cursor:" + pagePath)
+    if (!stored) return
+    const ctx = JSON.parse(stored)
+    // Delay to let editor render.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const scroller = document.querySelector("#app")
+        if (editMode === "visual" && editorView) {
+          const { fullText } = pmDocTextWithPositions(editorView.state.doc)
+          const textPos = findContextPosition(fullText, ctx, false)
+          if (textPos >= 0) {
+            const pmPos = textOffsetToPmPos(editorView.state.doc, textPos)
+            const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
+            try {
+              const $pos = editorView.state.doc.resolve(clampedPos)
+              const sel = TextSelection.near($pos)
+              editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
+              requestAnimationFrame(() => {
+                try {
+                  const coords = editorView.coordsAtPos(clampedPos)
+                  if (scroller) scroller.scrollTop += coords.top - window.innerHeight / 2
+                  setTimeout(() => {
+                    try {
+                      const finalCoords = editorView.coordsAtPos(clampedPos)
+                      if (scroller) scroller.scrollTop += finalCoords.top - window.innerHeight / 2
+                      showCursorBeacon(finalCoords.left, finalCoords.top)
+                    } catch {}
+                  }, 150)
+                } catch {}
+              })
+            } catch {}
+          }
+          editorView.focus()
+        } else if (editMode === "raw" && rawEditor) {
+          const pos = findContextPosition(rawEditor.value, ctx, true)
+          if (pos >= 0) {
+            rawEditor.setSelectionRange(pos, pos)
+            rawEditor.focus()
+            requestAnimationFrame(() => {
+              const cursorOffset = getTextareaCursorOffset(rawEditor, pos)
+              const textareaRect = rawEditor.getBoundingClientRect()
+              const currentScreenY = textareaRect.top + cursorOffset.y
+              if (scroller) scroller.scrollTop += currentScreenY - window.innerHeight / 2
+              const finalRect = rawEditor.getBoundingClientRect()
+              const finalOffset = getTextareaCursorOffset(rawEditor, pos)
+              showCursorBeacon(finalRect.left + finalOffset.x, finalRect.top + finalOffset.y)
+            })
+          } else {
+            rawEditor.focus()
+          }
+        }
+      })
+    })
+  } catch {}
+}
+
+/** Clear stored cursor context (on publish/discard). */
+function clearCursorLocalStorage() {
+  if (pagePath) {
+    try { localStorage.removeItem("gowiki:cursor:" + pagePath) } catch {}
+  }
+}
+
 /** Show a pulsing "you are here" beacon at the given screen coordinates. */
 function showCursorBeacon(screenX, screenY) {
   const el = document.createElement("div")
@@ -6606,6 +6692,8 @@ async function enterEditMode(force) {
   currentMarkdown = data.markdown
   currentDoc = markdownToPM(currentMarkdown, registry)
   setMode("edit")
+  // Restore cursor position from a previous editing session.
+  restoreCursorFromLocalStorage()
   return true
 }
 
@@ -6736,6 +6824,7 @@ async function autoSaveDraft() {
     if (resp.ok) {
       draftSavedThisSession = true
       lastSavedDraftMarkdown = markdown
+      saveCursorToLocalStorage()
       setStatus(`Draft auto-saved ${new Date().toLocaleTimeString()}`)
     }
   } catch {
@@ -6779,6 +6868,7 @@ async function saveDraftExplicit() {
   }
   draftSavedThisSession = true
   lastSavedDraftMarkdown = markdown
+  saveCursorToLocalStorage()
   setStatus(`Draft saved ${new Date().toLocaleTimeString()}`)
 }
 
@@ -6839,6 +6929,7 @@ async function publishDraft() {
           editToken = null
           pageLockInfo = null
           stashedEditorState = null
+          clearCursorLocalStorage()
           applyNormalizedEditState(normalized)
           editBaselineMarkdown = normalized.markdown
           isNewPage = false
@@ -6875,6 +6966,7 @@ async function publishDraft() {
   editToken = null
   pageLockInfo = null
   stashedEditorState = null
+  clearCursorLocalStorage()
   applyNormalizedEditState(normalized)
   editBaselineMarkdown = normalized.markdown
   isNewPage = false
@@ -6924,6 +7016,7 @@ async function discardDraft() {
     editToken = null
     pageLockInfo = null
     stashedEditorState = null
+    clearCursorLocalStorage()
     // Reload published content.
     const page = await fetchPage(pagePath)
     if (page) {
@@ -6967,6 +7060,7 @@ async function publishDraftFromHistory() {
   editToken = null
   pageLockInfo = null
   stashedEditorState = null
+  clearCursorLocalStorage()
   await reloadPageContent()
   setStatus("Draft published")
   showHistory()
@@ -6990,6 +7084,7 @@ async function discardDraftFromHistory(hasChanges) {
     editToken = null
     pageLockInfo = null
     stashedEditorState = null
+    clearCursorLocalStorage()
     await reloadPageContent()
     setStatus("Draft discarded")
     showHistory()
