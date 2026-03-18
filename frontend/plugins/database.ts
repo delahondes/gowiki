@@ -2816,6 +2816,7 @@ export const databasePlugin: WikiPlugin = {
       const type = reg.schema.nodes.database_query
       if (!type) return false
       if (dispatch) {
+        requestInputFocus("table")
         const node = type.create({ table: "" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
@@ -2845,6 +2846,7 @@ export const databasePlugin: WikiPlugin = {
       const type = reg.schema.nodes.database_newrow
       if (!type) return false
       if (dispatch) {
+        requestInputFocus("table")
         const node = type.create({ table: "" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
@@ -2880,6 +2882,7 @@ export const databasePlugin: WikiPlugin = {
       })
       if (hasBoundRow) return false
       if (dispatch) {
+        requestInputFocus("table")
         const node = type.create({ table: "", _fields: {} })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
