@@ -1283,41 +1283,207 @@ function showCursorBeacon(screenX, screenY) {
 }
 
 /**
+ * Strip markdown syntax to get plain text, preserving character positions
+ * roughly. Used for context matching across raw/visual mode switch.
+ */
+function stripMarkdownForContext(text) {
+  return text
+    // Links: [text](url) → text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // Images: ![alt](url) → alt
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // Bold: **text** → text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    // Italic: *text* → text
+    .replace(/\*([^*]+)\*/g, "$1")
+    // Underline: _text_ → text
+    .replace(/_([^_]+)_/g, "$1")
+    // Strikethrough: ~~text~~ → text
+    .replace(/~~([^~]+)~~/g, "$1")
+    // Inline code: `text` → text
+    .replace(/`([^`]+)`/g, "$1")
+    // Heading markers
+    .replace(/^#{1,6}\s+/gm, "")
+    // Directives on their own line
+    .replace(/^\{[^}]+\}\s*$/gm, "")
+}
+
+/**
  * Extract a text snippet around the cursor position for landmark-based
  * cursor restoration when switching between raw and visual modes.
- * Returns { before, after } — short text fragments flanking the cursor.
+ * Returns { before, after, rawBefore, rawAfter }.
+ * The plain versions have markdown stripped for cross-mode matching.
  */
-function extractCursorContext(text, cursorPos) {
-  // Take up to 60 chars before and 40 after, trimmed to word boundaries.
-  const before = text.substring(Math.max(0, cursorPos - 60), cursorPos)
-  const after = text.substring(cursorPos, cursorPos + 40)
-  return { before, after }
+function extractCursorContext(text, cursorPos, isRaw) {
+  let pos = cursorPos
+  if (isRaw) {
+    // If cursor is inside the (url) part of a [text](url) link,
+    // move it to just after the link text — the URL has no equivalent in visual mode.
+    pos = adjustRawCursorOutOfLinkSyntax(text, pos)
+  }
+  const before = text.substring(Math.max(0, pos - 80), pos)
+  const after = text.substring(pos, pos + 50)
+  const fraction = text.length > 0 ? pos / text.length : 0
+  if (isRaw) {
+    return {
+      before, after, fraction,
+      plainBefore: stripMarkdownForContext(before),
+      plainAfter: stripMarkdownForContext(after),
+    }
+  }
+  return { before, after, fraction, plainBefore: before, plainAfter: after }
+}
+
+/**
+ * If `pos` is inside markdown link syntax [text](url), move it to just
+ * after the link text (end of the visible content). Handles cursor in
+ * both the [text] and (url) parts.
+ */
+function adjustRawCursorOutOfLinkSyntax(text, pos) {
+  // Check if inside (url) part: search backward for unmatched '(' preceded by ']'
+  let parenDepth = 0
+  let i = pos - 1
+  while (i >= 0) {
+    if (text[i] === ")") parenDepth++
+    else if (text[i] === "(") {
+      if (parenDepth > 0) { parenDepth--; i--; continue }
+      if (i > 0 && text[i - 1] === "]") {
+        // Inside (url). Move to just before '](' — end of link text.
+        return i - 1
+      }
+      break
+    }
+    i--
+  }
+
+  // Check if inside [text] part: search backward for '[' and forward for ']()'
+  let bracketDepth = 0
+  i = pos - 1
+  while (i >= 0) {
+    if (text[i] === "]") bracketDepth++
+    else if (text[i] === "[") {
+      if (bracketDepth > 0) { bracketDepth--; i--; continue }
+      // Found opening '['. Check if this is a link by looking for '](' after.
+      const closeIdx = text.indexOf("](", i)
+      if (closeIdx >= 0 && closeIdx >= pos - 1) {
+        // Cursor is between [ and ](. Stay at pos but within the text portion —
+        // the context will be valid link text content.
+        return pos
+      }
+      break
+    }
+    i--
+  }
+
+  // Cursor at or near '](' boundary between [text](url).
+  // We want context to end with the link text, not include ] or (.
+  // pos-1=']', pos='(' → move to pos-1 (before ']', inside link text)
+  if (pos > 1 && text[pos - 1] === "]" && pos < text.length && text[pos] === "(") {
+    return pos - 1
+  }
+  // pos=']', pos+1='(' → same, move before ']'
+  if (text[pos] === "]" && pos + 1 < text.length && text[pos + 1] === "(") {
+    return pos
+  }
+
+  return pos
 }
 
 /**
  * Find the best matching position in `text` for the given context.
- * Searches for the longest suffix of `before` followed by a prefix of `after`.
+ * Tries exact match first, then falls back to plain (markdown-stripped) match.
+ * When using plain match against raw markdown, we search the stripped version
+ * but return the position in the original text.
  */
-function findContextPosition(text, ctx) {
-  // Try progressively shorter suffixes of `before` until we find a match.
-  const before = ctx.before
-  const after = ctx.after
-  for (let len = before.length; len >= 8; len--) {
+function findContextPosition(text, ctx, isRawTarget) {
+  const targetFraction = ctx.fraction ?? 0.5
+
+  if (isRawTarget) {
+    // When targeting raw markdown, always use stripped matching —
+    // PM text won't match inside [link](url) or **bold** syntax.
+    const stripped = stripMarkdownForContext(text)
+    const plainPos = _findInText(stripped, ctx.plainBefore, ctx.plainAfter, targetFraction)
+    if (plainPos >= 0) {
+      return mapStrippedPosToOriginal(text, stripped, plainPos)
+    }
+    // Fallback: try exact match (works for plain text regions).
+    const exactPos = _findInText(text, ctx.before, ctx.after, targetFraction)
+    if (exactPos >= 0) return exactPos
+  } else {
+    // When targeting PM text, try plain context (handles markdown→plain transition).
+    const plainPos = _findInText(text, ctx.plainBefore, ctx.plainAfter, targetFraction)
+    if (plainPos >= 0) return plainPos
+    // Fallback: exact match.
+    const exactPos = _findInText(text, ctx.before, ctx.after, targetFraction)
+    if (exactPos >= 0) return exactPos
+  }
+  return -1
+}
+
+/** Find all occurrences of `needle` in `text`. */
+function _findAll(text, needle) {
+  const positions = []
+  let start = 0
+  while (start < text.length) {
+    const idx = text.indexOf(needle, start)
+    if (idx === -1) break
+    positions.push(idx)
+    start = idx + 1
+  }
+  return positions
+}
+
+/** Pick the occurrence closest to the expected proportional position. */
+function _pickClosest(positions, textLen, targetFraction) {
+  if (positions.length === 1) return positions[0]
+  const targetPos = targetFraction * textLen
+  let best = positions[0]
+  let bestDist = Math.abs(positions[0] - targetPos)
+  for (let i = 1; i < positions.length; i++) {
+    const dist = Math.abs(positions[i] - targetPos)
+    if (dist < bestDist) {
+      best = positions[i]
+      bestDist = dist
+    }
+  }
+  return best
+}
+
+function _findInText(text, before, after, targetFraction) {
+  for (let len = before.length; len >= 6; len--) {
     const suffix = before.substring(before.length - len)
-    const idx = text.indexOf(suffix)
-    if (idx !== -1) {
+    const hits = _findAll(text, suffix)
+    if (hits.length > 0) {
+      const idx = _pickClosest(hits, text.length, targetFraction)
       return idx + suffix.length
     }
   }
-  // Fallback: try matching `after` prefix
-  for (let len = Math.min(after.length, 30); len >= 8; len--) {
+  for (let len = Math.min(after.length, 30); len >= 6; len--) {
     const prefix = after.substring(0, len)
-    const idx = text.indexOf(prefix)
-    if (idx !== -1) {
-      return idx
+    const hits = _findAll(text, prefix)
+    if (hits.length > 0) {
+      return _pickClosest(hits, text.length, targetFraction)
     }
   }
   return -1
+}
+
+/**
+ * Map a position in the stripped text back to the corresponding position
+ * in the original markdown text.
+ */
+function mapStrippedPosToOriginal(original, stripped, strippedPos) {
+  // Walk both strings in parallel, tracking how positions correspond.
+  let oi = 0, si = 0
+  while (si < strippedPos && oi < original.length) {
+    if (original[oi] === stripped[si]) {
+      oi++
+      si++
+    } else {
+      oi++ // skip markdown syntax character
+    }
+  }
+  return oi
 }
 
 /**
@@ -1379,12 +1545,12 @@ async function setEditMode(nextEditMode) {
   let cursorScreenTop = 200 // pixels from viewport top — the target after switch
   if (editMode === "visual" && editorView) {
     const { fullText, textOffset } = pmPosToTextOffset(editorView.state.doc, editorView.state.selection.from)
-    cursorContext = extractCursorContext(fullText, textOffset)
+    cursorContext = extractCursorContext(fullText, textOffset, false)
     try {
       cursorScreenTop = editorView.coordsAtPos(editorView.state.selection.from).top
     } catch {}
   } else if (editMode === "raw" && rawEditor) {
-    cursorContext = extractCursorContext(rawEditor.value, rawEditor.selectionStart)
+    cursorContext = extractCursorContext(rawEditor.value, rawEditor.selectionStart, true)
     // Measure exact cursor position using mirror div (handles wrapped lines).
     const cursorOffset = getTextareaCursorOffset(rawEditor, rawEditor.selectionStart)
     const textareaRect = rawEditor.getBoundingClientRect()
@@ -1426,7 +1592,8 @@ async function setEditMode(nextEditMode) {
     requestAnimationFrame(() => {
       const scroller = document.querySelector("#app")
       if (nextEditMode === "raw" && rawEditor) {
-        const pos = findContextPosition(rawEditor.value, cursorContext)
+        const pos = findContextPosition(rawEditor.value, cursorContext, true)
+        console.log("[mode-switch] visual→raw", { pos, rawLen: rawEditor.value.length, fraction: cursorContext.fraction, beforeTail: cursorContext.plainBefore.substring(cursorContext.plainBefore.length - 30), afterHead: cursorContext.plainAfter.substring(0, 30), rawAtPos: pos >= 0 ? rawEditor.value.substring(Math.max(0,pos-20), pos+20) : "N/A" })
         if (pos >= 0) {
           rawEditor.setSelectionRange(pos, pos)
           rawEditor.focus()
@@ -1449,7 +1616,8 @@ async function setEditMode(nextEditMode) {
       } else if (nextEditMode === "visual" && editorView) {
         try {
           const { fullText } = pmDocTextWithPositions(editorView.state.doc)
-          const textPos = findContextPosition(fullText, cursorContext)
+          const textPos = findContextPosition(fullText, cursorContext, false)
+          console.log("[mode-switch] raw→visual", { textPos, pmLen: fullText.length, fraction: cursorContext.fraction, beforeTail: cursorContext.plainBefore.substring(cursorContext.plainBefore.length - 30), afterHead: cursorContext.plainAfter.substring(0, 30), pmAtPos: textPos >= 0 ? fullText.substring(Math.max(0,textPos-20), textPos+20) : "N/A" })
           if (textPos >= 0) {
             const pmPos = textOffsetToPmPos(editorView.state.doc, textPos)
             const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
