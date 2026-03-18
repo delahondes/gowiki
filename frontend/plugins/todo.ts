@@ -589,8 +589,12 @@ class TodoListNodeView {
       const data = await gate.list(params)
       this.renderTasks(data.tasks || [])
     } catch {
-      // Plugin unavailable or error — render nothing
+      // Plugin unavailable — show message
       this.dom.innerHTML = ""
+      const msg = document.createElement("div")
+      msg.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
+      msg.textContent = "Todo list: requires a database connection"
+      this.dom.appendChild(msg)
     }
 
     // Connect SSE for live updates

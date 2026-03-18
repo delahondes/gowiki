@@ -8680,6 +8680,13 @@ async function renderAdminDatabaseTab(container) {
     statusIndicator.appendChild(statusText)
     form.appendChild(statusIndicator)
 
+    if (status.restart_required) {
+      const warning = document.createElement("div")
+      warning.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#b45309;font-size:13px;margin:8px 0"
+      warning.textContent = status.restart_message || "Server restart required to activate plugins."
+      form.appendChild(warning)
+    }
+
     const dsnInput = adminFormField(form, "DSN (e.g. postgres://user:pass@host:5432/db?sslmode=disable)", "text", dbConfig.dsn || "")
     dsnInput.style.fontFamily = "monospace"
     dsnInput.style.fontSize = "12px"
@@ -8751,8 +8758,8 @@ async function renderAdminDatabaseTab(container) {
         const connResp = await authFetch("/api/admin/database/connect", { method: "POST" })
         const connData = await connResp.json()
         if (connData.success) {
-          connStatusMsg.textContent = "Connected!"
-          connStatusMsg.style.color = "#155724"
+          connStatusMsg.textContent = connData.message || "Connected!"
+          connStatusMsg.style.color = connData.restart_required ? "#b45309" : "#155724"
           dot.style.background = "#40c057"
           statusText.textContent = "Connected"
           // Reload to show tables.

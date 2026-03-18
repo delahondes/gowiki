@@ -20,11 +20,16 @@ func (s *Server) handleDatabaseStatus(w http.ResponseWriter, _ *http.Request) {
 	if s.dbPool != nil {
 		connected = s.dbPool.IsConnected()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"connected":      connected,
 		"dsn_configured": cfg.Database.DSN != "",
 		"enabled":        cfg.Database.Enabled,
-	})
+	}
+	if connected && s.todoService == nil {
+		resp["restart_required"] = true
+		resp["restart_message"] = "Server restart required to activate the todo plugin."
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleDatabaseTest tests a DSN without saving it.
@@ -97,10 +102,17 @@ func (s *Server) handleDatabaseConnect(w http.ResponseWriter, r *http.Request) {
 	s.schemaStore = database.NewSchemaStore(s.dbPool)
 	s.dataStore = database.NewDataStore(s.dbPool, s.schemaStore)
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	// Check if plugins need a restart to activate.
+	restartRequired := s.todoService == nil // todo wasn't active at startup
+	resp := map[string]any{
 		"success":   true,
 		"connected": true,
-	})
+	}
+	if restartRequired {
+		resp["restart_required"] = true
+		resp["message"] = "Database connected. Server restart required to activate the todo plugin."
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // --- Schema admin handlers ---
