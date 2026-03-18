@@ -135,6 +135,8 @@ func (s *Server) buildDatabaseRowBlock(table *database.TableDef, row *database.R
 	sb.WriteString(fmt.Sprintf("{database-row table=%s}\n", table.Name))
 	sb.WriteString("| Field | Value |\n")
 	sb.WriteString("| --- | --- |\n")
+	// Include the system id column so {{id}} template variables resolve.
+	sb.WriteString(fmt.Sprintf("| id | %d |\n", row.ID))
 	for _, f := range table.Fields {
 		if f.ArchivedAt != nil {
 			continue
@@ -178,7 +180,10 @@ var databaseRowPlaceholderRe = regexp.MustCompile(`(?m)^\s*\{database-row\}\s*$`
 // Template variables like {{field_name}} are left as-is for render-time resolution.
 func applyTemplate(tmpl string, dbRowBlock string) string {
 	if databaseRowPlaceholderRe.MatchString(tmpl) {
-		return databaseRowPlaceholderRe.ReplaceAllString(tmpl, dbRowBlock)
+		// Replace placeholder, ensuring a blank line before the block
+		// so it's parsed as its own block (not absorbed into a paragraph).
+		replacement := "\n" + dbRowBlock
+		return databaseRowPlaceholderRe.ReplaceAllString(tmpl, replacement)
 	}
 	// No placeholder found — append at the end.
 	return strings.TrimRight(tmpl, "\n") + "\n\n" + dbRowBlock
@@ -393,8 +398,9 @@ func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, auth
 	}
 
 	// Build ordered field names and string values from the row.
-	var fieldNames []string
-	values := make(map[string]string)
+	// Include system id column so {{id}} resolves.
+	fieldNames := []string{"id"}
+	values := map[string]string{"id": fmt.Sprintf("%d", row.ID)}
 	for _, f := range table.Fields {
 		if f.ArchivedAt != nil {
 			continue

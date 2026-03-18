@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -21,6 +22,42 @@ func NewDatabaseSync(schemaStore *SchemaStore, dataStore *DataStore) *DatabaseSy
 		schemaStore: schemaStore,
 		dataStore:   dataStore,
 	}
+}
+
+// ValidatePageContent checks that system columns in {database-row} blocks
+// haven't been tampered with. Returns an error if the id was changed.
+func (ds *DatabaseSync) ValidatePageContent(pagePath, markdownContent string) error {
+	if ds.schemaStore == nil || ds.dataStore == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	blocks := markdown.ExtractDatabaseRows(markdownContent)
+	for _, block := range blocks {
+		userID, hasID := block.Fields["id"]
+		if !hasID || userID == "" {
+			continue
+		}
+
+		// Look up the actual row for this page.
+		lookupPath := pagePath
+		if !strings.HasPrefix(lookupPath, "/") {
+			lookupPath = "/" + lookupPath
+		}
+		row, err := ds.dataStore.GetRowByPagePath(ctx, block.TableName, lookupPath)
+		if err != nil || row == nil {
+			continue // new page, no row yet — id will be ignored anyway
+		}
+
+		// Compare the user-supplied id with the actual id.
+		actualID := fmt.Sprintf("%d", row.ID)
+		if strings.TrimSpace(userID) != actualID {
+			return fmt.Errorf("cannot change the id field (expected %s, got %s)", actualID, strings.TrimSpace(userID))
+		}
+	}
+	return nil
 }
 
 // SyncPageRows syncs page data to the database in two ways:
@@ -51,6 +88,10 @@ func (ds *DatabaseSync) SyncPageRows(pagePath, markdownContent string) {
 
 		fields := make(map[string]any, len(block.Fields))
 		for k, v := range block.Fields {
+			// System columns are read-only — never accept user-supplied values.
+			if k == "id" || k == "page_path" || k == "created_at" || k == "updated_at" {
+				continue
+			}
 			fields[k] = v
 		}
 

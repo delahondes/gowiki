@@ -1612,8 +1612,8 @@ class DatabaseRowNodeView {
 
       const tdVal = document.createElement("td")
 
-      if (f && f.type === "auto_increment") {
-        // auto_increment: read-only.
+      if ((f && f.type === "auto_increment") || key === "id") {
+        // auto_increment / system id: read-only.
         tdVal.textContent = String(val)
       } else {
         // Editable input, type-aware.
@@ -1883,8 +1883,8 @@ class DatabaseRowNodeView {
         tdVal.textContent = String(val)
       }
 
-      // Inline editing forbidden for auto_increment fields.
-      if (!(f && f.type === "auto_increment")) {
+      // Inline editing forbidden for auto_increment and system id fields.
+      if (!(f && f.type === "auto_increment") && key !== "id") {
         tdVal.className = "gowiki-database-editable-value"
         tdVal.addEventListener("dblclick", () => {
           this.inlineEdit(tdVal, f, String(key), String(val))

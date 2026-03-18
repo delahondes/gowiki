@@ -52,6 +52,10 @@ function parseDirective(line: string): DirectiveToken | null {
   return { name, attrs }
 }
 
+// Directive names that have their own block parser and should not be
+// consumed by the generic directive rule.
+const BLOCK_HANDLED_DIRECTIVES = new Set(["database-row"])
+
 function directivePlugin(md: MarkdownIt) {
   md.block.ruler.before("table", "directive", (state, startLine, endLine, silent) => {
     const start = state.bMarks[startLine] + state.tShift[startLine]
@@ -60,6 +64,8 @@ function directivePlugin(md: MarkdownIt) {
 
     const parsed = parseDirective(line)
     if (!parsed) return false
+    // Skip directives that have their own dedicated block parser.
+    if (BLOCK_HANDLED_DIRECTIVES.has(parsed.name)) return false
     if (silent) return true
 
     const token = state.push("directive", "", 0)

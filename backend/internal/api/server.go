@@ -116,6 +116,7 @@ type Server struct {
 	// Tracks pages where a forced inline edit modified the published content
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
+	databaseSync        *database.DatabaseSync
 	tokenStore          *auth.TokenStore
 	rateLimiter         *RateLimiter
 	oauthClient         *auth.OAuthClient
@@ -161,6 +162,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	if dbPool != nil && dbPool.IsConnected() {
 		s.schemaStore = database.NewSchemaStore(dbPool)
 		s.dataStore = database.NewDataStore(dbPool, s.schemaStore)
+		s.databaseSync = database.NewDatabaseSync(s.schemaStore, s.dataStore)
 	}
 
 	// Initialize OAuth client if configured.

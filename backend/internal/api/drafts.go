@@ -150,6 +150,14 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate database system columns (e.g. id) before saving.
+	if s.databaseSync != nil {
+		if err := s.databaseSync.ValidatePageContent(pagePath, md); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	// Write through the page store (which handles archiving, indexes, etc.)
 	result, err := s.store.Put(pagePath, md, username)
 	if err != nil {
