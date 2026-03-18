@@ -1434,8 +1434,12 @@ func normalizePagePath(raw string) (string, error) {
 		return "", fmt.Errorf("page path cannot be empty")
 	}
 	cleaned := path.Clean("/" + trimmed)
-	if cleaned == "." || cleaned == "/" {
+	if cleaned == "." {
 		return "", fmt.Errorf("invalid page path")
+	}
+	// "/" is valid — it maps to content/index.md (the root page).
+	if cleaned == "/" {
+		return "/index", nil
 	}
 	return cleaned, nil
 }
