@@ -10,6 +10,8 @@ Includes let you embed the content of one page inside another.
 
 The included content renders as a read-only zone in the visual editor, with a yellow property panel showing the source path.
 
+![Include zone with property panel](./screenshots/12.png)
+
 ## 1. Section includes
 
 Include a specific section of a page using `#`:

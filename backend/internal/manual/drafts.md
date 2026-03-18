@@ -6,6 +6,8 @@ When you click **Edit**, the wiki creates a lock on the page. Other users see th
 
 ## 1. Auto-save
 
+![Draft auto-saved notification](./screenshots/13.png)
+
 While editing, your changes are automatically saved as a draft at regular intervals (default: every 2 minutes, configurable in Admin > Configuration). Drafts are private — other users see the published version.
 
 ## 1. Publishing

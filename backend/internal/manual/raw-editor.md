@@ -1,5 +1,7 @@
 # Raw Editor
 
+![Raw editor mode](./screenshots/06.png)
+
 The raw editor lets you edit the markdown source directly. Toggle to it using the **Raw** button in the toolbar.
 
 ## 1. When to use raw mode

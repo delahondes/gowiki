@@ -2,6 +2,8 @@
 
 Access: Admin > ACL
 
+![Admin ACL tab](./screenshots/36.png)
+
 ## 1. How ACL works
 
 ACL rules control who can view, edit, and delete pages. Each rule has:

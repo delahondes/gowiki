@@ -18,6 +18,8 @@ This declares:
 
 Each role holder sees a confirmation button on the page. Once all roles have confirmed, the version is marked as **validated**.
 
+![Reviewflow panel with roles and confirmations](./screenshots/16.png)
+
 The reviewflow panel shows:
 - Current version tag
 - Which roles have confirmed (green checkmarks)

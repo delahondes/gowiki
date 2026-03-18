@@ -4,12 +4,16 @@
 
 Click **API Tokens** in the top-right banner (next to your username) to manage your tokens.
 
+![User token modal with newly created token](./screenshots/39.png)
+
 - **Create** — give the token a name (e.g. "Claude assistant"), copy the `gwk_...` value. It is shown once and never stored.
 - **Revoke** — delete a token immediately. Any client using it will be rejected.
 
 ## 1. For admins
 
 Access: Admin > Tokens
+
+![Admin tokens tab](./screenshots/38.png)
 
 The admin panel shows all tokens across all users. Admins can revoke any token.
 

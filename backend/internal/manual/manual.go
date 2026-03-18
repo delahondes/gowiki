@@ -8,13 +8,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
-//go:embed *.md
+//go:embed *.md screenshots/*.png
 var manualFS embed.FS
 
-// Bootstrap writes the embedded manual pages to contentRoot/wiki/manual/.
+// Bootstrap writes the embedded manual pages and screenshots to contentRoot/wiki/manual/.
 // It only writes files that don't already exist — it never overwrites
 // user-edited content. Returns the number of files written.
 func Bootstrap(contentRoot string) int {
@@ -29,15 +28,17 @@ func Bootstrap(contentRoot string) int {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !strings.HasSuffix(path, ".md") {
-			return nil
-		}
 
 		targetPath := filepath.Join(targetDir, path)
 
 		// Don't overwrite existing files.
 		if _, err := os.Stat(targetPath); err == nil {
 			return nil
+		}
+
+		// Ensure subdirectories exist (for screenshots/).
+		if dir := filepath.Dir(targetPath); dir != targetDir {
+			os.MkdirAll(dir, 0o755)
 		}
 
 		data, err := manualFS.ReadFile(path)

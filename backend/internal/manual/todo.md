@@ -20,6 +20,8 @@ All properties are specified within the curly braces. The description, if needed
 {todo title="Translate section 3" assign="bob" description="Translate from French to English, preserve formatting"}
 ```
 
+![Todo inline chips](./screenshots/18.png)
+
 ## 1. Properties
 
 | Property | Description | Example |
@@ -51,6 +53,8 @@ When assigned to a group, the `resolution` property controls completion:
 4. Completed tasks can recur if `recur` is set
 
 ## 1. Todo list
+
+![Todo list table](./screenshots/19.png)
 
 Display a list of tasks using the `{todo-list}` directive:
 

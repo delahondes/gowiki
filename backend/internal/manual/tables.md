@@ -11,6 +11,8 @@
 
 ## 1. Editing tables
 
+![Table editing in visual mode](./screenshots/09.png)
+
 In visual mode:
 - **Tab** moves to the next cell
 - **Shift+Tab** moves to the previous cell

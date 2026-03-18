@@ -18,6 +18,8 @@ Relative links are supported:
 [Sibling page](./other-page)
 ```
 
+![Link colors: existing (blue/green), missing (red), external (icon)](./screenshots/11.png)
+
 ## 1. External links
 
 ```

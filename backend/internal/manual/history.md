@@ -4,6 +4,8 @@
 
 Click **History** in the action bar to see all versions of a page, with timestamps, authors, and summaries.
 
+![History table](./screenshots/14.png)
+
 ## 1. Viewing a version
 
 Click **View** on any version to see the page as it was at that point in time. A banner at the top indicates you are viewing an archived version.
@@ -14,6 +16,8 @@ Click **View** on any version to see the page as it was at that point in time. A
 - **Diff vs current** — compare a version with the latest published content
 
 Additions are shown in green, deletions in red.
+
+![Diff view](./screenshots/15.png)
 
 ## 1. Restoring
 

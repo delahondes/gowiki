@@ -2,6 +2,8 @@
 
 Access: Admin > Users
 
+![Admin users tab](./screenshots/35.png)
+
 ## 1. Creating a user
 
 Click **Create User** and fill in:

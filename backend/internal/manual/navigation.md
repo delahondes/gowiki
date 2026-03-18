@@ -1,5 +1,7 @@
 # Navigation
 
+![Banner, sidebar, and main content area](./screenshots/01.png)
+
 ## 1. Sidebar
 
 The sidebar (left panel) provides the main navigation structure. It is a regular wiki page (configurable in Admin > Configuration) that can be edited by admins. It typically contains links organized by topic.
@@ -12,6 +14,8 @@ The page title area shows the current page path. Each segment is clickable to na
 
 The search bar in the top banner provides incremental, typo-tolerant full-text search. Results appear as you type. See [Search](./search) for details.
 
+![Search results dropdown](./screenshots/02.png)
+
 ## 1. Page links
 
 Internal links appear as colored text:
@@ -22,7 +26,9 @@ External links show a distinct icon and open in a new tab.
 
 ## 1. Sitemap
 
-Click **Sitemap** in the action bar to see a complete hierarchical listing of all pages in the wiki. Pages are grouped by namespace. This is useful for discovering content and understanding the wiki's structure.
+Click **Sitemap** in the action bar to see a complete hierarchical listing of all pages in the wiki.
+
+![Sitemap view](./screenshots/04.png) Pages are grouped by namespace. This is useful for discovering content and understanding the wiki's structure.
 
 ## 1. Footer
 

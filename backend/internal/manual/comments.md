@@ -11,6 +11,8 @@ Comments allow users to annotate specific parts of a page without modifying the 
 
 The selected text is highlighted in yellow to show the anchor.
 
+![Comment with highlighted text and sidebar](./screenshots/17.png)
+
 ## 1. Viewing comments
 
 Comments appear in a sidebar panel on the right. Each comment shows:

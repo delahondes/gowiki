@@ -30,6 +30,8 @@ Access: Admin > Configuration
 
 ## 1. AI Content API
 
+![AI Content API configuration](./screenshots/37.png)
+
 - **Enable** — master switch for token-based API access
 - **Read/Write rate limits** — requests per minute per token
 - **Max tokens per user** — maximum API tokens a user can create

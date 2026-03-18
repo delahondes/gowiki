@@ -2,6 +2,8 @@
 
 The visual editor provides a WYSIWYG editing experience powered by ProseMirror. It is the default editing mode.
 
+![Visual editor with toolbar](./screenshots/05.png)
+
 ## 1. Toolbar
 
 The toolbar provides buttons for common formatting:
@@ -17,7 +19,9 @@ The toolbar provides buttons for common formatting:
 
 ## 1. Switching modes
 
-Click the **Raw** / **Visual** toggle in the toolbar to switch between visual and raw markdown editing. Both modes edit the same content — switching is lossless.
+Click the **Raw** / **Visual** toggle in the toolbar to switch between visual and raw markdown editing. Both modes edit the same content — switching is lossless. A red beacon pulses at the cursor position to help you find your place after switching.
+
+![Mode switch beacon](./screenshots/07.png)
 
 ## 1. Tables in visual mode
 
@@ -34,6 +38,8 @@ Click the **Raw** / **Visual** toggle in the toolbar to switch between visual an
 - The size property updates live in the markdown source
 
 ## 1. Property panels
+
+![Property panel expanded](./screenshots/08.png)
 
 Some elements (images, tables, includes, code blocks) have a property panel that appears when the element is selected. Click the **+** button to expand all available properties.
 

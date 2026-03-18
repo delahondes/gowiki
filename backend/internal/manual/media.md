@@ -2,6 +2,8 @@
 
 ## 1. Uploading files
 
+![Media manager](./screenshots/10.png)
+
 1. Click **Media** in the action bar to open the media manager
 2. Select a file from your computer or drag and drop it
 3. The file is uploaded to the current page's namespace

@@ -18,6 +18,8 @@
 ## 1. The action bar
 
 The action bar (right side) provides quick access to:
+
+![Action bar buttons](./screenshots/03.png)
 - **Edit** / **View** — toggle edit mode
 - **History** — page version history
 - **Backlinks** — pages that link to this one
