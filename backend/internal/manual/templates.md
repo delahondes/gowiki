@@ -12,15 +12,27 @@ A template is a regular page named `_template.md` inside a namespace. For exampl
 
 When creating a new page, if a `_template.md` exists in the same namespace (or a parent namespace), its content is used as the starting point for the new page.
 
-## 1. Template variables
+## 1. Variables in templates
 
-Templates can include variables that are replaced when the page is created:
+Templates can include **global variables** that are resolved at render time (not at creation time). These use the `{{NAME}}` syntax with ALL_CAPS names:
 
+```markdown
+Page: {{PAGE}}
+Author: {{AUTHOR}}
+Created: {{DATE}}
 ```
-{{page_name}} — the new page's name
-{{namespace}} — the namespace path
-{{date}} — current date (YYYY-MM-DD)
-{{author}} — the creating user's login
+
+Global variables remain as `{{NAME}}` in the stored markdown and update dynamically every time the page is viewed. See the full list in [Global Variables](#).
+
+A fallback value can be specified with a colon: `{{AUTHORMAIL:no email provided}}`.
+
+## 1. Database-bound variables
+
+Templates are especially powerful with database-bound pages. When a page is linked to a database table row, **lowercase** template variables like `{{fieldname}}` resolve from the database row's fields:
+
+```markdown
+Patient: {{patient_name}}
+Visit date: {{visit_date}}
 ```
 
-Variables use double-brace syntax: `{{variable_name}}`. A fallback value can be specified: `{{variable_name:default value}}`.
+These are described in detail in [Database](./database).

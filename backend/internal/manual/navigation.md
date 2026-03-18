@@ -20,6 +20,10 @@ Internal links appear as colored text:
 
 External links show a distinct icon and open in a new tab.
 
+## 1. Sitemap
+
+Click **Sitemap** in the action bar to see a complete hierarchical listing of all pages in the wiki. Pages are grouped by namespace. This is useful for discovering content and understanding the wiki's structure.
+
 ## 1. Footer
 
 The footer (below the page content) is a regular wiki page (configurable in Admin > Configuration). It typically contains site-wide information or links.

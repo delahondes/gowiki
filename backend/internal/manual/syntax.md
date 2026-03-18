@@ -19,7 +19,7 @@ Gowiki uses a custom Markdown dialect. It is **bijective**: each formatting has 
 
 ATX headings only (setext headings are rejected):
 
-```
+```markdown
 # Heading 1
 ## Heading 2
 ### Heading 3
@@ -27,7 +27,7 @@ ATX headings only (setext headings are rejected):
 
 Numbered headings use a `1.` prefix:
 
-```
+```markdown
 ## 1. First Section
 ## 1. Second Section
 ```
@@ -36,7 +36,7 @@ Numbered headings use a `1.` prefix:
 
 Unordered lists use `-` only (not `*`):
 
-```
+```markdown
 - First item
 - Second item
   - Nested item
@@ -44,7 +44,7 @@ Unordered lists use `-` only (not `*`):
 
 Ordered lists use `1.`:
 
-```
+```markdown
 1. First item
 2. Second item
 ```
@@ -55,7 +55,7 @@ Use Tab/Shift+Tab to increase/decrease nesting.
 
 **Internal page links:**
 
-```
+```markdown
 [Display text](/path/to/page)
 [](/path/to/page)
 ```
@@ -64,7 +64,7 @@ An empty label `[]` automatically displays the page name.
 
 **External links:**
 
-```
+```markdown
 [Example](https://example.com)
 ```
 
@@ -72,7 +72,7 @@ External links display with a distinct icon and open in a new tab.
 
 **Media/attachment links:**
 
-```
+```markdown
 [Download](./document.pdf)
 ```
 
@@ -80,20 +80,20 @@ Links to files with extensions are treated as attachment downloads.
 
 ## 1. Images
 
-```
+```markdown
 ![Alt text](./image.png)
 ```
 
 Images support drag-resize in the visual editor. The size is stored as a property:
 
-```
+```markdown
 {image size=400px}
 ![Alt text](./image.png)
 ```
 
 ## 1. Tables
 
-```
+```markdown
 | Header 1 | Header 2 | Header 3 |
 | --- | --- | --- |
 | Cell 1 | Cell 2 | Cell 3 |
@@ -104,12 +104,12 @@ Use Tab to navigate between cells. Column alignment syntax is not supported.
 
 ## 1. Code blocks
 
-````
-```python
+`````markdown
+````python
 def hello():
     print("Hello, world!")
-```
 ````
+`````
 
 Language-specific syntax highlighting is applied automatically.
 
@@ -123,13 +123,13 @@ Language-specific syntax highlighting is applied automatically.
 
 Properties are written on their own line before the target block:
 
-```
+```markdown
 {pluginname key=value key2="value with spaces"}
 ```
 
 Self-contained directives stand alone:
 
-```
+```markdown
 {reviewflow version=1.0 author=alice reviewer=bob}
 {tag sop}
 {include path=/wiki/sidebar}

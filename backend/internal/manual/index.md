@@ -24,6 +24,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Namespaces](./namespaces) — Organizing pages in folders
 - [Tags](./tags) — Tagging pages and using tag queries
 - [Templates](./templates) — Creating pages from templates
+- [Database](./database) — Querying, inserting, and binding pages to structured data
 - [Search](./search) — Full-text search
 
 ## Collaboration
