@@ -5252,14 +5252,24 @@ function renderActions() {
     if (currentUser && !isNewPage) {
       actionsRoot.appendChild(makeActionSep())
       const commentCount = getCommentCount()
-      const commentTip = commentCount > 0 ? `Comments (${commentCount})` : "Comment"
-      const commentBtn = makeActionIconBtn("comment", commentTip, () => addComment())
+      const commentBtn = makeActionIconBtn("comment", "Comment (select text first)", () => addComment())
+      commentBtn.disabled = true
       if (commentCount > 0) {
         const badge = document.createElement("span")
         badge.className = "gowiki-action-badge"
         badge.textContent = String(commentCount)
         commentBtn.appendChild(badge)
       }
+      // Update button state based on text selection.
+      const updateCommentBtnState = () => {
+        const sel = window.getSelection()
+        const hasSelection = sel && sel.toString().trim().length > 0
+        commentBtn.disabled = !hasSelection
+        const countLabel = commentCount > 0 ? ` (${commentCount})` : ""
+        commentBtn.title = hasSelection ? `Comment${countLabel}` : `Comment (select text first)${countLabel}`
+      }
+      document.addEventListener("selectionchange", updateCommentBtnState)
+      updateCommentBtnState()
       actionsRoot.appendChild(commentBtn)
       actionsRoot.appendChild(makeActionIconBtn("move", "Move page", () => void movePage()))
       if (isNamespaceIndex) {
