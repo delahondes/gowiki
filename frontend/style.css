@@ -378,6 +378,7 @@ body {
   width: 40px;
   padding: 4px 0;
   z-index: 20;
+  pointer-events: none;
 }
 
 #left {
@@ -397,6 +398,7 @@ body {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
+  pointer-events: auto;
   color: #555;
   cursor: pointer;
   position: relative;
