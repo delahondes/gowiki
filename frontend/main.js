@@ -145,6 +145,7 @@ let todoInsertCommand = null
 let todoListInsertCommand = null
 let reviewflowInsertCommand = null
 let reviewflowLinkInsertCommand = null
+let reviewflowQueryInsertCommand = null
 let versionLinkInsertCommand = null
 let changesInsertCommand = null
 
@@ -224,6 +225,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "reviewflow-link") {
     if (name === "insert") reviewflowLinkInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "reviewflow-query") {
+    if (name === "insert") reviewflowQueryInsertCommand = cmd
     return
   }
 
@@ -4495,6 +4501,20 @@ function buildMenubar() {
         rawInsertText(rawEditor, snippet + "\n\n")
         const cursorPos = start + snippet.length - 1
         rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // Reviewflow Query
+  if (reviewflowQueryInsertCommand) {
+    addImgButton("/icons/reviewflow-query.svg", "Insert reviewflow query", () => {
+      if (editMode === "visual" && editorView) {
+        reviewflowQueryInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{reviewflow-query}"
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
       }
     })
   }

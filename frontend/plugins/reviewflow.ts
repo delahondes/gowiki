@@ -2,7 +2,7 @@ import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
-import { enablePropertiesPanel } from "../compiler/core_ui"
+import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // --- Properties ---
 
@@ -503,6 +503,323 @@ const reviewflowStyles = `
 
 // --- Plugin ---
 
+// --- Reviewflow Query NodeView ---
+
+class ReviewflowQueryNodeView {
+  dom: HTMLElement
+  private node: PMNode
+
+  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+    this.node = node
+    this.dom = document.createElement("div")
+    this.dom.className = "gowiki-reviewflow-query"
+    this.dom.contentEditable = "false"
+    this.fetchAndRender()
+  }
+
+  private resolvePathPrefix(): string {
+    const raw = this.node.attrs.path || ""
+    if (raw) return raw.replace(/^\/+/, "")
+    // Default: namespace of the current page
+    const pathname = window.location.pathname
+    const loc = pathname.replace(/^\/+|\/+$/g, "")
+    const parts = loc.split("/")
+    if (!pathname.endsWith("/")) parts.pop() // remove page name, keep namespace
+    return parts.join("/")
+  }
+
+  private async fetchAndRender() {
+    const path = this.resolvePathPrefix()
+    const statusFilter = this.node.attrs.status || "draft"
+
+    this.dom.innerHTML = '<div class="gowiki-rfq-loading">Loading reviewflow status...</div>'
+
+    try {
+      // 1. Fetch all pages under the path
+      const nsResp = await fetch(`/api/ai/v1/namespace/${path}?depth=0&include_meta=true`)
+      if (!nsResp.ok) {
+        this.dom.innerHTML = '<div class="gowiki-rfq-error">Failed to load pages</div>'
+        return
+      }
+      const nsData = await nsResp.json()
+      const pages: any[] = nsData.pages || []
+
+      // 2. Fetch reviewflow status for each page (in parallel)
+      const statusPromises = pages.map(async (p: any) => {
+        const cleanPath = p.path.replace(/^\/+/, "")
+        try {
+          const resp = await fetch(`/api/plugin/reviewflow/v1/status/${cleanPath}`)
+          if (!resp.ok) return null
+          const status = await resp.json()
+          if (!status.roles || Object.keys(status.roles).length === 0) return null
+          return { page: p, status }
+        } catch { return null }
+      })
+      const results = (await Promise.all(statusPromises)).filter(Boolean) as any[]
+
+      // 3. Filter by status
+      const filtered = results.filter(r => {
+        const isValidated = r.status.is_fully_validated === true
+        if (statusFilter === "draft") return !isValidated
+        if (statusFilter === "validated") return isValidated
+        return true // "all"
+      })
+
+      // 4. Sort by date (most recent first)
+      filtered.sort((a, b) => {
+        const da = a.page.last_modified || ""
+        const db = b.page.last_modified || ""
+        return db.localeCompare(da)
+      })
+
+      this.dom.innerHTML = ""
+
+      // Header
+      const header = document.createElement("div")
+      header.className = "gowiki-rfq-header"
+      const label = statusFilter === "draft" ? "Documents pending validation"
+        : statusFilter === "validated" ? "Validated documents"
+        : "All reviewflow documents"
+      header.textContent = `Reviewflow: ${label} (/${path})`
+      this.dom.appendChild(header)
+
+      if (filtered.length === 0) {
+        const empty = document.createElement("div")
+        empty.className = "gowiki-rfq-empty"
+        empty.textContent = statusFilter === "draft"
+          ? "No documents pending validation."
+          : "No documents found."
+        this.dom.appendChild(empty)
+        return
+      }
+
+      // Resolve user display names
+      const allUsers = new Set<string>()
+      for (const r of filtered) {
+        for (const user of Object.values(r.status.roles || {})) allUsers.add(user as string)
+        if (r.page.author) allUsers.add(r.page.author)
+      }
+      const unknownUsers = [...allUsers].filter(u => !(u in userDisplayCache))
+      if (unknownUsers.length > 0) {
+        await resolveUserLabels(unknownUsers)
+      }
+
+      // Table
+      const table = document.createElement("table")
+      table.className = "gowiki-rfq-table"
+      const thead = document.createElement("thead")
+      const hr = document.createElement("tr")
+      for (const h of ["Page", "Version", "Date", "Author", "Status", "Confirmations"]) {
+        const th = document.createElement("th")
+        th.textContent = h
+        hr.appendChild(th)
+      }
+      thead.appendChild(hr)
+      table.appendChild(thead)
+
+      const tbody = document.createElement("tbody")
+      for (const r of filtered) {
+        const tr = document.createElement("tr")
+
+        // Page link
+        const tdPage = document.createElement("td")
+        const a = document.createElement("a")
+        a.href = r.page.path
+        a.textContent = r.page.title || r.page.path
+        a.className = "gowiki-link-exists"
+        tdPage.appendChild(a)
+        tr.appendChild(tdPage)
+
+        // Version tag
+        const tdVersion = document.createElement("td")
+        if (r.status.version_tag) {
+          if (r.status.is_fully_validated && r.status.validated_page_version) {
+            const va = document.createElement("a")
+            va.href = `${r.page.path}?v=${r.status.validated_page_version}`
+            va.textContent = r.status.version_tag
+            va.className = "gowiki-rfq-version-link"
+            tdVersion.appendChild(va)
+          } else {
+            tdVersion.textContent = r.status.version_tag
+          }
+        }
+        tr.appendChild(tdVersion)
+
+        // Date
+        const tdDate = document.createElement("td")
+        tdDate.textContent = r.page.last_modified
+          ? new Date(r.page.last_modified).toLocaleDateString()
+          : ""
+        tr.appendChild(tdDate)
+
+        // Author
+        const tdAuthor = document.createElement("td")
+        tdAuthor.textContent = r.page.author ? getUserLabel(r.page.author) : ""
+        tr.appendChild(tdAuthor)
+
+        // Status badge
+        const tdStatus = document.createElement("td")
+        const badge = document.createElement("span")
+        if (r.status.is_fully_validated) {
+          badge.className = "gowiki-rfq-badge gowiki-rfq-badge-validated"
+          badge.textContent = "Validated"
+        } else {
+          badge.className = "gowiki-rfq-badge gowiki-rfq-badge-draft"
+          badge.textContent = "Draft"
+        }
+        tdStatus.appendChild(badge)
+        tr.appendChild(tdStatus)
+
+        // Confirmations
+        const tdConf = document.createElement("td")
+        const roles = r.status.roles || {}
+        const missingRoles = r.status.missing_roles || {}
+        const confirmations = r.status.version_history || []
+        // Find confirmations for this version from the raw status
+        const fragments: string[] = []
+        for (const [role, user] of Object.entries(roles)) {
+          const isMissing = role in missingRoles
+          const label = getUserLabel(user as string)
+          if (isMissing) {
+            fragments.push(`${role}: ${label} \u23F3`)
+          } else {
+            fragments.push(`${role}: ${label} \u2713`)
+          }
+        }
+        tdConf.textContent = fragments.join(", ")
+        tdConf.style.fontSize = "0.85em"
+        tr.appendChild(tdConf)
+
+        tbody.appendChild(tr)
+      }
+      table.appendChild(tbody)
+      this.dom.appendChild(table)
+
+    } catch (err) {
+      this.dom.innerHTML = '<div class="gowiki-rfq-error">Failed to load reviewflow data</div>'
+    }
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    if (node.attrs.path !== this.node.attrs.path || node.attrs.status !== this.node.attrs.status) {
+      this.node = node
+      this.fetchAndRender()
+      return true
+    }
+    this.node = node
+    return true
+  }
+
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
+    return true
+  }
+
+  ignoreMutation(): boolean {
+    return true
+  }
+}
+
+// --- Reviewflow Query Styles ---
+
+const rfqStyles = `
+.gowiki-reviewflow-query {
+  margin: 0.5em 0;
+}
+
+.gowiki-rfq-loading {
+  color: #999;
+  font-style: italic;
+  padding: 8px;
+}
+
+.gowiki-rfq-error {
+  color: #c62828;
+  padding: 8px;
+}
+
+.gowiki-rfq-empty {
+  color: #666;
+  padding: 8px;
+  font-style: italic;
+}
+
+.gowiki-rfq-header {
+  font-size: 11px;
+  color: #636e72;
+  margin-bottom: 4px;
+  font-family: monospace;
+}
+
+.gowiki-rfq-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.gowiki-rfq-table th {
+  background: #f1f3f5;
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.gowiki-rfq-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.gowiki-rfq-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.gowiki-rfq-badge-draft {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.gowiki-rfq-badge-validated {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.gowiki-rfq-version-link {
+  display: inline-block;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gowiki-rfq-version-link:hover {
+  background: #bbdefb;
+}
+
+#app.gowiki-editing .gowiki-reviewflow-query {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+#app.gowiki-editing .gowiki-reviewflow-query.ProseMirror-selectednode {
+  outline: 2px solid #ffd43b;
+  outline-offset: 1px;
+}
+`
+
 export const reviewflowPlugin: WikiPlugin = {
   register(reg) {
     // Schema node
@@ -642,7 +959,147 @@ export const reviewflowPlugin: WikiPlugin = {
       return true
     })
 
+    // ────────────────────────────────────────────────────
+    // Reviewflow Query — {reviewflow-query path=... status=...}
+    // ────────────────────────────────────────────────────
+
+    const rfqProperties = [
+      {
+        name: "path",
+        label: "Path prefix",
+        default: "",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+        helpText: "Namespace to scan (empty = current page's namespace)",
+      },
+      {
+        name: "status",
+        label: "Status filter",
+        default: "draft",
+        parse: (raw: string) => {
+          const v = raw.trim().toLowerCase()
+          return (v === "draft" || v === "validated" || v === "all") ? v : "draft"
+        },
+        serialize: (value: string | null) => String(value ?? "draft"),
+        options: [
+          { value: "draft", label: "Draft (pending validation)" },
+          { value: "validated", label: "Validated" },
+          { value: "all", label: "All" },
+        ],
+      },
+    ]
+
+    reg.registerSchema({
+      nodes: {
+        reviewflow_query: {
+          group: "block",
+          atom: true,
+          attrs: {
+            path: { default: "" },
+            status: { default: "draft" },
+          },
+          toDOM(node: PMNode) {
+            return [
+              "div",
+              {
+                class: "gowiki-reviewflow-query",
+                "data-path": node.attrs.path || "",
+                "data-status": node.attrs.status || "draft",
+              },
+              `Reviewflow query: ${node.attrs.status || "draft"}`,
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "div.gowiki-reviewflow-query",
+              getAttrs(dom: HTMLElement) {
+                return {
+                  path: dom.getAttribute("data-path") || "",
+                  status: dom.getAttribute("data-status") || "draft",
+                }
+              },
+            },
+          ],
+        },
+      },
+    })
+
+    reg.registerSelfContainedDirective("reviewflow-query", {
+      tokenType: "reviewflow_query",
+      nodeType: "reviewflow_query",
+      properties: rfqProperties,
+    })
+
+    reg.registerText("reviewflow_query", {
+      run(ctx, tok) {
+        const attrs = tok.meta?.attrs ?? {}
+        ctx.push(
+          ctx.schema.nodes.reviewflow_query.create({
+            path: attrs.path ?? "",
+            status: attrs.status ?? "draft",
+          })
+        )
+      },
+    })
+
+    reg.registerPMNode("reviewflow_query", {
+      print(node) {
+        const parts: string[] = []
+        if (node.attrs.path) parts.push(`path=${node.attrs.path}`)
+        if (node.attrs.status && node.attrs.status !== "draft") {
+          parts.push(`status=${node.attrs.status}`)
+        }
+        return parts.length
+          ? `{reviewflow-query ${parts.join(" ")}}\n\n`
+          : `{reviewflow-query}\n\n`
+      },
+    })
+
+    reg.registerEditorPlugin((_schema: Schema) => {
+      return new PMPlugin({
+        key: new PluginKey("gowiki.reviewflow-query"),
+        props: {
+          nodeViews: {
+            reviewflow_query(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new ReviewflowQueryNodeView(node, view, getPos)
+            },
+          },
+        },
+      })
+    })
+
+    reg.registerCommand("reviewflow-query", "insert", (state, dispatch) => {
+      const queryType = reg.schema.nodes.reviewflow_query
+      if (!queryType) return false
+      if (dispatch) {
+        requestInputFocus("path")
+        const node = queryType.create({ path: "", status: "draft" })
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 5),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === queryType && insertedAt === null) {
+              insertedAt = pos
+              return false
+            }
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch { /* leave default selection */ }
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
+
     // Styles
     reg.registerStyle("reviewflow", reviewflowStyles)
+    reg.registerStyle("reviewflow-query", rfqStyles)
   },
 }

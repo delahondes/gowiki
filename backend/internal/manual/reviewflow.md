@@ -54,6 +54,37 @@ This renders as a clickable badge that navigates to the archived validated versi
 {reviewflow-link version=2.0 page=/regulatory/qms/dir/mq01}
 ```
 
+## 1. Reviewflow query
+
+The `{reviewflow-query}` directive displays a dashboard of all documents pending validation (or all reviewflow documents) under a given path:
+
+```markdown
+{reviewflow-query}
+```
+
+![Reviewflow query showing documents pending validation](./screenshots/40.png)
+
+By default, it scans the current page's namespace and shows only **draft** documents (those with pending confirmations). You can customize:
+
+```markdown
+{reviewflow-query path=/regulatory/qms status=all}
+```
+
+| Property | Description | Default |
+| --- | --- | --- |
+| path | Namespace to scan | Current page's namespace |
+| status | Filter: `draft`, `validated`, or `all` | `draft` |
+
+The table shows for each document:
+- **Page** — clickable link to the page
+- **Version** — current version tag (clickable for validated versions)
+- **Date** — last modification date
+- **Author** — resolved via the user display setting
+- **Status** — Draft or Validated badge
+- **Confirmations** — per-role status with checkmarks (confirmed) or hourglasses (pending)
+
+Use the toolbar button (shield with question mark) to insert a reviewflow query in visual mode.
+
 ## 1. Deadlines
 
 Admins can configure deadlines per role in Admin > Configuration > Reviewflow. When a confirmation is overdue, the todo system can send reminders.

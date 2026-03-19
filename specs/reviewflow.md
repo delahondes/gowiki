@@ -527,7 +527,100 @@ Uses `registerSelfContainedDirective("reviewflow-link", ...)` with two propertie
 
 ---
 
-## 15. Decisions (continued)
+## 15. Reviewflow Query Directive
+
+### 15.1 Overview
+
+The `{reviewflow-query}` directive renders a table listing all pages under a given path that have a reviewflow directive with pending validation (i.e., not all roles have confirmed the current version). This provides a dashboard view of documents awaiting review, useful for quality managers and team leads.
+
+### 15.2 Markdown Syntax
+
+```markdown
+{reviewflow-query}
+
+{reviewflow-query path=/regulatory/qms}
+
+{reviewflow-query path=/regulatory/qms/soft status=all}
+```
+
+### 15.3 Attribute Reference
+
+| Attribute | Required | Default | Notes |
+|---|---|---|---|
+| `path` | No | Base namespace of the current page | Path prefix to scan. All pages under this path with a `{reviewflow}` directive are included. |
+| `status` | No | `draft` | Filter: `draft` (only pending validation), `validated` (only fully validated), `all` (both). |
+
+When `path` is omitted, it defaults to the namespace of the page containing the directive. For example, on page `/regulatory/qms/dir/mq01`, the default path is `/regulatory/qms/dir`.
+
+### 15.4 Rendered Table
+
+The table combines tag-query-style page information with reviewflow-specific validation status:
+
+| Column | Description |
+|---|---|
+| **Page** | Link to the page (clickable, navigates to the page) |
+| **Version** | Current version tag from the reviewflow directive. For validated pages, this is a clickable `{reviewflow-link}` to the validated version. |
+| **Date** | Last modified date of the page |
+| **Author** | Last editor, resolved via `user_display` setting |
+| **Status** | "Draft" or "Validated" badge |
+| **Confirmations** | Per-role status: each role shown as `rolename: username ✓ (date)` or `rolename: username ⏳` (pending). Confirmed roles show the confirmation date. |
+
+### 15.5 Data Source
+
+The directive is resolved at render time by the frontend NodeView:
+
+1. Fetch the page list from `GET /api/ai/v1/namespace/{path}?depth=0&include_meta=true` (recursive listing with metadata).
+2. For each page, fetch `GET /api/plugin/reviewflow/v1/status/{pagePath}` to get the reviewflow state.
+3. Filter by `status` attribute (draft / validated / all).
+4. Render the table, sorted by date (most recent first).
+
+Fetches are batched and cached within a single render cycle to avoid excessive API calls.
+
+### 15.6 Schema
+
+```typescript
+reviewflow_query: {
+  group: "block",
+  atom: true,
+  attrs: {
+    path: { default: "" },     // empty = current page's namespace
+    status: { default: "draft" },
+  },
+}
+```
+
+### 15.7 Serialization
+
+```
+{reviewflow-query}
+{reviewflow-query path=/regulatory/qms}
+{reviewflow-query path=/regulatory/qms status=all}
+```
+
+Only non-default attributes are emitted. `path` first, `status` second. Deterministic round-trip.
+
+### 15.8 NodeView
+
+Renders as a block element with:
+- A header: "Reviewflow: documents pending validation" (or "all documents" / "validated documents" depending on status filter).
+- The data table as described in §15.4.
+- A loading spinner while fetches are in progress.
+- An empty state message when no pages match the filter.
+
+In edit mode, the property panel exposes `path` and `status` (dropdown: draft / validated / all).
+
+### 15.9 Backend Considerations
+
+No new backend endpoint is required. The frontend composes existing APIs:
+- Namespace listing (`/api/ai/v1/namespace/`) for page enumeration.
+- Reviewflow status (`/api/plugin/reviewflow/v1/status/`) for per-page validation state.
+- User display (`/api/users/display`) for author name resolution.
+
+If performance becomes an issue with many pages, a dedicated `GET /api/plugin/reviewflow/v1/query?path=...&status=draft` backend endpoint could be added to avoid N+1 fetches. This optimization is deferred — the frontend approach works for typical deployments (hundreds of pages, not thousands).
+
+---
+
+## 16. Decisions (continued)
 
 1. **Storage** — File-based JSON, not database. Reviewflow state is per-page and does not need cross-page queries, joins, or transactions. This aligns with how Gowiki stores page metadata under `data/meta/`.
 

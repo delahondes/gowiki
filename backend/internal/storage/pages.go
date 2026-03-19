@@ -1124,7 +1124,15 @@ func (s *FileStore) RebuildIndexes() error {
 			s.TodoSync.SyncPageRows(pagePath, contentStr)
 		}
 		if s.ReviewflowSync != nil {
-			_ = s.ReviewflowSync.SyncFromMarkdown(pagePath, 0, contentStr)
+			// Read the actual page version from metadata so we don't
+			// accidentally invalidate already-validated reviewflow state.
+			pageVersion := int64(0)
+			if metaFile, err := s.metadataPathForContent(absPath); err == nil {
+				if meta, err := s.loadMeta(metaFile); err == nil {
+					pageVersion = meta.Version
+				}
+			}
+			_ = s.ReviewflowSync.SyncFromMarkdown(pagePath, pageVersion, contentStr)
 		}
 
 		return nil
