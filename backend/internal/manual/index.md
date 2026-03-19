@@ -18,6 +18,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Code Blocks](./code-blocks) — Syntax-highlighted code
 - [Includes](./includes) — Including content from other pages
 - [Blockquotes & Callouts](./blockquotes) — Styled callouts, admonitions, and layout
+- [Charts](./charts) — Pie, bar, line, and other data charts
 - [Footnotes](./footnotes) — Adding inline footnotes
 
 ## Content Organization
