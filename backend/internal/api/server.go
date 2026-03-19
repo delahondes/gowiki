@@ -117,6 +117,8 @@ type Server struct {
 	// while a draft was open. Checked at publish time to warn the user.
 	inlineEditConflicts sync.Map // map[pagePath string]tableName string
 	databaseSync        *database.DatabaseSync
+	caStore             *reviewflow.CAStore
+	certStore           *reviewflow.CertStore
 	tokenStore          *auth.TokenStore
 	rateLimiter         *RateLimiter
 	oauthClient         *auth.OAuthClient
@@ -127,7 +129,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -153,6 +155,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		reviewflowService: reviewflowService,
 		commentService:    commentService,
 		tokenStore:        tokenStore,
+		caStore:           caStore,
+		certStore:         certStore,
 		rateLimiter:       NewRateLimiter(),
 		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
@@ -328,6 +332,21 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Use(s.requireAdmin)
 		r.Get("/api/admin/tokens", s.handleAdminListTokens)
 		r.Delete("/api/admin/tokens/{id}", s.handleAdminDeleteToken)
+
+		// Certificate management
+		if s.certStore != nil {
+			r.Get("/api/admin/certs", func(w http.ResponseWriter, _ *http.Request) {
+				certs, err := s.certStore.List()
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if certs == nil {
+					certs = []reviewflow.UserCertificate{}
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"certs": certs})
+			})
+		}
 	})
 
 	// AI conventions — public (no auth), like the OpenAPI spec.
@@ -400,6 +419,14 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 				r.Use(s.requireAuth)
 				reviewflow.RegisterWriteRoutes(r, s.reviewflowService, extractUsername)
 			})
+			// CA management — admin only.
+			if s.caStore != nil {
+				r.Group(func(r chi.Router) {
+					r.Use(s.requireAuth)
+					r.Use(s.requireAdmin)
+					reviewflow.RegisterCARoutes(r, s.caStore, s.certStore, s.reviewflowService, extractUsername)
+				})
+			}
 		})
 	}
 

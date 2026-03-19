@@ -6489,7 +6489,21 @@ async function showSigningKeyModal() {
   async function refresh() {
     content.innerHTML = ""
     const has = await signingHasKey(username)
-    const certPEM = has ? await getCertificatePEM(username) : null
+    let certPEM = has ? await getCertificatePEM(username) : null
+
+    // Auto-detect if the server has a signed cert for this user that we don't have locally.
+    if (has && !certPEM) {
+      try {
+        const resp = await authFetch("/api/plugin/reviewflow/v1/cert/" + username)
+        if (resp.ok) {
+          const data = await resp.json()
+          if (data.certificate_pem) {
+            await importCertificate(username, data.certificate_pem)
+            certPEM = data.certificate_pem
+          }
+        }
+      } catch {}
+    }
 
     // Status
     const statusDiv = document.createElement("div")
@@ -7493,7 +7507,7 @@ function renderAdminPage() {
   const tabContent = document.createElement("div")
   tabContent.className = "gowiki-admin-content"
 
-  const tabs = ["Users", "Groups", "ACL", "Locks", "Tokens", "Configuration", "Database", "Todo"]
+  const tabs = ["Users", "Groups", "ACL", "Locks", "Tokens", "Certificates", "Configuration", "Database", "Todo"]
   let activeTab = "Users"
 
   function renderTabBar() {
@@ -7521,6 +7535,7 @@ function renderAdminPage() {
       case "ACL": renderAdminACLTab(tabContent); break
       case "Locks": renderAdminLocksTab(tabContent); break
       case "Tokens": renderAdminTokensTab(tabContent); break
+      case "Certificates": renderAdminCertsTab(tabContent); break
       case "Configuration": renderAdminConfigTab(tabContent); break
       case "Database": renderAdminDatabaseTab(tabContent); break
       case "Todo": renderAdminTodoTab(tabContent); break
@@ -8401,6 +8416,192 @@ async function renderAdminTokensTab(container) {
 
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load tokens.</div>'
+  }
+}
+
+// ── Admin: Certificates Tab ───────────────────────────
+
+async function renderAdminCertsTab(container) {
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading certificates...</div>'
+
+  try {
+    // Get CA status
+    const caResp = await authFetch("/api/plugin/reviewflow/v1/ca")
+    const caData = caResp.ok ? await caResp.json() : { has_ca: false }
+
+    // Get user certificates
+    const certsResp = await authFetch("/api/admin/certs")
+    const certsData = certsResp.ok ? await certsResp.json() : { certs: [] }
+
+    container.innerHTML = ""
+
+    // CA section
+    const caHeading = document.createElement("h3")
+    caHeading.textContent = "Company Certificate Authority"
+    container.appendChild(caHeading)
+
+    if (caData.has_ca) {
+      const status = document.createElement("div")
+      status.style.cssText = "padding:8px 12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;color:#2e7d32;font-size:13px;margin-bottom:12px"
+      status.textContent = "Company CA is configured."
+      container.appendChild(status)
+
+      const dlBtn = document.createElement("button")
+      dlBtn.className = "gowiki-admin-btn-small"
+      dlBtn.textContent = "Download CA Certificate"
+      dlBtn.addEventListener("click", () => {
+        const blob = new Blob([caData.certificate_pem], { type: "application/x-pem-file" })
+        const a = document.createElement("a")
+        a.href = URL.createObjectURL(blob)
+        a.download = "company-ca.crt"
+        a.click()
+        URL.revokeObjectURL(a.href)
+      })
+      container.appendChild(dlBtn)
+    } else {
+      const status = document.createElement("div")
+      status.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#b45309;font-size:13px;margin-bottom:12px"
+      status.textContent = "No company CA. Generate one to enable Level 2 (admin-signed) certificates."
+      container.appendChild(status)
+
+      const genDiv = document.createElement("div")
+      genDiv.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:12px"
+      const orgInput = document.createElement("input")
+      orgInput.type = "text"
+      orgInput.placeholder = "Organization name"
+      orgInput.value = "GMT Science"
+      orgInput.style.width = "200px"
+      genDiv.appendChild(orgInput)
+
+      const genBtn = document.createElement("button")
+      genBtn.className = "gowiki-admin-btn-small"
+      genBtn.textContent = "Generate Company CA"
+      genBtn.addEventListener("click", async () => {
+        genBtn.disabled = true
+        const resp = await authFetch("/api/plugin/reviewflow/v1/ca/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ organization: orgInput.value, common_name: orgInput.value + " Document Signing CA" }),
+        })
+        if (resp.ok) {
+          renderAdminCertsTab(container)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          alert(err.error || "CA generation failed")
+          genBtn.disabled = false
+        }
+      })
+      genDiv.appendChild(genBtn)
+      container.appendChild(genDiv)
+    }
+
+    // Sign user key section (only if CA exists)
+    if (caData.has_ca) {
+      const signHeading = document.createElement("h3")
+      signHeading.textContent = "Sign User Certificate"
+      signHeading.style.marginTop = "24px"
+      container.appendChild(signHeading)
+
+      const signNote = document.createElement("div")
+      signNote.style.cssText = "font-size:13px;color:#666;margin-bottom:8px"
+      signNote.textContent = "Paste the user's public key (base64 SPKI) to sign it with the company CA."
+      container.appendChild(signNote)
+
+      const signForm = document.createElement("div")
+      signForm.style.cssText = "display:flex;flex-direction:column;gap:6px;max-width:500px"
+
+      const userInput = document.createElement("input")
+      userInput.type = "text"
+      userInput.placeholder = "Username"
+      signForm.appendChild(userInput)
+
+      const spkiInput = document.createElement("textarea")
+      spkiInput.placeholder = "Paste base64 SPKI public key here"
+      spkiInput.rows = 3
+      spkiInput.style.fontFamily = "monospace"
+      spkiInput.style.fontSize = "12px"
+      signForm.appendChild(spkiInput)
+
+      const signBtn = document.createElement("button")
+      signBtn.className = "gowiki-admin-btn-small"
+      signBtn.textContent = "Sign & Issue Certificate"
+      signBtn.style.alignSelf = "flex-start"
+      signBtn.addEventListener("click", async () => {
+        if (!userInput.value || !spkiInput.value) { alert("Username and public key are required"); return }
+        signBtn.disabled = true
+        const resp = await authFetch("/api/plugin/reviewflow/v1/ca/sign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: userInput.value, public_key_spki: spkiInput.value.trim() }),
+        })
+        if (resp.ok) {
+          const data = await resp.json()
+          // Show the certificate for the user to copy — replace the form content
+          signForm.innerHTML = ""
+          const resultDiv = document.createElement("div")
+          resultDiv.style.cssText = "padding:12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px"
+          resultDiv.innerHTML = `<b>Certificate issued for ${userInput.value}!</b><br>The certificate has been saved on the server. The user can also import it manually:`
+          const code = document.createElement("textarea")
+          code.style.cssText = "display:block;margin-top:8px;width:100%;height:120px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:11px"
+          code.value = data.certificate_pem
+          code.readOnly = true
+          code.addEventListener("click", () => { code.select() })
+          resultDiv.appendChild(code)
+
+          const dlBtn = document.createElement("button")
+          dlBtn.className = "gowiki-admin-btn-small"
+          dlBtn.textContent = "Download as file"
+          dlBtn.style.marginTop = "8px"
+          dlBtn.addEventListener("click", () => {
+            const blob = new Blob([data.certificate_pem], { type: "application/x-pem-file" })
+            const a = document.createElement("a")
+            a.href = URL.createObjectURL(blob)
+            a.download = userInput.value + "-cert.pem"
+            a.click()
+            URL.revokeObjectURL(a.href)
+          })
+          resultDiv.appendChild(dlBtn)
+
+          signForm.appendChild(resultDiv)
+        } else {
+          const err = await resp.json().catch(() => ({}))
+          alert(err.error || "Signing failed")
+          signBtn.disabled = false
+        }
+      })
+      signForm.appendChild(signBtn)
+      container.appendChild(signForm)
+    }
+
+    // User certificates list
+    const certHeading = document.createElement("h3")
+    certHeading.textContent = "User Certificates"
+    certHeading.style.marginTop = "24px"
+    container.appendChild(certHeading)
+
+    const certs = certsData.certs || []
+    if (certs.length === 0) {
+      const empty = document.createElement("p")
+      empty.textContent = "No user certificates registered."
+      empty.style.color = "#666"
+      container.appendChild(empty)
+    } else {
+      const table = document.createElement("table")
+      table.className = "gowiki-admin-table"
+      const thead = document.createElement("thead")
+      thead.innerHTML = "<tr><th>User</th><th>Subject</th><th>Issuer</th><th>Expires</th><th>Fingerprint</th><th>Actions</th></tr>"
+      table.appendChild(thead)
+      const tbody = document.createElement("tbody")
+      for (const cert of certs) {
+        const tr = document.createElement("tr")
+        tr.innerHTML = `<td>${cert.username}</td><td>${cert.subject || ""}</td><td style="font-size:11px">${cert.issuer || ""}</td><td>${cert.not_after ? new Date(cert.not_after).toLocaleDateString() : ""}</td><td style="font-size:10px;font-family:monospace">${(cert.fingerprint || "").substring(0, 16)}...</td><td></td>`
+        tbody.appendChild(tr)
+      }
+      table.appendChild(tbody)
+      container.appendChild(table)
+    }
+  } catch {
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load certificates.</div>'
   }
 }
 

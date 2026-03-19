@@ -228,6 +228,7 @@ func main() {
 	reviewflowService := reviewflow.NewService(rfStore, store.Attic, configStore)
 	reviewflowService.SetPageReader(store)
 	certStore := reviewflow.NewCertStore(metaRoot)
+	caStore := reviewflow.NewCAStore(metaRoot)
 	signingVerifier := reviewflow.NewSigningVerifier(configStore, certStore)
 	reviewflowService.SetSigningVerifier(signingVerifier)
 	reviewflowService.SetCertStore(certStore)
@@ -260,7 +261,7 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore)
 	if serveWebEnabled {
 		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}

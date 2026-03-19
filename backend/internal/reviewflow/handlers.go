@@ -14,6 +14,28 @@ func RegisterReadRoutes(r chi.Router, svc *Service) {
 	r.Get("/status/*", handleGetStatus(svc))
 	r.Get("/digest/*", handleGetDigest(svc))
 	r.Get("/signatures/*", handleGetSignatures(svc))
+	r.Get("/cert/{username}", handleGetUserCert(svc))
+}
+
+func handleGetUserCert(svc *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := chi.URLParam(r, "username")
+		if svc.certStore == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no cert store"})
+			return
+		}
+		uc, err := svc.certStore.Load(username)
+		if err != nil || uc == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no certificate found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"certificate_pem": uc.CertificatePEM,
+			"fingerprint":     uc.Fingerprint,
+			"issuer":          uc.Issuer,
+			"not_after":       uc.NotAfter,
+		})
+	}
 }
 
 // RegisterWriteRoutes registers write reviewflow endpoints.
