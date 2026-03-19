@@ -116,6 +116,14 @@ export function registerCoreNodes(reg: Registry) {
     excludes: "subscript",
   } as MarkSpec
 
+  // code_expand: like code but allows template variable expansion inside.
+  // Syntax: @`text with {{VAR}}`
+  marks.code_expand = {
+    parseDOM: [{ tag: "code.gowiki-code-expand" }],
+    toDOM() { return ["code", { class: "gowiki-code-expand" }, 0] },
+    excludes: "code",
+  } as MarkSpec
+
   reg.registerSchema({ nodes, marks })
 
   registerParagraph(reg)
@@ -128,6 +136,7 @@ export function registerCoreNodes(reg: Registry) {
   registerMarkdownPrinters(reg)
   registerHeadingAnchors(reg)
   registerHeadingNumbers(reg)
+  registerCodeExpand(reg)
   registerLinkStatus(reg)
 
   reg.registerStyle("clearfix", `.gowiki-clear { clear: both; }`)
@@ -404,6 +413,37 @@ function registerEmphasis(reg: Registry) {
   reg.registerText("code_inline", {
     run(ctx, tok) {
       ctx.text(tok.content ?? "", [ctx.schema.marks.code.create()])
+    },
+  })
+
+  // @`...` — code with template variable expansion.
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.inline.ruler.push("gowiki_code_expand", (state: any, silent: boolean) => {
+      const src = state.src
+      const pos = state.pos
+      if (src.charCodeAt(pos) !== 0x40 /* @ */) return false
+      if (pos + 1 >= state.posMax || src.charCodeAt(pos + 1) !== 0x60 /* ` */) return false
+      // Find closing backtick
+      let end = pos + 2
+      while (end < state.posMax && src.charCodeAt(end) !== 0x60) end++
+      if (end >= state.posMax) return false
+      const content = src.slice(pos + 2, end)
+      if (!content) return false
+      if (silent) return true
+      if (state.pending) state.pushPending()
+      const token = state.push("code_expand", "", 0)
+      token.content = content
+      state.pos = end + 1
+      return true
+    })
+  })
+
+  reg.registerText("code_expand", {
+    run(ctx, tok) {
+      // Keep the raw content as text with code_expand mark.
+      // Template variables inside ({{VAR}}) are resolved at render time
+      // by the convertTemplateVarChildren pass, which runs on inline tokens.
+      ctx.text(tok.content ?? "", [ctx.schema.marks.code_expand.create()])
     },
   })
 
@@ -777,6 +817,14 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("em", { open: "*", close: "*" })
   reg.registerPMMark("strong", { open: "**", close: "**" })
   reg.registerPMMark("code", { open: "`", close: "`" })
+  reg.registerPMMark("code_expand", {
+    open: "@`",
+    close: "`",
+  })
+
+  // In the serializer, code_expand text should not be markdown-escaped
+  // (same as regular code marks).
+  // This is handled by the hasCodeMark check in pm_to_markdown.ts.
   reg.registerPMMark("underline", { open: "_", close: "_" })
   reg.registerPMMark("strikethrough", { open: "~~", close: "~~" })
   reg.registerPMMark("subscript", { open: "~", close: "~" })
@@ -1055,6 +1103,85 @@ function buildLinkDecorations(
     decorations.push(Decoration.inline(from, to, { class: cls }))
   }
   return DecorationSet.create(doc, decorations)
+}
+
+/* --------------------------------------------------
+ * code_expand: resolve {{VAR}} inside @`...` at render time
+ * -------------------------------------------------- */
+
+function registerCodeExpand(reg: Registry) {
+  const codeExpandKey = new PluginKey("gowiki.codeExpand")
+
+  function resolveVar(name: string, fallback: string): string {
+    const ctx = (window as any).__gowikiGlobalVarContext?.()
+    if (!ctx) return fallback || `{{${name}}}`
+    const meta = ctx.pageMeta
+    switch (name) {
+      case "SERVER": return window.location.hostname
+      case "ID": return ctx.pagePath || fallback
+      case "PATH": return ctx.pageNamespace || fallback
+      case "PAGE": return ctx.pageName || fallback
+      case "TITLE": return meta?.title || fallback
+      case "VERSION": return meta?.version != null ? String(meta.version) : fallback
+      case "VERSIONDATE": {
+        if (!meta?.updated_at) return fallback
+        const d = new Date(meta.updated_at)
+        return isNaN(d.getTime()) ? fallback : d.toISOString().slice(0, 10)
+      }
+      case "AUTHOR": return meta?.author || fallback
+      case "CREATED": {
+        if (!meta?.created_at) return fallback
+        const d = new Date(meta.created_at)
+        return isNaN(d.getTime()) ? fallback : d.toISOString().slice(0, 10)
+      }
+      default: return fallback || `{{${name}}}`
+    }
+  }
+
+  reg.registerEditorPlugin(() => {
+    return new PMPlugin({
+      key: codeExpandKey,
+      props: {
+        decorations(state) {
+          const decos: Decoration[] = []
+          const varPattern = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)(?::([^}]*))?\}\}/g
+          state.doc.descendants((node, pos) => {
+            if (!node.isText) return
+            if (!node.marks.some(m => m.type.name === "code_expand")) return
+            const text = node.text ?? ""
+            let m: RegExpExecArray | null
+            while ((m = varPattern.exec(text)) !== null) {
+              const resolved = resolveVar(m[1], m[2] ?? "")
+              if (resolved === m[0]) continue
+              const from = pos + m.index
+              const to = from + m[0].length
+              // Hide the {{VAR}} text
+              decos.push(Decoration.inline(from, to, {
+                class: "gowiki-code-expand-hidden",
+              }))
+              // Insert resolved value as a widget right before the hidden text
+              decos.push(Decoration.widget(from, () => {
+                const span = document.createElement("span")
+                span.className = "gowiki-code-expand-resolved"
+                span.textContent = resolved
+                return span
+              }, { side: -1 }))
+            }
+          })
+          return decos.length > 0 ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
+        },
+      },
+    })
+  })
+
+  reg.registerStyle("code-expand", `
+    .gowiki-code-expand-hidden {
+      display: none;
+    }
+    .gowiki-code-expand-resolved {
+      /* inherits code styling from parent <code> element */
+    }
+  `)
 }
 
 function registerLinkStatus(reg: Registry) {

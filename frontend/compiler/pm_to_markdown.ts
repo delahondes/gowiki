@@ -55,7 +55,7 @@ export function pmToMarkdown(
       if (node.marks.length === 0) {
         return serializePlainTextWithAutoLinks(node.text ?? "")
       }
-      const hasCodeMark = node.marks.some(m => m.type.name === "code")
+      const hasCodeMark = node.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
       let text = hasCodeMark ? (node.text ?? "") : escapeMarkdownText(node.text ?? "")
       for (const mark of node.marks) {
         const printer = registry.getPMMark(mark.type.name)

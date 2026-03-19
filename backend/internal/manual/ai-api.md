@@ -42,7 +42,7 @@ Authorization: Bearer gwk_<token>
 Or:
 
 ```
-https://wiki.example.com/api/ai/v1/meta/page?token=gwk_<token>
+https://{{SERVER}}/api/ai/v1/meta/page?token=gwk_<token>
 ```
 
 ## 1. How it works with Claude Code
@@ -54,6 +54,42 @@ Claude Code can use the API directly via `curl` or `fetch`. Example workflow:
 3. Make changes to the markdown
 4. Preview: `POST /api/ai/v1/preview/{path}`
 5. If the diff looks right, write: `PUT /api/pages/{path}`
+
+## 1. Quick start prompt
+
+Copy and paste this prompt to any AI assistant (Claude, ChatGPT, Copilot, etc.) to get started. Replace the URL and token with your own:
+
+{blockquote class=tip}
+> I want you to be able to read and manage content in my wiki. Here is how to get started:
+>
+> 1. Fetch the API conventions by reading this URL: @`https://{{SERVER}}/api/ai/v1/conventions?token=gwk_YOUR_TOKEN_HERE` — read the response carefully, it contains the markdown dialect rules and content guidelines you MUST follow.
+> 2. Fetch the OpenAPI schema at @`https://{{SERVER}}/api/openapi.json` to discover all available endpoints.
+> 3. For authentication, append `?token=gwk_YOUR_TOKEN_HERE` to every API URL.
+>    I will tell you what I need right after this.
+
+Adapt the prompt to your needs — for example, you can add:
+
+> Browse the namespace `/docs/` and give me a summary of all pages there.
+
+Or:
+
+> Read the page `/projects/alpha` and translate section 3 to English. Show me a preview diff before saving.
+
+Or:
+
+> Search for all pages mentioning "deployment" and list them with their last modified date.
+
+## 1. Additional API access
+
+Beyond page content, the AI can also access:
+
+- **Database tables** — query rows (`GET /api/database/{table}/rows`), insert rows (`POST`), update rows (`PUT`), get schema (`GET /api/database/{table}/schema`)
+- **Comments** — read and create page comments (`/api/plugin/comment/v1/comments/{path}`)
+- **Todo tasks** — list and manage tasks (`/api/plugin/todo/v1/tasks`)
+- **Reviewflow** — check validation status (`/api/plugin/reviewflow/v1/status/{path}`)
+- **Page operations** — move pages (`POST /api/move/{path}`), view history (`GET /api/history/{path}`), search (`GET /api/search?q=...`)
+
+All endpoints respect your ACL permissions.
 
 ## 1. Safety
 
