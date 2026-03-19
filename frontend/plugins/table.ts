@@ -401,8 +401,10 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
     changed = true
   }
 
-  // Formula detection — store formula in attr, empty cell text
-  if (newText.trimStart().startsWith("=") && newText.trim().length > 1) {
+  // Formula detection — store formula in attr, empty cell text.
+  // Skip if the text is inside a code mark (backticks protect from formula interpretation).
+  const hasCodeMark = firstChild.marks.some(m => m.type.name === "code")
+  if (!hasCodeMark && newText.trimStart().startsWith("=") && newText.trim().length > 1) {
     newAttrs.formula = newText.trim().slice(1)
     newText = ""
     changed = true
