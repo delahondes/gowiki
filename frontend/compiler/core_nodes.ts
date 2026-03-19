@@ -1139,10 +1139,18 @@ function registerCodeExpand(reg: Registry) {
   }
 
   reg.registerEditorPlugin(() => {
+    let editable = false
     return new PMPlugin({
       key: codeExpandKey,
+      view(view) {
+        editable = view.editable
+        return {}
+      },
       props: {
         decorations(state) {
+          // In edit mode, show raw {{VAR}} so users can edit the variable names.
+          // In view mode, resolve variables and show their values.
+          if (editable) return null
           const decos: Decoration[] = []
           const varPattern = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)(?::([^}]*))?\}\}/g
           state.doc.descendants((node, pos) => {
