@@ -3,6 +3,8 @@ import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
 import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
+import { signConfirmation } from "../signing/signer"
+import { hasKey } from "../signing/keystore"
 
 // --- Properties ---
 
@@ -67,6 +69,9 @@ interface ReviewflowStatus {
     confirmed_by: Record<string, string>
     version_tag: string
   }[]
+  signing_enabled?: boolean
+  signing_required?: boolean
+  signed_roles?: string[]
 }
 
 // User display name cache
@@ -98,16 +103,22 @@ const gate = {
     return resp.json()
   },
 
-  async confirm(pagePath: string, role: string): Promise<ReviewflowStatus> {
+  async confirm(pagePath: string, role: string, sigData?: { signature: string; certificate: string; digest: string } | null): Promise<ReviewflowStatus> {
     const cleanPath = pagePath.replace(/^\/+/, "")
+    const body: any = { role }
+    if (sigData) {
+      body.signature = sigData.signature
+      body.certificate = sigData.certificate
+      body.digest = sigData.digest
+    }
     const resp = await fetch(`${API_BASE}/confirm/${cleanPath}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
+      body: JSON.stringify(body),
     })
     if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}))
-      throw new Error(body.error || `reviewflow confirm: ${resp.status}`)
+      const b = await resp.json().catch(() => ({}))
+      throw new Error(b.error || `reviewflow confirm: ${resp.status}`)
     }
     return resp.json()
   },
@@ -123,6 +134,7 @@ class ReviewflowNodeView {
   private status: ReviewflowStatus | null = null
   private loading = false
   private historyVersion: number | null = null
+  private userHasKey = false
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.node = node
@@ -138,6 +150,14 @@ class ReviewflowNodeView {
 
     this.render()
     this.fetchStatus()
+    // Check if the current user has a signing key.
+    const currentUser = (window as any).__gowikiCurrentUser?.username
+    if (currentUser) {
+      hasKey(currentUser).then(has => {
+        this.userHasKey = has
+        if (this.status) this.render() // re-render with updated button label
+      }).catch(() => {})
+    }
   }
 
   private render() {
@@ -253,8 +273,9 @@ class ReviewflowNodeView {
           tdStatus.className = "gowiki-rf-status--pending"
           tdStatus.textContent = "\u23F3 Pending"
         } else {
+          const isSigned = this.status?.signed_roles?.includes(role)
           tdStatus.className = "gowiki-rf-status--confirmed"
-          tdStatus.textContent = "\u2714 Confirmed"
+          tdStatus.textContent = isSigned ? "\uD83D\uDD12 Signed" : "\u2714 Confirmed"
         }
         tr.appendChild(tdStatus)
 
@@ -263,7 +284,15 @@ class ReviewflowNodeView {
         if (isMissing && user === currentUser && !versionTagStale && !this.historyVersion) {
           const btn = document.createElement("button")
           btn.className = "gowiki-rf-confirm-btn"
-          btn.textContent = "Confirm"
+          // Show "Sign & Confirm" if signing is enabled and user has a key.
+          if (this.status?.signing_enabled && this.userHasKey) {
+            btn.textContent = "\uD83D\uDD12 Sign & Confirm"
+          } else if (this.status?.signing_required && !this.userHasKey) {
+            btn.textContent = "Signing key required"
+            btn.disabled = true
+          } else {
+            btn.textContent = "Confirm"
+          }
           btn.addEventListener("click", (e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -322,11 +351,22 @@ class ReviewflowNodeView {
   private async doConfirm(role: string) {
     const pagePath = window.location.pathname
     try {
-      this.status = await gate.confirm(pagePath, role)
+      // Attempt cryptographic signing if enabled and user has a key.
+      let sigData: { signature: string; certificate: string; digest: string } | null = null
+      if (this.status?.signing_enabled && this.userHasKey) {
+        const currentUser = (window as any).__gowikiCurrentUser?.username
+        if (currentUser) {
+          // Get the current page markdown for digest computation.
+          const markdown = (window as any).__gowikiCurrentMarkdown?.() || ""
+          sigData = await signConfirmation(currentUser, markdown)
+        }
+      }
+      this.status = await gate.confirm(pagePath, role, sigData)
       this.render()
       this.updatePageBackground()
-    } catch (err) {
+    } catch (err: any) {
       console.error("reviewflow confirm failed:", err)
+      if (err?.message) alert("Confirm failed: " + err.message)
     }
   }
 

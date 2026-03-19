@@ -15,6 +15,7 @@ import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { initComments, destroyComments, addComment, getCommentCount, reapplyComments } from "./plugins/comment.ts"
+import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI } from "./signing/keystore.ts"
 const HLJS_THEMES = [
   "github", "atom-one-light", "vs", "xcode", "idea",
   "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
@@ -6332,6 +6333,13 @@ function renderBannerUser() {
       showMyTokensModal()
     })
     el.appendChild(tokensLink)
+    const signingLink = document.createElement("a")
+    signingLink.textContent = "Signing Key"
+    signingLink.addEventListener("click", (e) => {
+      e.preventDefault()
+      showSigningKeyModal()
+    })
+    el.appendChild(signingLink)
     const logout = document.createElement("a")
     logout.textContent = "Logout"
     logout.addEventListener("click", async (e) => {
@@ -6448,6 +6456,190 @@ async function showMyTokensModal() {
   }
 
   await loadTokens()
+
+  const closeBtn = document.createElement("button")
+  closeBtn.className = "gowiki-content-btn"
+  closeBtn.textContent = "Close"
+  closeBtn.style.marginTop = "12px"
+  closeBtn.addEventListener("click", () => overlay.remove())
+  dialog.appendChild(closeBtn)
+
+  overlay.appendChild(dialog)
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove() })
+  document.body.appendChild(overlay)
+}
+
+async function showSigningKeyModal() {
+  const username = currentUser?.username
+  if (!username) return
+
+  const overlay = document.createElement("div")
+  overlay.className = "gowiki-login-overlay"
+  const dialog = document.createElement("div")
+  dialog.className = "gowiki-login-dialog"
+  dialog.style.maxWidth = "520px"
+
+  const title = document.createElement("h3")
+  title.textContent = "Document Signing Key"
+  dialog.appendChild(title)
+
+  const content = document.createElement("div")
+  dialog.appendChild(content)
+
+  async function refresh() {
+    content.innerHTML = ""
+    const has = await signingHasKey(username)
+    const certPEM = has ? await getCertificatePEM(username) : null
+
+    // Status
+    const statusDiv = document.createElement("div")
+    statusDiv.style.cssText = "margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;font-size:13px"
+    if (!has) {
+      statusDiv.innerHTML = "<b>No signing key.</b> Generate one to enable cryptographic confirmations."
+    } else if (!certPEM) {
+      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it, or generate a self-signed certificate for testing."
+    } else {
+      statusDiv.innerHTML = "<b>Key + Certificate ready.</b> You can sign reviewflow confirmations."
+      statusDiv.style.background = "#e8f5e9"
+    }
+    content.appendChild(statusDiv)
+
+    if (!has) {
+      // Generate key button
+      const genBtn = document.createElement("button")
+      genBtn.className = "gowiki-content-btn"
+      genBtn.textContent = "Generate Signing Key"
+      genBtn.addEventListener("click", async () => {
+        genBtn.disabled = true
+        genBtn.textContent = "Generating..."
+        try {
+          await generateKeypair(username)
+          await refresh()
+        } catch (err) {
+          alert("Key generation failed: " + err.message)
+          genBtn.disabled = false
+          genBtn.textContent = "Generate Signing Key"
+        }
+      })
+      content.appendChild(genBtn)
+    } else {
+      const btnRow = document.createElement("div")
+      btnRow.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"
+
+      if (!certPEM) {
+        // Download public key
+        const dlBtn = document.createElement("button")
+        dlBtn.className = "gowiki-content-btn"
+        dlBtn.textContent = "Download Public Key (SPKI)"
+        dlBtn.addEventListener("click", async () => {
+          const spki = await getPublicKeySPKI(username)
+          if (!spki) { alert("No public key found"); return }
+          const pem = "-----BEGIN PUBLIC KEY-----\n" + spki.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n"
+          const blob = new Blob([pem], { type: "application/x-pem-file" })
+          const a = document.createElement("a")
+          a.href = URL.createObjectURL(blob)
+          a.download = username + "-public.pem"
+          a.click()
+          URL.revokeObjectURL(a.href)
+        })
+        btnRow.appendChild(dlBtn)
+
+        // Self-signed certificate (for testing)
+        const selfSignBtn = document.createElement("button")
+        selfSignBtn.className = "gowiki-content-btn"
+        selfSignBtn.textContent = "Generate Self-Signed Certificate (test)"
+        selfSignBtn.addEventListener("click", async () => {
+          selfSignBtn.disabled = true
+          try {
+            // Send the public key to the server to generate a self-signed cert
+            const spki = await getPublicKeySPKI(username)
+            if (!spki) { alert("No public key found"); selfSignBtn.disabled = false; return }
+            const resp = await authFetch("/api/plugin/reviewflow/v1/self-sign", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username, public_key_spki: spki }),
+            })
+            if (!resp.ok) {
+              const err = await resp.json().catch(() => ({}))
+              alert(err.error || "Self-sign failed")
+              selfSignBtn.disabled = false
+              return
+            }
+            const data = await resp.json()
+            // Import the certificate into the local key store
+            await importCertificate(username, data.certificate_pem)
+            // Also upload to the server
+            await authFetch("/api/plugin/reviewflow/v1/cert", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ certificate_pem: data.certificate_pem }),
+            })
+            await refresh()
+          } catch (err) {
+            alert("Self-sign failed: " + err.message)
+            selfSignBtn.disabled = false
+          }
+        })
+        btnRow.appendChild(selfSignBtn)
+
+        // Import certificate from file
+        const importBtn = document.createElement("button")
+        importBtn.className = "gowiki-content-btn"
+        importBtn.textContent = "Import Certificate (PEM)"
+        importBtn.addEventListener("click", () => {
+          const input = document.createElement("input")
+          input.type = "file"
+          input.accept = ".pem,.crt,.cer"
+          input.addEventListener("change", async () => {
+            const file = input.files?.[0]
+            if (!file) return
+            const pem = await file.text()
+            try {
+              await importCertificate(username, pem)
+              // Upload to server
+              const resp = await authFetch("/api/plugin/reviewflow/v1/cert", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ certificate_pem: pem }),
+              })
+              if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}))
+                alert(err.error || "Certificate upload failed")
+              }
+              await refresh()
+            } catch (err) {
+              alert("Import failed: " + err.message)
+            }
+          })
+          input.click()
+        })
+        btnRow.appendChild(importBtn)
+      }
+
+      // Delete key
+      const delBtn = document.createElement("button")
+      delBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
+      delBtn.textContent = "Delete Key"
+      delBtn.addEventListener("click", async () => {
+        if (!confirm("Delete your signing key? This cannot be undone.")) return
+        await signingDeleteKey(username)
+        await refresh()
+      })
+      btnRow.appendChild(delBtn)
+
+      content.appendChild(btnRow)
+
+      // Show certificate info if available
+      if (certPEM) {
+        const certInfo = document.createElement("div")
+        certInfo.style.cssText = "font-size:12px;color:#666;font-family:monospace;white-space:pre-wrap;max-height:100px;overflow:auto;background:#f5f5f5;padding:6px;border-radius:4px"
+        certInfo.textContent = certPEM.substring(0, 200) + (certPEM.length > 200 ? "..." : "")
+        content.appendChild(certInfo)
+      }
+    }
+  }
+
+  await refresh()
 
   const closeBtn = document.createElement("button")
   closeBtn.className = "gowiki-content-btn"
@@ -6585,6 +6777,7 @@ async function authFetch(url, options) {
 // Expose for media_manager.js
 window.__gowikiAuthFetch = authFetch
 window.__gowikiCurrentUser = null
+window.__gowikiCurrentMarkdown = () => currentMarkdown
 
 // Expose global variable context for the template_var resolver.
 window.__gowikiGlobalVarContext = () => ({

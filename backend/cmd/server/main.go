@@ -227,6 +227,13 @@ func main() {
 	rfStore := reviewflow.NewStore(metaRoot)
 	reviewflowService := reviewflow.NewService(rfStore, store.Attic, configStore)
 	reviewflowService.SetPageReader(store)
+	certStore := reviewflow.NewCertStore(metaRoot)
+	signingVerifier := reviewflow.NewSigningVerifier(configStore, certStore)
+	reviewflowService.SetSigningVerifier(signingVerifier)
+	reviewflowService.SetCertStore(certStore)
+	if cfg.Reviewflow.Signing.Enabled {
+		log.Printf("reviewflow plugin: X.509 signing enabled")
+	}
 	if todoService != nil {
 		reviewflowService.SetTodoIntegrator(reviewflow.NewTodoAdapter(todoService))
 		log.Printf("reviewflow plugin: todo integration active")

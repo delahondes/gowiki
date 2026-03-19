@@ -25,11 +25,23 @@ type TodoIntegrator interface {
 
 // Service implements reviewflow business logic.
 type Service struct {
-	store       *Store
-	attic       *storage.Attic
-	configStore *config.Store
-	pageReader  PageReader
-	todo        TodoIntegrator
+	store            *Store
+	attic            *storage.Attic
+	configStore      *config.Store
+	pageReader       PageReader
+	todo             TodoIntegrator
+	signingVerifier  *SigningVerifier
+	certStore        *CertStore
+}
+
+// SetSigningVerifier sets the signing verifier for cryptographic confirmations.
+func (svc *Service) SetSigningVerifier(sv *SigningVerifier) {
+	svc.signingVerifier = sv
+}
+
+// SetCertStore sets the certificate store.
+func (svc *Service) SetCertStore(cs *CertStore) {
+	svc.certStore = cs
 }
 
 func NewService(store *Store, attic *storage.Attic, configStore *config.Store) *Service {
@@ -137,7 +149,7 @@ func (svc *Service) EnsureState(pagePath string) (*State, error) {
 }
 
 // Confirm records a role confirmation for the current page version.
-func (svc *Service) Confirm(pagePath, role, user string) (*Status, error) {
+func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*Status, error) {
 	st, err := svc.EnsureState(pagePath)
 	if err != nil {
 		return nil, err
@@ -160,13 +172,19 @@ func (svc *Service) Confirm(pagePath, role, user string) (*Status, error) {
 	}
 
 	// Record confirmation.
-	st.Confirmations = append(st.Confirmations, Confirmation{
+	conf := Confirmation{
 		PageVersion: st.CurrentPageVersion,
 		Role:        role,
 		User:        user,
 		Timestamp:   time.Now().UTC(),
 		VersionTag:  st.VersionTag,
-	})
+	}
+	if opts != nil {
+		conf.Signature = opts.Signature
+		conf.Digest = opts.Digest
+		conf.CertFingerprint = opts.CertFingerprint
+	}
+	st.Confirmations = append(st.Confirmations, conf)
 
 	// Check if all roles are now confirmed.
 	if svc.allConfirmed(st) {
@@ -430,6 +448,19 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 		}
 		if len(overdue) > 0 {
 			status.OverdueRoles = overdue
+		}
+	}
+
+	// Signing status.
+	cfg2 := cfg.Reviewflow.Signing
+	if cfg2.Enabled {
+		status.SigningEnabled = true
+		status.SigningRequired = cfg2.Required
+		// Collect roles that have cryptographic signatures.
+		for _, c := range st.Confirmations {
+			if c.PageVersion == st.CurrentPageVersion && c.Signature != "" {
+				status.SignedRoles = append(status.SignedRoles, c.Role)
+			}
 		}
 	}
 

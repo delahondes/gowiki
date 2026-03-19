@@ -34,6 +34,15 @@ type ServerConfig struct {
 type ReviewflowConfig struct {
 	Enabled   bool              `yaml:"enabled" json:"enabled"`
 	Deadlines map[string]string `yaml:"deadlines" json:"deadlines"` // role name -> duration string (e.g. "72h")
+	Signing   SigningConfig     `yaml:"signing" json:"signing"`
+}
+
+// SigningConfig holds X.509 document signing settings.
+type SigningConfig struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	Required     bool     `yaml:"required" json:"required"`
+	TrustStore   []string `yaml:"trust_store" json:"trust_store"`     // paths to trusted CA PEM files
+	RevokedCerts []string `yaml:"revoked_certs" json:"revoked_certs"` // SHA-256 fingerprints of revoked certs
 }
 
 // TodoConfig holds task management plugin settings.

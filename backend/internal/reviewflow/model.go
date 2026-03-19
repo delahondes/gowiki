@@ -9,6 +9,17 @@ type Confirmation struct {
 	User        string    `json:"user"`
 	Timestamp   time.Time `json:"timestamp"`
 	VersionTag  string    `json:"version_tag"`
+	// X.509 signing fields (empty for click-only confirmations).
+	Signature       string `json:"signature,omitempty"`
+	Digest          string `json:"digest,omitempty"`
+	CertFingerprint string `json:"cert_fingerprint,omitempty"`
+}
+
+// ConfirmOpts holds optional signing data for a confirmation.
+type ConfirmOpts struct {
+	Signature       string
+	Digest          string
+	CertFingerprint string
 }
 
 // VersionRecord records a fully-validated version.
@@ -40,6 +51,23 @@ type Status struct {
 	OverdueRoles     []string          `json:"overdue_roles,omitempty"`
 	IsFullyValidated bool              `json:"is_fully_validated"`
 	VersionHistory   []VersionRecord   `json:"version_history,omitempty"`
+	SigningEnabled   bool              `json:"signing_enabled,omitempty"`
+	SigningRequired  bool              `json:"signing_required,omitempty"`
+	SignedRoles      []string          `json:"signed_roles,omitempty"`
+}
+
+// UserCertificate holds a user's X.509 signing certificate.
+type UserCertificate struct {
+	Username       string     `json:"username"`
+	CertificatePEM string     `json:"certificate_pem"`
+	Fingerprint    string     `json:"fingerprint"`
+	Issuer         string     `json:"issuer"`
+	Subject        string     `json:"subject"`
+	NotBefore      time.Time  `json:"not_before"`
+	NotAfter       time.Time  `json:"not_after"`
+	UploadedAt     time.Time  `json:"uploaded_at"`
+	Revoked        bool       `json:"revoked"`
+	RevokedAt      *time.Time `json:"revoked_at,omitempty"`
 }
 
 // AtticMeta is stored in AtticEntry.PluginMeta["reviewflow"].
