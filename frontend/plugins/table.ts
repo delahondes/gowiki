@@ -369,6 +369,11 @@ function applyCellFeatures(tableNode: Node, schema: Schema): Node {
     : tableNode
 }
 
+// INVARIANT: Backticks (code mark) protect cell content from ALL in-cell parsing.
+// Every feature that processes cell text (directives, formulas, or any future
+// pattern like {... } or =...) MUST check hasCodeMark and skip if true.
+// Violation caused: `{{ID}}` in backticks was parsed as a cell directive,
+// stripping the variable name and leaving just `}`.
 function processCellFeatures(cell: Node, schema: Schema): Node {
   if (cell.childCount === 0) return cell
   const firstBlock = cell.child(0)
@@ -378,6 +383,10 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
   const firstChild = firstBlock.child(0)
   if (!firstChild.isText) return cell
   const text = firstChild.text ?? ""
+
+  // Code marks protect cell content from all in-cell parsing.
+  const hasCodeMark = firstChild.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+  if (hasCodeMark) return cell
 
   let newAttrs = { ...cell.attrs }
   let newText = text
@@ -402,9 +411,7 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
   }
 
   // Formula detection — store formula in attr, empty cell text.
-  // Skip if the text is inside a code mark (backticks protect from formula interpretation).
-  const hasCodeMark = firstChild.marks.some(m => m.type.name === "code")
-  if (!hasCodeMark && newText.trimStart().startsWith("=") && newText.trim().length > 1) {
+  if (newText.trimStart().startsWith("=") && newText.trim().length > 1) {
     newAttrs.formula = newText.trim().slice(1)
     newText = ""
     changed = true

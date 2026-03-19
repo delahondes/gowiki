@@ -184,6 +184,8 @@ The backend detects and rejects circular includes at save time (not render time)
 | Code block language specifier + highlighting | implemented |
 | `{version-link version=N page=/path}` | implemented |
 | `{reviewflow-link version=X page=/path}` | implemented |
+| `` @`code with {{VAR}} expansion` `` | implemented |
+| Backticks protect table cells from directive/formula parsing | implemented |
 | Deterministic round-trip | partial |
 | HTML entities not interpreted | partial |
 
@@ -200,3 +202,4 @@ The backend detects and rejects circular includes at save time (not render time)
 - Do not detect include cycles in the frontend — this is a backend responsibility
 - Do not implement media versioning before v0.5
 - Do not silently store invalid document states — enforce at the ProseMirror schema level
+- Do not process cell content (directives, formulas, or any `{...}` / `=...` pattern) when the cell text is inside a `code` or `code_expand` mark — backticks protect cell content from all in-cell parsing. This is a critical invariant: every new cell-level feature must check `hasCodeMark` before processing.
