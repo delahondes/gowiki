@@ -1064,6 +1064,52 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   cursor: pointer;
 }
 
+.gowiki-link-search-panel {
+  margin-top: 4px;
+}
+
+.gowiki-link-search-results {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.gowiki-link-search-results:empty {
+  display: none;
+}
+
+.gowiki-link-search-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.gowiki-link-search-item:last-child {
+  border-bottom: none;
+}
+
+.gowiki-link-search-item:hover,
+.gowiki-link-search-item.active {
+  background: #e3f2fd;
+}
+
+.gowiki-link-search-title {
+  font-weight: 500;
+  font-size: 13px;
+  color: #1a1a1a;
+}
+
+.gowiki-link-search-path {
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
 @media (max-width: 900px) {
   #banner-title {
     display: none;

@@ -349,6 +349,74 @@ function promptLinkForm(initialTarget, initialText) {
     const warning = document.createElement("div")
     warning.className = "gowiki-link-modal-warning"
 
+    // Page search panel
+    const searchPanel = document.createElement("div")
+    searchPanel.className = "gowiki-link-search-panel"
+
+    const searchHint = document.createElement("div")
+    searchHint.style.cssText = "font-size:11px;color:#888;margin-bottom:4px"
+    searchHint.textContent = "Type to search wiki pages, or enter a URL directly"
+    searchPanel.appendChild(searchHint)
+
+    const searchResults = document.createElement("div")
+    searchResults.className = "gowiki-link-search-results"
+    searchPanel.appendChild(searchResults)
+
+    let searchTimer = null
+    let searchActiveIndex = -1
+    let searchItems = []
+
+    function renderLinkSearchResults(results) {
+      searchResults.innerHTML = ""
+      searchItems = []
+      searchActiveIndex = -1
+      if (results.length === 0) return
+      for (const r of results) {
+        const item = document.createElement("div")
+        item.className = "gowiki-link-search-item"
+        const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
+        const titleSpan = document.createElement("span")
+        titleSpan.className = "gowiki-link-search-title"
+        titleSpan.textContent = r.title || displayPath
+        const pathSpan = document.createElement("span")
+        pathSpan.className = "gowiki-link-search-path"
+        pathSpan.textContent = displayPath
+        item.appendChild(titleSpan)
+        item.appendChild(pathSpan)
+        item.addEventListener("click", () => {
+          targetInput.value = displayPath
+          if (!textInput.value) textInput.value = r.title || ""
+          searchResults.innerHTML = ""
+          searchItems = []
+          targetInput.focus()
+        })
+        searchResults.appendChild(item)
+        searchItems.push(item)
+      }
+    }
+
+    function highlightSearchItem(idx) {
+      searchItems.forEach((el, i) => el.classList.toggle("active", i === idx))
+      searchActiveIndex = idx
+    }
+
+    async function doLinkSearch(query) {
+      if (!query || query.length < 2) { renderLinkSearchResults([]); return }
+      // Don't search if it looks like a URL
+      if (/^https?:\/\//i.test(query) || /^mailto:/i.test(query)) { renderLinkSearchResults([]); return }
+      try {
+        const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
+        if (!resp.ok) return
+        const data = await resp.json()
+        renderLinkSearchResults(data.results || [])
+      } catch { /* ignore */ }
+    }
+
+    targetInput.addEventListener("input", () => {
+      clearTimeout(searchTimer)
+      searchTimer = setTimeout(() => doLinkSearch(targetInput.value.trim()), 200)
+    })
+
     const buttons = document.createElement("div")
     buttons.className = "gowiki-link-modal-actions"
 
@@ -363,6 +431,7 @@ function promptLinkForm(initialTarget, initialText) {
     okBtn.className = "gowiki-link-modal-btn"
 
     function close(value) {
+      clearTimeout(searchTimer)
       overlay.remove()
       resolve(value)
     }
@@ -388,10 +457,24 @@ function promptLinkForm(initialTarget, initialText) {
     targetInput.addEventListener("keydown", event => {
       if (event.key === "Enter") {
         event.preventDefault()
-        submit()
+        if (searchActiveIndex >= 0 && searchItems[searchActiveIndex]) {
+          searchItems[searchActiveIndex].click()
+        } else {
+          submit()
+        }
       } else if (event.key === "Escape") {
         event.preventDefault()
-        close(null)
+        if (searchItems.length > 0) {
+          renderLinkSearchResults([])
+        } else {
+          close(null)
+        }
+      } else if (event.key === "ArrowDown" && searchItems.length > 0) {
+        event.preventDefault()
+        highlightSearchItem(Math.min(searchActiveIndex + 1, searchItems.length - 1))
+      } else if (event.key === "ArrowUp" && searchItems.length > 0) {
+        event.preventDefault()
+        highlightSearchItem(Math.max(searchActiveIndex - 1, 0))
       }
     })
     textInput.addEventListener("keydown", event => {
@@ -411,12 +494,18 @@ function promptLinkForm(initialTarget, initialText) {
     dialog.appendChild(textInput)
     dialog.appendChild(targetLabel)
     dialog.appendChild(targetInput)
+    dialog.appendChild(searchPanel)
     dialog.appendChild(warning)
     dialog.appendChild(buttons)
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
     targetInput.focus()
     targetInput.select()
+
+    // If there's an initial target that looks like a search term, trigger search.
+    if (initialTarget && !initialTarget.startsWith("http") && !initialTarget.startsWith("/") && !initialTarget.startsWith("./")) {
+      doLinkSearch(initialTarget)
+    }
   })
 }
 
@@ -10208,6 +10297,12 @@ async function bootstrap() {
       return
     }
     if (mode !== "edit") return
+    // CMD+K: insert link in raw mode.
+    if (e.key === "k" && !e.shiftKey && editMode === "raw" && rawEditor) {
+      e.preventDefault()
+      void rawInsertLink(rawEditor)
+      return
+    }
     if (e.key === "s" && e.shiftKey) {
       e.preventDefault()
       void publishDraft()

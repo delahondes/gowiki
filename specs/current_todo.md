@@ -15,6 +15,6 @@ Issues raised 2026-03-20, from the broken page rendering discussion.
 
 - [x] **Persistent error messages** — Error toasts (red) are now persistent with a dismiss button. Info toasts remain transient (3s).
 
-- [ ] **Erroneous links audit** — Many imported links may lack the `./` prefix. The auto-fix (prepend `./`) handles rendering, but the markdown source should be corrected. Needs: scan all pages for bare relative links, generate a batch fix report. Treat with caution — some may be intentional.
+- [x] **Erroneous links audit** — Only 5 bare links on 1 page (`dataset/biomscope-artefacts.md`). Fixed in source. Auto-fix in compiler remains as safety net.
 
-- [ ] **Internal link creation helper** — Search-based link picker triggered from the link button. Type a query, see matching pages, click to insert link. Similar to DokuWiki's link wizard. Scope: visual and raw mode, namespace browsing, search integration.
+- [x] **Internal link creation helper** — Search-based link picker integrated into the link modal. Typing in the target field searches wiki pages live (debounced 200ms). Results show title + path, click to fill target + text. Arrow keys navigate results, Enter selects, Escape dismisses. Works in both visual and raw mode.
