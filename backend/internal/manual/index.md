@@ -34,6 +34,9 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Drafts & Locking](./drafts) — How editing sessions, auto-save, and locks work
 - [Page History](./history) — Viewing changes, diffs, and restoring previous versions
 - [Reviewflow](./reviewflow) — Document validation workflow (version tagging, role-based approval)
+- [Document Signing — Administration](./signing-admin) — CA setup, certificate management, and signing configuration
+- [Document Signing — Users](./signing-user) — How to generate a signing key and sign confirmations
+- [Document Signing — Trust Model](./signing-trust) — Security assumptions, PKI model, audit export, and standalone verification
 - [Todo Tasks](./todo) — Assigning and tracking tasks within wiki pages
 - [Comments](./comments) — Inline page comments
 
