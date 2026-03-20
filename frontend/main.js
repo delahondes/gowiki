@@ -5303,9 +5303,13 @@ function toggleFullscreen() {
   isFullscreen = !isFullscreen
   document.body.classList.toggle("gowiki-fullscreen", isFullscreen)
   if (isFullscreen) {
+    // Request true browser fullscreen (hides browser chrome).
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {})
+    }
     const exitBtn = document.createElement("button")
     exitBtn.className = "gowiki-fullscreen-exit"
-    exitBtn.title = "Exit fullscreen (F11 or Esc)"
+    exitBtn.title = "Exit fullscreen (Esc)"
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
     svg.setAttribute("viewBox", "0 0 24 24")
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path")
@@ -5315,10 +5319,23 @@ function toggleFullscreen() {
     exitBtn.addEventListener("click", toggleFullscreen)
     document.body.appendChild(exitBtn)
   } else {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {})
+    }
     const existing = document.querySelector(".gowiki-fullscreen-exit")
     if (existing) existing.remove()
   }
 }
+
+// Sync state when browser exits fullscreen via its own Escape (before ours fires).
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement && isFullscreen) {
+    isFullscreen = false
+    document.body.classList.remove("gowiki-fullscreen")
+    const existing = document.querySelector(".gowiki-fullscreen-exit")
+    if (existing) existing.remove()
+  }
+})
 
 function renderActions() {
   actionsRoot.innerHTML = ""
@@ -10269,7 +10286,7 @@ async function bootstrap() {
 
   // Global keyboard shortcuts that work even when focus is in a property panel input.
   document.addEventListener("keydown", e => {
-    // F11: toggle fullscreen
+    // F11 (Windows/Linux) or Cmd+F11 (macOS): toggle fullscreen
     if (e.key === "F11") {
       e.preventDefault()
       toggleFullscreen()

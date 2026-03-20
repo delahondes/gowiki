@@ -12,6 +12,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Markdown Syntax](./syntax) — The Gowiki markdown dialect
 - [Visual Editor](./visual-editor) — Using the visual (WYSIWYG) editor
 - [Raw Editor](./raw-editor) — Editing markdown directly
+- [Keyboard Shortcuts](./shortcuts) — All keyboard and mouse shortcuts (macOS and Windows)
 - [Tables](./tables) — Creating and editing tables
 - [Images & Media](./media) — Uploading and inserting images, files, and attachments
 - [Links](./links) — Internal links, external links, and media links
