@@ -2766,6 +2766,37 @@ function rawGetListPrefix(textarea) {
   return { lineStart, lineEnd, line, indent: m[1], marker: m[2], contentStart: m[1].length + m[2].length }
 }
 
+// --- Raw blockquote keyboard handling ---
+
+const rawBlockquoteRe = /^((?:>\s*)+)/
+
+function rawHandleEnterInBlockquote(textarea) {
+  const { lineStart, lineEnd } = rawGetCurrentLineRange(textarea)
+  const line = textarea.value.substring(lineStart, lineEnd)
+  const m = line.match(rawBlockquoteRe)
+  if (!m) return false
+
+  const prefix = m[1]
+  const pos = textarea.selectionStart
+  const contentAfterCursor = textarea.value.substring(pos, lineEnd)
+  const contentBeforeCursor = textarea.value.substring(lineStart + prefix.length, pos)
+
+  // Empty blockquote line: remove the prefix (exit blockquote)
+  if (contentBeforeCursor.trim() === "" && contentAfterCursor.trim() === "") {
+    textarea.focus()
+    textarea.setSelectionRange(lineStart, lineEnd)
+    rawInsertText(textarea, "")
+    return true
+  }
+
+  // Continue blockquote on next line with same prefix
+  const insertion = "\n" + prefix
+  textarea.focus()
+  textarea.setSelectionRange(pos, pos)
+  rawInsertText(textarea, insertion)
+  return true
+}
+
 function rawHandleEnterInList(textarea) {
   const info = rawGetListPrefix(textarea)
   if (!info) return false
@@ -4718,7 +4749,7 @@ function renderEdit(nextEditMode) {
         return
       }
       if (e.key === "Enter" && !e.shiftKey && !isMod) {
-        if (rawHandleEnterInList(editorEl)) {
+        if (rawHandleEnterInList(editorEl) || rawHandleEnterInBlockquote(editorEl)) {
           e.preventDefault()
           autoResizeRawEditor(editorEl)
         }

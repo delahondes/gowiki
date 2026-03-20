@@ -38,7 +38,7 @@
 | Outdent (list, table, code) | Shift+Tab | Shift+Tab |
 | Insert hard line break | Enter | Enter |
 
-## 1. Table navigation (visual mode)
+## 1. Table navigation (visual and raw)
 
 | Action | macOS | Windows/Linux |
 | --- | --- | --- |
