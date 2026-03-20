@@ -10284,7 +10284,7 @@ async function bootstrap() {
     const isMod = e.metaKey || e.ctrlKey
     if (!isMod) return
     // CMD+Shift+E: force raw edit mode (recovery shortcut).
-    if (e.key === "e" && e.shiftKey && mode === "view" && currentUser) {
+    if ((e.key === "e" || e.key === "E") && e.shiftKey && mode === "view" && currentUser) {
       e.preventDefault()
       editMode = "raw"
       void enterEditMode(true)
@@ -10294,6 +10294,12 @@ async function bootstrap() {
     if (e.key === "e" && !e.shiftKey && mode === "view" && currentUser) {
       e.preventDefault()
       void enterEditMode(true)
+      return
+    }
+    // CMD+E while editing: toggle visual/raw mode.
+    if (e.key === "e" && !e.shiftKey && mode === "edit") {
+      e.preventDefault()
+      void setEditMode(editMode === "visual" ? "raw" : "visual")
       return
     }
     if (mode !== "edit") return
