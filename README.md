@@ -30,7 +30,7 @@ Gowiki is licensed under the **GNU General Public License v3.0** (GPL-3.0). In t
 
 ## Acknowledgments
 
-This software was designed and built with the help of AI agents: ChatGPT (OpenAI) for the initial architecture and design discussions, and Claude (Anthropic) for implementation and coding. The author directed all design decisions and takes full responsibility for the result.
+This software was designed and built with the help of AI agents: ChatGPT (OpenAI) for the initial architecture, design discussions and audit of security and trust aspects, and Claude (Anthropic) for implementation and coding. The author directed all design decisions and takes full responsibility for the result.
 
 Many thanks to the DokuWiki team for creating the wiki that made this one possible.
 
