@@ -32,6 +32,7 @@ type Service struct {
 	todo             TodoIntegrator
 	signingVerifier  *SigningVerifier
 	certStore        *CertStore
+	caStore          *CAStore
 }
 
 // SetSigningVerifier sets the signing verifier for cryptographic confirmations.
@@ -42,6 +43,11 @@ func (svc *Service) SetSigningVerifier(sv *SigningVerifier) {
 // SetCertStore sets the certificate store.
 func (svc *Service) SetCertStore(cs *CertStore) {
 	svc.certStore = cs
+}
+
+// SetCAStore sets the CA store for audit exports.
+func (svc *Service) SetCAStore(cas *CAStore) {
+	svc.caStore = cas
 }
 
 func NewService(store *Store, attic *storage.Attic, configStore *config.Store) *Service {
@@ -183,6 +189,8 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 		conf.Signature = opts.Signature
 		conf.Digest = opts.Digest
 		conf.CertFingerprint = opts.CertFingerprint
+		conf.CertificatePEM = opts.CertificatePEM
+		conf.TimestampToken = opts.TimestampToken
 	}
 	st.Confirmations = append(st.Confirmations, conf)
 

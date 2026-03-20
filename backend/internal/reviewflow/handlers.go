@@ -2,9 +2,11 @@ package reviewflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -15,6 +17,7 @@ func RegisterReadRoutes(r chi.Router, svc *Service) {
 	r.Get("/digest/*", handleGetDigest(svc))
 	r.Get("/signatures/*", handleGetSignatures(svc))
 	r.Get("/cert/{username}", handleGetUserCert(svc))
+	r.Get("/audit/*", handleAuditExport(svc))
 }
 
 func handleGetUserCert(svc *Service) http.HandlerFunc {
@@ -111,10 +114,24 @@ func handleConfirm(svc *Service, extractUsername func(*http.Request) string) htt
 					return
 				}
 				cert, _ := parsePEMCertificate(req.Certificate)
+				fp := ""
+				if cert != nil {
+					fp = certFingerprint(cert)
+				}
+
+				// Request a trusted timestamp from an external TSA.
+				var tsToken string
+				tsDigest, tsErr := ComputeTimestampDigest(req.Signature)
+				if tsErr == nil {
+					tsToken, _ = RequestTimestamp(tsDigest, "") // uses FreeTSA.org
+				}
+
 				opts = &ConfirmOpts{
 					Signature:       req.Signature,
 					Digest:          req.Digest,
-					CertFingerprint: certFingerprint(cert),
+					CertFingerprint: fp,
+					CertificatePEM:  req.Certificate,
+					TimestampToken:  tsToken,
 				}
 			} else if svc.signingVerifier.IsRequired() {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cryptographic signature required"})
@@ -237,6 +254,117 @@ func handleUploadCert(svc *Service, extractUsername func(*http.Request) string) 
 			"issuer":      uc.Issuer,
 			"not_after":   uc.NotAfter,
 		})
+	}
+}
+
+func handleAuditExport(svc *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pagePath := "/" + strings.TrimLeft(chi.URLParam(r, "*"), "/")
+
+		st, err := svc.store.Load(pagePath)
+		if err != nil || st == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no reviewflow state for this page"})
+			return
+		}
+
+		// Determine which version to export.
+		version := st.CurrentPageVersion
+		if vStr := r.URL.Query().Get("version"); vStr != "" {
+			if v, err := strconv.ParseInt(vStr, 10, 64); err == nil {
+				version = v
+			}
+		}
+
+		// Get the page content.
+		var markdownDigest string
+		var markdownContent string
+		var pageURL string
+		if svc.pageReader != nil {
+			page, err := svc.pageReader.Get(pagePath)
+			if err == nil {
+				markdownContent = page.Markdown
+				markdownDigest = ComputeDigest([]byte(page.Markdown))
+			}
+		}
+		// Build page URL from config base_url if available.
+		if svc.configStore != nil {
+			baseURL := svc.configStore.Get().Site.BaseURL
+			if baseURL != "" {
+				pageURL = strings.TrimRight(baseURL, "/") + pagePath
+			}
+		}
+
+		// Collect signed confirmations for this version.
+		type auditConfirmation struct {
+			Role               string `json:"role"`
+			User               string `json:"user"`
+			Timestamp          string `json:"timestamp"`
+			SignatureBase64    string `json:"signature_base64,omitempty"`
+			CertificatePEM     string `json:"certificate_pem,omitempty"`
+			CertFingerprint    string `json:"certificate_fingerprint,omitempty"`
+			Digest             string `json:"digest,omitempty"`
+			TimestampToken     string `json:"timestamp_token,omitempty"`
+			Signed             bool   `json:"signed"`
+		}
+
+		var confirmations []auditConfirmation
+		for _, c := range st.Confirmations {
+			if c.PageVersion != version {
+				continue
+			}
+			// If the confirmation doesn't have the PEM inline, try the cert store.
+			certPEM := c.CertificatePEM
+			if certPEM == "" && c.CertFingerprint != "" && svc.certStore != nil {
+				uc, err := svc.certStore.Load(c.User)
+				if err == nil && uc != nil && uc.Fingerprint == c.CertFingerprint {
+					certPEM = uc.CertificatePEM
+				}
+			}
+			confirmations = append(confirmations, auditConfirmation{
+				Role:            c.Role,
+				User:            c.User,
+				Timestamp:       c.Timestamp.Format("2006-01-02T15:04:05Z"),
+				SignatureBase64: c.Signature,
+				CertificatePEM:  certPEM,
+				CertFingerprint: c.CertFingerprint,
+				Digest:          c.Digest,
+				TimestampToken:  c.TimestampToken,
+				Signed:          c.Signature != "",
+			})
+		}
+
+		// Include the CA certificate so the export is self-sufficient.
+		var caPEM string
+		if svc.caStore != nil {
+			caPEM = svc.caStore.GetCACert()
+		}
+
+		// Include the revocation list from config.
+		var revokedCerts []string
+		if svc.configStore != nil {
+			revokedCerts = svc.configStore.Get().Reviewflow.Signing.RevokedCerts
+		}
+
+		// Build the audit export.
+		export := map[string]any{
+			"page":               pagePath,
+			"page_url":           pageURL,
+			"version":            version,
+			"version_tag":        st.VersionTag,
+			"markdown_sha256":    markdownDigest,
+			"markdown":           markdownContent,
+			"ca_certificate_pem": caPEM,
+			"revoked_certs":      revokedCerts,
+			"signed_payload_spec": "SHA-256 of raw UTF-8 markdown bytes, signed with ECDSA P-256 (IEEE P1363 format, 64 bytes: r || s, 32 bytes each)",
+			"exported_at":        time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			"confirmations":      confirmations,
+		}
+
+		// Set download filename.
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf("attachment; filename=\"audit-%s-v%d.json\"",
+				strings.ReplaceAll(strings.Trim(pagePath, "/"), "/", "-"), version))
+		writeJSON(w, http.StatusOK, export)
 	}
 }
 

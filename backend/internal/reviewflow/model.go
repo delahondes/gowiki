@@ -13,6 +13,8 @@ type Confirmation struct {
 	Signature       string `json:"signature,omitempty"`
 	Digest          string `json:"digest,omitempty"`
 	CertFingerprint string `json:"cert_fingerprint,omitempty"`
+	CertificatePEM  string `json:"certificate_pem,omitempty"`
+	TimestampToken  string `json:"timestamp_token,omitempty"` // base64-encoded RFC 3161 TSA response
 }
 
 // ConfirmOpts holds optional signing data for a confirmation.
@@ -20,6 +22,8 @@ type ConfirmOpts struct {
 	Signature       string
 	Digest          string
 	CertFingerprint string
+	CertificatePEM  string
+	TimestampToken  string
 }
 
 // VersionRecord records a fully-validated version.

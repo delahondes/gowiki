@@ -232,6 +232,7 @@ func main() {
 	signingVerifier := reviewflow.NewSigningVerifier(configStore, certStore)
 	reviewflowService.SetSigningVerifier(signingVerifier)
 	reviewflowService.SetCertStore(certStore)
+	reviewflowService.SetCAStore(caStore)
 	if cfg.Reviewflow.Signing.Enabled {
 		log.Printf("reviewflow plugin: X.509 signing enabled")
 	}
