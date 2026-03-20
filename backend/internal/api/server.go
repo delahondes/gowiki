@@ -413,7 +413,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Route("/api/plugin/reviewflow/v1", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(s.optionalAuth)
-				reviewflow.RegisterReadRoutes(r, s.reviewflowService)
+				reviewflow.RegisterReadRoutes(r, s.reviewflowService, extractUsername)
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireAuth)

@@ -11,9 +11,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// GroupResolver returns the effective groups for a username.
+type GroupResolver func(username string) []string
+
 // RegisterReadRoutes registers read-only reviewflow endpoints.
-func RegisterReadRoutes(r chi.Router, svc *Service) {
-	r.Get("/status/*", handleGetStatus(svc))
+func RegisterReadRoutes(r chi.Router, svc *Service, extractUsername ...func(*http.Request) string) {
+	var getUser func(*http.Request) string
+	if len(extractUsername) > 0 {
+		getUser = extractUsername[0]
+	}
+	r.Get("/status/*", handleGetStatus(svc, getUser))
 	r.Get("/digest/*", handleGetDigest(svc))
 	r.Get("/signatures/*", handleGetSignatures(svc))
 	r.Get("/cert/{username}", handleGetUserCert(svc))
@@ -48,7 +55,7 @@ func RegisterWriteRoutes(r chi.Router, svc *Service, extractUsername func(*http.
 	r.Post("/self-sign", handleSelfSign(svc, extractUsername))
 }
 
-func handleGetStatus(svc *Service) http.HandlerFunc {
+func handleGetStatus(svc *Service, getUser func(*http.Request) string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		pagePath := "/" + strings.TrimLeft(chi.URLParam(r, "*"), "/")
 
@@ -68,6 +75,18 @@ func handleGetStatus(svc *Service) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+
+		// Set observer flag for the requesting user.
+		if getUser != nil {
+			username := getUser(r)
+			if username != "" && svc.groupResolver != nil {
+				groups := svc.groupResolver(username)
+				status.IsObserver = svc.IsObserver(username, groups)
+			} else if username != "" {
+				status.IsObserver = svc.IsObserver(username, nil)
+			}
+		}
+
 		writeJSON(w, http.StatusOK, status)
 	}
 }

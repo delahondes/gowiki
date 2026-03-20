@@ -253,16 +253,38 @@ reviewflow:
     _default: "168h"    # 7 days for any role without a specific deadline
     reviewer: "72h"     # 3 days for reviewers
     validator: "48h"    # 2 days for validators
+  observers:
+    - alice
+    - group:quality
 ```
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `enabled` | `bool` | `false` | Enables deadline computation and todo integration |
 | `deadlines` | `map[string]string` | `{}` | Role name → Go duration string. `_default` is the fallback. |
+| `observers` | `[]string` | `[]` | Users or groups who can view draft (unvalidated) documents even if they are not assigned a role. |
 
 Deadlines are validated at config save time (must be valid Go duration strings).
 
 The admin UI provides a "Reviewflow Plugin" section with an enable checkbox and a textarea for deadlines (one `role=duration` per line).
+
+### Observers
+
+Observers are users or groups who need visibility into the review process without being assigned a specific role. Typical use case: quality managers who must monitor all draft documents across the QMS, even when they are not listed as author, reviewer, or validator on a specific page.
+
+Observers:
+- Can view any page that has a `{reviewflow}` directive, regardless of whether the page is validated or in draft
+- See the full reviewflow panel (role status, confirmations, deadlines) but have no "Confirm" button
+- Appear in the `{reviewflow-query}` results (the query uses observer access to list draft pages)
+- Are NOT recorded in the validation history — they are watchers, not approvers
+
+Observer entries support two formats:
+- **User**: bare username (e.g. `alice`) — the specific user is an observer
+- **Group**: `group:quality` — all members of the group are observers
+
+The observer list is configured globally (not per page) because quality oversight typically spans the entire wiki. Per-page observer overrides may be added in a future version if needed.
+
+**ACL interaction:** Observer access is orthogonal to ACL. A user must still have ACL "view" permission on a page to see it. The observer list only affects reviewflow-specific visibility (e.g., ensuring draft pages are not hidden from quality managers by reviewflow-level access controls).
 
 ### Deadline Computation
 

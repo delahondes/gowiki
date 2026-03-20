@@ -240,6 +240,13 @@ func main() {
 		reviewflowService.SetTodoIntegrator(reviewflow.NewTodoAdapter(todoService))
 		log.Printf("reviewflow plugin: todo integration active")
 	}
+	reviewflowService.SetGroupResolver(func(username string) []string {
+		u, err := userStore.Get(username)
+		if err != nil {
+			return nil
+		}
+		return u.EffectiveGroups()
+	})
 	store.ReviewflowSync = reviewflowService
 	log.Printf("reviewflow plugin: active")
 

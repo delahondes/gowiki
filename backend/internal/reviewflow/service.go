@@ -3,6 +3,7 @@ package reviewflow
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gowiki/backend/internal/config"
@@ -33,6 +34,7 @@ type Service struct {
 	signingVerifier  *SigningVerifier
 	certStore        *CertStore
 	caStore          *CAStore
+	groupResolver    func(username string) []string
 }
 
 // SetSigningVerifier sets the signing verifier for cryptographic confirmations.
@@ -48,6 +50,31 @@ func (svc *Service) SetCertStore(cs *CertStore) {
 // SetCAStore sets the CA store for audit exports.
 func (svc *Service) SetCAStore(cas *CAStore) {
 	svc.caStore = cas
+}
+
+// SetGroupResolver sets the function that resolves a user's effective groups.
+func (svc *Service) SetGroupResolver(resolver func(string) []string) {
+	svc.groupResolver = resolver
+}
+
+// IsObserver returns true if the user is in the global observer list
+// (either directly by username or via a group membership).
+func (svc *Service) IsObserver(username string, groups []string) bool {
+	cfg := svc.configStore.Get()
+	for _, entry := range cfg.Reviewflow.Observers {
+		if entry == username {
+			return true
+		}
+		if strings.HasPrefix(entry, "group:") {
+			groupName := strings.TrimPrefix(entry, "group:")
+			for _, g := range groups {
+				if g == groupName {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func NewService(store *Store, attic *storage.Attic, configStore *config.Store) *Service {

@@ -54,6 +54,7 @@ type Status struct {
 	Deadlines        map[string]string `json:"deadlines,omitempty"`
 	OverdueRoles     []string          `json:"overdue_roles,omitempty"`
 	IsFullyValidated bool              `json:"is_fully_validated"`
+	IsObserver       bool              `json:"is_observer,omitempty"`
 	VersionHistory   []VersionRecord   `json:"version_history,omitempty"`
 	SigningEnabled   bool              `json:"signing_enabled,omitempty"`
 	SigningRequired  bool              `json:"signing_required,omitempty"`

@@ -34,6 +34,7 @@ type ServerConfig struct {
 type ReviewflowConfig struct {
 	Enabled   bool              `yaml:"enabled" json:"enabled"`
 	Deadlines map[string]string `yaml:"deadlines" json:"deadlines"` // role name -> duration string (e.g. "72h")
+	Observers []string          `yaml:"observers" json:"observers"` // users/groups who can view all drafts (e.g. "alice", "group:quality")
 	Signing   SigningConfig     `yaml:"signing" json:"signing"`
 }
 
