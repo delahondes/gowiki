@@ -105,6 +105,14 @@ One entry per line. Use `group:name` for groups. Observers:
 {blockquote class=note}
 > Observers still need ACL "view" permission on a page to see it. The observer list only controls reviewflow-specific visibility, not page-level access.
 
+## 1. Document signing
+
+Reviewflow confirmations can be cryptographically signed using X.509 certificates. When enabled, users sign the exact content of the document at confirmation time, creating tamper-evident proof of approval.
+
+- [Document Signing — Administration](./signing-admin) — CA setup, certificate management, configuration
+- [Document Signing — Users](./signing-user) — How to generate a signing key and sign confirmations
+- [Document Signing — Trust Model](./signing-trust) — Security assumptions, audit export, standalone verification
+
 ## 1. Deadlines
 
 Admins can configure deadlines per role in Admin > Configuration > Reviewflow. When a confirmation is overdue, the todo system can send reminders.

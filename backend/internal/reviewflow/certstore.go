@@ -126,6 +126,30 @@ func (cs *CertStore) List() ([]UserCertificate, error) {
 	return certs, nil
 }
 
+// Revoke marks a user's certificate as revoked. It updates the cert store file
+// and returns the revoked certificate (with RevokedAt set).
+func (cs *CertStore) Revoke(username string) (*UserCertificate, error) {
+	uc, err := cs.Load(username)
+	if err != nil || uc == nil {
+		return nil, ErrCertNotFound
+	}
+	if uc.Revoked {
+		return uc, nil // already revoked
+	}
+	now := time.Now().UTC()
+	uc.Revoked = true
+	uc.RevokedAt = &now
+
+	data, err := json.MarshalIndent(uc, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal certificate: %w", err)
+	}
+	if err := os.WriteFile(cs.certPath(username), data, 0o600); err != nil {
+		return nil, fmt.Errorf("write certificate: %w", err)
+	}
+	return uc, nil
+}
+
 func (cs *CertStore) certPath(username string) string {
 	return filepath.Join(cs.dir, username+".json")
 }

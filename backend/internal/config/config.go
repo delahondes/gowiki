@@ -40,10 +40,28 @@ type ReviewflowConfig struct {
 
 // SigningConfig holds X.509 document signing settings.
 type SigningConfig struct {
-	Enabled      bool     `yaml:"enabled" json:"enabled"`
-	Required     bool     `yaml:"required" json:"required"`
-	TrustStore   []string `yaml:"trust_store" json:"trust_store"`     // paths to trusted CA PEM files
-	RevokedCerts []string `yaml:"revoked_certs" json:"revoked_certs"` // SHA-256 fingerprints of revoked certs
+	Enabled      bool          `yaml:"enabled" json:"enabled"`
+	Required     bool          `yaml:"required" json:"required"`
+	TrustStore   []string      `yaml:"trust_store" json:"trust_store"`     // paths to trusted CA PEM files
+	RevokedCerts []RevokedCert `yaml:"revoked_certs" json:"revoked_certs"` // revoked certificate entries
+}
+
+// RevokedCert represents a revoked certificate with its fingerprint and revocation date.
+// Signatures made before the revocation date remain valid; only signatures after are rejected.
+type RevokedCert struct {
+	Fingerprint string `yaml:"fingerprint" json:"fingerprint"` // SHA-256 fingerprint
+	RevokedAt   string `yaml:"revoked_at" json:"revoked_at"`   // RFC 3339 timestamp (e.g. "2026-03-15T00:00:00Z")
+}
+
+// IsRevoked returns true if the given fingerprint is in the revocation list.
+// Used for server-side rejection of new confirmations (date is irrelevant for new signatures).
+func (sc SigningConfig) IsRevoked(fingerprint string) bool {
+	for _, rc := range sc.RevokedCerts {
+		if rc.Fingerprint == fingerprint {
+			return true
+		}
+	}
+	return false
 }
 
 // TodoConfig holds task management plugin settings.

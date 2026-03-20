@@ -14,7 +14,7 @@ The tool verifies:
 3. Each certificate has digitalSignature key usage
 4. Each ECDSA/RSA signature matches the SHA-256 of the document markdown
 5. The document markdown hash matches the declared digest
-6. Signer certificate is not on the revocation list (if revoked_certs is in the export)
+6. Signer certificate is not revoked at the time of signing (temporal revocation check)
 7. RFC 3161 timestamp tokens: imprint binding AND TSA signature verified
    (requires asn1crypto; install it: pip install asn1crypto)
 
@@ -164,11 +164,37 @@ def verify_confirmation(conf, ca_cert=None, doc_markdown=None, revoked_certs=Non
         return False, messages + [f"FAIL: fingerprint mismatch (stored={fp_stored[:16]}..., computed={fp_computed[:16]}...)"]
     messages.append(f"fingerprint: {fp_computed[:32]}...")
 
-    # --- Revocation check ---
+    # --- Revocation check (temporal: only revocations before signing time invalidate) ---
     if revoked_certs:
-        if fp_computed in revoked_certs:
-            return False, messages + [f"FAIL: certificate is REVOKED (fingerprint {fp_computed[:16]}... is on revocation list)"]
-        messages.append("revocation: not revoked")
+        revoked_entry = None
+        for rc in revoked_certs:
+            # Support both new format (dict with fingerprint+revoked_at) and legacy (plain string).
+            if isinstance(rc, dict):
+                if rc.get("fingerprint") == fp_computed:
+                    revoked_entry = rc
+                    break
+            elif isinstance(rc, str) and rc == fp_computed:
+                revoked_entry = {"fingerprint": rc, "revoked_at": ""}
+                break
+        if revoked_entry:
+            revoked_at_str = revoked_entry.get("revoked_at", "")
+            if revoked_at_str:
+                try:
+                    revoked_at = datetime.fromisoformat(revoked_at_str.replace("Z", "+00:00"))
+                    if sign_time >= revoked_at:
+                        return False, messages + [
+                            f"FAIL: certificate REVOKED on {revoked_at_str} — signature at {timestamp_str} is AFTER revocation"
+                        ]
+                    else:
+                        messages.append(f"revocation: cert revoked on {revoked_at_str} but signature predates revocation — VALID")
+                except Exception:
+                    # Cannot parse revocation date — fail closed.
+                    return False, messages + [f"FAIL: certificate is REVOKED (cannot parse revocation date '{revoked_at_str}')"]
+            else:
+                # No revocation date — fail closed (legacy format, no temporal info).
+                return False, messages + [f"FAIL: certificate is REVOKED (no revocation date — cannot determine validity)"]
+        else:
+            messages.append("revocation: not revoked")
     else:
         messages.append("revocation: no revocation list provided")
 
@@ -370,8 +396,8 @@ def main():
         user = conf.get("user", "?")
         ts = conf.get("timestamp", "?")
 
-        revoked = audit.get("revoked_certs") or []
-        ok, messages = verify_confirmation(conf, ca_cert, doc_markdown, revoked)
+        revoked_list = audit.get("revoked_certs") or []
+        ok, messages = verify_confirmation(conf, ca_cert, doc_markdown, revoked_list)
         status = "PASS" if ok else "FAIL"
         icon = "\u2713" if ok else "\u2717"
 

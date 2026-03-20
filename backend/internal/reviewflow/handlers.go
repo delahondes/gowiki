@@ -24,7 +24,14 @@ func RegisterReadRoutes(r chi.Router, svc *Service, extractUsername ...func(*htt
 	r.Get("/digest/*", handleGetDigest(svc))
 	r.Get("/signatures/*", handleGetSignatures(svc))
 	r.Get("/cert/{username}", handleGetUserCert(svc))
-	r.Get("/audit/*", handleAuditExport(svc))
+}
+
+// PermissionChecker returns true if the user (with groups) has the given action on pagePath.
+type PermissionChecker func(username string, groups []string, pagePath string, action string) bool
+
+// RegisterAuditRoutes registers the audit export endpoint with ACL enforcement.
+func RegisterAuditRoutes(r chi.Router, svc *Service, extractUsername func(*http.Request) string, checkPerm PermissionChecker, resolveGroups func(string) []string) {
+	r.Get("/audit/*", handleAuditExport(svc, extractUsername, checkPerm, resolveGroups))
 }
 
 func handleGetUserCert(svc *Service) http.HandlerFunc {
@@ -276,9 +283,21 @@ func handleUploadCert(svc *Service, extractUsername func(*http.Request) string) 
 	}
 }
 
-func handleAuditExport(svc *Service) http.HandlerFunc {
+func handleAuditExport(svc *Service, extractUsername func(*http.Request) string, checkPerm PermissionChecker, resolveGroups func(string) []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		pagePath := "/" + strings.TrimLeft(chi.URLParam(r, "*"), "/")
+
+		// Enforce ACL: user must have "view" permission on the page.
+		username := extractUsername(r)
+		if username == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			return
+		}
+		groups := resolveGroups(username)
+		if !checkPerm(username, groups, pagePath, "view") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+			return
+		}
 
 		st, err := svc.store.Load(pagePath)
 		if err != nil || st == nil {
@@ -358,10 +377,19 @@ func handleAuditExport(svc *Service) http.HandlerFunc {
 			caPEM = svc.caStore.GetCACert()
 		}
 
-		// Include the revocation list from config.
-		var revokedCerts []string
+		// Include the revocation list from config (with dates for temporal verification).
+		type revokedCertEntry struct {
+			Fingerprint string `json:"fingerprint"`
+			RevokedAt   string `json:"revoked_at"`
+		}
+		var revokedCerts []revokedCertEntry
 		if svc.configStore != nil {
-			revokedCerts = svc.configStore.Get().Reviewflow.Signing.RevokedCerts
+			for _, rc := range svc.configStore.Get().Reviewflow.Signing.RevokedCerts {
+				revokedCerts = append(revokedCerts, revokedCertEntry{
+					Fingerprint: rc.Fingerprint,
+					RevokedAt:   rc.RevokedAt,
+				})
+			}
 		}
 
 		// Build the audit export.

@@ -8469,7 +8469,7 @@ async function renderAdminCertsTab(container) {
       const orgInput = document.createElement("input")
       orgInput.type = "text"
       orgInput.placeholder = "Organization name"
-      orgInput.value = "GMT Science"
+      orgInput.value = ""
       orgInput.style.width = "200px"
       genDiv.appendChild(orgInput)
 
@@ -8594,7 +8594,52 @@ async function renderAdminCertsTab(container) {
       const tbody = document.createElement("tbody")
       for (const cert of certs) {
         const tr = document.createElement("tr")
-        tr.innerHTML = `<td>${cert.username}</td><td>${cert.subject || ""}</td><td style="font-size:11px">${cert.issuer || ""}</td><td>${cert.not_after ? new Date(cert.not_after).toLocaleDateString() : ""}</td><td style="font-size:10px;font-family:monospace">${(cert.fingerprint || "").substring(0, 16)}...</td><td></td>`
+        const tdUser = document.createElement("td")
+        tdUser.textContent = cert.username
+        const tdSubject = document.createElement("td")
+        tdSubject.textContent = cert.subject || ""
+        const tdIssuer = document.createElement("td")
+        tdIssuer.style.fontSize = "11px"
+        tdIssuer.textContent = cert.issuer || ""
+        const tdExpires = document.createElement("td")
+        tdExpires.textContent = cert.not_after ? new Date(cert.not_after).toLocaleDateString() : ""
+        const tdFp = document.createElement("td")
+        tdFp.style.cssText = "font-size:10px;font-family:monospace"
+        tdFp.textContent = (cert.fingerprint || "").substring(0, 16) + "..."
+        const tdActions = document.createElement("td")
+
+        if (cert.revoked) {
+          const badge = document.createElement("span")
+          badge.style.cssText = "color:#c62828;font-size:12px;font-weight:600"
+          badge.textContent = "Revoked" + (cert.revoked_at ? " (" + new Date(cert.revoked_at).toLocaleDateString() + ")" : "")
+          tdActions.appendChild(badge)
+        } else {
+          const revokeBtn = document.createElement("button")
+          revokeBtn.className = "gowiki-admin-btn-small"
+          revokeBtn.style.cssText = "background:#c62828;color:#fff;border:none"
+          revokeBtn.textContent = "Revoke"
+          revokeBtn.addEventListener("click", async () => {
+            if (!confirm(`Revoke certificate for ${cert.username}?\n\nThis will prevent new signatures. Existing signatures made before revocation remain valid.`)) return
+            revokeBtn.disabled = true
+            revokeBtn.textContent = "Revoking..."
+            const resp = await authFetch(`/api/plugin/reviewflow/v1/ca/revoke/${cert.username}`, { method: "POST" })
+            if (resp.ok) {
+              renderAdminCertsTab(container)
+            } else {
+              alert("Failed to revoke certificate")
+              revokeBtn.disabled = false
+              revokeBtn.textContent = "Revoke"
+            }
+          })
+          tdActions.appendChild(revokeBtn)
+        }
+
+        tr.appendChild(tdUser)
+        tr.appendChild(tdSubject)
+        tr.appendChild(tdIssuer)
+        tr.appendChild(tdExpires)
+        tr.appendChild(tdFp)
+        tr.appendChild(tdActions)
         tbody.appendChild(tr)
       }
       table.appendChild(tbody)
@@ -8944,6 +8989,43 @@ async function renderAdminConfigTab(container) {
     form.appendChild(rfObserversLabel)
     form.appendChild(rfObserversInput)
 
+    // Signing sub-section
+    const signingConfig = rfConfig.signing || {}
+
+    const signingHeading = document.createElement("div")
+    signingHeading.style.cssText = "font-weight:600;margin:16px 0 8px 0;font-size:14px"
+    signingHeading.textContent = "Document Signing (X.509)"
+    form.appendChild(signingHeading)
+
+    const sigEnabledCheckbox = document.createElement("input")
+    sigEnabledCheckbox.type = "checkbox"
+    sigEnabledCheckbox.checked = !!signingConfig.enabled
+    const sigEnabledLabel = document.createElement("label")
+    sigEnabledLabel.style.display = "flex"
+    sigEnabledLabel.style.alignItems = "center"
+    sigEnabledLabel.style.gap = "8px"
+    sigEnabledLabel.style.margin = "4px 0"
+    sigEnabledLabel.appendChild(sigEnabledCheckbox)
+    sigEnabledLabel.appendChild(document.createTextNode("Enable document signing"))
+    form.appendChild(sigEnabledLabel)
+
+    const sigRequiredCheckbox = document.createElement("input")
+    sigRequiredCheckbox.type = "checkbox"
+    sigRequiredCheckbox.checked = !!signingConfig.required
+    const sigRequiredLabel = document.createElement("label")
+    sigRequiredLabel.style.display = "flex"
+    sigRequiredLabel.style.alignItems = "center"
+    sigRequiredLabel.style.gap = "8px"
+    sigRequiredLabel.style.margin = "4px 0"
+    sigRequiredLabel.appendChild(sigRequiredCheckbox)
+    sigRequiredLabel.appendChild(document.createTextNode("Require signing for all confirmations"))
+    form.appendChild(sigRequiredLabel)
+
+    const sigNote = document.createElement("div")
+    sigNote.style.cssText = "font-size:0.85em;color:#666;margin:4px 0 0 0"
+    sigNote.textContent = "When enabled, users with a signing key see \"Sign & Confirm\". When required, users without a key cannot confirm at all."
+    form.appendChild(sigNote)
+
     // Save button
     const actions = document.createElement("div")
     actions.className = "gowiki-admin-config-actions"
@@ -9009,6 +9091,12 @@ async function renderAdminConfigTab(container) {
             return d
           })(),
           observers: rfObserversInput.value.trim().split("\n").map(s => s.trim()).filter(Boolean),
+          signing: {
+            enabled: sigEnabledCheckbox.checked,
+            required: sigRequiredCheckbox.checked,
+            trust_store: signingConfig.trust_store || [],
+            revoked_certs: signingConfig.revoked_certs || [],
+          },
         },
         ai_api: {
           enabled: aiEnabledCheckbox.checked,

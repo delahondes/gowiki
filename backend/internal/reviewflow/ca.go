@@ -16,6 +16,10 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"gowiki/backend/internal/config"
 )
 
 // CAStore manages the company Certificate Authority files.
@@ -168,10 +172,11 @@ func (cs *CAStore) SignUserKey(username, email string, pubKeySPKI []byte) (certP
 // --- HTTP Handlers ---
 
 // RegisterCARoutes registers admin CA management endpoints.
-func RegisterCARoutes(r interface{ Post(string, http.HandlerFunc); Get(string, http.HandlerFunc) }, caStore *CAStore, certStore *CertStore, svc *Service, extractUsername func(*http.Request) string) {
+func RegisterCARoutes(r chi.Router, caStore *CAStore, certStore *CertStore, svc *Service, extractUsername func(*http.Request) string) {
 	r.Get("/ca", handleGetCA(caStore))
 	r.Post("/ca/generate", handleGenerateCA(caStore))
 	r.Post("/ca/sign", handleSignUserKey(caStore, certStore, svc, extractUsername))
+	r.Post("/ca/revoke/{username}", handleRevokeCert(certStore, svc))
 }
 
 func handleGetCA(caStore *CAStore) http.HandlerFunc {
@@ -254,6 +259,52 @@ func handleSignUserKey(caStore *CAStore, certStore *CertStore, svc *Service, ext
 		writeJSON(w, http.StatusOK, map[string]any{
 			"certificate_pem": certPEM,
 			"username":        req.Username,
+		})
+	}
+}
+
+func handleRevokeCert(certStore *CertStore, svc *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := chi.URLParam(r, "username")
+		if username == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing username"})
+			return
+		}
+
+		uc, err := certStore.Revoke(username)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "certificate not found"})
+			return
+		}
+
+		// Also add to config revocation list so it's included in audit exports.
+		if svc.configStore != nil {
+			cfg := svc.configStore.Get()
+			// Check if already in the list.
+			found := false
+			for _, rc := range cfg.Reviewflow.Signing.RevokedCerts {
+				if rc.Fingerprint == uc.Fingerprint {
+					found = true
+					break
+				}
+			}
+			if !found {
+				revokedAt := ""
+				if uc.RevokedAt != nil {
+					revokedAt = uc.RevokedAt.Format(time.RFC3339)
+				}
+				cfg.Reviewflow.Signing.RevokedCerts = append(cfg.Reviewflow.Signing.RevokedCerts, config.RevokedCert{
+					Fingerprint: uc.Fingerprint,
+					RevokedAt:   revokedAt,
+				})
+				svc.configStore.Update(cfg)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"revoked":    true,
+			"username":   username,
+			"revoked_at": uc.RevokedAt,
 		})
 	}
 }

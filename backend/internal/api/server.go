@@ -419,6 +419,11 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 				r.Use(s.requireAuth)
 				reviewflow.RegisterWriteRoutes(r, s.reviewflowService, extractUsername)
 			})
+			// Audit export — requires auth + ACL "view" on the page.
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				reviewflow.RegisterAuditRoutes(r, s.reviewflowService, extractUsername, s.aclStore.CheckPermission, s.getUserGroups)
+			})
 			// CA management — admin only.
 			if s.caStore != nil {
 				r.Group(func(r chi.Router) {

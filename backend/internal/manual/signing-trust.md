@@ -98,7 +98,7 @@ signing:
 
 **Limitation:** revocation is only as current as the last configuration update. There is no real-time revocation check.
 
-**Important:** Revocation is evaluated at verification time, not at signing time. A certificate that was valid when the signature was created but later revoked will be flagged as invalid during verification if it appears in the revocation list.
+**Temporal revocation:** each revocation entry carries a date. When verifying a past signature, the verifier compares the signature timestamp against the revocation date. A signature made **before** the revocation date remains valid — the signer was authorized at the time. Only signatures made **after** the revocation date are rejected. For new confirmations, the server always rejects revoked certificates regardless of date.
 
 ## 1. Audit export
 
@@ -110,7 +110,7 @@ The audit export is a self-contained JSON file that includes everything needed f
 | `markdown_sha256` | SHA-256 hex digest of the markdown |
 | `ca_certificate_pem` | The organization's CA certificate (PEM) |
 | `signed_payload_spec` | Exact definition of what is signed |
-| `revoked_certs` | List of revoked certificate fingerprints |
+| `revoked_certs` | List of revoked certificates with fingerprint and revocation date |
 | `confirmations` | Array of per-role confirmation records |
 | `exported_at` | Timestamp of the export |
 
@@ -121,7 +121,9 @@ Each confirmation record includes:
 - Digest (SHA-256 hex)
 - RFC 3161 timestamp token (base64 DER, when available)
 
-Download the audit export from the reviewflow panel on any validated page, or via the API:
+The audit export requires authentication and enforces ACL: only users with **view** permission on the page can download its audit export.
+
+Download the audit export via the API:
 
 ```
 GET /api/plugin/reviewflow/v1/audit/{page-path}?version={N}
@@ -141,7 +143,7 @@ The verifier checks:
 2. Each signer certificate chains to the CA in the export
 3. Each certificate was valid at the time of signing
 4. Each certificate has `digitalSignature` key usage
-5. No certificate is on the revocation list
+5. No certificate was revoked before the signature timestamp
 6. Each ECDSA signature is valid for the document hash
 7. Each RFC 3161 timestamp imprint matches the signature
 8. Each RFC 3161 timestamp token signature is valid (TSA signature verification)

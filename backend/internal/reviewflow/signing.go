@@ -65,13 +65,11 @@ func (sv *SigningVerifier) VerifySignature(certPEM, signatureB64, digest, userna
 		return fmt.Errorf("certificate has expired (expired %s)", cert.NotAfter)
 	}
 
-	// Check revocation.
+	// Check revocation (always reject revoked certs for new confirmations).
 	fingerprint := certFingerprint(cert)
 	cfg := sv.configStore.Get().Reviewflow.Signing
-	for _, revoked := range cfg.RevokedCerts {
-		if revoked == fingerprint {
-			return fmt.Errorf("certificate has been revoked")
-		}
+	if cfg.IsRevoked(fingerprint) {
+		return fmt.Errorf("certificate has been revoked")
 	}
 
 	// If a trust store is configured, verify the chain.

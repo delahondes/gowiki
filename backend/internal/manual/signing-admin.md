@@ -60,20 +60,14 @@ The certificates table shows all issued certificates with:
 
 ## 1. Revoking certificates
 
-If a user's key is compromised or they leave the organization, add their certificate fingerprint to the revocation list:
+If a user's key is compromised or they leave the organization, revoke their certificate from the Admin > Certificates tab by clicking the **Revoke** button next to their certificate.
 
-```yaml
-signing:
-  revoked_certs:
-    - "a1b2c3d4e5f6..."
-```
-
-The fingerprint is the SHA-256 hash of the certificate, visible in the certificates table.
+Revocation records include a date. This is important: signatures made **before** the revocation date remain valid (the signer was authorized at the time). Only signatures after the revocation date are rejected during verification.
 
 Revoked certificates:
-- Are flagged in the audit export (`revoked_certs` field)
-- Are checked by the standalone verification tool
-- Cannot be used for new confirmations (the server rejects them)
+- Cannot be used for new confirmations (the server always rejects them)
+- Are included with their revocation date in every audit export
+- Are checked by the standalone verification tool with temporal logic
 
 ## 1. Trust store
 
@@ -96,5 +90,5 @@ reviewflow:
     enabled: true         # Enable signing UI
     required: false       # Make signing mandatory
     trust_store: []       # Additional trusted CA certificates
-    revoked_certs: []     # SHA-256 fingerprints of revoked certs
+    revoked_certs: []     # Managed via admin UI (fingerprint + revocation date)
 ```
