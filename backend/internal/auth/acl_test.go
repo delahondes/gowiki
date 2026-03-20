@@ -507,6 +507,45 @@ func TestCheckPermission_SelfRulesRegexEscaping(t *testing.T) {
 	}
 }
 
+func TestCheckPermission_LeadingSlashRequired(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Patterns must use leading "/" to match paths (which always have leading "/").
+	err = store.Replace([]ACLRule{
+		{Pattern: "/regulatory/.*", SubjectType: "group", Subject: "regulatory", Permissions: []string{"view", "edit", "delete"}},
+		{Pattern: "/wiki/.*", SubjectType: "group", Subject: "docs", Permissions: []string{"view", "edit"}},
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// Path with leading slash matches pattern with leading slash.
+	if !store.CheckPermission("alice", []string{"regulatory"}, "/regulatory/qms/dir/mq01", "edit") {
+		t.Error("path /regulatory/... should match pattern /regulatory/.*")
+	}
+
+	if !store.CheckPermission("bob", []string{"docs"}, "/wiki/manual", "edit") {
+		t.Error("path /wiki/... should match pattern /wiki/.*")
+	}
+
+	// Pattern WITHOUT leading slash does NOT match paths with leading slash.
+	err = store.Replace([]ACLRule{
+		{Pattern: "regulatory/.*", SubjectType: "group", Subject: "regulatory", Permissions: []string{"view", "edit"}},
+		{Pattern: ".*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	if store.CheckPermission("alice", []string{"regulatory"}, "/regulatory/qms/dir/mq01", "edit") {
+		t.Error("pattern without leading / should NOT match path with leading /")
+	}
+}
+
 func TestValidateRules_SelfPattern(t *testing.T) {
 	// @self rules with @self in pattern should pass validation.
 	rules := []ACLRule{

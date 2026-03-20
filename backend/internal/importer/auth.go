@@ -397,16 +397,24 @@ func dokuACLPathToPattern(dokuPath string) string {
 
 	// If the path contains wildcards, split on *, escape each segment,
 	// and rejoin with .* to produce a valid regex.
+	var pattern string
 	if strings.Contains(p, "*") {
 		parts := strings.Split(p, "*")
 		for i, part := range parts {
 			parts[i] = regexpEscapePath(part)
 		}
-		return strings.Join(parts, ".*")
+		pattern = strings.Join(parts, ".*")
+	} else {
+		// Exact page match — escape regex metacharacters in the path.
+		pattern = regexpEscapePath(p)
 	}
 
-	// Exact page match — escape regex metacharacters in the path.
-	return regexpEscapePath(p)
+	// Ensure pattern starts with "/" to match the internal path convention.
+	// The catch-all ".*" pattern is left as-is since it already matches all paths.
+	if pattern != ".*" && !strings.HasPrefix(pattern, "/") {
+		pattern = "/" + pattern
+	}
+	return pattern
 }
 
 // regexpEscapePath escapes regex metacharacters in a path string,

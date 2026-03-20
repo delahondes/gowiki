@@ -8923,6 +8923,27 @@ async function renderAdminConfigTab(container) {
     form.appendChild(rfDeadlinesLabel)
     form.appendChild(rfDeadlinesInput)
 
+    const rfObserversNote = document.createElement("div")
+    rfObserversNote.style.fontSize = "0.85em"
+    rfObserversNote.style.color = "#666"
+    rfObserversNote.style.margin = "12px 0 4px 0"
+    rfObserversNote.textContent = "Observers: users or groups who can view all draft documents (one per line). Use group:name for groups."
+    form.appendChild(rfObserversNote)
+
+    const rfObserversInput = document.createElement("textarea")
+    rfObserversInput.rows = 3
+    rfObserversInput.style.width = "100%"
+    rfObserversInput.style.fontFamily = "monospace"
+    rfObserversInput.style.fontSize = "13px"
+    rfObserversInput.value = (rfConfig.observers || []).join("\n")
+    const rfObserversLabel = document.createElement("label")
+    rfObserversLabel.style.display = "block"
+    rfObserversLabel.style.margin = "4px 0 4px 0"
+    rfObserversLabel.style.fontWeight = "500"
+    rfObserversLabel.textContent = "Observers"
+    form.appendChild(rfObserversLabel)
+    form.appendChild(rfObserversInput)
+
     // Save button
     const actions = document.createElement("div")
     actions.className = "gowiki-admin-config-actions"
@@ -8987,6 +9008,7 @@ async function renderAdminConfigTab(container) {
             })
             return d
           })(),
+          observers: rfObserversInput.value.trim().split("\n").map(s => s.trim()).filter(Boolean),
         },
         ai_api: {
           enabled: aiEnabledCheckbox.checked,

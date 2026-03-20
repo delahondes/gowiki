@@ -85,6 +85,26 @@ The table shows for each document:
 
 Use the toolbar button (shield with question mark) to insert a reviewflow query in visual mode.
 
+## 1. Observers
+
+Observers are users or groups who can view the reviewflow status of all documents — including draft (unvalidated) pages — without being assigned a role. This is typically used for quality managers who need oversight across the entire QMS.
+
+Configure observers in Admin > Configuration > Reviewflow:
+
+```markdown
+alice
+group:quality
+```
+
+One entry per line. Use `group:name` for groups. Observers:
+- See the full reviewflow panel on every reviewflow page (roles, confirmations, deadlines)
+- Appear in `{reviewflow-query}` results (the query uses observer access)
+- **Cannot** confirm — they are watchers, not approvers
+- Are **not** recorded in validation history
+
+{blockquote class=note}
+> Observers still need ACL "view" permission on a page to see it. The observer list only controls reviewflow-specific visibility, not page-level access.
+
 ## 1. Deadlines
 
 Admins can configure deadlines per role in Admin > Configuration > Reviewflow. When a confirmation is overdue, the todo system can send reminders.
