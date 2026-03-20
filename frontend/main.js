@@ -10275,11 +10275,18 @@ async function bootstrap() {
       toggleFullscreen()
       return
     }
-    // Escape: exit fullscreen (only when no modal is open)
-    if (e.key === "Escape" && isFullscreen && !document.querySelector(".gowiki-link-modal-overlay, .gowiki-media-modal-overlay, .gowiki-admin-modal-overlay, .gowiki-login-overlay")) {
-      e.preventDefault()
-      toggleFullscreen()
-      return
+    // Escape: context-dependent.
+    if (e.key === "Escape" && !document.querySelector(".gowiki-link-modal-overlay, .gowiki-media-modal-overlay, .gowiki-admin-modal-overlay, .gowiki-login-overlay")) {
+      if (isFullscreen) {
+        e.preventDefault()
+        toggleFullscreen()
+        return
+      }
+      if (mode === "edit") {
+        e.preventDefault()
+        cancelEdit()
+        return
+      }
     }
     const isMod = e.metaKey || e.ctrlKey
     if (!isMod) return
