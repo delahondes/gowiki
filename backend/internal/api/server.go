@@ -234,6 +234,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/media-orphans", s.handleMediaOrphans)
 		r.Get("/api/media-version/*", s.handleServeMediaVersion)
 		r.Get("/api/export/pdf/*", s.handleExportPDF)
+		r.Get("/api/render/*", s.handleRender)
 		r.Get("/api/backlinks/*", s.handleBacklinks)
 		r.Post("/api/pages/check", s.handleCheckPages)
 		r.Get("/api/template/*", s.handleGetTemplate)

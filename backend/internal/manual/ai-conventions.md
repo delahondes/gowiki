@@ -35,3 +35,18 @@ Gowiki uses a bijective markdown dialect. Key rules:
 - `./page` — relative page link
 - `./file.ext` — attachment/media link
 - Links with extensions are always treated as media files
+
+## 1. Quality checks
+
+After writing a page, you can verify it renders correctly:
+
+```
+GET /api/render/{path}
+```
+
+This returns the rendered HTML via headless browser. Check:
+- The `errors` array for JavaScript exceptions
+- The HTML content for `⚠ Directive` error blocks (broken formatting)
+- The `rendering` field: `"ok"` or `"failed"`
+
+To scan all pages for rendering errors, combine `GET /api/sitemap` with `GET /api/render/{path}` for each page.

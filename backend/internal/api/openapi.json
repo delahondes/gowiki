@@ -541,6 +541,63 @@
         }
       }
     },
+    "/api/render/{path}": {
+      "get": {
+        "operationId": "renderPage",
+        "summary": "Render a page as HTML via headless browser",
+        "description": "Returns the server-side rendered HTML of a wiki page, produced by navigating headless Chrome to the page and extracting the DOM. This endpoint is useful for: (1) verifying that a page renders correctly after edits, (2) detecting rendering errors (broken directives, missing plugins), (3) obtaining the HTML interpretation of the canonical markdown source. The rendered HTML is a derived product — markdown remains the authoritative source. Requires Chrome/Chromium on the server.",
+        "tags": ["Pages"],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Page path (e.g. docs/getting-started)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rendered page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page": { "type": "string", "description": "Canonical page path" },
+                    "html": { "type": "string", "description": "Rendered HTML content of the page" },
+                    "errors": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "JavaScript console errors captured during rendering (empty if rendering succeeded cleanly)"
+                    },
+                    "rendering": { "type": "string", "enum": ["ok", "failed"], "description": "Overall rendering status" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Access denied (ACL)" },
+          "422": {
+            "description": "Page rendered with errors — JS exceptions were thrown during rendering",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page": { "type": "string" },
+                    "html": { "type": "string" },
+                    "errors": { "type": "array", "items": { "type": "string" } },
+                    "rendering": { "type": "string", "enum": ["failed"] }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "description": "Render not available — no Chrome/Chromium on server" }
+        }
+      }
+    },
     "/api/tokens/{id}": {
       "delete": {
         "operationId": "revokeToken",

@@ -29,6 +29,7 @@ The full API is described at `/api/openapi.json` (OpenAPI 3.1 schema).
 | POST /api/ai/v1/preview/{path} | Dry-run diff without saving |
 | GET /api/pages/{path} | Read a single page |
 | PUT /api/pages/{path} | Write a page |
+| GET /api/render/{path} | Render a page as HTML (headless browser) |
 | GET /api/search?q=... | Full-text search |
 
 ## 1. Authentication

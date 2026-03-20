@@ -78,6 +78,18 @@ function directivePlugin(md: MarkdownIt) {
   })
 }
 
+/** Inject paragraph tokens that render as a visible error message. */
+function emitErrorTokens(out: any[], message: string) {
+  out.push({ type: "paragraph_open", tag: "p", nesting: 1, block: true, level: 0, attrs: [["style", "background:#fce4ec;border:1px solid #ef9a9a;border-radius:4px;padding:8px 12px;color:#b71c1c;font-size:13px;font-family:monospace"]] })
+  out.push({
+    type: "inline",
+    content: `⚠ ${message}`,
+    children: [{ type: "text", content: `⚠ ${message}`, level: 0 }],
+    level: 0,
+  })
+  out.push({ type: "paragraph_close", tag: "p", nesting: -1, block: true, level: 0 })
+}
+
 function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   const out: any[] = []
   let pending: {
@@ -93,10 +105,15 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
       if (!meta) {
         throw new Error("Invalid directive token")
       }
-      if (pending && strict) {
-        throw new Error(
-          `Directive "${pending.name}" must apply to the next block`
-        )
+      if (pending) {
+        if (strict) {
+          throw new Error(
+            `Directive "${pending.name}" must apply to the next block`
+          )
+        }
+        emitErrorTokens(out, `Directive "{${pending.name}}" must be followed by its target block`)
+        pending = null
+        pendingSpec = null
       }
 
       // Check for self-contained directives first
@@ -159,6 +176,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
       const spec = registry.getDirective(meta.name)
       if (!spec) {
         if (strict) throw new Error(`Unknown directive: ${meta.name}`)
+        emitErrorTokens(out, `Unknown directive "{${meta.name}}"`)
         continue
       }
       const directiveLineCount = Array.isArray(token.map)
@@ -176,6 +194,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
             `Directive "${pending.name}" cannot apply to "${token.type}"`
           )
         }
+        emitErrorTokens(out, `Directive "{${pending.name}}" cannot apply to the following block`)
         pending = null
         pendingSpec = null
       } else {
@@ -211,10 +230,13 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
     out.push(token)
   }
 
-  if (pending && strict) {
-    throw new Error(
-      `Directive "${pending.name}" must be followed by a block`
-    )
+  if (pending) {
+    if (strict) {
+      throw new Error(
+        `Directive "${pending.name}" must be followed by a block`
+      )
+    }
+    emitErrorTokens(out, `Directive "{${pending.name}}" at end of document has no target block`)
   }
 
   return out
@@ -640,7 +662,7 @@ export function markdownToPM(
       convertTemplateVarTokens(
         convertMediaLinkTokens(
           normalizeEmptyLinkLabels(
-            applyDirectives(md.parse(markdown, {}), registry, true)
+            applyDirectives(md.parse(markdown, {}), registry, false)
           )
         )
       )

@@ -333,6 +333,12 @@ func (s *Server) handleAIConventions(w http.ResponseWriter, _ *http.Request) {
 			"user_agent":        "Set User-Agent: <tool>/1.0 (gowiki-ai-api; user=<username>)",
 			"authentication":    "Preferred: Authorization: Bearer gwk_<token> header. Fallback: ?token=gwk_<token> query parameter (for platforms that cannot set custom headers).",
 		},
+		"quality_checks": map[string]any{
+			"render_endpoint":  "GET /api/render/{path} — returns rendered HTML via headless browser",
+			"render_usage":     "Use after writing a page to verify it renders correctly. Check the 'errors' array and look for '⚠ Directive' in the HTML to detect broken formatting.",
+			"render_note":      "The rendered HTML is a derived product of the canonical markdown source. Markdown is always the ground truth.",
+			"systematic_check": "Combine GET /api/sitemap with GET /api/render/{path} to scan all pages for rendering errors.",
+		},
 		"do_not": []string{
 			"Do not introduce alternative Markdown syntaxes — bijectivity is non-negotiable",
 			"Do not store metadata under data/content/",
