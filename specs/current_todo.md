@@ -13,7 +13,7 @@ Issues raised 2026-03-20, from the broken page rendering discussion.
 
 ## TODO
 
-- [ ] **Persistent error messages** — Save/publish errors are transient toasts that disappear after 3s. Errors should be persistent (manually dismissable). "Draft saved" can remain transient; "publish failed" or "save failed" must stay visible.
+- [x] **Persistent error messages** — Error toasts (red) are now persistent with a dismiss button. Info toasts remain transient (3s).
 
 - [ ] **Erroneous links audit** — Many imported links may lack the `./` prefix. The auto-fix (prepend `./`) handles rendering, but the markdown source should be corrected. Needs: scan all pages for bare relative links, generate a batch fix report. Treat with caution — some may be intentional.
 

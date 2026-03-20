@@ -520,6 +520,17 @@ body {
   opacity: 1;
 }
 
+.gowiki-action-toast.gowiki-toast-error {
+  background: #c62828;
+  color: #fff;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 500px;
+  white-space: normal;
+}
+
 .gowiki-status {
   min-height: 1.2em;
   color: #666;

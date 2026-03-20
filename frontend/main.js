@@ -1203,20 +1203,40 @@ function applyNormalizedEditState(normalized) {
 let statusToastEl = null
 let statusToastTimer = null
 
-function setStatus(text) {
+function setStatus(text, isError) {
   statusText = text
   if (!text) return
+  // Auto-detect errors if not explicitly specified.
+  if (isError === undefined) {
+    isError = /^(Failed|Invalid|Cannot|Error|.*failed|.*error)/i.test(text)
+  }
   if (!statusToastEl) {
     statusToastEl = document.createElement("div")
     statusToastEl.className = "gowiki-action-toast"
     document.body.appendChild(statusToastEl)
   }
-  statusToastEl.textContent = text
-  statusToastEl.classList.add("visible")
-  clearTimeout(statusToastTimer)
-  statusToastTimer = setTimeout(() => {
-    statusToastEl.classList.remove("visible")
-  }, 3000)
+  statusToastEl.textContent = ""
+  if (isError) {
+    statusToastEl.classList.add("visible", "gowiki-toast-error")
+    const msg = document.createElement("span")
+    msg.textContent = text
+    statusToastEl.appendChild(msg)
+    const dismissBtn = document.createElement("button")
+    dismissBtn.textContent = "\u2715"
+    dismissBtn.style.cssText = "background:none;border:none;color:inherit;font-size:16px;cursor:pointer;margin-left:12px;padding:0 4px;opacity:0.8"
+    dismissBtn.addEventListener("click", () => statusToastEl.classList.remove("visible", "gowiki-toast-error"))
+    statusToastEl.appendChild(dismissBtn)
+    clearTimeout(statusToastTimer)
+    // No auto-dismiss for errors.
+  } else {
+    statusToastEl.classList.remove("gowiki-toast-error")
+    statusToastEl.classList.add("visible")
+    statusToastEl.textContent = text
+    clearTimeout(statusToastTimer)
+    statusToastTimer = setTimeout(() => {
+      statusToastEl.classList.remove("visible")
+    }, 3000)
+  }
 }
 
 function setMode(nextMode) {
