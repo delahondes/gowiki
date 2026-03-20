@@ -300,6 +300,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Put("/api/admin/acl", s.handleReplaceACL)
 
 		r.Get("/api/admin/locks", s.handleListLocks)
+		r.Get("/api/admin/drafts/*", s.handleAdminViewDraft)
+		r.Post("/api/admin/drafts/reclaim/*", s.handleAdminReclaimDraft)
 		r.Delete("/api/admin/drafts/*", s.handleAdminDiscardDraft)
 
 		// Database admin endpoints.

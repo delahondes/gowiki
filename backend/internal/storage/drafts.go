@@ -348,6 +348,114 @@ func (d *DraftStore) AdminDiscardDraft(pagePath, draftOwner string) error {
 	return d.clearLock(pagePath)
 }
 
+// AdminReadDraft reads a draft for any user without modifying state.
+func (d *DraftStore) AdminReadDraft(pagePath, owner string) (string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	data, err := os.ReadFile(d.draftPath(owner, pagePath))
+	if err != nil {
+		return "", ErrNoDraft
+	}
+	return string(data), nil
+}
+
+// AdminReclaimDraft transfers a draft from one user to another.
+// The draft file is moved and the lock is updated to the new owner.
+func (d *DraftStore) AdminReclaimDraft(pagePath, fromUser, toUser string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	srcPath := d.draftPath(fromUser, pagePath)
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return ErrNoDraft
+	}
+
+	dstPath := d.draftPath(toUser, pagePath)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return fmt.Errorf("create draft dir: %w", err)
+	}
+	if err := writeFileAtomic(dstPath, data); err != nil {
+		return fmt.Errorf("write reclaimed draft: %w", err)
+	}
+
+	// Remove old draft.
+	os.Remove(srcPath)
+
+	// Update the lock to point to the new owner.
+	newLock := DraftLock{
+		Owner:     toUser,
+		Since:     time.Now().UTC().Format(time.RFC3339),
+		EditToken: generateEditToken(),
+	}
+	return d.writeLock(pagePath, newLock)
+}
+
+// DraftInfo describes a draft for admin listing.
+type DraftInfo struct {
+	Page  string `json:"page"`
+	Owner string `json:"owner"`
+	Since string `json:"since"` // from lock if available, else file mtime
+}
+
+// ListDrafts returns all drafts across all users, including orphaned ones (no lock).
+func (d *DraftStore) ListDrafts() []DraftInfo {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	draftsDir := filepath.Join(d.dataDir, "drafts")
+	seen := make(map[string]bool) // "owner:page" -> true
+	var drafts []DraftInfo
+
+	// Walk all draft files.
+	_ = filepath.Walk(draftsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		// Path is: draftsDir/<username>/<page/path>.md
+		rel, relErr := filepath.Rel(draftsDir, path)
+		if relErr != nil {
+			return nil
+		}
+		parts := strings.SplitN(filepath.ToSlash(rel), "/", 2)
+		if len(parts) < 2 {
+			return nil
+		}
+		owner := parts[0]
+		pagePath := strings.TrimSuffix(parts[1], ".md")
+
+		// Check if there's a lock for this page.
+		lock, _ := d.readLock(pagePath)
+		since := ""
+		if lock.Owner == owner && lock.Since != "" {
+			since = lock.Since
+		} else {
+			since = info.ModTime().UTC().Format(time.RFC3339)
+		}
+
+		key := owner + ":" + pagePath
+		if !seen[key] {
+			seen[key] = true
+			drafts = append(drafts, DraftInfo{
+				Page:  pagePath,
+				Owner: owner,
+				Since: since,
+			})
+		}
+		return nil
+	})
+
+	sort.Slice(drafts, func(i, j int) bool {
+		return drafts[i].Page < drafts[j].Page
+	})
+
+	return drafts
+}
+
 func generateEditToken() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

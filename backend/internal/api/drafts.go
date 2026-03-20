@@ -20,7 +20,10 @@ type DraftManager interface {
 	Publish(pagePath, username, editToken string) (string, error)
 	GetLock(pagePath string) storage.DraftLock
 	ListLocks() []storage.LockInfo
+	ListDrafts() []storage.DraftInfo
 	AdminDiscardDraft(pagePath, draftOwner string) error
+	AdminReadDraft(pagePath, owner string) (string, error)
+	AdminReclaimDraft(pagePath, fromUser, toUser string) error
 }
 
 func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {

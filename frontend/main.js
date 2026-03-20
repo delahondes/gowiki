@@ -2052,7 +2052,21 @@ function addCodeCopyButtons(container) {
 }
 
 function mountReadOnlyView(container, markdown, className) {
-  const doc = markdownToPM(markdown, registry)
+  let doc
+  try {
+    doc = markdownToPM(markdown, registry)
+  } catch (err) {
+    console.error("Rendering failed:", err)
+    const errorDiv = document.createElement("div")
+    errorDiv.style.cssText = "background:#fce4ec;border:1px solid #ef9a9a;border-radius:6px;padding:16px;margin:12px 0;color:#b71c1c;font-family:monospace;font-size:13px;white-space:pre-wrap"
+    errorDiv.textContent = "⚠ Rendering error: " + (err.message || err) + "\n\nThe raw markdown is shown below. Use raw edit mode (Shift+click Edit) to fix this page."
+    container.appendChild(errorDiv)
+    const pre = document.createElement("pre")
+    pre.style.cssText = "background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:12px;margin:8px 0;font-size:12px;overflow-x:auto;white-space:pre-wrap"
+    pre.textContent = markdown
+    container.appendChild(pre)
+    return null
+  }
   const wrapper = document.createElement("div")
   if (className) wrapper.className = className
   container.appendChild(wrapper)
@@ -5061,7 +5075,7 @@ function makeActionIconBtn(iconName, tooltip, onClick, extraClass) {
     svg.appendChild(p)
   }
   btn.appendChild(svg)
-  btn.addEventListener("click", onClick)
+  btn.addEventListener("click", (e) => onClick(e))
   return btn
 }
 
@@ -5243,7 +5257,7 @@ function renderActions() {
 
     // Edit button — varies by lock/draft state
     if (pageLockInfo && pageLockInfo.is_draft && pageLockInfo.locked_by === currentUser?.username) {
-      const editBtn = makeActionIconBtn("edit", "Resume editing \u2014 unpublished draft", () => void enterEditMode(true))
+      const editBtn = makeActionIconBtn("edit", "Resume editing \u2014 unpublished draft (Shift+click: raw mode)", (e) => { if (e?.shiftKey) editMode = "raw"; void enterEditMode(true) })
       const dot = document.createElement("span")
       dot.className = "gowiki-action-draft-dot"
       editBtn.appendChild(dot)
@@ -5256,7 +5270,7 @@ function renderActions() {
       actionsRoot.appendChild(editBtn)
     } else {
       const editHint = isMac ? "\u2318E" : "Ctrl+E"
-      actionsRoot.appendChild(makeActionIconBtn("edit", `Edit (${editHint})`, () => void enterEditMode(false)))
+      actionsRoot.appendChild(makeActionIconBtn("edit", `Edit (${editHint}, Shift+click: raw mode)`, (e) => { if (e?.shiftKey) editMode = "raw"; void enterEditMode(false) }))
     }
 
     actionsRoot.appendChild(makeActionSep())
@@ -6927,7 +6941,14 @@ async function enterEditMode(force) {
   draftSavedThisSession = false
   lastSavedDraftMarkdown = null
   currentMarkdown = data.markdown
-  currentDoc = markdownToPM(currentMarkdown, registry)
+  try {
+    currentDoc = markdownToPM(currentMarkdown, registry)
+  } catch (err) {
+    console.error("Failed to parse draft markdown:", err)
+    // Visual mode would crash — force raw mode so the user can fix the content.
+    currentDoc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create()])
+    editMode = "raw"
+  }
   setMode("edit")
   // Restore cursor position from a previous editing session.
   restoreCursorFromLocalStorage()
@@ -8242,16 +8263,16 @@ async function renderAdminACLTab(container) {
 // ── Admin: Locks Tab ──────────────────────────────────
 
 async function renderAdminLocksTab(container) {
-  container.innerHTML = '<div class="gowiki-admin-loading">Loading locks...</div>'
+  container.innerHTML = '<div class="gowiki-admin-loading">Loading drafts...</div>'
 
   try {
     const resp = await authFetch("/api/admin/locks")
     if (!resp.ok) {
-      container.innerHTML = '<div class="gowiki-admin-error">Failed to load locks.</div>'
+      container.innerHTML = '<div class="gowiki-admin-error">Failed to load drafts.</div>'
       return
     }
     const data = await resp.json()
-    const locks = data.locks || []
+    const drafts = data.drafts || []
 
     container.innerHTML = ""
 
@@ -8264,10 +8285,10 @@ async function renderAdminLocksTab(container) {
     toolbar.appendChild(refreshBtn)
     container.appendChild(toolbar)
 
-    if (locks.length === 0) {
+    if (drafts.length === 0) {
       const empty = document.createElement("div")
       empty.className = "gowiki-admin-empty"
-      empty.textContent = "No active locks."
+      empty.textContent = "No drafts."
       container.appendChild(empty)
       return
     }
@@ -8286,47 +8307,100 @@ async function renderAdminLocksTab(container) {
     table.appendChild(thead)
 
     const tbody = document.createElement("tbody")
-    for (const lock of locks) {
+    for (const draft of drafts) {
       const tr = document.createElement("tr")
 
       const tdPage = document.createElement("td")
-      tdPage.textContent = lock.page
+      const pageLink = document.createElement("a")
+      pageLink.href = "/" + draft.page
+      pageLink.textContent = draft.page
+      pageLink.style.color = "#1565c0"
+      tdPage.appendChild(pageLink)
       tr.appendChild(tdPage)
 
       const tdOwner = document.createElement("td")
-      tdOwner.textContent = lock.owner
+      tdOwner.textContent = draft.owner
       tr.appendChild(tdOwner)
 
       const tdSince = document.createElement("td")
-      tdSince.textContent = lock.since ? new Date(lock.since).toLocaleString() : ""
+      tdSince.textContent = draft.since ? new Date(draft.since).toLocaleString() : ""
       tr.appendChild(tdSince)
 
       const tdActions = document.createElement("td")
       tdActions.className = "gowiki-admin-actions-cell"
+      tdActions.style.cssText = "display:flex;gap:4px;flex-wrap:wrap"
+
+      // View button
+      const viewBtn = document.createElement("button")
+      viewBtn.className = "gowiki-admin-btn-small"
+      viewBtn.textContent = "View"
+      viewBtn.addEventListener("click", async () => {
+        const r = await authFetch("/api/admin/drafts/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner))
+        if (!r.ok) { alert("Failed to read draft."); return }
+        const d = await r.json()
+        const modal = document.createElement("div")
+        modal.className = "gowiki-admin-modal-overlay"
+        modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove() })
+        const dialog = document.createElement("div")
+        dialog.className = "gowiki-admin-modal"
+        dialog.style.maxWidth = "800px"
+        const title = document.createElement("h3")
+        title.textContent = "Draft: " + draft.page + " (by " + draft.owner + ")"
+        dialog.appendChild(title)
+        const pre = document.createElement("pre")
+        pre.style.cssText = "background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:12px;max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"
+        pre.textContent = d.markdown
+        dialog.appendChild(pre)
+        const closeBtn = document.createElement("button")
+        closeBtn.className = "gowiki-admin-btn"
+        closeBtn.textContent = "Close"
+        closeBtn.style.marginTop = "12px"
+        closeBtn.addEventListener("click", () => modal.remove())
+        dialog.appendChild(closeBtn)
+        modal.appendChild(dialog)
+        document.body.appendChild(modal)
+      })
+      tdActions.appendChild(viewBtn)
+
+      // Reclaim button
+      const reclaimBtn = document.createElement("button")
+      reclaimBtn.className = "gowiki-admin-btn-small"
+      reclaimBtn.style.cssText = "background:#1565c0;color:#fff;border:none"
+      reclaimBtn.textContent = "Reclaim"
+      reclaimBtn.addEventListener("click", async () => {
+        if (!confirm("Reclaim draft for \"" + draft.page + "\" from " + draft.owner + "?\n\nThe draft will become yours and you can edit/publish it.")) return
+        const r = await authFetch("/api/admin/drafts/reclaim/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner), { method: "POST" })
+        if (r.ok) {
+          renderAdminLocksTab(container)
+        } else {
+          alert("Failed to reclaim draft.")
+        }
+      })
+      tdActions.appendChild(reclaimBtn)
+
+      // Discard button
       const discardBtn = document.createElement("button")
       discardBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
-      discardBtn.textContent = "Force Discard"
+      discardBtn.textContent = "Discard"
       discardBtn.addEventListener("click", async () => {
-        if (confirm("Force discard draft for \"" + lock.page + "\" owned by " + lock.owner + "?")) {
-          const pagePath = lock.page
-          const r = await authFetch("/api/admin/drafts/" + encodePagePath(pagePath), { method: "DELETE" })
-          if (r.ok) {
-            renderAdminLocksTab(container)
-          } else {
-            alert("Failed to discard draft.")
-          }
+        if (!confirm("Discard draft for \"" + draft.page + "\" owned by " + draft.owner + "?\n\nThis cannot be undone.")) return
+        const r = await authFetch("/api/admin/drafts/" + encodePagePath(draft.page), { method: "DELETE" })
+        if (r.ok) {
+          renderAdminLocksTab(container)
+        } else {
+          alert("Failed to discard draft.")
         }
       })
       tdActions.appendChild(discardBtn)
-      tr.appendChild(tdActions)
 
+      tr.appendChild(tdActions)
       tbody.appendChild(tr)
     }
     table.appendChild(tbody)
     container.appendChild(table)
 
   } catch {
-    container.innerHTML = '<div class="gowiki-admin-error">Failed to load locks.</div>'
+    container.innerHTML = '<div class="gowiki-admin-error">Failed to load drafts.</div>'
   }
 }
 
@@ -10100,6 +10174,13 @@ async function bootstrap() {
     }
     const isMod = e.metaKey || e.ctrlKey
     if (!isMod) return
+    // CMD+Shift+E: force raw edit mode (recovery shortcut).
+    if (e.key === "e" && e.shiftKey && mode === "view" && currentUser) {
+      e.preventDefault()
+      editMode = "raw"
+      void enterEditMode(true)
+      return
+    }
     // CMD+E: enter edit mode from view mode.
     if (e.key === "e" && !e.shiftKey && mode === "view" && currentUser) {
       e.preventDefault()
@@ -10289,7 +10370,14 @@ async function bootstrap() {
     }
   }
 
-  currentDoc = markdownToPM(currentMarkdown, registry)
+  try {
+    currentDoc = markdownToPM(currentMarkdown, registry)
+  } catch (err) {
+    console.error("Failed to parse page markdown:", err)
+    // Create a minimal valid doc so setMode("view") doesn't crash.
+    currentDoc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create()])
+    // setMode will call mountReadOnlyView which will show the error.
+  }
   setMode("view")
 
   // Auto-view a specific version when ?v=N is present.

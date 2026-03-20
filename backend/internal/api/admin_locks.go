@@ -10,14 +10,18 @@ import (
 	"gowiki/backend/internal/storage"
 )
 
-// handleListLocks returns all current draft locks across the wiki.
+// handleListLocks returns all current draft locks and drafts across the wiki.
 // GET /api/admin/locks
 func (s *Server) handleListLocks(w http.ResponseWriter, _ *http.Request) {
 	locks := s.draftManager.ListLocks()
 	if locks == nil {
 		locks = []storage.LockInfo{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"locks": locks})
+	drafts := s.draftManager.ListDrafts()
+	if drafts == nil {
+		drafts = []storage.DraftInfo{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"locks": locks, "drafts": drafts})
 }
 
 // handleAdminDiscardDraft forcefully discards any user's draft.
@@ -56,5 +60,84 @@ func (s *Server) handleAdminDiscardDraft(w http.ResponseWriter, r *http.Request)
 		"discarded":    pagePath,
 		"draft_owner":  draftOwner,
 		"discarded_by": adminUser,
+	})
+}
+
+// handleAdminViewDraft reads any user's draft content.
+// GET /api/admin/drafts/*?owner=username
+func (s *Server) handleAdminViewDraft(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	owner := r.URL.Query().Get("owner")
+	if owner == "" {
+		// Try to get owner from lock.
+		lock := s.draftManager.GetLock(pagePath)
+		if lock.Owner != "" {
+			owner = lock.Owner
+		} else {
+			writeError(w, http.StatusBadRequest, "missing owner parameter (no lock found for this page)")
+			return
+		}
+	}
+
+	content, err := s.draftManager.AdminReadDraft(pagePath, owner)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no draft found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"page":     pagePath,
+		"owner":    owner,
+		"markdown": content,
+	})
+}
+
+// handleAdminReclaimDraft transfers a draft from one user to the requesting admin.
+// POST /api/admin/drafts/reclaim/*?owner=username
+func (s *Server) handleAdminReclaimDraft(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	adminUser := UsernameFromContext(r.Context())
+
+	owner := r.URL.Query().Get("owner")
+	if owner == "" {
+		lock := s.draftManager.GetLock(pagePath)
+		if lock.Owner != "" {
+			owner = lock.Owner
+		} else {
+			writeError(w, http.StatusBadRequest, "missing owner parameter (no lock found for this page)")
+			return
+		}
+	}
+
+	if owner == adminUser {
+		writeError(w, http.StatusBadRequest, "you already own this draft")
+		return
+	}
+
+	err := s.draftManager.AdminReclaimDraft(pagePath, owner, adminUser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if s.changelog != nil {
+		s.changelog.Append(pagePath, 0, adminUser,
+			fmt.Sprintf("admin override: reclaimed draft from %s", owner), "admin")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"page":           pagePath,
+		"previous_owner": owner,
+		"new_owner":      adminUser,
 	})
 }

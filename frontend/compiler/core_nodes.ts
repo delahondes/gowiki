@@ -449,11 +449,17 @@ function registerEmphasis(reg: Registry) {
 
   reg.registerMark("link_open", {
     open(ctx, tok) {
-      const href = tok.attrGet?.("href") ?? ""
+      let href = tok.attrGet?.("href") ?? ""
       if (!isAllowedLinkTarget(href)) {
-        throw new Error(
-          `Invalid link target "${href}". Expected http(s) URL or internal path starting with '/', './', or '../'.`
-        )
+        // Auto-fix bare relative links (e.g. "page" → "./page") from DokuWiki import.
+        if (href && !href.includes("://") && !href.startsWith("#")) {
+          href = "./" + href
+        }
+        // If still invalid after auto-fix, render as plain text (skip the mark).
+        if (!isAllowedLinkTarget(href)) {
+          console.warn(`Invalid link target: "${tok.attrGet?.("href") ?? ""}"`)
+          return
+        }
       }
       const title = tok.attrGet?.("title") ?? null
       const autoText = Boolean(tok.meta?.autoText)
