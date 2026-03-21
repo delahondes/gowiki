@@ -60,9 +60,28 @@ Round-trip between raw, visual, and view modes must be lossless. Deterministic s
 
 All user content (pages and attachments) lives under `data/content/`. Metadata lives under `data/meta/` mirroring the same folder structure.
 
+### Canonical page paths
+
+Every page has exactly one canonical path. This path is used in URLs, API responses, WebSocket messages, link targets, and all internal references. **The word `index` never appears in a canonical path.**
+
+| Storage file | Canonical path |
+|---|---|
+| `content/page.md` | `/page` |
+| `content/index.md` | `/` |
+| `content/docs/index.md` | `/docs/` |
+| `content/docs/guide.md` | `/docs/guide` |
+
+Rules:
+- All canonical paths start with `/`
+- Leaf pages have no trailing slash: `/page`
+- Namespace index pages have a trailing slash: `/docs/`
+- The root page is `/`
+
+Conversions must go through `storage.CanonicalPath()` (Go) or `canonicalPagePath()` (JS). Never inline `/index` stripping — use the helper. See `specs/canonical_page_names.md` for the full specification.
+
 **Page links** (resolve to rendered page):
 - `/path/to/page` → `content/path/to/page.md`
-- `/path/to/namespace` or `/path/to/namespace/` → `content/path/to/namespace/index.md`
+- `/path/to/namespace/` → `content/path/to/namespace/index.md`
 - `./page` → adjacent `page.md` relative to current page
 
 **Attachment links** (resolve to raw file):

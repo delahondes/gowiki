@@ -7221,6 +7221,15 @@ async function joinCollabSession(lockOwner) {
     updateEditOffset()
   }, 500)
 
+  // Check if the owner is actually online. If not, offer to reclaim after 3s.
+  setTimeout(() => {
+    if (!isCollabGuest) return // already promoted
+    const ownerOnline = currentPresenceUsers.some(u => u.username === lockOwner && u.mode === "edit")
+    if (!ownerOnline) {
+      handleOwnerLeft(lockOwner)
+    }
+  }, 3000)
+
   setStatus(`Joined ${lockOwner}'s editing session`)
   return true
 }
@@ -7233,11 +7242,22 @@ function stashEditorState() {
 
 async function enterEditMode(force) {
   // If we still have a valid edit token (saved-to-draft without exiting the session),
-  // resume directly with the stashed editor state — no API call needed.
+  // verify the token is still valid before resuming (draft may have been reclaimed).
   if (editToken && stashedEditorState) {
-    draftSavedThisSession = true
-    setMode("edit")
-    return true
+    const checkResp = await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown: currentMarkdown, edit_token: editToken }),
+    })
+    if (checkResp.ok) {
+      draftSavedThisSession = true
+      setMode("edit")
+      return true
+    }
+    // Token is no longer valid — draft was reclaimed. Clear stale state and fall through.
+    editToken = null
+    stashedEditorState = null
+    pageLockInfo = null
   }
 
   const forceParam = force ? "?force=true" : ""
@@ -10995,6 +11015,45 @@ function renderRawRemoteIndicators() {
   }
 }
 
+async function handleOwnerLeft(previousOwner) {
+  setStatus(`Draft owner (${previousOwner}) left. Taking over the draft...`)
+
+  // Get current content from the editor.
+  let markdown = currentMarkdown
+  if (editMode === "visual" && editorView) {
+    markdown = pmToMarkdown(editorView.state.doc, registry)
+  } else if (editMode === "raw" && rawEditor) {
+    markdown = rawEditor.value
+  }
+
+  // Promote ourselves: reclaim the draft and get an edit token.
+  try {
+    const resp = await authFetch(`/api/collab/promote/${encodePagePath(pagePath)}`, { method: "POST" })
+    if (!resp.ok) {
+      setStatus("Failed to take over draft")
+      return
+    }
+    const data = await resp.json()
+    editToken = data.edit_token
+    isCollabGuest = false
+
+    // Save the current content as our draft.
+    await authFetch(`/api/draft/${encodePagePath(pagePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown, edit_token: editToken }),
+    })
+
+    // Update UI — show save/publish buttons.
+    renderActions()
+    sendPresenceUpdate()
+    setStatus(`You are now the draft owner (${previousOwner} left)`)
+  } catch (err) {
+    console.error("Failed to promote to owner:", err)
+    setStatus("Failed to take over draft")
+  }
+}
+
 function startCollabSession(initialMarkdown) {
   stopCollabSession() // clean up any previous session
 
@@ -11068,6 +11127,17 @@ function initPresence() {
           renderPresenceBar()
           renderRemoteBlockIndicators()
         }
+        if (msg.type === "owner_left" && msg.page === pagePath && isCollabGuest && mode === "edit") {
+          handleOwnerLeft(msg.owner)
+        }
+        if (msg.type === "draft_reclaimed" && msg.page === pageDisplayPath && msg.previous_owner === currentUser?.username && msg.new_owner !== currentUser?.username) {
+          // Someone took over our draft. Clear stale state and update UI immediately.
+          editToken = null
+          stashedEditorState = null
+          pageLockInfo = { locked_by: msg.new_owner, is_draft: true }
+          renderActions()
+          setStatus(`Your draft was taken over by ${msg.new_owner}. Click "Join" to continue editing.`)
+        }
       } catch { /* ignore */ }
     })
 
@@ -11100,7 +11170,10 @@ let currentEditBlock = -1 // markdown char offset where cursor is
 function sendPresenceUpdate() {
   if (presenceSocket && presenceSocket.readyState === WebSocket.OPEN) {
     const msg = { type: "join", page: pagePath, mode: mode === "edit" ? "edit" : "view" }
-    if (mode === "edit") msg.offset = currentEditBlock
+    if (mode === "edit") {
+      msg.offset = currentEditBlock
+      msg.is_owner = !isCollabGuest
+    }
     presenceSocket.send(JSON.stringify(msg))
   }
 }

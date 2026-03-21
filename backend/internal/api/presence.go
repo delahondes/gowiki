@@ -7,6 +7,7 @@ import (
 	"github.com/coder/websocket"
 
 	"gowiki/backend/internal/collab"
+	"gowiki/backend/internal/storage"
 )
 
 func (s *Server) handlePresenceWS(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +67,70 @@ func (s *Server) handleCollabWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.collabRelay.Join(conn, pagePath, username, displayName) // blocks
+}
+
+// handleCollabPromote promotes a collab guest to draft owner.
+// POST /api/collab/promote/{path}
+func (s *Server) handleCollabPromote(w http.ResponseWriter, r *http.Request) {
+	pagePath := "/" + strings.TrimPrefix(r.URL.Path, "/api/collab/promote/")
+	if pagePath == "/" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	username := UsernameFromContext(r.Context())
+	if username == "" {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	lock := s.draftManager.GetLock(pagePath)
+	if lock.Owner == "" {
+		// No lock — create a fresh edit session for this user.
+		page, err := s.store.Get(pagePath)
+		published := ""
+		if err == nil {
+			published = page.Markdown
+		}
+		md, token, err := s.draftManager.EnterEditMode(pagePath, username, true, published)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"promoted":   true,
+			"edit_token": token,
+			"markdown":   md,
+		})
+		return
+	}
+
+	if lock.Owner == username {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"promoted":   true,
+			"edit_token": lock.EditToken,
+		})
+		return
+	}
+
+	// Reclaim the draft from the previous owner.
+	err := s.draftManager.AdminReclaimDraft(pagePath, lock.Owner, username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	previousOwner := lock.Owner
+	newLock := s.draftManager.GetLock(pagePath)
+
+	// Notify all clients that draft ownership changed.
+	s.presenceHub.NotifyDraftReclaimed(storage.CanonicalPath(pagePath), previousOwner, username)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"promoted":       true,
+		"previous_owner": previousOwner,
+		"edit_token":     newLock.EditToken,
+	})
 }
 
 // handleCollabDraftRead lets any authenticated user read the current draft

@@ -259,12 +259,13 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/users/list", s.handleUsersList)
 	})
 
-	// WebSocket endpoints + collab draft read — require auth, no ACL.
+	// WebSocket endpoints + collab — require auth, no ACL.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Get("/api/ws/presence", s.handlePresenceWS)
 		r.Get("/api/ws/collab/*", s.handleCollabWS)
 		r.Get("/api/collab/draft/*", s.handleCollabDraftRead)
+		r.Post("/api/collab/promote/*", s.handleCollabPromote)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.

@@ -21,9 +21,10 @@ type UserPresence struct {
 
 // PresenceUpdate is sent to clients when presence changes on a page.
 type PresenceUpdate struct {
-	Type  string         `json:"type"`  // "presence"
+	Type  string         `json:"type"`  // "presence" or "owner_left"
 	Page  string         `json:"page"`
-	Users []UserPresence `json:"users"`
+	Users []UserPresence `json:"users,omitempty"`
+	Owner string         `json:"owner,omitempty"` // for owner_left: who left
 }
 
 // Hub manages all active WebSocket connections and presence state.
@@ -32,6 +33,8 @@ type Hub struct {
 	clients map[*Client]bool
 	// page -> username -> presence
 	pages map[string]map[string]*clientPresence
+	// page -> owner username (the lock/draft owner)
+	owners map[string]string
 }
 
 type clientPresence struct {
@@ -44,6 +47,7 @@ func NewHub() *Hub {
 	return &Hub{
 		clients: make(map[*Client]bool),
 		pages:   make(map[string]map[string]*clientPresence),
+		owners:  make(map[string]string),
 	}
 }
 
@@ -75,16 +79,21 @@ func (h *Hub) Unregister(c *Client) {
 		}
 	}
 
-	// Broadcast updates for affected pages (outside the lock would be
-	// better for performance, but presence updates are small and infrequent).
+	// Broadcast updates for affected pages.
 	for _, page := range affectedPages {
 		h.broadcastPageLocked(page)
+
+		// If the departing user was the owner, notify remaining editors.
+		if h.owners[page] == c.Username {
+			delete(h.owners, page)
+			h.broadcastOwnerLeftLocked(page, c.Username)
+		}
 	}
 }
 
 // SetPresence updates a client's presence on a page.
 // If the client was previously on a different page, it is removed from that page.
-func (h *Hub) SetPresence(c *Client, page, mode string, offset int) {
+func (h *Hub) SetPresence(c *Client, page, mode string, offset int, isOwner bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -115,6 +124,15 @@ func (h *Hub) SetPresence(c *Client, page, mode string, offset int) {
 			Offset:      offset,
 			Since:       time.Now().UnixMilli(),
 		},
+	}
+
+	// Track owner. If the owner switches away from edit mode, notify guests.
+	if isOwner && mode == "edit" {
+		h.owners[page] = c.Username
+	} else if h.owners[page] == c.Username && mode != "edit" {
+		// Owner stopped editing (saved to draft, published, cancelled).
+		delete(h.owners, page)
+		h.broadcastOwnerLeftLocked(page, c.Username)
 	}
 
 	// Broadcast to affected pages.
@@ -165,6 +183,42 @@ func (h *Hub) broadcastPageLocked(page string) {
 	// Also send to clients that were on this page (they may have left — send
 	// the empty update so their UI clears). We do this by sending to all
 	// clients and letting the client filter by page.
+	for c := range h.clients {
+		c.Send(data)
+	}
+}
+
+func (h *Hub) broadcastOwnerLeftLocked(page, owner string) {
+	update := PresenceUpdate{
+		Type:  "owner_left",
+		Page:  page,
+		Owner: owner,
+	}
+	data, err := json.Marshal(update)
+	if err != nil {
+		return
+	}
+	// Send to all remaining clients on this page.
+	for _, cp := range h.pages[page] {
+		cp.client.Send(data)
+	}
+}
+
+// NotifyDraftReclaimed sends a message to all clients on a page that
+// the draft ownership has changed. The former owner should refresh.
+func (h *Hub) NotifyDraftReclaimed(page, previousOwner, newOwner string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	msg := map[string]string{
+		"type":           "draft_reclaimed",
+		"page":           page,
+		"previous_owner": previousOwner,
+		"new_owner":      newOwner,
+	}
+	data, _ := json.Marshal(msg)
+
+	// Send to all clients (the former owner might be viewing, not editing).
 	for c := range h.clients {
 		c.Send(data)
 	}
