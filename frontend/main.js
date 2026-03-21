@@ -10878,7 +10878,6 @@ function renderRemoteBlockIndicators() {
     const block = u.offset ?? u.block ?? -1
     return block >= 0
   }).map(u => ({ ...u, _block: u.offset ?? u.block ?? -1 }))
-  console.log("[presence] remote users:", editingUsers.map(u => ({ user: u.username, block: u._block })), "mode:", editMode)
 
   if (mode !== "edit") return
 
@@ -10908,7 +10907,6 @@ function renderRemoteBlockIndicators() {
     // Convert markdown char offset → blank-line block index.
     remoteBlockUsers = editingUsers.map(u => {
       const block = markdownOffsetToBlock(rawEditor.value, u._block)
-      console.log("[presence→raw] offset", u._block, "→ block", block, "text at offset:", JSON.stringify(rawEditor.value.substring(u._block, u._block + 40)))
       return { block, username: u.username, displayName: u.display_name || u.username }
     })
     renderRawRemoteIndicators()
@@ -11051,7 +11049,6 @@ function initPresence() {
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === "presence" && msg.page === pagePath) {
-          console.log("[presence] raw message:", JSON.stringify(msg.users))
           // Filter out self.
           currentPresenceUsers = (msg.users || []).filter(u => u.username !== currentUser.username)
           renderPresenceBar()
