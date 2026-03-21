@@ -127,6 +127,7 @@ type Server struct {
 	reviewflowService   *reviewflow.Service
 	commentService      *comment.Service
 	presenceHub         *collab.Hub
+	collabRelay         *collab.Relay
 	serveWeb            bool
 	webDirPath          string
 }
@@ -160,6 +161,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		caStore:           caStore,
 		certStore:         certStore,
 		presenceHub:       collab.NewHub(),
+		collabRelay:       collab.NewRelay(),
 		rateLimiter:       NewRateLimiter(),
 		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
@@ -257,10 +259,11 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/users/list", s.handleUsersList)
 	})
 
-	// WebSocket presence — requires auth, no ACL.
+	// WebSocket endpoints — require auth, no ACL.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)
 		r.Get("/api/ws/presence", s.handlePresenceWS)
+		r.Get("/api/ws/collab/*", s.handleCollabWS)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.

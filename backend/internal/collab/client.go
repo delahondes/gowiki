@@ -63,9 +63,10 @@ func (c *Client) Run() {
 
 // clientMessage is the JSON structure clients send to the server.
 type clientMessage struct {
-	Type string `json:"type"` // "join", "leave", "mode"
-	Page string `json:"page,omitempty"`
-	Mode string `json:"mode,omitempty"` // "view" or "edit"
+	Type   string `json:"type"` // "join", "leave", "mode"
+	Page   string `json:"page,omitempty"`
+	Mode   string `json:"mode,omitempty"`   // "view" or "edit"
+	Offset int    `json:"offset,omitempty"` // cursor offset in markdown (-1 = unknown)
 }
 
 func (c *Client) readPump() {
@@ -91,13 +92,13 @@ func (c *Client) readPump() {
 			if mode == "" {
 				mode = "view"
 			}
-			c.hub.SetPresence(c, msg.Page, mode)
+			c.hub.SetPresence(c, msg.Page, mode, msg.Offset)
 
 		case "mode":
 			if msg.Page == "" || msg.Mode == "" {
 				continue
 			}
-			c.hub.SetPresence(c, msg.Page, msg.Mode)
+			c.hub.SetPresence(c, msg.Page, msg.Mode, msg.Offset)
 
 		case "leave":
 			// Client navigated away — remove from current page.

@@ -14,8 +14,9 @@ type UserPresence struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name,omitempty"`
 	Page        string `json:"page"`
-	Mode        string `json:"mode"` // "view" or "edit"
-	Since       int64  `json:"since"` // unix ms
+	Mode        string `json:"mode"`   // "view" or "edit"
+	Offset      int    `json:"offset"` // cursor offset in markdown string (-1 if unknown)
+	Since       int64  `json:"since"`  // unix ms
 }
 
 // PresenceUpdate is sent to clients when presence changes on a page.
@@ -83,7 +84,7 @@ func (h *Hub) Unregister(c *Client) {
 
 // SetPresence updates a client's presence on a page.
 // If the client was previously on a different page, it is removed from that page.
-func (h *Hub) SetPresence(c *Client, page, mode string) {
+func (h *Hub) SetPresence(c *Client, page, mode string, offset int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -111,6 +112,7 @@ func (h *Hub) SetPresence(c *Client, page, mode string) {
 			DisplayName: c.DisplayName,
 			Page:        page,
 			Mode:        mode,
+			Offset:      offset,
 			Since:       time.Now().UnixMilli(),
 		},
 	}

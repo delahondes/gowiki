@@ -1,5 +1,5 @@
 import { EditorState, TextSelection, Plugin } from "prosemirror-state"
-import { EditorView } from "prosemirror-view"
+import { EditorView, Decoration, DecorationSet } from "prosemirror-view"
 import { Slice } from "prosemirror-model"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
@@ -8,6 +8,7 @@ import { history, undo, redo } from "prosemirror-history"
 import { icons } from "prosemirror-menu"
 import { splitListItem, sinkListItem, liftListItem, wrapInList } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
+import { CollabSession } from "./collab.js"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
@@ -104,6 +105,7 @@ let lastSavedDraftMarkdown = null // markdown from the last successful draft sav
 
 let mode = "view"
 let editMode = "visual"
+let collabSession = null
 let currentMarkdown = defaultMarkdown
 let currentDoc = markdownToPM(defaultMarkdown, registry)
 let editBaselineMarkdown = defaultMarkdown
@@ -1336,6 +1338,7 @@ function setMode(nextMode) {
   if (mode === "edit" && nextMode !== "edit") {
     editBaselineMarkdown = currentMarkdown
     stopAutoSave()
+    stopCollabSession()
   }
 
   mode = nextMode
@@ -4853,6 +4856,21 @@ function renderEdit(nextEditMode) {
       })
     })
 
+    // Notify collab session on raw edits + track cursor for presence.
+    let rawCollabTimer = null
+    editorEl.addEventListener("input", () => {
+      if (!collabSession) return
+      clearTimeout(rawCollabTimer)
+      rawCollabTimer = setTimeout(() => {
+        if (collabSession) collabSession.localChange(editorEl.value)
+      }, 150)
+      updateEditOffset()
+    })
+    editorEl.addEventListener("click", () => updateEditOffset())
+    editorEl.addEventListener("keyup", (e) => {
+      if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") updateEditOffset()
+    })
+
     wrapper.appendChild(editorEl)
     contentRoot.appendChild(wrapper)
     autoResizeRawEditor(editorEl)
@@ -4922,6 +4940,82 @@ function renderEdit(nextEditMode) {
     },
   })
 
+  // Plugin that notifies the collab session when the document changes,
+  // and tracks which block the cursor is in for presence indicators.
+  const collabNotifyPlugin = new Plugin({
+    view() {
+      return {
+        update(view, prevState) {
+          // Track block position on every selection change.
+          if (!prevState || !view.state.selection.eq(prevState.selection)) {
+            updateEditOffset()
+          }
+          // Track doc changes for collab sync.
+          if (prevState && !view.state.doc.eq(prevState.doc)) {
+            const isRemote = view.state.tr?.getMeta?.("collab-remote")
+            if (!isRemote && collabSession) {
+              clearTimeout(collabNotifyPlugin.spec._timer)
+              collabNotifyPlugin.spec._timer = setTimeout(() => {
+                if (collabSession && editorView) {
+                  const md = pmToMarkdown(editorView.state.doc, registry)
+                  collabSession.localChange(md)
+                }
+              }, 100)
+            }
+          }
+        }
+      }
+    },
+  })
+
+  // Plugin that renders colored block indicators for remote users' cursor positions.
+  const remoteBlockPlugin = new Plugin({
+    state: {
+      init() { return DecorationSet.empty },
+      apply(tr, decos) {
+        if (!tr.getMeta("remoteBlocksUpdate") && !tr.docChanged) return decos
+        // Rebuild decorations from remoteBlockUsers.
+        const doc = tr.doc
+        const decorations = []
+        for (const u of remoteBlockUsers) {
+          if (u.block < 0 || u.block >= doc.content.childCount) continue
+          let pos = 0
+          for (let i = 0; i < u.block; i++) {
+            pos += doc.content.child(i).nodeSize
+          }
+          const node = doc.content.child(u.block)
+          const color = presenceColor(u.username)
+          // Widget decoration: a small colored bar before the block.
+          const widget = Decoration.widget(pos, () => {
+            const bar = document.createElement("div")
+            bar.className = "gowiki-remote-indicator"
+            bar.style.cssText = `border-left:3px solid ${color};position:absolute;left:0;top:0;bottom:0;pointer-events:none`
+            const label = document.createElement("div")
+            label.className = "gowiki-remote-label"
+            label.style.cssText = `position:absolute;left:6px;top:-10px;font-size:9px;color:${color};font-weight:600;white-space:nowrap;pointer-events:none;opacity:0.8`
+            label.textContent = u.displayName
+            const wrapper = document.createElement("div")
+            wrapper.style.cssText = "position:absolute;left:0;top:0;bottom:0;width:0;overflow:visible;pointer-events:none"
+            wrapper.appendChild(bar)
+            wrapper.appendChild(label)
+            return wrapper
+          }, { side: -1, key: "remote-" + u.username })
+          decorations.push(widget)
+          // Also add a node decoration for the background tint.
+          decorations.push(Decoration.node(pos, pos + node.nodeSize, {
+            style: `background:${color}11;border-left:3px solid ${color};padding-left:8px`,
+          }))
+        }
+        return DecorationSet.create(doc, decorations)
+      },
+    },
+    props: {
+      decorations(state) {
+        return this.getState(state)
+      },
+    },
+  })
+
   const plugins = [
     shortcutKeymap,
     listKeymap,
@@ -4929,6 +5023,8 @@ function renderEdit(nextEditMode) {
     keymap(baseKeymap),
     ...registry.getEditorPlugins(),
     menubarStatePlugin,
+    collabNotifyPlugin,
+    remoteBlockPlugin,
   ]
 
   // Restore stashed state (preserves undo history) or create fresh.
@@ -5395,16 +5491,21 @@ function renderActions() {
 
     actionsRoot.appendChild(makeActionSep())
 
-    const saveHint = isMac ? "\u2318S" : "Ctrl+S"
-    actionsRoot.appendChild(makeActionIconBtn("save", `Save & continue (${saveHint})`, () => void saveDraftExplicit()))
-    actionsRoot.appendChild(makeActionIconBtn("saveDraft", "Save to draft", () => void saveDraftAndExit()))
+    if (isCollabGuest) {
+      // Collab guest: can only leave the session.
+      actionsRoot.appendChild(makeActionIconBtn("cancel", "Leave session (Esc)", () => cancelEdit()))
+    } else {
+      const saveHint = isMac ? "\u2318S" : "Ctrl+S"
+      actionsRoot.appendChild(makeActionIconBtn("save", `Save & continue (${saveHint})`, () => void saveDraftExplicit()))
+      actionsRoot.appendChild(makeActionIconBtn("saveDraft", "Save to draft", () => void saveDraftAndExit()))
 
-    const pubHint = isMac ? "\u21E7\u2318S" : "Ctrl+Shift+S"
-    actionsRoot.appendChild(makeActionIconBtn("publish", `Publish (${pubHint})`, () => void publishDraft()))
+      const pubHint = isMac ? "\u21E7\u2318S" : "Ctrl+Shift+S"
+      actionsRoot.appendChild(makeActionIconBtn("publish", `Publish (${pubHint})`, () => void publishDraft()))
 
-    actionsRoot.appendChild(makeActionSep())
-    actionsRoot.appendChild(makeActionIconBtn("cancel", "Cancel editing", () => cancelEdit()))
-    actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
+      actionsRoot.appendChild(makeActionSep())
+      actionsRoot.appendChild(makeActionIconBtn("cancel", "Cancel editing", () => cancelEdit()))
+      actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
+    }
 
     actionsRoot.appendChild(makeActionSep())
     actionsRoot.appendChild(makeActionIconBtn("fullscreen", "Fullscreen (F11)", () => toggleFullscreen()))
@@ -5422,9 +5523,7 @@ function renderActions() {
       actionsRoot.appendChild(makeActionIconBtn("publish", "Publish draft", () => void publishFromView()))
       actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
     } else if (pageLockInfo && pageLockInfo.locked_by && pageLockInfo.locked_by !== currentUser?.username) {
-      const editBtn = makeActionIconBtn("lock", `Locked by ${pageLockInfo.locked_by}`, () => {})
-      editBtn.disabled = true
-      actionsRoot.appendChild(editBtn)
+      actionsRoot.appendChild(makeActionIconBtn("edit", `Join ${pageLockInfo.locked_by}'s session`, (e) => { if (e?.shiftKey) editMode = "raw"; void joinCollabSession(pageLockInfo.locked_by) }))
     } else {
       const editHint = isMac ? "\u2318E" : "Ctrl+E"
       actionsRoot.appendChild(makeActionIconBtn("edit", `Edit (${editHint}, Shift+click: raw mode)`, (e) => { if (e?.shiftKey) editMode = "raw"; void enterEditMode(false) }))
@@ -6222,6 +6321,20 @@ async function restoreVersion(version) {
 
 function cancelEdit() {
   if (mode !== "edit") return
+
+  // Collab guest: just leave the session, no draft to manage.
+  if (isCollabGuest) {
+    isCollabGuest = false
+    currentMarkdown = editBaselineMarkdown
+    try {
+      currentDoc = markdownToPM(currentMarkdown, registry)
+    } catch {
+      currentDoc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create()])
+    }
+    setMode("view")
+    setStatus("Left editing session")
+    return
+  }
 
   if (draftSavedThisSession) {
     // Draft was explicitly saved — preserve it, show saved draft content.
@@ -7051,6 +7164,46 @@ async function reloadPageContent() {
 
 // ── Draft / Edit mode API ────────────────────────────
 
+let isCollabGuest = false // true when co-editing without owning the lock
+
+async function joinCollabSession(lockOwner) {
+  // Join an existing edit session without acquiring a lock.
+  // Use the published content as the starting point — the Yjs sync
+  // will bring us up to date with the lock owner's current state.
+  isCollabGuest = true
+  editToken = null
+  stashedEditorState = null
+  draftSavedThisSession = false
+  lastSavedDraftMarkdown = null
+
+  // currentMarkdown is already the published content from view mode.
+  try {
+    currentDoc = markdownToPM(currentMarkdown, registry)
+  } catch (err) {
+    console.error("Failed to parse markdown for collab join:", err)
+    currentDoc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create()])
+    editMode = "raw"
+  }
+  setMode("edit")
+
+  // Start the collab session — Yjs will sync with the lock owner.
+  startCollabSession(currentMarkdown)
+
+  // Focus the editor and send initial cursor position.
+  setTimeout(() => {
+    if (editMode === "visual" && editorView) {
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      rawEditor.focus()
+      rawEditor.setSelectionRange(0, 0)
+    }
+    updateEditOffset()
+  }, 200)
+
+  setStatus(`Joined ${lockOwner}'s editing session`)
+  return true
+}
+
 function stashEditorState() {
   if (editorView) {
     stashedEditorState = editorView.state
@@ -7072,7 +7225,10 @@ async function enterEditMode(force) {
   })
   if (resp.status === 423) {
     const body = await resp.json()
-    setStatus(`Page locked by ${body.locked_by}`)
+    const lockOwner = body.locked_by || "another user"
+    if (confirm(`Page is being edited by ${lockOwner}. Join their editing session?`)) {
+      return joinCollabSession(lockOwner)
+    }
     return false
   }
   if (resp.status === 409) {
@@ -7107,6 +7263,13 @@ async function enterEditMode(force) {
     editMode = "raw"
   }
   setMode("edit")
+
+  // Start collaborative editing session.
+  startCollabSession(currentMarkdown)
+
+  // Send initial cursor position.
+  setTimeout(() => updateEditOffset(), 200)
+
   // Restore cursor position from a previous editing session.
   restoreCursorFromLocalStorage()
   return true
@@ -10588,6 +10751,281 @@ async function bootstrap() {
   initPresence()
 }
 
+// ── Collaborative editing ───────────────────────────────
+
+/**
+ * Apply a remote document update to the ProseMirror editor by diffing
+ * top-level nodes and only replacing changed ones. This preserves the
+ * cursor position when the cursor is in an unchanged block.
+ */
+function applyRemoteDocUpdate(view, newDoc) {
+  const oldDoc = view.state.doc
+  const tr = view.state.tr
+
+  // Compare top-level nodes. Walk backwards so position offsets stay valid.
+  const oldCount = oldDoc.content.childCount
+  const newCount = newDoc.content.childCount
+  const maxCount = Math.max(oldCount, newCount)
+
+  // Find common prefix (unchanged top-level nodes from the start).
+  let commonPrefix = 0
+  while (commonPrefix < oldCount && commonPrefix < newCount) {
+    const oldNode = oldDoc.content.child(commonPrefix)
+    const newNode = newDoc.content.child(commonPrefix)
+    if (!oldNode.eq(newNode)) break
+    commonPrefix++
+  }
+
+  // Find common suffix (unchanged top-level nodes from the end).
+  let commonSuffix = 0
+  while (commonSuffix < (oldCount - commonPrefix) && commonSuffix < (newCount - commonPrefix)) {
+    const oldNode = oldDoc.content.child(oldCount - 1 - commonSuffix)
+    const newNode = newDoc.content.child(newCount - 1 - commonSuffix)
+    if (!oldNode.eq(newNode)) break
+    commonSuffix++
+  }
+
+  // If everything matches, nothing to do.
+  if (commonPrefix + commonSuffix >= maxCount) return
+
+  // Compute the range in the old doc that changed.
+  let fromPos = 0
+  for (let i = 0; i < commonPrefix; i++) {
+    fromPos += oldDoc.content.child(i).nodeSize
+  }
+  let toPos = oldDoc.content.size
+  for (let i = 0; i < commonSuffix; i++) {
+    toPos -= oldDoc.content.child(oldCount - 1 - i).nodeSize
+  }
+
+  // Collect the new nodes for the changed range.
+  const newNodes = []
+  for (let i = commonPrefix; i < newCount - commonSuffix; i++) {
+    newNodes.push(newDoc.content.child(i))
+  }
+
+  tr.replaceWith(fromPos, toPos, newNodes)
+  tr.setMeta("addToHistory", false)
+  tr.setMeta("collab-remote", true)
+  view.dispatch(tr)
+}
+
+/**
+ * Apply a remote text update to a textarea by diffing strings and
+ * adjusting the cursor position based on where the change happened.
+ */
+function applyRemoteRawUpdate(textarea, newText) {
+  const oldText = textarea.value
+  if (oldText === newText) return
+
+  const cursorPos = textarea.selectionStart
+  const cursorEnd = textarea.selectionEnd
+
+  // Find the changed region.
+  let start = 0
+  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
+    start++
+  }
+  let oldEnd = oldText.length
+  let newEnd = newText.length
+  while (oldEnd > start && newEnd > start && oldText[oldEnd - 1] === newText[newEnd - 1]) {
+    oldEnd--
+    newEnd--
+  }
+
+  textarea.value = newText
+
+  // Adjust cursor: if cursor was before the change, keep it.
+  // If inside or after, shift by the length difference.
+  const delta = (newEnd - start) - (oldEnd - start)
+  let newCursorPos = cursorPos
+  let newCursorEnd = cursorEnd
+  if (cursorPos > oldEnd) {
+    newCursorPos = cursorPos + delta
+    newCursorEnd = cursorEnd + delta
+  } else if (cursorPos > start) {
+    // Cursor was inside the changed region — put it at the end of the new content.
+    newCursorPos = newEnd
+    newCursorEnd = newEnd
+  }
+  newCursorPos = Math.max(0, Math.min(newCursorPos, newText.length))
+  newCursorEnd = Math.max(0, Math.min(newCursorEnd, newText.length))
+  textarea.setSelectionRange(newCursorPos, newCursorEnd)
+}
+
+let remoteBlockUsers = [] // [{block, username, displayName}]
+
+/**
+ * Convert a markdown character offset to a block index (blank-line separated).
+ */
+function markdownOffsetToBlock(md, offset) {
+  let block = 0
+  let i = 0
+  while (i < offset && i < md.length) {
+    if (md[i] === "\n" && i + 1 < md.length && md[i + 1] === "\n") {
+      block++
+      // Skip consecutive blank lines.
+      while (i + 1 < md.length && md[i + 1] === "\n") i++
+    }
+    i++
+  }
+  return block
+}
+
+function renderRemoteBlockIndicators() {
+  const editingUsers = currentPresenceUsers.filter(u => {
+    if (u.mode !== "edit") return false
+    const block = u.offset ?? u.block ?? -1
+    return block >= 0
+  }).map(u => ({ ...u, _block: u.offset ?? u.block ?? -1 }))
+  console.log("[presence] remote users:", editingUsers.map(u => ({ user: u.username, block: u._block })), "mode:", editMode)
+
+  if (mode !== "edit") return
+
+  if (editMode === "visual" && editorView) {
+    // Convert markdown char offset → PM node index.
+    const doc = editorView.state.doc
+    const docSize = doc.content.size
+    const maxNode = doc.content.childCount - 1
+    remoteBlockUsers = editingUsers.map(u => {
+      // Map char offset to approximate PM position, then find the node.
+      const charOff = u._block // this is actually a char offset now
+      const pmPos = docSize > 0 ? Math.round((charOff / Math.max(1, currentMarkdown.length)) * docSize) : 0
+      let nodeIdx = 0
+      doc.forEach((node, nodePos) => {
+        if (pmPos > nodePos + node.nodeSize) nodeIdx++
+      })
+      return {
+        block: Math.min(nodeIdx, maxNode),
+        username: u.username,
+        displayName: u.display_name || u.username,
+      }
+    })
+    const tr = editorView.state.tr.setMeta("remoteBlocksUpdate", true)
+    tr.setMeta("addToHistory", false)
+    editorView.dispatch(tr)
+  } else if (editMode === "raw" && rawEditor) {
+    // Convert markdown char offset → blank-line block index.
+    remoteBlockUsers = editingUsers.map(u => {
+      const block = markdownOffsetToBlock(rawEditor.value, u._block)
+      console.log("[presence→raw] offset", u._block, "→ block", block, "text at offset:", JSON.stringify(rawEditor.value.substring(u._block, u._block + 40)))
+      return { block, username: u.username, displayName: u.display_name || u.username }
+    })
+    renderRawRemoteIndicators()
+  }
+}
+
+/**
+ * Render colored indicators alongside the raw textarea showing
+ * which "block" (separated by blank lines) remote users are in.
+ */
+function renderRawRemoteIndicators() {
+  // Remove existing indicators.
+  document.querySelectorAll(".gowiki-raw-remote-indicator").forEach(el => el.remove())
+
+  if (!rawEditor || remoteBlockUsers.length === 0) return
+
+  const text = rawEditor.value
+  const lines = text.split("\n")
+
+  // Map block indices to line ranges. Blocks are separated by blank lines.
+  const blockRanges = [] // [{startLine, endLine}]
+  let blockStart = 0
+  let inBlock = false
+  for (let i = 0; i <= lines.length; i++) {
+    const isBlank = i === lines.length || lines[i].trim() === ""
+    if (!isBlank && !inBlock) {
+      blockStart = i
+      inBlock = true
+    } else if (isBlank && inBlock) {
+      blockRanges.push({ startLine: blockStart, endLine: i - 1 })
+      inBlock = false
+    }
+  }
+
+  const parent = rawEditor.parentElement
+  if (!parent) return
+  parent.style.position = "relative"
+
+  // Compute character offset for the start of each line.
+  const lineOffsets = [0]
+  for (let i = 0; i < lines.length - 1; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1)
+  }
+
+  for (const u of remoteBlockUsers) {
+    if (u.block < 0 || u.block >= blockRanges.length) continue
+    const range = blockRanges[u.block]
+    const color = presenceColor(u.username)
+
+    // Get pixel Y for start and end of the block using the mirror div.
+    const startCharPos = lineOffsets[range.startLine] || 0
+    const endCharPos = (lineOffsets[range.endLine + 1] || lineOffsets[range.endLine] || startCharPos)
+    const startY = getTextareaCursorOffset(rawEditor, startCharPos)
+    const endY = getTextareaCursorOffset(rawEditor, endCharPos)
+
+    // Offset by textarea's position within parent.
+    const taTop = rawEditor.offsetTop
+    const top = taTop + startY.y - rawEditor.scrollTop
+    const height = Math.max(endY.y - startY.y, 16)
+
+    const indicator = document.createElement("div")
+    indicator.className = "gowiki-raw-remote-indicator"
+    indicator.style.cssText = `position:absolute;left:0;top:${top}px;width:3px;height:${height}px;background:${color};pointer-events:none;border-radius:1px;z-index:5`
+
+    const label = document.createElement("div")
+    label.style.cssText = `position:absolute;left:6px;top:${Math.max(0, top - 12)}px;font-size:9px;color:${color};font-weight:600;white-space:nowrap;pointer-events:none;opacity:0.8;z-index:5`
+    label.textContent = u.displayName
+    label.className = "gowiki-raw-remote-indicator"
+
+    parent.appendChild(indicator)
+    parent.appendChild(label)
+  }
+}
+
+function startCollabSession(initialMarkdown) {
+  stopCollabSession() // clean up any previous session
+
+  collabSession = new CollabSession(pagePath, initialMarkdown, {
+    getMarkdown() {
+      if (editMode === "visual" && editorView) {
+        return pmToMarkdown(editorView.state.doc, registry)
+      } else if (editMode === "raw" && rawEditor) {
+        return rawEditor.value
+      }
+      return currentMarkdown
+    },
+    setMarkdown(markdown, source) {
+      if (source !== "remote") return
+      currentMarkdown = markdown
+
+      if (editMode === "visual" && editorView) {
+        try {
+          const newDoc = markdownToPM(markdown, registry)
+          applyRemoteDocUpdate(editorView, newDoc)
+        } catch (err) {
+          console.warn("collab: failed to apply remote change to visual editor", err)
+        }
+      } else if (editMode === "raw" && rawEditor) {
+        // Apply a surgical text diff to preserve cursor position.
+        applyRemoteRawUpdate(rawEditor, markdown)
+      }
+    },
+    getMode() {
+      return editMode
+    },
+  }, isCollabGuest)
+
+  collabSession.connect()
+}
+
+function stopCollabSession() {
+  if (collabSession) {
+    collabSession.destroy()
+    collabSession = null
+  }
+}
+
 // ── Presence (real-time user tracking) ──────────────────
 
 let presenceSocket = null
@@ -10613,9 +11051,11 @@ function initPresence() {
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === "presence" && msg.page === pagePath) {
+          console.log("[presence] raw message:", JSON.stringify(msg.users))
           // Filter out self.
           currentPresenceUsers = (msg.users || []).filter(u => u.username !== currentUser.username)
           renderPresenceBar()
+          renderRemoteBlockIndicators()
         }
       } catch { /* ignore */ }
     })
@@ -10644,9 +11084,76 @@ function initPresence() {
   connect()
 }
 
+let currentEditBlock = -1 // markdown char offset where cursor is
+
 function sendPresenceUpdate() {
   if (presenceSocket && presenceSocket.readyState === WebSocket.OPEN) {
-    presenceSocket.send(JSON.stringify({ type: "join", page: pagePath, mode: mode === "edit" ? "edit" : "view" }))
+    const msg = { type: "join", page: pagePath, mode: mode === "edit" ? "edit" : "view" }
+    if (mode === "edit") msg.offset = currentEditBlock
+    presenceSocket.send(JSON.stringify(msg))
+  }
+}
+
+let cachedNodeMap = null // { doc, md, nodeRanges: [{charStart, charEnd}] }
+
+/**
+ * Build a map from PM node index to character range in the serialized markdown.
+ * Each node is serialized individually and its position is found in the full markdown.
+ */
+function getNodeMap(doc) {
+  if (cachedNodeMap && cachedNodeMap.doc === doc) return cachedNodeMap
+
+  const md = pmToMarkdown(doc, registry)
+  const nodeRanges = []
+  let searchFrom = 0
+
+  doc.forEach((node) => {
+    const nodeDoc = schema.nodes.doc.create(null, [node.copy(node.content)])
+    let nodeMd = pmToMarkdown(nodeDoc, registry)
+    // Strip trailing newline from node serialization.
+    while (nodeMd.endsWith("\n")) nodeMd = nodeMd.slice(0, -1)
+
+    // Find this node's markdown in the full serialized output.
+    const idx = md.indexOf(nodeMd, searchFrom)
+    if (idx >= 0) {
+      nodeRanges.push({ charStart: idx, charEnd: idx + nodeMd.length })
+      searchFrom = idx + nodeMd.length
+    } else {
+      // Fallback: estimate from previous position.
+      nodeRanges.push({ charStart: searchFrom, charEnd: searchFrom })
+    }
+  })
+
+  cachedNodeMap = { doc, md, nodeRanges }
+  return cachedNodeMap
+}
+
+function updateEditOffset() {
+  if (mode !== "edit") return
+  let charOffset = -1
+
+  if (editMode === "raw" && rawEditor) {
+    charOffset = rawEditor.selectionStart
+  } else if (editMode === "visual" && editorView) {
+    const doc = editorView.state.doc
+    const pos = editorView.state.selection.from
+
+    // Find which PM node the cursor is in.
+    let cursorNodeIdx = 0
+    doc.forEach((node, nodePos) => {
+      if (pos > nodePos + node.nodeSize) cursorNodeIdx++
+    })
+
+    // Get the char offset of that node in the markdown.
+    const map = getNodeMap(doc)
+    if (cursorNodeIdx < map.nodeRanges.length) {
+      charOffset = map.nodeRanges[cursorNodeIdx].charStart
+    }
+  }
+
+  if (charOffset !== currentEditBlock) {
+    currentEditBlock = charOffset
+    sendPresenceUpdate()
   }
 }
 
