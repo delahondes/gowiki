@@ -24,8 +24,28 @@ The user who first enters edit mode **owns the draft**. This has specific implic
 
 The guest contributes to the draft owner's work. The draft owner retains full control: they alone decide whether to publish or discard the changes. When the guest leaves, the draft owner's content includes all contributions.
 
+## 1. Ownership transfer
+
+Draft ownership transfers automatically when the owner leaves:
+
+### Owner saves to draft and exits
+
+The system detects that the owner stopped editing. The guest is automatically promoted to draft owner and gains save/publish permissions. The former owner sees a notification that their draft was taken over.
+
+### Owner disconnects (browser closed, network loss)
+
+The WebSocket connection detects the disconnection. The guest is automatically promoted, same as above.
+
+### Joining a stale draft
+
+If a user saved a draft and left without another user being present, the draft remains locked. When a new user tries to edit, they are prompted to join the session. If the original owner is not online, the new user is automatically promoted to draft owner within a few seconds.
+
+### What the former owner sees
+
+When ownership transfers, the former owner receives a notification: "Your draft was taken over by [user]. Click Join to continue editing." The former owner's edit button updates to show a Join option. If they try to resume editing, the system verifies their edit token is still valid — if the draft was reclaimed, they enter a fresh session or join the new owner's session.
+
 {blockquote class=note}
-> A guest cannot save independently. If the guest needs to preserve work, the draft owner should save or publish before the guest leaves.
+> Ownership transfer preserves all content. No edits are lost during the transfer — the new owner receives the exact content the previous owner had.
 
 ## 1. Presence indicators
 
@@ -56,12 +76,11 @@ Switching modes during a session (Cmd+E / Ctrl+E) works normally — the remote 
 
 - **Same-block editing**: if two users edit the same paragraph simultaneously, the last keystroke wins. The block indicators help you avoid this — work in different sections of the page.
 - **No character-level merge**: unlike Google Docs, individual characters are not tracked across users. The system works at the block level.
-- **Guest cannot save**: only the draft owner can save or publish. The guest's contributions are part of the owner's draft.
 - **Session persistence**: the collaborative session lives in memory. If both users disconnect, the draft is preserved on disk (for the owner), but the real-time connection must be re-established.
 
 ## 1. Best practices
 
 - **Work in different sections** of the page to avoid conflicts
 - **Watch the block indicators** — if someone's bar is near your cursor, move to a different area
-- **The draft owner should save regularly** (Cmd+S / Ctrl+S) to preserve everyone's work
+- **Save regularly** (Cmd+S / Ctrl+S) — the draft owner should save frequently to preserve everyone's work
 - **Communicate** — the presence indicators show who is on the page, but brief messages in a chat help coordinate larger edits
