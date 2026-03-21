@@ -230,11 +230,7 @@ func (s *SearchIndex) RebuildFromDir(contentDir string) error {
 		}
 		rel = filepath.ToSlash(rel)
 
-		pagePath := "/" + strings.TrimSuffix(rel, ".md")
-		pagePath = strings.TrimSuffix(pagePath, "/index")
-		if pagePath == "" {
-			pagePath = "/"
-		}
+		pagePath := CanonicalPath(strings.TrimSuffix(rel, ".md"))
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {

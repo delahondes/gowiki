@@ -56,9 +56,7 @@ func main() {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		pagePath := "/" + strings.TrimSuffix(rel, ".reviewflow.json")
-		// Namespace index pages: /foo/bar/index -> /foo/bar
-		pagePath = strings.TrimSuffix(pagePath, "/index")
+		pagePath := storage.CanonicalPath(strings.TrimSuffix(rel, ".reviewflow.json"))
 
 		// Load current state.
 		st, err := rfStore.Load(pagePath)

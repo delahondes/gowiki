@@ -164,7 +164,7 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 
 	// Normalize path: strip trailing /index so the returned path is canonical.
 	if isIndex && strings.HasSuffix(normalized, "/index") {
-		normalized = strings.TrimSuffix(normalized, "/index")
+		normalized = CanonicalPath(normalized)
 	}
 
 	content, err := os.ReadFile(contentPath)
@@ -1098,7 +1098,7 @@ func (s *FileStore) RebuildIndexes() error {
 		// resolvePath keeps /index suffix so ResolvePath resolves relative
 		// links correctly for namespace index pages.
 		resolvePath := "/" + strings.TrimSuffix(rel, ".md")
-		pagePath := strings.TrimSuffix(resolvePath, "/index")
+		pagePath := CanonicalPath(strings.TrimSuffix(rel, ".md"))
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {
@@ -1266,11 +1266,7 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 		rel = filepath.ToSlash(rel)
 
 		isNsIndex := strings.HasSuffix(rel, "/index.md")
-		pagePath := "/" + strings.TrimSuffix(rel, ".md")
-		pagePath = strings.TrimSuffix(pagePath, "/index")
-		if pagePath == "" {
-			pagePath = "/"
-		}
+		pagePath := CanonicalPath(strings.TrimSuffix(rel, ".md"))
 
 		content, readErr := os.ReadFile(absPath)
 		if readErr != nil {

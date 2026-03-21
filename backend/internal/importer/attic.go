@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gowiki/backend/internal/storage"
 )
 
 // atticVersion represents a single DokuWiki attic entry (one version of one page).
@@ -276,12 +278,7 @@ func dokuPageIDToGowikiPath(pageID string) string {
 	p := "/" + strings.Join(parts, "/")
 
 	// Simplify /path/index to /path
-	if strings.HasSuffix(p, "/index") {
-		p = strings.TrimSuffix(p, "/index")
-		if p == "" {
-			p = "/"
-		}
-	}
+	p = storage.CanonicalPath(p)
 
 	return p
 }

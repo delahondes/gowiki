@@ -49,8 +49,7 @@ func main() {
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		pagePath := "/" + strings.TrimSuffix(rel, ".reviewflow.json")
-		pagePath = strings.TrimSuffix(pagePath, "/index")
+		pagePath := storage.CanonicalPath(strings.TrimSuffix(rel, ".reviewflow.json"))
 
 		st, err := rfStore.Load(pagePath)
 		if err != nil || st == nil || len(st.VersionHistory) == 0 {

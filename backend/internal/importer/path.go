@@ -3,6 +3,8 @@ package importer
 import (
 	"path"
 	"strings"
+
+	"gowiki/backend/internal/storage"
 )
 
 // PageSourceToTarget converts a DokuWiki page path (relative to pages/)
@@ -156,13 +158,7 @@ func normalizeLinkPath(p string) string {
 	}
 
 	// Simplify /path/index to /path (they resolve to the same content)
-	if strings.HasSuffix(p, "/index") {
-		simplified := strings.TrimSuffix(p, "/index")
-		if simplified == "" {
-			simplified = "/"
-		}
-		p = simplified
-	}
+	p = storage.CanonicalPath(p)
 
 	return p
 }
