@@ -10583,6 +10583,129 @@ async function bootstrap() {
   fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
     footerView = v
   })
+
+  // Start presence tracking.
+  initPresence()
+}
+
+// ── Presence (real-time user tracking) ──────────────────
+
+let presenceSocket = null
+let presenceReconnectTimer = null
+let currentPresenceUsers = []
+
+function initPresence() {
+  if (!currentUser) return // not logged in
+
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+  const url = `${proto}//${window.location.host}/api/ws/presence`
+
+  function connect() {
+    const ws = new WebSocket(url)
+    presenceSocket = ws
+
+    ws.addEventListener("open", () => {
+      // Join current page.
+      ws.send(JSON.stringify({ type: "join", page: pagePath, mode: mode === "edit" ? "edit" : "view" }))
+    })
+
+    ws.addEventListener("message", (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === "presence" && msg.page === pagePath) {
+          // Filter out self.
+          currentPresenceUsers = (msg.users || []).filter(u => u.username !== currentUser.username)
+          renderPresenceBar()
+        }
+      } catch { /* ignore */ }
+    })
+
+    ws.addEventListener("close", () => {
+      presenceSocket = null
+      // Reconnect after 3 seconds.
+      clearTimeout(presenceReconnectTimer)
+      presenceReconnectTimer = setTimeout(connect, 3000)
+    })
+
+    ws.addEventListener("error", () => {
+      ws.close()
+    })
+
+    // Client-side keepalive every 25s.
+    const keepalive = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }))
+      } else {
+        clearInterval(keepalive)
+      }
+    }, 25000)
+  }
+
+  connect()
+}
+
+function sendPresenceUpdate() {
+  if (presenceSocket && presenceSocket.readyState === WebSocket.OPEN) {
+    presenceSocket.send(JSON.stringify({ type: "join", page: pagePath, mode: mode === "edit" ? "edit" : "view" }))
+  }
+}
+
+// Call sendPresenceUpdate when mode changes.
+const _originalSetMode = setMode
+setMode = function(nextMode) {
+  _originalSetMode(nextMode)
+  sendPresenceUpdate()
+}
+
+function renderPresenceBar() {
+  let container = document.getElementById("gowiki-presence")
+  if (currentPresenceUsers.length === 0) {
+    if (container) container.remove()
+    return
+  }
+
+  // Place in the banner, before the username.
+  const bannerUser = document.getElementById("banner-user")
+  if (!bannerUser) return
+
+  if (!container) {
+    container = document.createElement("span")
+    container.id = "gowiki-presence"
+    container.className = "gowiki-presence-container"
+    // Insert at the beginning of banner-user (before user links).
+    bannerUser.prepend(container)
+  }
+
+  container.innerHTML = ""
+  for (const u of currentPresenceUsers) {
+    const dot = document.createElement("span")
+    dot.className = "gowiki-presence-dot"
+    if (u.mode === "edit") dot.classList.add("gowiki-presence-editing")
+
+    const initial = (u.display_name || u.username).charAt(0).toUpperCase()
+    dot.textContent = initial
+    dot.style.background = presenceColor(u.username)
+    if (u.mode === "edit") {
+      dot.style.boxShadow = "0 0 0 2px #fff, 0 0 0 4px #ff9800"
+    }
+
+    dot.title = (u.display_name || u.username) + (u.mode === "edit" ? " (editing)" : " (viewing)")
+    container.appendChild(dot)
+  }
+}
+
+const presenceColors = [
+  "#e53935", "#d81b60", "#8e24aa", "#5e35b1",
+  "#3949ab", "#1e88e5", "#00897b", "#43a047",
+  "#7cb342", "#f4511e", "#6d4c41", "#546e7a",
+]
+
+function presenceColor(username) {
+  let hash = 0
+  for (let i = 0; i < username.length; i++) {
+    hash = ((hash << 5) - hash + username.charCodeAt(i)) | 0
+  }
+  return presenceColors[Math.abs(hash) % presenceColors.length]
 }
 
 bootstrap().catch(err => {

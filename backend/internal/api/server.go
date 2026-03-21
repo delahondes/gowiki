@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/collab"
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
@@ -125,6 +126,7 @@ type Server struct {
 	todoService         *todo.TodoService
 	reviewflowService   *reviewflow.Service
 	commentService      *comment.Service
+	presenceHub         *collab.Hub
 	serveWeb            bool
 	webDirPath          string
 }
@@ -157,6 +159,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		tokenStore:        tokenStore,
 		caStore:           caStore,
 		certStore:         certStore,
+		presenceHub:       collab.NewHub(),
 		rateLimiter:       NewRateLimiter(),
 		serveWeb:          serveWeb,
 		webDirPath:  webDirPath,
@@ -252,6 +255,12 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/site/info", s.handleSiteInfo)
 		r.Get("/api/users/display", s.handleUsersDisplay)
 		r.Get("/api/users/list", s.handleUsersList)
+	})
+
+	// WebSocket presence — requires auth, no ACL.
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Get("/api/ws/presence", s.handlePresenceWS)
 	})
 
 	// Write endpoints — require auth + ACL "edit" permission.
