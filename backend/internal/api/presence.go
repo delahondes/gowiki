@@ -67,3 +67,38 @@ func (s *Server) handleCollabWS(w http.ResponseWriter, r *http.Request) {
 
 	s.collabRelay.Join(conn, pagePath, username, displayName) // blocks
 }
+
+// handleCollabDraftRead lets any authenticated user read the current draft
+// for a page that is being actively edited (locked). This is used when
+// joining a collaborative session so the guest starts with the same content.
+// GET /api/collab/draft/{path}
+func (s *Server) handleCollabDraftRead(w http.ResponseWriter, r *http.Request) {
+	pagePath := "/" + strings.TrimPrefix(r.URL.Path, "/api/collab/draft/")
+	if pagePath == "/" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	// Only serve if the page is currently locked (someone is editing).
+	lock := s.draftManager.GetLock(pagePath)
+	if lock.Owner == "" {
+		writeError(w, http.StatusNotFound, "no active editing session")
+		return
+	}
+
+	content, err := s.draftManager.AdminReadDraft(pagePath, lock.Owner)
+	if err != nil {
+		// Fall back to published content.
+		page, err := s.store.Get(pagePath)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "page not found")
+			return
+		}
+		content = page.Markdown
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"markdown": content,
+		"owner":    lock.Owner,
+	})
+}

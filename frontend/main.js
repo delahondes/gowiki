@@ -1792,6 +1792,12 @@ async function setEditMode(nextEditMode) {
   renderEdit(editMode)
   renderActions()
 
+  // Re-render remote block indicators and update our position after mode switch.
+  setTimeout(() => {
+    renderRemoteBlockIndicators()
+    updateEditOffset()
+  }, 100)
+
   // Restore cursor position using text context matching.
   if (cursorContext) {
     requestAnimationFrame(() => {
@@ -7168,15 +7174,26 @@ let isCollabGuest = false // true when co-editing without owning the lock
 
 async function joinCollabSession(lockOwner) {
   // Join an existing edit session without acquiring a lock.
-  // Use the published content as the starting point — the Yjs sync
-  // will bring us up to date with the lock owner's current state.
+  // Fetch the lock owner's draft so we start with the same content.
   isCollabGuest = true
   editToken = null
   stashedEditorState = null
   draftSavedThisSession = false
   lastSavedDraftMarkdown = null
 
-  // currentMarkdown is already the published content from view mode.
+  // Fetch the current draft content so we start with the same document.
+  try {
+    const resp = await authFetch(`/api/collab/draft/${encodePagePath(pagePath)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.markdown) {
+        currentMarkdown = data.markdown
+      }
+    }
+  } catch {
+    // Fall back to published content if we can't read the draft.
+  }
+
   try {
     currentDoc = markdownToPM(currentMarkdown, registry)
   } catch (err) {
@@ -7186,10 +7203,14 @@ async function joinCollabSession(lockOwner) {
   }
   setMode("edit")
 
-  // Start the collab session — Yjs will sync with the lock owner.
+  // Start the collab session with the draft content.
   startCollabSession(currentMarkdown)
 
-  // Focus the editor and send initial cursor position.
+  // Send initial position immediately (block 0) so the other user sees us.
+  currentEditBlock = 0
+  sendPresenceUpdate()
+
+  // Focus the editor after it's mounted.
   setTimeout(() => {
     if (editMode === "visual" && editorView) {
       editorView.focus()
@@ -7198,7 +7219,7 @@ async function joinCollabSession(lockOwner) {
       rawEditor.setSelectionRange(0, 0)
     }
     updateEditOffset()
-  }, 200)
+  }, 500)
 
   setStatus(`Joined ${lockOwner}'s editing session`)
   return true
@@ -10882,20 +10903,11 @@ function renderRemoteBlockIndicators() {
   if (mode !== "edit") return
 
   if (editMode === "visual" && editorView) {
-    // Convert markdown char offset → PM node index.
-    const doc = editorView.state.doc
-    const docSize = doc.content.size
-    const maxNode = doc.content.childCount - 1
+    // Block index maps directly to PM node index.
+    const maxNode = editorView.state.doc.content.childCount - 1
     remoteBlockUsers = editingUsers.map(u => {
-      // Map char offset to approximate PM position, then find the node.
-      const charOff = u._block // this is actually a char offset now
-      const pmPos = docSize > 0 ? Math.round((charOff / Math.max(1, currentMarkdown.length)) * docSize) : 0
-      let nodeIdx = 0
-      doc.forEach((node, nodePos) => {
-        if (pmPos > nodePos + node.nodeSize) nodeIdx++
-      })
       return {
-        block: Math.min(nodeIdx, maxNode),
+        block: Math.min(Math.max(0, u._block), maxNode),
         username: u.username,
         displayName: u.display_name || u.username,
       }
@@ -10903,12 +10915,14 @@ function renderRemoteBlockIndicators() {
     const tr = editorView.state.tr.setMeta("remoteBlocksUpdate", true)
     tr.setMeta("addToHistory", false)
     editorView.dispatch(tr)
-  } else if (editMode === "raw" && rawEditor) {
-    // Convert markdown char offset → blank-line block index.
-    remoteBlockUsers = editingUsers.map(u => {
-      const block = markdownOffsetToBlock(rawEditor.value, u._block)
-      return { block, username: u.username, displayName: u.display_name || u.username }
-    })
+  } else if (editMode === "raw") {
+    if (!rawEditor) return
+    // Block index used directly.
+    remoteBlockUsers = editingUsers.map(u => ({
+      block: u._block,
+      username: u.username,
+      displayName: u.display_name || u.username,
+    }))
     renderRawRemoteIndicators()
   }
 }
@@ -11091,62 +11105,23 @@ function sendPresenceUpdate() {
   }
 }
 
-let cachedNodeMap = null // { doc, md, nodeRanges: [{charStart, charEnd}] }
-
-/**
- * Build a map from PM node index to character range in the serialized markdown.
- * Each node is serialized individually and its position is found in the full markdown.
- */
-function getNodeMap(doc) {
-  if (cachedNodeMap && cachedNodeMap.doc === doc) return cachedNodeMap
-
-  const md = pmToMarkdown(doc, registry)
-  const nodeRanges = []
-  let searchFrom = 0
-
-  doc.forEach((node) => {
-    const nodeDoc = schema.nodes.doc.create(null, [node.copy(node.content)])
-    let nodeMd = pmToMarkdown(nodeDoc, registry)
-    // Strip trailing newline from node serialization.
-    while (nodeMd.endsWith("\n")) nodeMd = nodeMd.slice(0, -1)
-
-    // Find this node's markdown in the full serialized output.
-    const idx = md.indexOf(nodeMd, searchFrom)
-    if (idx >= 0) {
-      nodeRanges.push({ charStart: idx, charEnd: idx + nodeMd.length })
-      searchFrom = idx + nodeMd.length
-    } else {
-      // Fallback: estimate from previous position.
-      nodeRanges.push({ charStart: searchFrom, charEnd: searchFrom })
-    }
-  })
-
-  cachedNodeMap = { doc, md, nodeRanges }
-  return cachedNodeMap
-}
-
 function updateEditOffset() {
   if (mode !== "edit") return
-  let charOffset = -1
+  let block = -1
 
   if (editMode === "raw" && rawEditor) {
-    charOffset = rawEditor.selectionStart
+    block = markdownOffsetToBlock(rawEditor.value, rawEditor.selectionStart)
   } else if (editMode === "visual" && editorView) {
-    const doc = editorView.state.doc
+    // Use PM node index directly — same coordinate system as visual decorations.
     const pos = editorView.state.selection.from
-
-    // Find which PM node the cursor is in.
-    let cursorNodeIdx = 0
-    doc.forEach((node, nodePos) => {
-      if (pos > nodePos + node.nodeSize) cursorNodeIdx++
+    let idx = 0
+    editorView.state.doc.forEach((node, nodePos) => {
+      if (pos > nodePos + node.nodeSize) idx++
     })
-
-    // Get the char offset of that node in the markdown.
-    const map = getNodeMap(doc)
-    if (cursorNodeIdx < map.nodeRanges.length) {
-      charOffset = map.nodeRanges[cursorNodeIdx].charStart
-    }
+    block = idx
   }
+
+  let charOffset = block
 
   if (charOffset !== currentEditBlock) {
     currentEditBlock = charOffset

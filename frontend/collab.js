@@ -40,6 +40,7 @@ export class CollabSession {
     this.isGuest = isGuest
 
     this._initialMarkdown = initialMarkdown
+    this.synced = false
   }
 
   /**
@@ -64,10 +65,13 @@ export class CollabSession {
     // When we first sync, seed the document if it's empty.
     // Only the lock owner seeds — guests receive the state via sync.
     this.provider.on("sync", (synced) => {
-      if (synced && !this.isGuest && this.ytext.length === 0 && this._initialMarkdown) {
-        this.doc.transact(() => {
-          this.ytext.insert(0, this._initialMarkdown)
-        }, this) // origin = this, so we can filter in the observer
+      if (synced) {
+        this.synced = true
+        if (!this.isGuest && this.ytext.length === 0 && this._initialMarkdown) {
+          this.doc.transact(() => {
+            this.ytext.insert(0, this._initialMarkdown)
+          }, this)
+        }
       }
     })
 
