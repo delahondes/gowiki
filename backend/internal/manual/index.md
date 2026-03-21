@@ -33,6 +33,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 
 ## Collaboration
 
+- [Collaborative Editing](./collaboration) — Real-time co-editing, presence indicators, and draft ownership
 - [Drafts & Locking](./drafts) — How editing sessions, auto-save, and locks work
 - [Page History](./history) — Viewing changes, diffs, and restoring previous versions
 - [Reviewflow](./reviewflow) — Document validation workflow (version tagging, role-based approval)
