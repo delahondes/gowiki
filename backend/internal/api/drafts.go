@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	markdown_pkg "gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
 )
 
@@ -51,6 +52,13 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 		if tmpl, ok := s.store.(TemplateResolver); ok {
 			if content, _, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
 				published = content
+				// Apply tag mutations (e.g. remove "tpl" tags from templates).
+				if s.configStore != nil {
+					mutations := s.configStore.Get().Tags.TemplateMutations
+					if len(mutations) > 0 {
+						published = markdown_pkg.ApplyTagMutations(published, mutations)
+					}
+				}
 			}
 		}
 	}

@@ -186,18 +186,9 @@ func ResolveTemplateVars(text, content string) string {
 	if !strings.Contains(text, "{{") {
 		return text
 	}
-	rows := ExtractDatabaseRows(content)
-	if len(rows) == 0 {
+	fields := extractTemplateFields(content)
+	if len(fields) == 0 {
 		return text
-	}
-	// Merge all row fields (first block wins for duplicates).
-	fields := make(map[string]string)
-	for _, row := range rows {
-		for k, v := range row.Fields {
-			if _, exists := fields[k]; !exists {
-				fields[k] = v
-			}
-		}
 	}
 	return templateVarRe.ReplaceAllStringFunc(text, func(match string) string {
 		name := match[2 : len(match)-2]
@@ -206,4 +197,54 @@ func ResolveTemplateVars(text, content string) string {
 		}
 		return match
 	})
+}
+
+// directiveRe matches lines that are directive blocks: {name ...}
+var directiveLineRe = regexp.MustCompile(`^\s*\{[A-Za-z][A-Za-z0-9_-]*\s`)
+
+// ResolveDirectiveVars replaces {{field}} expressions only inside directive lines
+// (lines matching {name ...}). Regular text is left unchanged so {{VAR}} stays
+// dynamic for render-time resolution.
+func ResolveDirectiveVars(text, content string) string {
+	if !strings.Contains(text, "{{") {
+		return text
+	}
+	fields := extractTemplateFields(content)
+	if len(fields) == 0 {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, "{{") {
+			continue
+		}
+		if !directiveLineRe.MatchString(line) {
+			continue
+		}
+		lines[i] = templateVarRe.ReplaceAllStringFunc(line, func(match string) string {
+			name := match[2 : len(match)-2]
+			if val, ok := fields[name]; ok {
+				return val
+			}
+			return match
+		})
+	}
+	return strings.Join(lines, "\n")
+}
+
+func extractTemplateFields(content string) map[string]string {
+	rows := ExtractDatabaseRows(content)
+	if len(rows) == 0 {
+		return nil
+	}
+	fields := make(map[string]string)
+	for _, row := range rows {
+		for k, v := range row.Fields {
+			if _, exists := fields[k]; !exists {
+				fields[k] = v
+			}
+		}
+	}
+	return fields
 }

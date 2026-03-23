@@ -19,6 +19,7 @@ type Config struct {
 	Drafts     DraftsConfig     `yaml:"drafts" json:"drafts"`
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	Todo       TodoConfig       `yaml:"todo" json:"todo"`
+	Tags       TagConfig        `yaml:"tags" json:"tags"`
 	Reviewflow ReviewflowConfig `yaml:"reviewflow" json:"reviewflow"`
 	AIAPI      AIAPIConfig      `yaml:"ai_api" json:"ai_api"`
 }
@@ -104,6 +105,14 @@ type TodoWebhookConfig struct {
 type DatabaseConfig struct {
 	DSN     string `yaml:"dsn" json:"dsn"`
 	Enabled bool   `yaml:"enabled" json:"enabled"`
+}
+
+// TagConfig holds tag-related settings.
+type TagConfig struct {
+	// TemplateMutations defines tag transformations applied when creating a page from a template.
+	// Each entry is either "tag" (remove the tag) or "tag:replacement" (replace with another tag).
+	// Example: ["tpl", "draft:review"] removes "tpl" tags and replaces "draft" with "review".
+	TemplateMutations []string `yaml:"template_mutations" json:"template_mutations"`
 }
 
 // SiteConfig holds site-wide display settings.

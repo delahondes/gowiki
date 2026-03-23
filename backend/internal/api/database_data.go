@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -143,12 +144,38 @@ func (s *Server) buildDatabaseRowBlock(table *database.TableDef, row *database.R
 		}
 		val := ""
 		if v, ok := row.Fields[f.Name]; ok && v != nil {
-			val = fmt.Sprintf("%v", v)
+			val = formatFieldValue(v, f.Type)
 		}
 		sb.WriteString(fmt.Sprintf("| %s | %s |\n", f.Name, val))
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// formatFieldValue converts a database field value to its markdown string representation.
+func formatFieldValue(v any, fieldType string) string {
+	if v == nil {
+		return ""
+	}
+	switch fieldType {
+	case database.FieldTypeDate:
+		if t, ok := v.(time.Time); ok {
+			return t.Format("2006-01-02")
+		}
+		// String that looks like a full timestamp — truncate to date.
+		s := fmt.Sprintf("%v", v)
+		if len(s) >= 10 {
+			return s[:10]
+		}
+		return s
+	case database.FieldTypeDatetime:
+		if t, ok := v.(time.Time); ok {
+			return t.Format("2006-01-02T15:04:05Z")
+		}
+		return fmt.Sprintf("%v", v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // buildPageContent generates the markdown for an auto-created page-bound row.
@@ -159,7 +186,18 @@ func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) s
 	if table.PageTemplatePath != "" {
 		tmpl, err := s.store.Get(table.PageTemplatePath)
 		if err == nil {
-			return applyTemplate(tmpl.Markdown, dbRowBlock)
+			content := applyTemplate(tmpl.Markdown, dbRowBlock)
+			// Resolve {{field}} variables inside directive lines only.
+			// Regular text {{VAR}} stays unresolved for render-time expansion.
+			content = markdown.ResolveDirectiveVars(content, content)
+			// Apply tag mutations (e.g. remove "tpl" tags from templates).
+			if s.configStore != nil {
+				mutations := s.configStore.Get().Tags.TemplateMutations
+				if len(mutations) > 0 {
+					content = markdown.ApplyTagMutations(content, mutations)
+				}
+			}
+			return content
 		}
 	}
 
@@ -407,7 +445,7 @@ func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, auth
 		}
 		fieldNames = append(fieldNames, f.Name)
 		if v, ok := row.Fields[f.Name]; ok && v != nil {
-			values[f.Name] = fmt.Sprintf("%v", v)
+			values[f.Name] = formatFieldValue(v, f.Type)
 		} else {
 			values[f.Name] = ""
 		}

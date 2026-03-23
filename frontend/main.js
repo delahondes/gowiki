@@ -7788,10 +7788,18 @@ async function renderSitemapPage() {
       const pathElements = []
 
       for (const node of nodes) {
+        // Skip namespace index children — they are merged into the parent namespace label.
+        if (node.is_namespace_index && node.path !== "/") continue
+
         const li = document.createElement("li")
         const hasChildren = node.children && node.children.length > 0
         const isPhantom = !node.has_page
         const isRoot = node.path === "/"
+
+        // Check if this namespace has an index page among its children.
+        const nsIndex = hasChildren ? node.children.find(c => c.is_namespace_index) : null
+        // If the namespace has an index page, treat the namespace as having a page.
+        const effectiveHasPage = node.has_page || !!nsIndex
 
         if (hasChildren) {
           const toggle = document.createElement("span")
@@ -7816,14 +7824,14 @@ async function renderSitemapPage() {
         row.className = "gowiki-sitemap-row"
 
         const label = leafName(node)
-        if (isPhantom) {
+        if (isPhantom && !nsIndex) {
           const span = document.createElement("span")
           span.className = "gowiki-sitemap-path gowiki-sitemap-phantom"
           span.textContent = label
           pathElements.push(span)
           row.appendChild(span)
         } else {
-          const url = nodeUrl(node)
+          const url = nsIndex ? nodeUrl(nsIndex) : nodeUrl(node)
           const a = document.createElement("a")
           a.href = url
           a.className = "gowiki-sitemap-path gowiki-link-exists"
@@ -7836,8 +7844,8 @@ async function renderSitemapPage() {
           row.appendChild(a)
         }
 
-        const displayTitle = node.title || ""
-        if (!isPhantom && displayTitle) {
+        const displayTitle = nsIndex ? (nsIndex.title || node.title || "") : (node.title || "")
+        if (effectiveHasPage && displayTitle) {
           const titleSpan = document.createElement("span")
           titleSpan.className = "gowiki-sitemap-title"
           titleSpan.textContent = displayTitle
@@ -9362,6 +9370,28 @@ async function renderAdminConfigTab(container) {
     aiRequireSummaryLabel.appendChild(document.createTextNode("Require summary for token-authenticated writes"))
     form.appendChild(aiRequireSummaryLabel)
 
+    // Tags section
+    const tagsHeading = document.createElement("h3")
+    tagsHeading.textContent = "Tags"
+    form.appendChild(tagsHeading)
+
+    const tagsConfig = config.tags || {}
+
+    const tagMutNote = document.createElement("div")
+    tagMutNote.style.cssText = "font-size:0.85em;color:#666;margin:0 0 4px 0"
+    tagMutNote.textContent = "Template tag mutations: one per line. \"tpl\" removes the tag, \"draft:review\" replaces \"draft\" with \"review\". Applied when creating pages from templates."
+    form.appendChild(tagMutNote)
+
+    const tagMutInput = document.createElement("textarea")
+    tagMutInput.rows = 3
+    tagMutInput.style.cssText = "width:100%;font-family:monospace;font-size:13px"
+    tagMutInput.value = (tagsConfig.template_mutations || []).join("\n")
+    const tagMutLabel = document.createElement("label")
+    tagMutLabel.style.cssText = "display:block;margin:4px 0 4px 0;font-weight:500"
+    tagMutLabel.textContent = "Template tag mutations"
+    form.appendChild(tagMutLabel)
+    form.appendChild(tagMutInput)
+
     // Reviewflow section
     const rfHeading = document.createElement("h3")
     rfHeading.textContent = "Reviewflow Plugin"
@@ -9515,6 +9545,9 @@ async function renderAdminConfigTab(container) {
           stale_lock_timeout: staleLockInput.value.trim(),
         },
         database: config.database || {},
+        tags: {
+          template_mutations: tagMutInput.value.trim().split("\n").map(s => s.trim()).filter(Boolean),
+        },
         reviewflow: {
           enabled: rfEnabledCheckbox.checked,
           deadlines: (() => {
@@ -10790,6 +10823,76 @@ async function bootstrap() {
 
   // Start presence tracking.
   initPresence()
+
+  // Track recently viewed pages.
+  trackRecentPage()
+}
+
+// ── Recent pages ────────────────────────────────────────
+
+const RECENT_PAGES_MAX = 15
+const RECENT_PAGES_COOKIE = "gowiki_recent"
+
+function getRecentPages() {
+  const cookie = document.cookie.split("; ").find(c => c.startsWith(RECENT_PAGES_COOKIE + "="))
+  if (!cookie) return []
+  try {
+    return JSON.parse(decodeURIComponent(cookie.split("=").slice(1).join("=")))
+  } catch { return [] }
+}
+
+function setRecentPages(pages) {
+  const value = encodeURIComponent(JSON.stringify(pages))
+  // Session cookie (no max-age) — persists until browser closes.
+  // Use max-age=31536000 (1 year) so it survives restarts.
+  document.cookie = `${RECENT_PAGES_COOKIE}=${value};path=/;max-age=31536000;SameSite=Lax`
+}
+
+function trackRecentPage() {
+  // Skip virtual pages.
+  if (pagePath.startsWith("_")) return
+
+  const title = document.title.replace(/^\[.*?\]\s*/, "") || pageDisplayPath
+  const entry = { path: pageDisplayPath, title }
+
+  let recent = getRecentPages()
+  // Remove duplicate if already in the list.
+  recent = recent.filter(r => r.path !== entry.path)
+  // Add to front.
+  recent.unshift(entry)
+  // Trim to max.
+  if (recent.length > RECENT_PAGES_MAX) recent = recent.slice(0, RECENT_PAGES_MAX)
+
+  setRecentPages(recent)
+  renderRecentPages(recent)
+}
+
+function renderRecentPages(recent) {
+  const bar = document.getElementById("recent-pages")
+  if (!bar) return
+  bar.innerHTML = ""
+
+  if (!recent || recent.length === 0) return
+
+  for (let i = 0; i < recent.length; i++) {
+    if (i > 0) {
+      const sep = document.createElement("span")
+      sep.className = "gowiki-recent-sep"
+      sep.textContent = "›"
+      bar.appendChild(sep)
+    }
+    const link = document.createElement("a")
+    link.href = recent[i].path
+    link.textContent = recent[i].title
+    if (recent[i].path === pageDisplayPath) {
+      link.className = "gowiki-recent-current"
+    }
+    link.addEventListener("click", (e) => {
+      e.preventDefault()
+      window.location.href = recent[i].path
+    })
+    bar.appendChild(link)
+  }
 }
 
 // ── Collaborative editing ───────────────────────────────

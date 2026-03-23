@@ -17,6 +17,48 @@ body {
   z-index: 100;
 }
 
+/* ── Recent pages bar ───────────────────────────────── */
+
+#recent-pages {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 12px;
+  margin-right: auto;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+#recent-pages:empty {
+  display: none;
+}
+
+#recent-pages a {
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+#recent-pages a:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+#recent-pages a.gowiki-recent-current {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  font-weight: 600;
+}
+
+#recent-pages .gowiki-recent-sep {
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
 #banner-logo {
   flex-shrink: 0;
   margin-right: 12px;
@@ -32,7 +74,6 @@ body {
   font-size: 1.2em;
   font-weight: 600;
   flex-shrink: 0;
-  margin-right: auto;
 }
 
 #banner-search {
