@@ -17,7 +17,7 @@ class PresentationEngine {
   private progressBar: HTMLElement
   private counter: HTMLElement
 
-  constructor(slides: HTMLElement[], theme: string, ratio: string, background: string) {
+  constructor(slides: HTMLElement[], theme: string, ratio: string, background: string, font: string) {
     this.slides = slides
 
     this.overlay = document.createElement("div")
@@ -38,6 +38,18 @@ class PresentationEngine {
     slideEl.className = "gowiki-slides-slide"
     if (background) {
       slideEl.style.backgroundImage = `url(${background})`
+    }
+    if (font) {
+      // Percentages are relative to the base 1.5em slide font size.
+      // E.g. font=80% → 1.5 * 0.8 = 1.2em
+      if (font.endsWith("%")) {
+        const pct = parseFloat(font) / 100
+        if (!isNaN(pct)) {
+          slideEl.style.fontSize = `${(1.5 * pct).toFixed(3)}em`
+        }
+      } else {
+        slideEl.style.fontSize = font
+      }
     }
     viewport.appendChild(slideEl)
 
@@ -245,11 +257,11 @@ function collectSlides(markerDom: HTMLElement): HTMLElement[] {
   return slides
 }
 
-function launchPresentation(markerDom: HTMLElement, theme: string, ratio: string, background: string) {
+function launchPresentation(markerDom: HTMLElement, theme: string, ratio: string, background: string, font: string) {
   const slides = collectSlides(markerDom)
   if (slides.length === 0) return
 
-  const engine = new PresentationEngine(slides, theme, ratio, background)
+  const engine = new PresentationEngine(slides, theme, ratio, background, font)
   engine.start()
 }
 
@@ -288,7 +300,7 @@ class SlidesMarkerView {
     btn.addEventListener("click", (e) => {
       e.preventDefault()
       e.stopPropagation()
-      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio, this.node.attrs.background)
+      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio, this.node.attrs.background, this.node.attrs.font)
     })
   }
 
@@ -352,6 +364,13 @@ const slidesProperties: NodePropertySpec[] = [
   {
     name: "background",
     label: "Background",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => String(v ?? ""),
+  },
+  {
+    name: "font",
+    label: "Font size",
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
@@ -429,10 +448,33 @@ const slidesStyles = `
   line-height: 1.5;
   height: 100%;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: auto;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+}
+.gowiki-slides-slide::after {
+  content: "";
+  display: table;
+  clear: both;
+}
+/* Blockquote wrapping (floats) — these styles are scoped to .ProseMirror in the
+   blockquote plugin, so we duplicate them for the slide overlay context. */
+.gowiki-slides-slide blockquote.gowiki-bq-wrap-left {
+  float: left;
+  margin-right: 1em;
+  margin-bottom: 0.5em;
+}
+.gowiki-slides-slide blockquote.gowiki-bq-wrap-right {
+  float: right;
+  margin-left: 1em;
+  margin-bottom: 0.5em;
+}
+.gowiki-slides-slide blockquote[style*="float: left"] {
+  float: left !important;
+}
+.gowiki-slides-slide blockquote[style*="float: right"] {
+  float: right !important;
 }
 .gowiki-slides-slide h1 { font-size: 2em; margin: 0.3em 0; }
 .gowiki-slides-slide h2 { font-size: 1.5em; margin: 0.3em 0; }
@@ -529,6 +571,7 @@ export const slidePlugin: WikiPlugin = {
             theme: { default: "light" },
             ratio: { default: "16:9" },
             background: { default: "" },
+            font: { default: "" },
           },
           toDOM(node: any) {
             return ["div", {
@@ -537,6 +580,7 @@ export const slidePlugin: WikiPlugin = {
               "data-slides-theme": node.attrs.theme,
               "data-slides-ratio": node.attrs.ratio,
               "data-slides-background": node.attrs.background,
+              "data-slides-font": node.attrs.font,
             }, `Slides: ${node.attrs.title || "Presentation"}`]
           },
           parseDOM: [{
@@ -547,6 +591,7 @@ export const slidePlugin: WikiPlugin = {
                 theme: dom.getAttribute("data-slides-theme") || "light",
                 ratio: dom.getAttribute("data-slides-ratio") || "16:9",
                 background: dom.getAttribute("data-slides-background") || "",
+                font: dom.getAttribute("data-slides-font") || "",
               }
             },
           }],
@@ -570,6 +615,7 @@ export const slidePlugin: WikiPlugin = {
           theme: attrs.theme ?? "light",
           ratio: attrs.ratio ?? "16:9",
           background: attrs.background ?? "",
+          font: attrs.font ?? "",
         }))
       },
     })
@@ -582,6 +628,7 @@ export const slidePlugin: WikiPlugin = {
         if (node.attrs.theme && node.attrs.theme !== "light") parts.push(`theme=${node.attrs.theme}`)
         if (node.attrs.ratio && node.attrs.ratio !== "16:9") parts.push(`ratio=${node.attrs.ratio}`)
         if (node.attrs.background) parts.push(`background=${node.attrs.background}`)
+        if (node.attrs.font) parts.push(`font=${node.attrs.font}`)
         if (parts.length > 0) {
           return `{slides ${parts.join(" ")}}\n\n`
         }

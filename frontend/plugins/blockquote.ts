@@ -308,10 +308,14 @@ export const blockquotePlugin: WikiPlugin = {
           styles.push(`--gowiki-bq-img-width: ${imgWidth}`)
         }
 
-        // wrap: float the blockquote left or right
+        // wrap: float the blockquote left or right (inline style ensures it works
+        // outside .ProseMirror context, e.g. in slide presentations).
         const wrap = node.attrs.wrap
         if (wrap) {
           classes.push(`gowiki-bq-wrap-${wrap}`)
+          styles.push(`float: ${wrap}`)
+          if (wrap === "left") styles.push("margin-right: 1em")
+          if (wrap === "right") styles.push("margin-left: 1em")
         }
 
         if (classes.length > 0) domAttrs.class = classes.join(" ")
