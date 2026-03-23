@@ -368,6 +368,46 @@ export const blockquotePlugin: WikiPlugin = {
       properties: blockquoteProperties,
     })
 
+
+    // Pre-process blockquote content: convert extra blank > lines into trailing
+    // \n markers on the preceding content line, preserving visual spacing.
+    // For non-nested lines (> content), 1 blank = normal, 2+ = extra.
+    // For nested lines (> > content), 2 blanks = normal (1 closes inner + 1 separates), 3+ = extra.
+    reg.registerMarkdownItPlugin((md: any) => {
+      const originalParse = md.parse.bind(md)
+      md.parse = (src: string, env: any) => {
+        const lines = src.split("\n")
+        let i = 0
+        while (i < lines.length) {
+          if (/^>\s*.+/.test(lines[i])) {
+            // Count consecutive blank > lines after it
+            let blanks = 0
+            let j = i + 1
+            while (j < lines.length && /^>\s*$/.test(lines[j])) {
+              blanks++
+              j++
+            }
+
+            // 1 blank is the normal separator. Extra blanks = extra spacing.
+            // Replace extra blanks with "> \n" lines — these become paragraphs
+            // containing just a hard break, acting as visual spacers.
+            if (blanks > 1) {
+              const extras = Math.min(blanks - 1, 2)
+              for (let e = 0; e < extras; e++) {
+                lines[i + 2 + e] = "> \\n"
+              }
+              // Remove any remaining extra blanks beyond what we converted
+              if (blanks - 1 > extras) {
+                lines.splice(i + 2 + extras, blanks - 1 - extras)
+              }
+            }
+          }
+          i++
+        }
+        return originalParse(lines.join("\n"), env)
+      }
+    })
+
     // Markdown → PM
     reg.registerNode("blockquote_open", {
       open(ctx) {
@@ -405,6 +445,11 @@ export const blockquotePlugin: WikiPlugin = {
 
         node.content.forEach((child, _offset, index) => {
           const rendered = recurse(child).trimEnd()
+          // A paragraph containing only \n (spacer) should become a blank > line.
+          if (rendered === "\\n") {
+            out += ">\n"
+            return
+          }
           const lines = rendered.split("\n")
           for (const line of lines) {
             if (line.length > 0) {
