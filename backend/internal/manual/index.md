@@ -20,6 +20,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Includes](./includes) — Including content from other pages
 - [Blockquotes & Callouts](./blockquotes) — Styled callouts, admonitions, and layout
 - [Charts](./charts) — Pie, bar, line, and other data charts
+- [Mermaid Diagrams](./mermaid) — Flowcharts, sequence diagrams, and more from text
 - [Footnotes](./footnotes) — Adding inline footnotes
 - [Slides](./slides) — Creating fullscreen slideshow presentations
 
