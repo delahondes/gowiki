@@ -10554,6 +10554,16 @@ async function bootstrap() {
 
   // Global keyboard shortcuts that work even when focus is in a property panel input.
   document.addEventListener("keydown", e => {
+    // "/" in view mode: focus search (GitHub-style)
+    if (e.key === "/" && mode !== "edit" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const active = document.activeElement
+      // Don't intercept if already in an input/textarea
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return
+      e.preventDefault()
+      const searchInput = document.getElementById("search-input")
+      if (searchInput) searchInput.focus()
+      return
+    }
     // F11 (Windows/Linux) or Cmd+F11 (macOS): toggle fullscreen
     if (e.key === "F11") {
       e.preventDefault()
