@@ -47,8 +47,9 @@ class MermaidNodeView {
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-mermaid"
-    // Make the node selectable via NodeSelection on click.
+    // Make the node selectable via NodeSelection on click (edit mode only).
     this.dom.addEventListener("mousedown", (e) => {
+      if (!view.editable) return
       e.preventDefault()
       const pos = this.getPos()
       if (pos != null) {
@@ -65,6 +66,9 @@ class MermaidNodeView {
 
     this.renderArea = document.createElement("div")
     this.renderArea.className = "gowiki-mermaid-render"
+    if (node.attrs.size) {
+      this.renderArea.style.maxWidth = node.attrs.size
+    }
     this.dom.appendChild(this.renderArea)
 
     this.renderDiagram()
@@ -102,6 +106,9 @@ class MermaidNodeView {
     if (node.attrs.data !== this.node.attrs.data) {
       this.node = node
       this.renderDiagram()
+    }
+    if (node.attrs.size !== this.node.attrs.size) {
+      this.renderArea.style.maxWidth = node.attrs.size || ""
     }
     this.node = node
     return true
@@ -148,13 +155,18 @@ class MermaidNodeView {
 
 const mermaidProperties: NodePropertySpec[] = [
   {
+    name: "size",
+    label: "Size",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => v ?? "",
+  },
+  {
     name: "data",
     label: "Diagram source",
     default: "",
     multiline: true,
-    // Unescape \n and \\ from the directive string representation.
     parse: (raw: string) => raw.replace(/\\n/g, "\n").replace(/\\\\/g, "\\"),
-    // Serialize: escape for directive storage (actual escaping is in registerPMNode).
     serialize: (v: string | null) => v ?? "",
   },
 ]
@@ -170,6 +182,10 @@ const mermaidStyles = `
   font-weight: 600;
   color: #666;
   margin-bottom: 4px;
+  display: none;
+}
+#app.gowiki-editing .gowiki-mermaid-marker {
+  display: block;
 }
 .gowiki-mermaid-render {
   text-align: center;
@@ -218,6 +234,7 @@ export const mermaidPlugin: WikiPlugin = {
           group: "block",
           atom: true,
           attrs: {
+            size: { default: "" },
             data: { default: "" },
           },
           toDOM(node: any) {
@@ -250,6 +267,7 @@ export const mermaidPlugin: WikiPlugin = {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
         ctx.push(ctx.schema.nodes.mermaid_diagram.create({
+          size: attrs.size ?? "",
           data: attrs.data ?? "",
         }))
       },
@@ -259,9 +277,11 @@ export const mermaidPlugin: WikiPlugin = {
     reg.registerPMNode("mermaid_diagram", {
       print(node) {
         const data = node.attrs.data || ""
-        // Escape newlines and quotes for single-line directive storage.
         const escaped = data.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
-        return `{mermaid data="${escaped}"}\n\n`
+        const parts: string[] = []
+        if (node.attrs.size) parts.push(`size=${node.attrs.size}`)
+        parts.push(`data="${escaped}"`)
+        return `{mermaid ${parts.join(" ")}}\n\n`
       },
     })
 
