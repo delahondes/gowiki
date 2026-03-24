@@ -4451,7 +4451,7 @@ function buildMenubar() {
         mermaidInsertCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        const snippet = '{mermaid data="graph TD\\n    A[Start] --> B{Decision}\\n    B -->|Yes| C[Result 1]\\n    B -->|No| D[Result 2]"}'
+        const snippet = "```mermaid\ngraph TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Result 1]\n    B -->|No| D[Result 2]\n```"
         rawInsertText(rawEditor, snippet)
       }
     })

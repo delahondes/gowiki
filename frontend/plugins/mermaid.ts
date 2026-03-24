@@ -30,11 +30,27 @@ function ensureMermaid(): Promise<any> {
   return mermaidPromise
 }
 
+// ── Info string parsing ──
+// ```mermaid [size=500px]
+
+function parseInfoString(info: string): { size: string } {
+  const attrs = { size: "" }
+  const sizeMatch = info.match(/\bsize=(\S+)/)
+  if (sizeMatch) attrs.size = sizeMatch[1]
+  return attrs
+}
+
+function serializeInfoString(attrs: { size: string }): string {
+  const parts = ["mermaid"]
+  if (attrs.size) parts.push(`size=${attrs.size}`)
+  return parts.join(" ")
+}
+
 // ── NodeView ──
 
 class MermaidNodeView {
   dom: HTMLElement
-  contentDOM: undefined = undefined // no content hole — fully opaque
+  contentDOM: undefined = undefined
   private renderArea: HTMLElement
   node: PMNode
   view: EditorView
@@ -47,7 +63,7 @@ class MermaidNodeView {
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-mermaid"
-    // Make the node selectable via NodeSelection on click (edit mode only).
+
     this.dom.addEventListener("mousedown", (e) => {
       if (!view.editable) return
       e.preventDefault()
@@ -76,7 +92,6 @@ class MermaidNodeView {
 
   private renderDiagram() {
     const data = (this.node.attrs.data || "").trim()
-
     if (!data) {
       this.renderArea.innerHTML = '<div class="gowiki-mermaid-empty">Empty diagram — click to edit</div>'
       return
@@ -85,7 +100,6 @@ class MermaidNodeView {
     this.renderArea.innerHTML = '<div style="color:#999;font-size:0.85em">Rendering...</div>'
     const currentData = data
     setTimeout(async () => {
-      // Guard against stale renders.
       if ((this.node.attrs.data || "").trim() !== currentData) return
       try {
         const mermaid = await ensureMermaid()
@@ -116,22 +130,9 @@ class MermaidNodeView {
 
   selectNode() {
     this.dom.classList.add("ProseMirror-selectednode")
-    // Enable the properties panel via a proper transaction.
     setTimeout(() => {
       const tr = enablePropertiesPanel(this.view.state.tr)
       this.view.dispatch(tr)
-      // Make the textarea bigger for diagram source editing.
-      setTimeout(() => {
-        const panel = document.querySelector(".gowiki-props-panel")
-        if (panel) {
-          const ta = panel.querySelector("textarea")
-          if (ta) {
-            ta.style.minHeight = "15em"
-            ta.style.width = "30em"
-            ta.style.fontFamily = "monospace"
-          }
-        }
-      }, 10)
     }, 0)
   }
 
@@ -139,7 +140,6 @@ class MermaidNodeView {
     this.dom.classList.remove("ProseMirror-selectednode")
   }
 
-  // Block all events — PM should not look inside this node.
   stopEvent(): boolean {
     return true
   }
@@ -151,7 +151,7 @@ class MermaidNodeView {
   destroy() {}
 }
 
-// ── Property definitions ──
+// ── Property definitions (size only — data is edited in raw mode) ──
 
 const mermaidProperties: NodePropertySpec[] = [
   {
@@ -166,7 +166,7 @@ const mermaidProperties: NodePropertySpec[] = [
     label: "Diagram source",
     default: "",
     multiline: true,
-    parse: (raw: string) => raw.replace(/\\n/g, "\n").replace(/\\\\/g, "\\"),
+    parse: (raw: string) => raw,
     serialize: (v: string | null) => v ?? "",
   },
 ]
@@ -240,6 +240,7 @@ export const mermaidPlugin: WikiPlugin = {
           toDOM(node: any) {
             return ["div", {
               class: "gowiki-mermaid",
+              "data-mermaid-size": node.attrs.size,
               "data-mermaid-data": node.attrs.data,
             }, "Mermaid diagram"]
           },
@@ -247,6 +248,7 @@ export const mermaidPlugin: WikiPlugin = {
             tag: "div.gowiki-mermaid",
             getAttrs(dom: any) {
               return {
+                size: dom.getAttribute("data-mermaid-size") || "",
                 data: dom.getAttribute("data-mermaid-data") || "",
               }
             },
@@ -255,20 +257,52 @@ export const mermaidPlugin: WikiPlugin = {
       },
     })
 
-    // ── Self-contained directive ──
-    reg.registerSelfContainedDirective("mermaid", {
-      tokenType: "mermaid_diagram",
-      nodeType: "mermaid_diagram",
-      properties: mermaidProperties,
+    // ── Markdown-it: fenced block ```mermaid [size=...] ──
+    reg.registerMarkdownItPlugin((md: any) => {
+      md.block.ruler.before("fence", "mermaid_fence", (state: any, startLine: number, endLine: number, silent: boolean) => {
+        const start = state.bMarks[startLine] + state.tShift[startLine]
+        const max = state.eMarks[startLine]
+        const line = state.src.slice(start, max)
+
+        if (!line.startsWith("```mermaid")) return false
+        if (silent) return true
+
+        // Parse info string for attributes (size etc.)
+        const infoStr = line.slice(3).trim() // "mermaid size=500px"
+        const attrs = parseInfoString(infoStr)
+
+        // Find closing fence
+        let nextLine = startLine + 1
+        while (nextLine < endLine) {
+          const nStart = state.bMarks[nextLine] + state.tShift[nextLine]
+          const nMax = state.eMarks[nextLine]
+          const nLine = state.src.slice(nStart, nMax)
+          if (nLine.startsWith("```") && nLine.trim() === "```") break
+          nextLine++
+        }
+
+        // Extract body
+        const bodyStart = state.bMarks[startLine + 1]
+        const bodyEnd = nextLine < endLine ? state.bMarks[nextLine] : state.eMarks[endLine - 1]
+        const body = state.src.slice(bodyStart, bodyEnd).trim()
+
+        const token = state.push("mermaid_diagram", "", 0)
+        token.meta = { data: body, size: attrs.size }
+        token.map = [startLine, nextLine + 1]
+        token.block = true
+
+        state.line = nextLine + 1
+        return true
+      })
     })
 
     // ── Markdown → PM ──
     reg.registerText("mermaid_diagram", {
       run(ctx, tok) {
-        const attrs = tok.meta?.attrs ?? {}
+        const meta = tok.meta ?? {}
         ctx.push(ctx.schema.nodes.mermaid_diagram.create({
-          size: attrs.size ?? "",
-          data: attrs.data ?? "",
+          size: meta.size ?? "",
+          data: meta.data ?? "",
         }))
       },
     })
@@ -276,12 +310,9 @@ export const mermaidPlugin: WikiPlugin = {
     // ── PM → Markdown ──
     reg.registerPMNode("mermaid_diagram", {
       print(node) {
+        const infoStr = serializeInfoString({ size: node.attrs.size || "" })
         const data = node.attrs.data || ""
-        const escaped = data.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")
-        const parts: string[] = []
-        if (node.attrs.size) parts.push(`size=${node.attrs.size}`)
-        parts.push(`data="${escaped}"`)
-        return `{mermaid ${parts.join(" ")}}\n\n`
+        return "```" + infoStr + "\n" + data + "\n```\n\n"
       },
     })
 
@@ -307,7 +338,6 @@ export const mermaidPlugin: WikiPlugin = {
           data: "graph TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Result 1]\n    B -->|No| D[Result 2]",
         })
         let tr = state.tr.replaceSelectionWith(node)
-        // Select the new node and open properties panel.
         const insertedAt = tr.doc.resolve(tr.selection.from).before(1)
         try {
           tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -317,6 +347,9 @@ export const mermaidPlugin: WikiPlugin = {
       }
       return true
     })
+
+    // ── Node properties (for property panel) ──
+    reg.registerNodeProperties("mermaid_diagram", mermaidProperties)
 
     // ── Styles ──
     reg.registerStyle("mermaid_diagram", mermaidStyles)
