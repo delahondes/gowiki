@@ -232,11 +232,15 @@ function loadChartJS(): Promise<any> {
 class ChartNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
+  private getPos: () => number | undefined
   private canvas: HTMLCanvasElement
   private chartInstance: any = null
 
-  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.node = node
+    this.view = view
+    this.getPos = getPos
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-chart"
@@ -358,6 +362,18 @@ class ChartNodeView {
     this.applyAlign(node.attrs.align)
     this.renderChart()
     return true
+  }
+
+  selectNode() {
+    this.dom.classList.add("ProseMirror-selectednode")
+    setTimeout(() => {
+      const tr = enablePropertiesPanel(this.view.state.tr)
+      this.view.dispatch(tr)
+    }, 0)
+  }
+
+  deselectNode() {
+    this.dom.classList.remove("ProseMirror-selectednode")
   }
 
   stopEvent(event: Event): boolean {
