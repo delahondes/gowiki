@@ -143,6 +143,7 @@ let captionInsertRefCommand = null
 let footnoteInsertCommand = null
 let spoilerInsertCommand = null
 let chartInsertCommand = null
+let mermaidInsertCommand = null
 let slidesInsertCommand = null
 let todoInsertCommand = null
 let todoListInsertCommand = null
@@ -203,6 +204,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "chart") {
     if (name === "insert") chartInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "mermaid_diagram") {
+    if (name === "insert") mermaidInsertCommand = cmd
     return
   }
 
@@ -4054,6 +4060,29 @@ function buildMenubar() {
   const headingMenu = document.createElement("div")
   headingMenu.className = "gowiki-raw-dropdown-menu"
   const headingItems = []
+
+  // "Paragraph" entry to remove heading
+  const paraItem = document.createElement("div")
+  paraItem.className = "gowiki-raw-dropdown-item"
+  paraItem.textContent = "Paragraph"
+  paraItem.style.fontStyle = "italic"
+  paraItem.addEventListener("mousedown", e => {
+    e.preventDefault()
+    headingMenu.style.display = "none"
+    if (editMode === "visual" && editorView) {
+      setBlockType(schema.nodes.paragraph)(editorView.state, editorView.dispatch)
+      editorView.focus()
+    } else if (editMode === "raw" && rawEditor) {
+      const { lineStart, lineEnd } = rawGetCurrentLineRange(rawEditor)
+      const line = rawEditor.value.substring(lineStart, lineEnd)
+      const stripped = line.replace(/^#{1,6}\s*(?:1\.\s)?/, "")
+      rawEditor.focus()
+      rawEditor.setSelectionRange(lineStart, lineEnd)
+      rawInsertText(rawEditor, stripped)
+    }
+  })
+  headingMenu.appendChild(paraItem)
+
   for (let level = 1; level <= 5; level++) {
     const item = document.createElement("div")
     item.className = "gowiki-raw-dropdown-item"
@@ -4411,6 +4440,19 @@ function buildMenubar() {
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
         rawInsertChart(rawEditor)
+      }
+    })
+  }
+
+  // Mermaid diagram
+  if (mermaidInsertCommand) {
+    addImgButton("/icons/mermaid.svg", "Mermaid diagram", () => {
+      if (editMode === "visual" && editorView) {
+        mermaidInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = '{mermaid data="graph TD\\n    A[Start] --> B{Decision}\\n    B -->|Yes| C[Result 1]\\n    B -->|No| D[Result 2]"}'
+        rawInsertText(rawEditor, snippet)
       }
     })
   }

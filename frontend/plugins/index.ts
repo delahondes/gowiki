@@ -14,6 +14,7 @@ import { changesPlugin } from "./changes"
 import { commentPlugin } from "./comment"
 import { spoilerPlugin } from "./spoiler"
 import { chartPlugin } from "./chart"
+import { mermaidPlugin } from "./mermaid"
 import { slidePlugin } from "./slide"
 import { captionPlugin } from "./caption"
 import { footnotePlugin } from "./footnote"
@@ -36,5 +37,6 @@ export const plugins: Plugin[] = [
   commentPlugin,
   spoilerPlugin,
   chartPlugin,
+  mermaidPlugin,
   slidePlugin,
 ]
