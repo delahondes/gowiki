@@ -33,16 +33,25 @@ function ensureMermaid(): Promise<any> {
 // ── Info string parsing ──
 // ```mermaid [size=500px]
 
-function parseInfoString(info: string): { size: string } {
-  const attrs = { size: "" }
+function parseInfoString(info: string): { size: string; caption: string } {
+  const attrs = { size: "", caption: "" }
   const sizeMatch = info.match(/\bsize=(\S+)/)
   if (sizeMatch) attrs.size = sizeMatch[1]
+  const captionMatch = info.match(/\bcaption="([^"]*)"/) || info.match(/\bcaption=(\S+)/)
+  if (captionMatch) attrs.caption = captionMatch[1]
   return attrs
 }
 
-function serializeInfoString(attrs: { size: string }): string {
+function serializeInfoString(attrs: { size: string; caption: string }): string {
   const parts = ["mermaid"]
   if (attrs.size) parts.push(`size=${attrs.size}`)
+  if (attrs.caption) {
+    if (attrs.caption.includes(" ")) {
+      parts.push(`caption="${attrs.caption}"`)
+    } else {
+      parts.push(`caption=${attrs.caption}`)
+    }
+  }
   return parts.join(" ")
 }
 
@@ -52,6 +61,7 @@ class MermaidNodeView {
   dom: HTMLElement
   contentDOM: undefined = undefined
   private renderArea: HTMLElement
+  private captionEl: HTMLElement
   node: PMNode
   view: EditorView
   getPos: () => number | undefined
@@ -87,6 +97,11 @@ class MermaidNodeView {
     }
     this.dom.appendChild(this.renderArea)
 
+    this.captionEl = document.createElement("div")
+    this.captionEl.className = "gowiki-mermaid-caption"
+    this.updateCaption()
+    this.dom.appendChild(this.captionEl)
+
     this.renderDiagram()
   }
 
@@ -115,6 +130,17 @@ class MermaidNodeView {
     }, 10)
   }
 
+  private updateCaption() {
+    const caption = this.node.attrs.caption || ""
+    if (caption) {
+      this.captionEl.textContent = caption
+      this.captionEl.style.display = ""
+    } else {
+      this.captionEl.textContent = ""
+      this.captionEl.style.display = "none"
+    }
+  }
+
   update(node: PMNode) {
     if (node.type !== this.node.type) return false
     if (node.attrs.data !== this.node.attrs.data) {
@@ -123,6 +149,10 @@ class MermaidNodeView {
     }
     if (node.attrs.size !== this.node.attrs.size) {
       this.renderArea.style.maxWidth = node.attrs.size || ""
+    }
+    if (node.attrs.caption !== this.node.attrs.caption) {
+      this.node = node
+      this.updateCaption()
     }
     this.node = node
     return true
@@ -157,6 +187,13 @@ const mermaidProperties: NodePropertySpec[] = [
   {
     name: "size",
     label: "Size",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => v ?? "",
+  },
+  {
+    name: "caption",
+    label: "Caption",
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => v ?? "",
@@ -204,6 +241,13 @@ const mermaidStyles = `
   outline: 2px solid #ffd43b;
   outline-offset: 1px;
 }
+.gowiki-mermaid-caption {
+  text-align: center;
+  font-size: 0.9em;
+  color: #555;
+  font-style: italic;
+  margin-top: 4px;
+}
 .gowiki-mermaid-empty {
   color: #999;
   font-style: italic;
@@ -235,12 +279,14 @@ export const mermaidPlugin: WikiPlugin = {
           atom: true,
           attrs: {
             size: { default: "" },
+            caption: { default: "" },
             data: { default: "" },
           },
           toDOM(node: any) {
             return ["div", {
               class: "gowiki-mermaid",
               "data-mermaid-size": node.attrs.size,
+              "data-mermaid-caption": node.attrs.caption,
               "data-mermaid-data": node.attrs.data,
             }, "Mermaid diagram"]
           },
@@ -249,6 +295,7 @@ export const mermaidPlugin: WikiPlugin = {
             getAttrs(dom: any) {
               return {
                 size: dom.getAttribute("data-mermaid-size") || "",
+                caption: dom.getAttribute("data-mermaid-caption") || "",
                 data: dom.getAttribute("data-mermaid-data") || "",
               }
             },
@@ -287,7 +334,7 @@ export const mermaidPlugin: WikiPlugin = {
         const body = state.src.slice(bodyStart, bodyEnd).trim()
 
         const token = state.push("mermaid_diagram", "", 0)
-        token.meta = { data: body, size: attrs.size }
+        token.meta = { data: body, size: attrs.size, caption: attrs.caption }
         token.map = [startLine, nextLine + 1]
         token.block = true
 
@@ -302,6 +349,7 @@ export const mermaidPlugin: WikiPlugin = {
         const meta = tok.meta ?? {}
         ctx.push(ctx.schema.nodes.mermaid_diagram.create({
           size: meta.size ?? "",
+          caption: meta.caption ?? "",
           data: meta.data ?? "",
         }))
       },
@@ -310,7 +358,7 @@ export const mermaidPlugin: WikiPlugin = {
     // ── PM → Markdown ──
     reg.registerPMNode("mermaid_diagram", {
       print(node) {
-        const infoStr = serializeInfoString({ size: node.attrs.size || "" })
+        const infoStr = serializeInfoString({ size: node.attrs.size || "", caption: node.attrs.caption || "" })
         const data = node.attrs.data || ""
         return "```" + infoStr + "\n" + data + "\n```\n\n"
       },
