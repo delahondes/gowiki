@@ -356,10 +356,24 @@ class ReviewflowNodeView {
       if (this.status?.signing_enabled && this.userHasKey) {
         const currentUser = (window as any).__gowikiCurrentUser?.username
         if (currentUser) {
-          // Get the current page markdown for digest computation.
-          const markdown = (window as any).__gowikiCurrentMarkdown?.() || ""
-          sigData = await signConfirmation(currentUser, markdown)
+          try {
+            const markdown = (window as any).__gowikiCurrentMarkdown?.() || ""
+            sigData = await signConfirmation(currentUser, markdown)
+            if (!sigData) {
+              console.error("reviewflow: signConfirmation returned null — key or certificate not found")
+            }
+          } catch (sigErr: any) {
+            console.error("reviewflow: signing failed:", sigErr)
+            if (this.status?.signing_required) {
+              alert("Signing failed: " + (sigErr?.message || sigErr) + "\n\nTry regenerating your signing key.")
+              return
+            }
+          }
         }
+      }
+      if (this.status?.signing_required && !sigData) {
+        alert("Confirm failed: cryptographic signature required but signing failed.\n\nCheck your signing key in the user menu.")
+        return
       }
       this.status = await gate.confirm(pagePath, role, sigData)
       this.render()

@@ -3,7 +3,7 @@
  * Computes SHA-256 digest and signs with ECDSA P-256 via Web Crypto API.
  */
 
-import { getPrivateKey, getCertificatePEM } from "./keystore"
+import { getPrivateKey, getCertificatePEM, importCertificate } from "./keystore"
 
 export interface SignatureResult {
   signature: string    // base64-encoded ECDSA signature
@@ -32,7 +32,20 @@ export async function signConfirmation(
   const privateKey = await getPrivateKey(username)
   if (!privateKey) return null
 
-  const certPEM = await getCertificatePEM(username)
+  let certPEM = await getCertificatePEM(username)
+  if (!certPEM) {
+    // Certificate not in local store — try fetching from server (admin may have signed it).
+    try {
+      const resp = await fetch(`/api/plugin/reviewflow/v1/cert/${encodeURIComponent(username)}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        if (data.certificate_pem) {
+          await importCertificate(username, data.certificate_pem)
+          certPEM = data.certificate_pem
+        }
+      }
+    } catch { /* server unreachable — continue without cert */ }
+  }
   if (!certPEM) return null
 
   // Compute digest (for the server to verify content matches)
