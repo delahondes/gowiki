@@ -177,7 +177,13 @@ function buildPropGroup(
       const wasNodeSelection =
         state.selection instanceof NodeSelection && state.selection.from === pos
 
-      let tr = state.tr.setNodeMarkup(pos, live.type, attrs)
+      let tr = state.tr
+
+      // If the node is an inline image inside a paragraph with other content,
+      // extract it into its own paragraph first so block-level properties work.
+      if (promoteInlineImage(view, pos, attrs)) return
+
+      tr = tr.setNodeMarkup(pos, live.type, attrs)
       if (wasNodeSelection) {
         tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
       }
@@ -441,6 +447,49 @@ function buildPanel(
 
     wrap.appendChild(hiddenContainer)
     wrap.appendChild(expandBtn)
+  }
+
+  // For block-level images (sole child of a paragraph), offer "Convert to inline".
+  if (node.type.name === "image" && node.isInline) {
+    const $pos = view.state.doc.resolve(pos)
+    const parent = $pos.parent
+    if (parent.type.name === "paragraph" && parent.childCount === 1) {
+      const inlineSep = document.createElement("div")
+      inlineSep.style.cssText = "border-top:1px solid #e0e0c0;margin-top:4px;padding-top:4px;text-align:right"
+      const inlineBtn = document.createElement("button")
+      inlineBtn.type = "button"
+      inlineBtn.style.cssText = "background:none;border:none;color:#1565c0;font-size:11px;cursor:pointer;padding:0"
+      inlineBtn.textContent = "Convert to inline"
+      inlineBtn.title = "Move image back inline (removes size, align, caption properties)"
+      inlineBtn.addEventListener("click", () => {
+        // Reset all block-level properties and delete the wrapping paragraph,
+        // inserting the plain image into the previous paragraph.
+        const state = view.state
+        const parentPos = $pos.before($pos.depth)
+        const parentEnd = parentPos + parent.nodeSize
+
+        // Create a plain image with only src/alt/title (no block props).
+        const plainAttrs: Record<string, any> = {
+          src: node.attrs.src,
+          alt: node.attrs.alt,
+          title: node.attrs.title,
+        }
+        const plainImage = node.type.create(plainAttrs)
+
+        let tr = state.tr
+        // Delete the entire paragraph containing the image.
+        tr = tr.delete(parentPos, parentEnd)
+        // Insert the plain image at the deletion point (end of previous block).
+        const insertPos = Math.max(0, tr.mapping.map(parentPos) - 1)
+        tr = tr.insert(insertPos, plainImage)
+        view.dispatch(tr)
+        if ((window as any).__gowikiSetStatus) {
+          (window as any).__gowikiSetStatus("Image converted to inline (properties removed)")
+        }
+      })
+      inlineSep.appendChild(inlineBtn)
+      wrap.appendChild(inlineSep)
+    }
   }
 
   return wrap
@@ -764,6 +813,38 @@ function propertiesPlugin(reg: Registry) {
 
 export function isPropertiesPanelEnabled(state: any): boolean {
   return Boolean(panelKey.getState(state)?.enabled)
+}
+
+/**
+ * If the image at `pos` is inline inside a paragraph with other content,
+ * extract it into its own paragraph and apply `attrs`. Returns true if
+ * promotion happened (and the transaction was dispatched).
+ */
+export function promoteInlineImage(view: any, pos: number, attrs: Record<string, any>): boolean {
+  const state = view.state
+  const node = state.doc.nodeAt(pos)
+  if (!node || node.type.name !== "image" || !node.isInline) return false
+  const $pos = state.doc.resolve(pos)
+  const parent = $pos.parent
+  if (parent.type.name !== "paragraph" || parent.childCount <= 1) return false
+
+  let tr = state.tr
+  tr = tr.delete(pos, pos + node.nodeSize)
+  const parentPos = $pos.before($pos.depth)
+  const parentEnd = parentPos + parent.nodeSize
+  const newImage = node.type.create(attrs)
+  const newParagraph = state.schema.nodes.paragraph.create(null, newImage)
+  const insertPos = tr.mapping.map(parentEnd)
+  tr = tr.insert(insertPos, newParagraph)
+  const newImagePos = insertPos + 1
+  try {
+    tr = tr.setSelection(NodeSelection.create(tr.doc, newImagePos))
+  } catch { /* leave default */ }
+  view.dispatch(tr)
+  if ((window as any).__gowikiSetStatus) {
+    (window as any).__gowikiSetStatus("Image converted to block (moved to its own paragraph)")
+  }
+  return true
 }
 
 export function enablePropertiesPanel(tr: any): any {

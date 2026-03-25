@@ -194,13 +194,41 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
     for (const entry of state.entries) {
       const row = document.createElement("div")
       row.className = "gowiki-media-row"
+      if (state.highlightFile && entry.name === state.highlightFile) {
+        row.classList.add("gowiki-media-row-highlight")
+      }
 
-      const label = document.createElement("div")
-      label.className = "gowiki-media-row-label"
-      const prefix = entry.kind === "folder" ? "[dir] " : "[file] "
-      const size = entry.kind === "file" ? ` (${formatMediaSize(entry.size)})` : ""
-      label.textContent = `${prefix}${entry.name}${size}`
-      row.appendChild(label)
+      // Thumbnail for images
+      if (entry.kind === "file" && isImageFile(entry.name)) {
+        const thumb = document.createElement("img")
+        thumb.className = "gowiki-media-thumb"
+        thumb.src = `/${encodePath(entry.path)}`
+        thumb.alt = entry.name
+        thumb.loading = "lazy"
+        row.appendChild(thumb)
+      } else {
+        const icon = document.createElement("div")
+        icon.className = "gowiki-media-icon"
+        icon.textContent = entry.kind === "folder" ? "\uD83D\uDCC1" : "\uD83D\uDCC4"
+        row.appendChild(icon)
+      }
+
+      const info = document.createElement("div")
+      info.className = "gowiki-media-row-info"
+      const nameEl = document.createElement("div")
+      nameEl.className = "gowiki-media-row-name"
+      nameEl.textContent = entry.name
+      info.appendChild(nameEl)
+      if (entry.kind === "file" && entry.size) {
+        const sizeEl = document.createElement("div")
+        sizeEl.className = "gowiki-media-row-size"
+        sizeEl.textContent = formatMediaSize(entry.size)
+        info.appendChild(sizeEl)
+      }
+      row.appendChild(info)
+
+      const actions = document.createElement("div")
+      actions.className = "gowiki-media-row-actions"
 
       if (entry.kind === "folder") {
         const openBtn = document.createElement("button")
@@ -211,37 +239,37 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
           state.namespacePath = normalizeNamespacePath(entry.path)
           void refresh()
         })
-        row.appendChild(openBtn)
+        actions.appendChild(openBtn)
       } else {
-        const linkBtn = document.createElement("button")
-        linkBtn.type = "button"
-        linkBtn.className = "gowiki-link-modal-btn"
-        linkBtn.textContent = "Add link"
-        linkBtn.addEventListener("click", () => {
-          if (typeof onInsert === "function") {
-            onInsert("link", entry)
-          }
-          close()
-        })
-        row.appendChild(linkBtn)
-
         if (isImageFile(entry.name)) {
           const imgBtn = document.createElement("button")
           imgBtn.type = "button"
-          imgBtn.className = "gowiki-link-modal-btn"
-          imgBtn.textContent = "Add image"
+          imgBtn.className = "gowiki-link-modal-btn gowiki-media-btn-primary"
+          imgBtn.textContent = "Insert image"
           imgBtn.addEventListener("click", () => {
             if (typeof onInsert === "function") {
               onInsert("image", entry)
             }
             close()
           })
-          row.appendChild(imgBtn)
+          actions.appendChild(imgBtn)
         }
+
+        const linkBtn = document.createElement("button")
+        linkBtn.type = "button"
+        linkBtn.className = "gowiki-link-modal-btn"
+        linkBtn.textContent = "Insert link"
+        linkBtn.addEventListener("click", () => {
+          if (typeof onInsert === "function") {
+            onInsert("link", entry)
+          }
+          close()
+        })
+        actions.appendChild(linkBtn)
 
         const deleteBtn = document.createElement("button")
         deleteBtn.type = "button"
-        deleteBtn.className = "gowiki-link-modal-btn"
+        deleteBtn.className = "gowiki-link-modal-btn gowiki-media-btn-danger"
         deleteBtn.textContent = "Delete"
         deleteBtn.addEventListener("click", async () => {
           try {
@@ -252,10 +280,17 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
             setModalStatus(String(err?.message ?? err), true)
           }
         })
-        row.appendChild(deleteBtn)
+        actions.appendChild(deleteBtn)
       }
 
+      row.appendChild(actions)
       list.appendChild(row)
+    }
+
+    // Scroll to highlighted file (just uploaded)
+    if (state.highlightFile) {
+      const highlighted = list.querySelector(".gowiki-media-row-highlight")
+      if (highlighted) highlighted.scrollIntoView({ block: "center", behavior: "smooth" })
     }
   }
 
@@ -278,9 +313,11 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
       return
     }
     try {
+      const fileName = fileInput.files[0].name
       await uploadMedia(state.namespacePath, fileInput.files[0], overwriteInput.checked)
       fileInput.value = ""
-      setModalStatus("Upload complete.")
+      setModalStatus("Upload complete — click Insert to add it to the page.")
+      state.highlightFile = fileName
       await refresh()
     } catch (err) {
       setModalStatus(String(err?.message ?? err), true)

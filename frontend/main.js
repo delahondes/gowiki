@@ -1300,6 +1300,8 @@ function applyNormalizedEditState(normalized) {
 let statusToastEl = null
 let statusToastTimer = null
 
+window.__gowikiSetStatus = function(text, isError) { setStatus(text, isError) }
+
 function setStatus(text, isError) {
   statusText = text
   if (!text) return

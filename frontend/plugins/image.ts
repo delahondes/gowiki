@@ -3,6 +3,7 @@ import { EditorView } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import { captionNumberingKey, renderInlineMarkdown } from "./caption"
+import { promoteInlineImage } from "../compiler/core_ui"
 
 function normalizeImageVersion(raw: string): string | null {
   const value = String(raw ?? "").trim().toLowerCase()
@@ -418,10 +419,11 @@ class ImageNodeView {
       const node = state.doc.nodeAt(pos)
       if (!node || node.type.name !== "image") return
 
-      let tr = state.tr.setNodeMarkup(pos, node.type, {
-        ...node.attrs,
-        size,
-      })
+      const newAttrs = { ...node.attrs, size }
+      // Promote inline image to block if needed.
+      if (promoteInlineImage(this.outerView, pos, newAttrs)) return
+
+      let tr = state.tr.setNodeMarkup(pos, node.type, newAttrs)
       tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
       this.outerView.dispatch(tr)
     }
