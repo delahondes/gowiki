@@ -11,7 +11,7 @@ import { markdownToPM } from "./compiler/markdown_to_pm.ts"
 import { CollabSession } from "./collab.js"
 import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
-import { isPropertiesPanelEnabled } from "./compiler/core_ui.ts"
+import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
@@ -1339,6 +1339,8 @@ function setStatus(text, isError) {
 }
 
 function setMode(nextMode) {
+  setPropertiesPanelEditable(nextMode === "edit")
+
   if (mode !== "edit" && nextMode === "edit") {
     editBaselineMarkdown = currentMarkdown
   }

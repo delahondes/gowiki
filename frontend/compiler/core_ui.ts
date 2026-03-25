@@ -17,6 +17,12 @@ type PanelState = {
 
 const panelKey = new PluginKey<PanelState>("gowiki.nodePropertiesPanel")
 
+/** Set to true when the view is editable. Property panels are hidden in read-only mode. */
+let _editableView = false
+export function setPropertiesPanelEditable(editable: boolean) {
+  _editableView = editable
+}
+
 let pendingInputRefocus: {
   propName: string
   start: number | null
@@ -760,6 +766,9 @@ function propertiesPlugin(reg: Registry) {
         },
       },
       decorations(state) {
+        // Don't show property panels in read-only (view) mode.
+        if (!_editableView) return null
+
         const pluginState = panelKey.getState(state)
         const targets = findPropertyNodes(state, registry)
         if (targets.length === 0) return null
