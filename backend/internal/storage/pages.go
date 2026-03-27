@@ -1582,6 +1582,10 @@ func normalizePagePath(raw string) (string, error) {
 	if trimmed == "" {
 		return "", fmt.Errorf("page path cannot be empty")
 	}
+	// Reject paths with dangerous or invalid characters.
+	if strings.ContainsAny(trimmed, ":?#%\\") {
+		return "", fmt.Errorf("invalid page path: contains forbidden characters")
+	}
 	cleaned := path.Clean("/" + trimmed)
 	if cleaned == "." {
 		return "", fmt.Errorf("invalid page path")

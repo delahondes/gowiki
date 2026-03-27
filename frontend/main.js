@@ -857,10 +857,21 @@ class AccessDeniedError extends Error {
   }
 }
 
+class InvalidPathError extends Error {
+  constructor(path, detail) {
+    super(detail || `Invalid page path: ${path}`)
+    this.name = "InvalidPathError"
+  }
+}
+
 async function fetchPage(path) {
   const resp = await fetch(`/api/pages/${encodePagePath(path)}`)
   if (resp.status === 404) return null
   if (resp.status === 403) throw new AccessDeniedError(path)
+  if (resp.status === 400) {
+    const data = await resp.json().catch(() => ({}))
+    throw new InvalidPathError(path, data.error || "Invalid page path")
+  }
   if (!resp.ok) {
     throw new Error(`Failed to load page ${path}: ${resp.status}`)
   }
@@ -5426,7 +5437,7 @@ function promptNewPage() {
     }
 
     function submit() {
-      const raw = pathInput.value.trim()
+      let raw = pathInput.value.trim()
       if (!raw) {
         warning.textContent = "Path cannot be empty."
         pathInput.focus()
@@ -5434,6 +5445,12 @@ function promptNewPage() {
       }
       if (/\.\w+$/.test(raw)) {
         warning.textContent = "Page paths must not have a file extension."
+        pathInput.focus()
+        return
+      }
+      // Reject paths with invalid characters (colons, percent-encoding, etc.)
+      if (/[:?#%]/.test(raw.replace(/^\/+/, ""))) {
+        warning.textContent = "Invalid characters in path. Use only letters, numbers, hyphens, and slashes."
         pathInput.focus()
         return
       }
@@ -11460,5 +11477,13 @@ function presenceColor(username) {
 
 bootstrap().catch(err => {
   console.error("Failed to start frontend", err)
-  setStatus("Startup failed")
+  if (err instanceof InvalidPathError) {
+    // Show a friendly message for invalid URLs — not a software error.
+    const contentRoot = document.getElementById("content")
+    if (contentRoot) {
+      contentRoot.innerHTML = `<div style="padding:2em;text-align:center;color:#666"><h2>Invalid page path</h2><p>${err.message}</p><p>The URL contains characters that are not allowed in page paths.</p><p><a href="/">Go to home page</a></p></div>`
+    }
+  } else {
+    setStatus("Startup failed")
+  }
 })

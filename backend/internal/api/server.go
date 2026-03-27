@@ -519,6 +519,10 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid page path") || strings.Contains(err.Error(), "forbidden characters") {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
