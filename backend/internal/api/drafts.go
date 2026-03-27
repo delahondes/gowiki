@@ -43,10 +43,25 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		published = page.Markdown
 	} else if errors.Is(err, storage.ErrPageNotFound) {
+		// If the path has a trailing slash, the user wants a namespace index.
+		// Pre-create the directory so the page store creates index.md.
+		if strings.HasSuffix(pagePath, "/") {
+			if creator, ok := s.store.(interface{ EnsureNamespaceDir(string) error }); ok {
+				_ = creator.EnsureNamespaceDir(strings.TrimSuffix(pagePath, "/"))
+			}
+			pagePath = strings.TrimSuffix(pagePath, "/")
+		}
 		// New page — check namespace constraints before allowing edit.
-		if nsErr := s.store.CheckNamespaceConflict(pagePath); errors.Is(nsErr, storage.ErrNamespaceConflict) {
-			writeError(w, http.StatusConflict, "a page exists at a parent path that conflicts with this namespace")
-			return
+		if nsErr := s.store.CheckNamespaceConflict(pagePath); nsErr != nil {
+			var nce *storage.NamespaceConflictError
+			if errors.As(nsErr, &nce) {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error":            "namespace_conflict",
+					"conflicting_page": nce.ConflictingPage,
+					"message":          "Page " + nce.ConflictingPage + " must be converted to a namespace index first",
+				})
+				return
+			}
 		}
 		// New page — resolve template if available.
 		if tmpl, ok := s.store.(TemplateResolver); ok {

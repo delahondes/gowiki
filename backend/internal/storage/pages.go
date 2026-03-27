@@ -17,6 +17,20 @@ import (
 
 var ErrPageNotFound = errors.New("page not found")
 var ErrNamespaceConflict = errors.New("namespace conflict: a directory exists at this path")
+
+// NamespaceConflictError is a detailed version of ErrNamespaceConflict that includes
+// the conflicting page path.
+type NamespaceConflictError struct {
+	ConflictingPage string // the page that must be converted to a namespace index
+}
+
+func (e *NamespaceConflictError) Error() string {
+	return "namespace conflict: page " + e.ConflictingPage + " blocks this path"
+}
+
+func (e *NamespaceConflictError) Is(target error) bool {
+	return target == ErrNamespaceConflict
+}
 var ErrPageHasLock = errors.New("page is locked by a draft")
 var ErrDestinationExists = errors.New("destination already exists")
 var ErrNamespaceNotEmpty = errors.New("namespace not empty")
@@ -189,6 +203,41 @@ func (s *FileStore) Get(pagePath string) (Page, error) {
 	}, nil
 }
 
+// PageExists returns true if a page exists at the given path (either as a leaf page or namespace index).
+func (s *FileStore) PageExists(pagePath string) bool {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return false
+	}
+	_, _, err = s.resolveExistingContentPath(normalized)
+	return err == nil
+}
+
+// EnsureNamespaceDir creates the content directory for a namespace so that
+// subsequent writes create index.md instead of path.md.
+func (s *FileStore) EnsureNamespaceDir(pagePath string) error {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return err
+	}
+	dirPath := filepath.Join(s.contentRoot, filepath.FromSlash(strings.TrimPrefix(normalized, "/")))
+	return os.MkdirAll(dirPath, 0o755)
+}
+
+// IsNamespaceIndex returns true if the given page path resolves to a namespace index
+// (i.e. the file on disk is content/{path}/index.md rather than content/{path}.md).
+func (s *FileStore) IsNamespaceIndex(pagePath string) bool {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return false
+	}
+	_, isIndex, err := s.resolveExistingContentPath(normalized)
+	if err != nil {
+		return false
+	}
+	return isIndex
+}
+
 // CheckNamespaceConflict checks whether creating or writing a page at the given
 // path would violate namespace constraints, without performing any write.
 // Returns ErrNamespaceConflict if the path is forbidden, nil otherwise.
@@ -214,7 +263,9 @@ func (s *FileStore) checkNamespaceConstraints(contentPath string) error {
 	if !strings.HasSuffix(contentPath, string(filepath.Separator)+"index.md") {
 		dirPath := strings.TrimSuffix(contentPath, ".md")
 		if info, statErr := os.Stat(dirPath); statErr == nil && info.IsDir() {
-			return ErrNamespaceConflict
+			rel, _ := filepath.Rel(s.contentRoot, contentPath)
+			conflictPage := CanonicalPath(strings.TrimSuffix(filepath.ToSlash(rel), ".md"))
+			return &NamespaceConflictError{ConflictingPage: conflictPage}
 		}
 	}
 
@@ -225,7 +276,9 @@ func (s *FileStore) checkNamespaceConstraints(contentPath string) error {
 	for dir != s.contentRoot && len(dir) > len(s.contentRoot) {
 		conflictFile := dir + ".md"
 		if info, statErr := os.Stat(conflictFile); statErr == nil && !info.IsDir() {
-			return ErrNamespaceConflict
+			rel, _ := filepath.Rel(s.contentRoot, conflictFile)
+			conflictPage := CanonicalPath(strings.TrimSuffix(filepath.ToSlash(rel), ".md"))
+			return &NamespaceConflictError{ConflictingPage: conflictPage}
 		}
 		dir = filepath.Dir(dir)
 	}
@@ -562,16 +615,49 @@ func (s *FileStore) ConvertToNamespaceIndex(pagePath, author string) (MoveResult
 		return MoveResult{}, fmt.Errorf("move content to namespace index: %w", err)
 	}
 
-	// Move metadata file.
-	newMetaDir := filepath.Join(strings.TrimSuffix(metaPath, ".json"), "")
-	// meta/{path}.json → meta/{path}/index.json
-	newMetaPath := filepath.Join(strings.TrimSuffix(metaPath, ".json"), "index.json")
-	if err := os.MkdirAll(filepath.Dir(newMetaPath), 0o755); err != nil {
-		// Best effort: content already moved.
-		_ = newMetaDir
+	// Co-move media files that are exclusively referenced by this page.
+	// Read from the new location since content file was already moved.
+	pageContent, _ := os.ReadFile(newContentPath)
+	if len(pageContent) > 0 {
+		resolvePath := normalized
+		mediaRefs := markdown.ExtractMediaRefs(string(pageContent), resolvePath)
+		nsDir := filepath.Dir(newContentPath) // the new namespace dir
+		for _, mediaPath := range mediaRefs {
+			// Only move media exclusively referenced by this page.
+			refPages := s.RefIndex.GetReferencingPages(mediaPath)
+			if len(refPages) > 1 || (len(refPages) == 1 && refPages[0] != normalized) {
+				continue
+			}
+			oldAbsPath := filepath.Join(s.contentRoot, filepath.FromSlash(strings.TrimPrefix(mediaPath, "/")))
+			if !fileExists(oldAbsPath) {
+				continue
+			}
+			// Move into the new namespace directory.
+			newAbsPath := filepath.Join(nsDir, filepath.Base(oldAbsPath))
+			_ = os.Rename(oldAbsPath, newAbsPath)
+		}
 	}
-	if fileExists(metaPath) {
-		_ = os.Rename(metaPath, newMetaPath)
+
+	// Move ALL metadata files (page.json, page.reviewflow.json, page.comments.json, etc.)
+	// from meta/{path}.X.json to meta/{path}/index.X.json
+	oldMetaBase := strings.TrimSuffix(metaPath, ".json")
+	newMetaBase := filepath.Join(strings.TrimSuffix(metaPath, ".json"), "index")
+	metaDir := filepath.Dir(metaPath)
+	metaPrefix := filepath.Base(oldMetaBase)
+	entries, _ := os.ReadDir(metaDir)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, metaPrefix+".") {
+			suffix := strings.TrimPrefix(name, metaPrefix)
+			oldFile := filepath.Join(metaDir, name)
+			newFile := newMetaBase + suffix
+			if err := os.MkdirAll(filepath.Dir(newFile), 0o755); err == nil {
+				_ = os.Rename(oldFile, newFile)
+			}
+		}
 	}
 
 	// Log to changelog.
@@ -606,27 +692,35 @@ func (s *FileStore) ConvertToRegularPage(pagePath, author string) (MoveResult, e
 		return MoveResult{}, fmt.Errorf("page is not a namespace index")
 	}
 
-	// Check that the namespace dir contains only index.md.
+	// Check that the namespace dir contains no sub-pages or sub-directories.
+	// The index page's own files (index.md, media) are allowed.
 	nsDir := filepath.Dir(contentPath)
 	entries, err := os.ReadDir(nsDir)
 	if err != nil {
 		return MoveResult{}, fmt.Errorf("read namespace dir: %w", err)
 	}
 	for _, e := range entries {
-		if e.Name() != "index.md" {
+		if e.IsDir() {
+			// Sub-directory = sub-namespace, not empty.
+			return MoveResult{}, ErrNamespaceNotEmpty
+		}
+		name := e.Name()
+		// Allow index.md and any non-.md files (media/attachments).
+		if name != "index.md" && strings.HasSuffix(name, ".md") {
+			// Another .md page in this namespace.
 			return MoveResult{}, ErrNamespaceNotEmpty
 		}
 	}
 
-	// Also check meta dir.
 	metaPath, err := s.metadataPathForContent(contentPath)
 	if err != nil {
 		return MoveResult{}, err
 	}
 	metaNsDir := filepath.Dir(metaPath)
+	// Check meta dir: only reject if there are sub-directories (sub-namespaces).
 	if metaEntries, readErr := os.ReadDir(metaNsDir); readErr == nil {
 		for _, e := range metaEntries {
-			if e.Name() != "index.json" {
+			if e.IsDir() {
 				return MoveResult{}, ErrNamespaceNotEmpty
 			}
 		}
@@ -634,18 +728,40 @@ func (s *FileStore) ConvertToRegularPage(pagePath, author string) (MoveResult, e
 
 	// Compute new paths: content/{path}/index.md → content/{path}.md
 	newContentPath := nsDir + ".md"
-	newMetaPath := metaNsDir + ".json"
 
 	// Move content file.
 	if err := os.Rename(contentPath, newContentPath); err != nil {
 		return MoveResult{}, fmt.Errorf("move content from namespace index: %w", err)
 	}
+
+	// Move any co-located media files from the namespace dir to the parent dir.
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "index.md" {
+			continue
+		}
+		oldMediaFile := filepath.Join(nsDir, e.Name())
+		newMediaFile := filepath.Join(filepath.Dir(nsDir), e.Name())
+		_ = os.Rename(oldMediaFile, newMediaFile)
+	}
+
 	// Remove the now-empty namespace dir.
 	_ = os.Remove(nsDir)
 
-	// Move metadata file.
-	if fileExists(metaPath) {
-		_ = os.Rename(metaPath, newMetaPath)
+	// Move ALL metadata files (index.json, index.reviewflow.json, etc.)
+	// from meta/{path}/index.X.json to meta/{path}.X.json
+	if metaEntries, readErr := os.ReadDir(metaNsDir); readErr == nil {
+		for _, e := range metaEntries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasPrefix(name, "index.") {
+				suffix := strings.TrimPrefix(name, "index")
+				oldFile := filepath.Join(metaNsDir, name)
+				newFile := metaNsDir + suffix
+				_ = os.Rename(oldFile, newFile)
+			}
+		}
 		_ = os.Remove(metaNsDir)
 	}
 
@@ -936,10 +1052,31 @@ func (s *FileStore) Move(oldPath, newPath string, moveMedia, updateLinks bool, a
 		return MoveResult{}, fmt.Errorf("write metadata at new path: %w", err)
 	}
 
-	// Remove old content and metadata files.
+	// Remove old content file.
 	_ = os.Remove(oldContentPath)
-	_ = os.Remove(oldMetaPath)
 	cleanEmptyParents(filepath.Dir(oldContentPath), s.contentRoot)
+
+	// Move ALL meta files associated with the old page (reviewflow, comments, lock, etc.).
+	oldMetaBase := strings.TrimSuffix(oldMetaPath, ".json")
+	newMetaBase := strings.TrimSuffix(newMetaPath, ".json")
+	metaDir := filepath.Dir(oldMetaPath)
+	metaPrefix := filepath.Base(oldMetaBase)
+	entries, _ := os.ReadDir(metaDir)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Match files like: page.json, page.reviewflow.json, page.comments.json, page.lock.json
+		if strings.HasPrefix(name, metaPrefix+".") {
+			suffix := strings.TrimPrefix(name, metaPrefix)
+			oldFile := filepath.Join(metaDir, name)
+			newFile := newMetaBase + suffix
+			if err := os.MkdirAll(filepath.Dir(newFile), 0o755); err == nil {
+				_ = os.Rename(oldFile, newFile)
+			}
+		}
+	}
 	cleanEmptyParents(filepath.Dir(oldMetaPath), s.metaRoot)
 
 	// 8. Move attic history from old path to new path.

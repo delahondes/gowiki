@@ -31,6 +31,29 @@ func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Redirect trailing-slash URLs to non-trailing-slash ONLY for existing leaf pages.
+	// Namespace index pages keep the trailing slash.
+	// Non-existent pages keep the trailing slash (the user may intend to create a namespace index).
+	if strings.HasSuffix(r.URL.Path, "/") && r.URL.Path != "/" {
+		trimmed := strings.TrimRight(strings.TrimPrefix(r.URL.Path, "/"), "/")
+		if trimmed != "" {
+			if store, ok := s.store.(interface {
+				IsNamespaceIndex(string) bool
+				PageExists(string) bool
+			}); ok {
+				// Only redirect if the page exists AND is a leaf (not a namespace index).
+				if store.PageExists(trimmed) && !store.IsNamespaceIndex(trimmed) {
+					target := "/" + trimmed
+					if r.URL.RawQuery != "" {
+						target += "?" + r.URL.RawQuery
+					}
+					http.Redirect(w, r, target, http.StatusMovedPermanently)
+					return
+				}
+			}
+		}
+	}
+
 	if canServeAsAttachmentPath(requestPath) {
 		if resolved, err := s.mediaStore.ResolvePath(requestPath); err == nil {
 			if info, statErr := os.Stat(resolved); statErr == nil && !info.IsDir() {

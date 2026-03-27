@@ -18,15 +18,38 @@ func NewStore(metaRoot string) *Store {
 }
 
 // statePath derives the reviewflow state file path for a page.
-// /foo/bar  → meta/foo/bar.reviewflow.json
-// /foo/bar/ → meta/foo/bar.reviewflow.json  (trailing slash stripped)
+// It checks both possible locations (leaf and namespace index) to handle
+// pages regardless of whether the path has a trailing slash.
 func (s *Store) statePath(pagePath string) string {
 	clean := strings.TrimPrefix(pagePath, "/")
 	clean = strings.TrimRight(clean, "/")
 	if clean == "" {
 		clean = "index"
 	}
-	return filepath.Join(s.metaRoot, filepath.FromSlash(clean)+".reviewflow.json")
+
+	// Primary: meta/{path}.reviewflow.json (leaf page)
+	leafPath := filepath.Join(s.metaRoot, filepath.FromSlash(clean)+".reviewflow.json")
+	// Alternative: meta/{path}/index.reviewflow.json (namespace index)
+	indexPath := filepath.Join(s.metaRoot, filepath.FromSlash(clean), "index.reviewflow.json")
+
+	// If the leaf path exists, use it.
+	if _, err := os.Stat(leafPath); err == nil {
+		return leafPath
+	}
+	// If the index path exists, use it.
+	if _, err := os.Stat(indexPath); err == nil {
+		return indexPath
+	}
+
+	// Neither exists — determine the correct path by checking the content directory.
+	// If content/{path}/index.md exists, it's a namespace index.
+	contentRoot := strings.Replace(s.metaRoot, "meta", "content", 1)
+	indexMdPath := filepath.Join(contentRoot, filepath.FromSlash(clean), "index.md")
+	if _, err := os.Stat(indexMdPath); err == nil {
+		return indexPath
+	}
+
+	return leafPath
 }
 
 // Load reads the reviewflow state for a page. Returns nil, nil if no state exists.

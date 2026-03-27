@@ -592,7 +592,16 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 	author := UsernameFromContext(r.Context())
 	result, err := s.store.Put(pagePath, req.Markdown, author)
 	if errors.Is(err, storage.ErrNamespaceConflict) {
-		writeError(w, http.StatusConflict, "a namespace directory exists at this path")
+		var nce *storage.NamespaceConflictError
+		if errors.As(err, &nce) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":            "namespace_conflict",
+				"conflicting_page": nce.ConflictingPage,
+				"message":          "Page " + nce.ConflictingPage + " must be converted to a namespace index first",
+			})
+		} else {
+			writeError(w, http.StatusConflict, "a namespace directory exists at this path")
+		}
 		return
 	}
 	var cycleErr *storage.CircularIncludeError

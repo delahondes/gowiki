@@ -5437,13 +5437,14 @@ function promptNewPage() {
         pathInput.focus()
         return
       }
+      const hasTrailingSlash = raw.endsWith("/")
       const cleaned = raw.replace(/^\/+/, "").replace(/\/+$/, "")
       if (!cleaned) {
         warning.textContent = "Invalid path."
         pathInput.focus()
         return
       }
-      close(cleaned)
+      close(hasTrailingSlash ? cleaned + "/" : cleaned)
     }
 
     cancelBtn.addEventListener("click", () => close(null))
@@ -5763,7 +5764,7 @@ async function convertPageType(flag) {
   })
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}))
-    setStatus(data.error || `Conversion failed (${resp.status})`)
+    setStatus(data.error || `Conversion failed (${resp.status})`, true)
     return
   }
 
@@ -7286,7 +7287,7 @@ function stashEditorState() {
   }
 }
 
-async function enterEditMode(force) {
+async function enterEditMode(force, asNamespaceIndex = false) {
   // If we still have a valid edit token (saved-to-draft without exiting the session),
   // verify the token is still valid before resuming (draft may have been reclaimed).
   if (editToken && stashedEditorState) {
@@ -7307,7 +7308,12 @@ async function enterEditMode(force) {
   }
 
   const forceParam = force ? "?force=true" : ""
-  const resp = await authFetch(`/api/edit/${encodePagePath(pagePath)}${forceParam}`, {
+  // If creating a namespace index, append trailing slash to signal the backend.
+  // Detect from parameter or from current URL (user navigated to /path/ directly).
+  const urlHasTrailingSlash = window.location.pathname.endsWith("/") && window.location.pathname !== "/"
+  const createAsNamespace = asNamespaceIndex || (isNewPage && urlHasTrailingSlash)
+  const editPath = createAsNamespace ? encodePagePath(pagePath) + "/" : encodePagePath(pagePath)
+  const resp = await authFetch(`/api/edit/${editPath}${forceParam}`, {
     method: "POST",
   })
   if (resp.status === 423) {
@@ -7320,8 +7326,32 @@ async function enterEditMode(force) {
   }
   if (resp.status === 409) {
     const body = await resp.json().catch(() => ({}))
+    if (body.error === "namespace_conflict" && body.conflicting_page) {
+      const convertOk = confirm(
+        `Cannot create this page: "${body.conflicting_page}" exists as a regular page and blocks this namespace.\n\n` +
+        `Convert "${body.conflicting_page}" to a namespace index?\n` +
+        `(The page content will be preserved, only its internal path changes.)`
+      )
+      if (convertOk) {
+        const moveResp = await authFetch(`/api/move/${encodePagePath(body.conflicting_page)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to_namespace_index: true }),
+        })
+        if (moveResp.ok) {
+          setStatus(`Converted "${body.conflicting_page}" to namespace index`)
+          // Retry entering edit mode now that the conflict is resolved.
+          return enterEditMode(force)
+        } else {
+          const err = await moveResp.json().catch(() => ({}))
+          setStatus(`Failed to convert: ${err.error || moveResp.status}`, true)
+          return false
+        }
+      }
+      return false
+    }
     if (body.error && body.error.includes("conflict")) {
-      setStatus(body.error)
+      setStatus(body.message || body.error)
       return false
     }
     const ok = confirm("You already have this page open in another session. Force edit?")
@@ -7341,11 +7371,16 @@ async function enterEditMode(force) {
   draftSavedThisSession = false
   lastSavedDraftMarkdown = null
   currentMarkdown = data.markdown
+
+  // Update namespace index flag if we just created a namespace index.
+  if (createAsNamespace) {
+    isNamespaceIndex = true
+  }
+
   try {
     currentDoc = markdownToPM(currentMarkdown, registry)
   } catch (err) {
     console.error("Failed to parse draft markdown:", err)
-    // Visual mode would crash — force raw mode so the user can fix the content.
     currentDoc = schema.nodes.doc.create(null, [schema.nodes.paragraph.create()])
     editMode = "raw"
   }
@@ -10831,6 +10866,8 @@ async function bootstrap() {
     window.history.replaceState(null, "", canonical + window.location.search + window.location.hash)
   }
 
+  isNamespaceIndex = !!(page && page.is_namespace_index)
+
   // If page is a namespace index, ensure URL ends with / so relative links resolve correctly.
   if (page && page.is_namespace_index) {
     const currentPathname = window.location.pathname
@@ -10864,9 +10901,11 @@ async function bootstrap() {
   // Navigating to a non-existing page by accident should not auto-create it.
   const actionParam = new URLSearchParams(window.location.search).get("action")
   if (isNewPage && currentUser && actionParam === "create") {
+    // Detect if the user wants a namespace index (trailing slash in URL).
+    const wantsNamespaceIndex = window.location.pathname.endsWith("/") && window.location.pathname !== "/"
     // Clean the URL so a refresh doesn't re-trigger auto-edit.
     window.history.replaceState(null, "", window.location.pathname)
-    void enterEditMode(true)
+    void enterEditMode(true, wantsNamespaceIndex)
   }
 
   // Fetch and mount sidebar and footer as read-only views (non-blocking)
