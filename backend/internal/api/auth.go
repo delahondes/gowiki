@@ -182,7 +182,13 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 func (s *Server) optionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Try Bearer token first.
-		username, tokenID, _ := s.tryBearerAuth(r)
+		username, tokenID, tryErr := s.tryBearerAuth(r)
+		if tryErr != nil {
+			// A token was presented but is invalid — reject rather than
+			// silently falling through to anonymous access.
+			writeError(w, http.StatusUnauthorized, tryErr.Error())
+			return
+		}
 		if username != "" {
 			ctx := r.Context()
 			ctx = context.WithValue(ctx, usernameKey, username)
