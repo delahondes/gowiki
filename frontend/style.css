@@ -1715,6 +1715,16 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   color: #555;
 }
 
+.gowiki-diff-separator {
+  text-align: center;
+  color: #999;
+  padding: 4px 0;
+  font-size: 0.9em;
+  border-top: 1px dashed #ddd;
+  border-bottom: 1px dashed #ddd;
+  margin: 2px 0;
+}
+
 .gowiki-diff-insert {
   background: #d4edda;
   color: #155724;

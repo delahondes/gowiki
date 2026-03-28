@@ -6221,17 +6221,82 @@ function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRef
   const toLabel = toVersion === -1 ? "draft" : toVersion === 0 ? "current" : `v${toVersion}`
   header.textContent = `Diff: ${fromLabel} → ${toLabel} — ${pageDisplayPath}`
 
+  const CONTEXT_LINES = 3
+  let showFull = false
+
+  const toggleBtn = document.createElement("button")
+  toggleBtn.className = "gowiki-content-btn"
+  toggleBtn.style.cssText = "margin-left:12px;font-size:0.85em"
+  toggleBtn.textContent = "Show full"
+  header.appendChild(toggleBtn)
+
   const diffContent = document.createElement("div")
   diffContent.className = "gowiki-diff-content"
 
-  for (const hunk of hunks) {
-    const line = document.createElement("div")
-    line.className = `gowiki-diff-line gowiki-diff-${hunk.op}`
-    const prefix = hunk.op === "insert" ? "+" : hunk.op === "delete" ? "-" : " "
-    line.textContent = prefix + (hunk.content.endsWith("\n") ? hunk.content.slice(0, -1) : hunk.content)
-    diffContent.appendChild(line)
+  function rebuildDiff() {
+    diffContent.innerHTML = ""
+    toggleBtn.textContent = showFull ? "Show changes only" : "Show full"
+
+    if (showFull) {
+      // Full view: show all hunks
+      for (const hunk of hunks) {
+        const line = document.createElement("div")
+        line.className = `gowiki-diff-line gowiki-diff-${hunk.op}`
+        const prefix = hunk.op === "insert" ? "+" : hunk.op === "delete" ? "-" : " "
+        line.textContent = prefix + (hunk.content.endsWith("\n") ? hunk.content.slice(0, -1) : hunk.content)
+        diffContent.appendChild(line)
+      }
+    } else {
+      // Compact view: show only changes with context lines
+      // Mark which hunks are within CONTEXT_LINES of a change
+      const isChange = hunks.map(h => h.op !== "equal")
+      const visible = new Array(hunks.length).fill(false)
+
+      for (let i = 0; i < hunks.length; i++) {
+        if (isChange[i]) {
+          for (let j = Math.max(0, i - CONTEXT_LINES); j <= Math.min(hunks.length - 1, i + CONTEXT_LINES); j++) {
+            visible[j] = true
+          }
+        }
+      }
+
+      let lastShown = -1
+      for (let i = 0; i < hunks.length; i++) {
+        if (!visible[i]) continue
+
+        // Insert separator if there's a gap
+        if (lastShown >= 0 && i - lastShown > 1) {
+          const sep = document.createElement("div")
+          sep.className = "gowiki-diff-separator"
+          sep.textContent = "···"
+          diffContent.appendChild(sep)
+        }
+
+        const hunk = hunks[i]
+        const line = document.createElement("div")
+        line.className = `gowiki-diff-line gowiki-diff-${hunk.op}`
+        const prefix = hunk.op === "insert" ? "+" : hunk.op === "delete" ? "-" : " "
+        line.textContent = prefix + (hunk.content.endsWith("\n") ? hunk.content.slice(0, -1) : hunk.content)
+        diffContent.appendChild(line)
+
+        lastShown = i
+      }
+
+      if (diffContent.children.length === 0) {
+        const noChanges = document.createElement("div")
+        noChanges.style.cssText = "color:#666;font-style:italic;padding:1em"
+        noChanges.textContent = "No text changes."
+        diffContent.appendChild(noChanges)
+      }
+    }
   }
 
+  toggleBtn.addEventListener("click", () => {
+    showFull = !showFull
+    rebuildDiff()
+  })
+
+  rebuildDiff()
   container.append(header, diffContent)
 
   // Show media version changes between the two versions.
