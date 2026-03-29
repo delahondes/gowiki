@@ -2328,8 +2328,131 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   font-size: 12pt;
 }
 
+/* ── AI Assistant Panel ────────────────────── */
+
+#app.ai-panel-visible {
+  grid-template-columns: 220px minmax(0, 1fr) 350px 48px;
+}
+
+#ai-panel {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #ddd;
+  background: #fafafa;
+  height: 100%;
+  overflow: hidden;
+  font-size: 0.88em;
+}
+
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+  background: #f0f0f0;
+  font-weight: 600;
+}
+
+.ai-panel-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1em;
+  color: #666;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.ai-panel-close:hover { background: #ddd; }
+
+.ai-panel-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-msg {
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg-user {
+  background: #e3f2fd;
+  align-self: flex-end;
+  max-width: 90%;
+}
+
+.ai-msg-assistant {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  align-self: flex-start;
+  max-width: 95%;
+}
+
+.ai-msg-error {
+  background: #fdecea;
+  border-color: #f5c6cb;
+  color: #721c24;
+}
+
+.ai-msg-applied {
+  background: #e8f5e9;
+  border-color: #c8e6c9;
+  color: #2e7d32;
+  font-weight: 500;
+}
+
+.ai-msg-usage {
+  margin-top: 6px;
+  font-size: 0.8em;
+  color: #999;
+}
+
+.ai-panel-input-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid #ddd;
+  background: #f5f5f5;
+}
+
+.ai-panel-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.95em;
+  line-height: 1.4;
+}
+.ai-panel-input:focus { outline: none; border-color: #4a90d9; }
+
+.ai-panel-send {
+  background: #4a90d9;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 1em;
+}
+.ai-panel-send:hover { background: #3a7cc0; }
+.ai-panel-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  #app.ai-panel-visible { grid-template-columns: 1fr; }
+  #ai-panel { position: fixed; top: 48px; right: 0; bottom: 0; width: 320px; z-index: 100; box-shadow: -2px 0 8px rgba(0,0,0,0.15); }
+}
+
 @media print {
-  #banner, #left, #footer, #actions { display: none !important; }
+  #banner, #left, #footer, #actions, #ai-panel { display: none !important; }
   .gowiki-toc { display: none !important; }
   h1, h2, h3 { page-break-after: avoid; }
   table, img { page-break-inside: avoid; }

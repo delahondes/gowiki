@@ -122,6 +122,7 @@ let viewView = null
 let sidebarView = null
 let footerView = null
 let isFullscreen = false
+let aiAssistantEnabled = false
 
 let reapplyTimer = null
 const debouncedReapplyComments = () => {
@@ -1360,6 +1361,7 @@ function setMode(nextMode) {
     editBaselineMarkdown = currentMarkdown
     stopAutoSave()
     stopCollabSession()
+    closeAIPanel()
   }
 
   mode = nextMode
@@ -3989,6 +3991,233 @@ function closeSymbolPanel() {
   symbolPanelAnchor = null
 }
 
+// ── AI Assistant Panel ──────────────────────────────
+
+let aiPanelEl = null
+let aiPanelOpen = false
+let aiPanelBusy = false
+
+function toggleAIPanel() {
+  if (!aiAssistantEnabled || mode !== "edit") return
+  if (aiPanelOpen) {
+    closeAIPanel()
+  } else {
+    openAIPanel()
+  }
+}
+
+function openAIPanel() {
+  if (aiPanelEl) return
+  aiPanelOpen = true
+
+  aiPanelEl = document.createElement("div")
+  aiPanelEl.id = "ai-panel"
+  aiPanelEl.innerHTML = `
+    <div class="ai-panel-header">
+      <span class="ai-panel-title">AI Assistant</span>
+      <button class="ai-panel-close" title="Close">\u2715</button>
+    </div>
+    <div class="ai-panel-messages"></div>
+    <div class="ai-panel-input-row">
+      <textarea class="ai-panel-input" placeholder="Ask AI to modify this page..." rows="2"></textarea>
+      <button class="ai-panel-send" title="Send">&#9654;</button>
+    </div>
+  `
+  appRoot.appendChild(aiPanelEl)
+  appRoot.classList.add("ai-panel-visible")
+
+  const closeBtn = aiPanelEl.querySelector(".ai-panel-close")
+  closeBtn.addEventListener("click", closeAIPanel)
+
+  const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
+  const input = aiPanelEl.querySelector(".ai-panel-input")
+  sendBtn.addEventListener("click", () => aiSend())
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      aiSend()
+    }
+  })
+  input.focus()
+}
+
+function closeAIPanel() {
+  aiPanelOpen = false
+  if (aiPanelEl) {
+    aiPanelEl.remove()
+    aiPanelEl = null
+  }
+  appRoot.classList.remove("ai-panel-visible")
+}
+
+function aiAddMessage(role, text) {
+  if (!aiPanelEl) return
+  const messagesEl = aiPanelEl.querySelector(".ai-panel-messages")
+  const msg = document.createElement("div")
+  msg.className = `ai-msg ai-msg-${role}`
+  msg.textContent = text
+  messagesEl.appendChild(msg)
+  messagesEl.scrollTop = messagesEl.scrollHeight
+  return msg
+}
+
+async function aiSend() {
+  if (!aiPanelEl || aiPanelBusy) return
+  const input = aiPanelEl.querySelector(".ai-panel-input")
+  const message = input.value.trim()
+  if (!message) return
+
+  input.value = ""
+  aiPanelBusy = true
+
+  // Show user message.
+  aiAddMessage("user", message)
+
+  // Show AI response placeholder.
+  const aiMsg = aiAddMessage("assistant", "")
+  aiMsg.textContent = "Thinking..."
+
+  const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
+  sendBtn.disabled = true
+
+  try {
+    const resp = await fetch("/api/ai/assistant/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page_path: `/${pagePath}`,
+        message,
+        mode: "action",
+      }),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: "Request failed" }))
+      aiMsg.textContent = `Error: ${err.error || resp.statusText}`
+      aiMsg.classList.add("ai-msg-error")
+      return
+    }
+
+    // Read SSE stream.
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let fullText = ""
+    let edits = null
+    let usage = null
+
+    aiMsg.textContent = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      // Parse SSE events from buffer.
+      const lines = buffer.split("\n")
+      buffer = lines.pop() // keep incomplete line in buffer
+      let currentEventType = null
+
+      for (const line of lines) {
+        if (line.startsWith("event: ")) {
+          currentEventType = line.slice(7).trim()
+        } else if (line.startsWith("data: ")) {
+          const data = line.slice(6)
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.type === "token" && parsed.text) {
+              fullText += parsed.text
+              aiMsg.textContent = fullText
+              const messagesEl = aiPanelEl.querySelector(".ai-panel-messages")
+              messagesEl.scrollTop = messagesEl.scrollHeight
+            } else if (parsed.type === "edits" && parsed.edits) {
+              edits = parsed.edits
+            } else if (parsed.type === "done") {
+              usage = parsed
+            } else if (parsed.type === "error") {
+              aiMsg.textContent += `\n\nError: ${parsed.text}`
+              aiMsg.classList.add("ai-msg-error")
+            }
+          } catch { /* skip malformed JSON */ }
+        }
+      }
+    }
+
+    // Apply edits to the editor if we got structured edits.
+    if (edits && edits.length > 0) {
+      const applied = applyAIEdits(edits)
+      if (applied > 0) {
+        aiMsg.textContent = `Applied ${applied} edit${applied > 1 ? "s" : ""} to the page.`
+        aiMsg.classList.add("ai-msg-applied")
+        // Save draft after AI edits.
+        if (typeof saveDraftExplicit === "function") saveDraftExplicit()
+      } else {
+        aiMsg.textContent = "No changes to apply (page already matches)."
+      }
+    }
+
+    // Show token usage.
+    if (usage && (usage.input_tokens || usage.output_tokens)) {
+      const usageEl = document.createElement("div")
+      usageEl.className = "ai-msg-usage"
+      usageEl.textContent = `Tokens: ${usage.input_tokens || 0} in, ${usage.output_tokens || 0} out`
+      aiMsg.appendChild(usageEl)
+    }
+
+  } catch (err) {
+    aiMsg.textContent = `Error: ${err.message}`
+    aiMsg.classList.add("ai-msg-error")
+  } finally {
+    aiPanelBusy = false
+    if (aiPanelEl) {
+      const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
+      if (sendBtn) sendBtn.disabled = false
+    }
+  }
+}
+
+function applyAIEdits(edits) {
+  if (editMode === "visual" && editorView) {
+    return applyAIEditsVisual(edits)
+  } else if (editMode === "raw" && rawEditor) {
+    return applyAIEditsRaw(edits)
+  }
+  return 0
+}
+
+function applyAIEditsVisual(edits) {
+  // For visual mode: re-parse the full modified markdown and replace the document.
+  // This is simpler and more reliable than trying to map line-based edits to PM positions.
+  const currentMd = getCurrentMarkdown()
+  const lines = currentMd.split("\n")
+
+  // Apply edits in reverse order to preserve line numbers.
+  const sortedEdits = [...edits].sort((a, b) => b.old_start - a.old_start)
+  for (const edit of sortedEdits) {
+    const newLines = edit.new_text ? edit.new_text.split("\n") : []
+    lines.splice(edit.old_start, edit.old_end - edit.old_start, ...newLines)
+  }
+
+  const newMarkdown = lines.join("\n")
+  const newDoc = markdownToPM(newMarkdown, registry)
+  const tr = editorView.state.tr
+  tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
+  editorView.dispatch(tr)
+  return edits.length
+}
+
+function applyAIEditsRaw(edits) {
+  const lines = rawEditor.value.split("\n")
+  const sortedEdits = [...edits].sort((a, b) => b.old_start - a.old_start)
+  for (const edit of sortedEdits) {
+    const newLines = edit.new_text ? edit.new_text.split("\n") : []
+    lines.splice(edit.old_start, edit.old_end - edit.old_start, ...newLines)
+  }
+  rawEditor.value = lines.join("\n")
+  rawEditor.dispatchEvent(new Event("input"))
+  return edits.length
+}
+
 function buildMenubar() {
   const bar = document.createElement("div")
   bar.className = "gowiki-raw-menubar"
@@ -4781,6 +5010,12 @@ function buildMenubar() {
         editorView.focus()
       }
     })
+  }
+
+  // AI Assistant button
+  if (aiAssistantEnabled) {
+    addSeparator()
+    addButton("AI", "AI Assistant (Ctrl+L)", () => toggleAIPanel(), "aiBtn")
   }
 
   return { dom: bar, refs }
@@ -6527,6 +6762,9 @@ async function resolveSiteInfo() {
       }
       if (data.code_theme) {
         loadHighlightTheme(data.code_theme)
+      }
+      if (data.ai_assistant_enabled) {
+        aiAssistantEnabled = true
       }
     }
   } catch { /* keep default */ }
@@ -10768,6 +11006,12 @@ async function bootstrap() {
       return
     }
     if (mode !== "edit") return
+    // CMD+L: toggle AI panel.
+    if (e.key === "l" && !e.shiftKey && aiAssistantEnabled) {
+      e.preventDefault()
+      toggleAIPanel()
+      return
+    }
     // CMD+K: insert link in raw mode.
     if (e.key === "k" && !e.shiftKey && editMode === "raw" && rawEditor) {
       e.preventDefault()
