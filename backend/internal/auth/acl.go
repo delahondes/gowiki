@@ -32,6 +32,7 @@ var ValidSpecialSubjects = map[string]bool{
 	"@all":           true,
 	"@authenticated": true,
 	"@self":          true,
+	"@ai":            true,
 }
 
 // ACLRule represents a single access control entry.
@@ -237,6 +238,8 @@ func subjectMatches(rule ACLRule, username string, groups []string) bool {
 			return username != ""
 		case "@self":
 			return username != ""
+		case "@ai":
+			return username == "@ai"
 		}
 	case "user":
 		return rule.Subject == username

@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"gowiki/backend/internal/aiassistant"
 	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/collab"
 	"gowiki/backend/internal/comment"
@@ -128,6 +129,7 @@ type Server struct {
 	commentService      *comment.Service
 	presenceHub         *collab.Hub
 	collabRelay         *collab.Relay
+	aiProvider          aiassistant.Provider
 	serveWeb            bool
 	webDirPath          string
 }
@@ -172,6 +174,22 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		s.schemaStore = database.NewSchemaStore(dbPool)
 		s.dataStore = database.NewDataStore(dbPool, s.schemaStore)
 		s.databaseSync = database.NewDatabaseSync(s.schemaStore, s.dataStore)
+	}
+
+	// Initialize AI assistant provider if configured.
+	if cfg := configStore.Get(); cfg.AIAssistant.Enabled {
+		apiKey := cfg.AIAssistant.EffectiveAPIKey()
+		if apiKey != "" {
+			switch cfg.AIAssistant.Provider {
+			case "anthropic", "":
+				s.aiProvider = aiassistant.NewAnthropicProvider(apiKey)
+				log.Printf("ai assistant: Anthropic provider initialized (model: %s)", cfg.AIAssistant.Model)
+			default:
+				log.Printf("ai assistant: unknown provider %q, disabled", cfg.AIAssistant.Provider)
+			}
+		} else {
+			log.Printf("ai assistant: enabled but no API key configured")
+		}
 	}
 
 	// Initialize OAuth client if configured.
@@ -377,6 +395,13 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Post("/batch/read", s.handleAIBatchRead)
 		r.Post("/preview/*", s.handleAIPreview)
 		r.Get("/meta/*", s.handleAIMeta)
+	})
+
+	// Integrated AI assistant — session auth + allowed_groups check.
+	r.Route("/api/ai/assistant", func(r chi.Router) {
+		r.Use(s.requireSessionAuth)
+		r.Use(s.requireAIAssistantAccess)
+		r.Post("/chat", s.handleAIChat)
 	})
 
 	// Database data endpoints — read (optional auth).
@@ -922,11 +947,12 @@ func (s *Server) handleRecentChanges(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.configStore.Get()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"title":         cfg.Site.Title,
-		"version":       Version,
-		"toc_max_level": cfg.Site.TOCMaxLevel,
-		"user_display":  cfg.Site.UserDisplay,
-		"code_theme":    cfg.Site.CodeTheme,
+		"title":               cfg.Site.Title,
+		"version":             Version,
+		"toc_max_level":       cfg.Site.TOCMaxLevel,
+		"user_display":        cfg.Site.UserDisplay,
+		"code_theme":          cfg.Site.CodeTheme,
+		"ai_assistant_enabled": cfg.AIAssistant.Enabled,
 	})
 }
 

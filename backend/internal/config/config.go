@@ -20,8 +20,9 @@ type Config struct {
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	Todo       TodoConfig       `yaml:"todo" json:"todo"`
 	Tags       TagConfig        `yaml:"tags" json:"tags"`
-	Reviewflow ReviewflowConfig `yaml:"reviewflow" json:"reviewflow"`
-	AIAPI      AIAPIConfig      `yaml:"ai_api" json:"ai_api"`
+	Reviewflow    ReviewflowConfig  `yaml:"reviewflow" json:"reviewflow"`
+	AIAPI         AIAPIConfig       `yaml:"ai_api" json:"ai_api"`
+	AIAssistant   AIAssistantConfig `yaml:"ai_assistant" json:"ai_assistant"`
 }
 
 // ServerConfig holds network/serving settings.
@@ -151,6 +152,35 @@ type AIAPIConfig struct {
 	RequireSummary   bool `yaml:"require_summary" json:"require_summary"`
 }
 
+// AIAssistantConfig holds settings for the integrated AI assistant (browser-based).
+type AIAssistantConfig struct {
+	Enabled       bool                `yaml:"enabled" json:"enabled"`
+	Provider      string              `yaml:"provider" json:"provider"`             // "anthropic" | "openai" (future)
+	APIKey        string              `yaml:"api_key" json:"api_key"`               // provider API key (overridden by AI_ASSISTANT_API_KEY env var)
+	Model         string              `yaml:"model" json:"model"`                   // model identifier
+	MaxTokens     int                 `yaml:"max_tokens" json:"max_tokens"`         // max response tokens per request
+	AllowedGroups []string            `yaml:"allowed_groups" json:"allowed_groups"` // groups that can use the assistant (empty = all authenticated)
+	Costs         AIAssistantCosts    `yaml:"costs" json:"costs"`
+}
+
+// AIAssistantCosts holds cost control settings for the integrated AI assistant.
+type AIAssistantCosts struct {
+	RateLimitPerUser    int     `yaml:"rate_limit_per_user" json:"rate_limit_per_user"`       // max requests/hour/user (0 = unlimited)
+	MaxTokensPerRequest int     `yaml:"max_tokens_per_request" json:"max_tokens_per_request"` // max output tokens per request
+	MaxContextTokens    int     `yaml:"max_context_tokens" json:"max_context_tokens"`         // max input tokens (page + system prompt)
+	DailyLimitPerUser   int     `yaml:"daily_limit_per_user" json:"daily_limit_per_user"`     // max requests/day/user (0 = unlimited)
+	MonthlyBudget       float64 `yaml:"monthly_budget" json:"monthly_budget"`                 // USD cap across all users (0 = unlimited)
+	WarnAtPercentage    int     `yaml:"warn_at_percentage" json:"warn_at_percentage"`         // admin warning threshold (0 = no warning)
+}
+
+// EffectiveAPIKey returns the API key, preferring the environment variable.
+func (c AIAssistantConfig) EffectiveAPIKey() string {
+	if envKey := os.Getenv("AI_ASSISTANT_API_KEY"); envKey != "" {
+		return envKey
+	}
+	return c.APIKey
+}
+
 // DraftsConfig holds draft/lock settings.
 type DraftsConfig struct {
 	AutoSaveInterval string `yaml:"auto_save_interval" json:"auto_save_interval"` // e.g. "2m"
@@ -183,6 +213,20 @@ func DefaultConfig() Config {
 			RateLimitWrite:   30,
 			MaxTokensPerUser: 5,
 			RequireSummary:   true,
+		},
+		AIAssistant: AIAssistantConfig{
+			Enabled:  false,
+			Provider: "anthropic",
+			Model:    "claude-sonnet-4-20250514",
+			MaxTokens: 4096,
+			Costs: AIAssistantCosts{
+				RateLimitPerUser:    30,
+				MaxTokensPerRequest: 4096,
+				MaxContextTokens:    16000,
+				DailyLimitPerUser:   100,
+				MonthlyBudget:       0,
+				WarnAtPercentage:    80,
+			},
 		},
 	}
 }
