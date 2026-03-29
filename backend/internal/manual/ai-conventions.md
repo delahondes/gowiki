@@ -50,3 +50,27 @@ This returns the rendered HTML via headless browser. Check:
 - The `rendering` field: `"ok"` or `"failed"`
 
 To scan all pages for rendering errors, combine `GET /api/sitemap` with `GET /api/render/{path}` for each page.
+
+## 1. Document review
+
+When asked to review a document for language, clarity, or consistency, follow this batch process:
+
+1. **Fetch** the page content
+2. **Generate a change document** — a numbered list of proposed changes, each with:
+   - The original text
+   - The suggested replacement
+   - A brief reason for the change
+   - Context notes for punctuation changes (e.g. "in table cell", "end of list item")
+   - A `Decision:` field left empty for the reviewer
+3. **Present** the change document for review — the reviewer annotates each proposal with accept, reject, or a clarification request
+4. **Clarify** if needed — update proposals based on feedback, then present again
+5. **Apply** all accepted changes at once and deploy
+
+This avoids slow one-by-one back-and-forth. A typical review of a large document should take 2-3 exchanges, not dozens.
+
+When reviewing English, pay attention to:
+- False friends from French (planification, resume, follower, etc.)
+- Passive voice in responsibility statements — prefer active voice
+- Regulatory terms that should stay capitalized (Customer, Design Output, etc.)
+- Missing articles, comma splices, dangling prepositions
+- Formatting issues (missing periods, broken table cell line breaks)
