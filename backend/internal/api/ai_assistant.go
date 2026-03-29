@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"gowiki/backend/internal/aiassistant"
 )
@@ -52,6 +53,12 @@ func hasAnyGroup(userGroups, allowedGroups []string) bool {
 }
 
 // handleAIChat handles POST /api/ai/assistant/chat
+//
+// In action mode: streams tokens for progress, then sends a final "edits" event
+// with structured diffs between the original and modified page.
+//
+// In review mode: streams the full AI response as tokens, which contains
+// a JSON array of numbered proposals.
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if s.aiProvider == nil {
 		writeError(w, http.StatusServiceUnavailable, "AI provider not configured")
@@ -82,6 +89,19 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	username := UsernameFromContext(r.Context())
 	cfg := s.configStore.Get()
 
+	// Rate limiting.
+	if s.aiRateLimiter != nil {
+		ok, reason := s.aiRateLimiter.Allow(
+			username,
+			cfg.AIAssistant.Costs.RateLimitPerUser,
+			cfg.AIAssistant.Costs.DailyLimitPerUser,
+		)
+		if !ok {
+			writeError(w, http.StatusTooManyRequests, reason)
+			return
+		}
+	}
+
 	// Read page content for context (from draft if available, otherwise published).
 	var pageContent string
 	if req.PagePath != "" {
@@ -111,7 +131,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build system prompt.
-	systemPrompt := s.buildAISystemPrompt(req.Mode, pageContent, req.PagePath)
+	systemPrompt := buildAISystemPrompt(req.Mode, pageContent, req.PagePath)
 
 	// Build LLM request.
 	chatReq := aiassistant.ChatRequest{
@@ -141,60 +161,150 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Collect the full response while streaming tokens.
+	var fullResponse strings.Builder
+	var inputTokens, outputTokens int
+
 	for event := range eventCh {
+		switch event.Type {
+		case "token":
+			fullResponse.WriteString(event.Text)
+			// Stream token for progress display.
+			data, _ := json.Marshal(map[string]any{
+				"type": "token",
+				"text": event.Text,
+			})
+			fmt.Fprintf(w, "event: token\ndata: %s\n\n", data)
+			flusher.Flush()
+
+		case "done":
+			inputTokens = event.InputTokens
+			outputTokens = event.OutputTokens
+
+		case "error":
+			data, _ := json.Marshal(map[string]any{
+				"type":  "error",
+				"text":  event.Text,
+			})
+			fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+			flusher.Flush()
+			return
+		}
+	}
+
+	// For action mode: compute structured edits from the AI's output.
+	if req.Mode == "action" && pageContent != "" {
+		modifiedContent := fullResponse.String()
+		// Strip markdown code fences if the AI wrapped its output in them.
+		modifiedContent = stripCodeFences(modifiedContent)
+		edits := aiassistant.ComputeEdits(pageContent, modifiedContent)
+
 		data, _ := json.Marshal(map[string]any{
-			"type":          event.Type,
-			"text":          event.Text,
-			"input_tokens":  event.InputTokens,
-			"output_tokens": event.OutputTokens,
+			"type":  "edits",
+			"edits": edits,
 		})
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
+		fmt.Fprintf(w, "event: edits\ndata: %s\n\n", data)
 		flusher.Flush()
 	}
+
+	// Send done event with usage.
+	data, _ := json.Marshal(map[string]any{
+		"type":          "done",
+		"input_tokens":  inputTokens,
+		"output_tokens": outputTokens,
+	})
+	fmt.Fprintf(w, "event: done\ndata: %s\n\n", data)
+	flusher.Flush()
+}
+
+// stripCodeFences removes wrapping ```markdown ... ``` if the AI added them.
+func stripCodeFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```markdown\n") {
+		s = strings.TrimPrefix(s, "```markdown\n")
+		if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
+			s = s[:idx]
+		}
+	} else if strings.HasPrefix(s, "```\n") {
+		s = strings.TrimPrefix(s, "```\n")
+		if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
+			s = s[:idx]
+		}
+	}
+	return s
 }
 
 // buildAISystemPrompt assembles the system prompt from conventions + page context.
-func (s *Server) buildAISystemPrompt(mode, pageContent, pagePath string) string {
-	prompt := "You are an AI assistant integrated into Gowiki, a wiki system.\n\n"
+func buildAISystemPrompt(mode, pageContent, pagePath string) string {
+	var b strings.Builder
 
-	// Add conventions (same content as GET /api/ai/v1/conventions, but as text).
-	prompt += "# Wiki Conventions\n\n"
-	prompt += "You must follow the Gowiki Markdown dialect strictly:\n"
-	prompt += "- *italic* only (not _italic_)\n"
-	prompt += "- _underline_ (not italic)\n"
-	prompt += "- **bold** only\n"
-	prompt += "- ATX headings (#) only\n"
-	prompt += "- - for unordered lists (not *)\n"
-	prompt += "- Raw HTML is forbidden\n"
-	prompt += "- Single newline = hard line break in paragraphs\n\n"
+	b.WriteString("You are an AI assistant integrated into Gowiki, a wiki system. ")
+	b.WriteString("You operate on the page the user is currently editing.\n\n")
 
-	if mode == "action" {
-		prompt += "# Mode: Action\n\n"
-		prompt += "The user will give you an instruction. Apply the requested change directly.\n"
-		prompt += "Output ONLY the modified page markdown. Do not include explanations or commentary outside the markdown.\n"
-		prompt += "If you only need to change part of the page, output the full page with the change applied.\n\n"
-	} else {
-		prompt += "# Mode: Review\n\n"
-		prompt += "The user wants a structured review of the page. Analyze the content and produce a numbered list of proposals.\n"
-		prompt += "Each proposal must have:\n"
-		prompt += "- Number\n"
-		prompt += "- Location (section or line description)\n"
-		prompt += "- Original text (exact quote)\n"
-		prompt += "- Proposed text\n"
-		prompt += "- Rationale (brief)\n\n"
-		prompt += "Format each proposal as a JSON object in a JSON array. Example:\n"
-		prompt += "```json\n"
-		prompt += "[{\"number\": 1, \"location\": \"Section 3, paragraph 1\", \"original\": \"...\", \"proposed\": \"...\", \"rationale\": \"...\"}]\n"
-		prompt += "```\n\n"
+	// Full conventions.
+	b.WriteString("# Gowiki Markdown Dialect\n\n")
+	b.WriteString("You MUST follow these rules strictly. The dialect is bijective — one canonical syntax per node type.\n\n")
+	b.WriteString("## Syntax rules\n")
+	b.WriteString("- `*italic*` only — `_text_` means UNDERLINE, not italic\n")
+	b.WriteString("- `**bold**` only — `__bold__` is rejected\n")
+	b.WriteString("- `_underline_` — produces underline, NOT italic\n")
+	b.WriteString("- `~~strikethrough~~`\n")
+	b.WriteString("- `~subscript~`, `^superscript^`\n")
+	b.WriteString("- `^[inline footnote]` — supports bold, italic, links inside\n")
+	b.WriteString("- ATX headings only (`# H1`, `## H2`) — setext headings rejected\n")
+	b.WriteString("- `- item` for unordered lists — `*` as list marker is rejected\n")
+	b.WriteString("- `1. item` for ordered lists\n")
+	b.WriteString("- Numbered headings: `## 1. Title` (prefix syntax, not directive)\n")
+	b.WriteString("- Raw HTML is forbidden — `<` and `>` are plain characters\n")
+	b.WriteString("- HTML entities are not interpreted — use UTF-8 directly\n")
+	b.WriteString("- Single newline in a paragraph = hard line break\n")
+	b.WriteString("- Trailing spaces have no meaning\n")
+	b.WriteString("- `\\n` literal = line break in lists and tables only\n")
+	b.WriteString("- Pipe tables — no column alignment syntax\n")
+	b.WriteString("- Directives: `{name key=value}` on its own line before the target block\n\n")
+
+	b.WriteString("## Forbidden\n")
+	b.WriteString("- Do NOT use `_text_` for italic\n")
+	b.WriteString("- Do NOT use `*` as a list marker\n")
+	b.WriteString("- Do NOT use raw HTML\n")
+	b.WriteString("- Do NOT use HTML entities\n")
+	b.WriteString("- Do NOT use setext headings\n")
+	b.WriteString("- Do NOT remove or reformat content you were not asked to change\n")
+	b.WriteString("- Do NOT silently change document structure\n\n")
+
+	// Mode-specific instructions.
+	switch mode {
+	case "action":
+		b.WriteString("# Instructions\n\n")
+		b.WriteString("The user will give you an instruction to modify the page.\n")
+		b.WriteString("Output ONLY the complete modified page markdown.\n")
+		b.WriteString("Do not include explanations, commentary, or code fences around the output.\n")
+		b.WriteString("Do not change parts of the document that the instruction does not mention.\n")
+		b.WriteString("Preserve all existing formatting, directives, and structure.\n\n")
+
+	case "review":
+		b.WriteString("# Instructions\n\n")
+		b.WriteString("Analyze the page and produce a structured list of improvement proposals.\n")
+		b.WriteString("Output ONLY a JSON array. No prose before or after.\n")
+		b.WriteString("Each proposal is a JSON object with these fields:\n")
+		b.WriteString("- `number` (int): sequential proposal number\n")
+		b.WriteString("- `location` (string): section or paragraph description\n")
+		b.WriteString("- `original` (string): exact text to be replaced\n")
+		b.WriteString("- `proposed` (string): replacement text\n")
+		b.WriteString("- `rationale` (string): brief explanation\n\n")
+		b.WriteString("Example:\n")
+		b.WriteString("```json\n")
+		b.WriteString(`[{"number": 1, "location": "Section 3, paragraph 1", "original": "The datas shows", "proposed": "The data show", "rationale": "Grammar: 'data' is plural"}]`)
+		b.WriteString("\n```\n\n")
 	}
 
+	// Page content as context.
 	if pageContent != "" {
-		prompt += "# Current Page Content\n\n"
-		prompt += fmt.Sprintf("Page path: %s\n\n", pagePath)
-		prompt += "```markdown\n"
-		prompt += pageContent
-		prompt += "\n```\n"
+		b.WriteString("# Current Page\n\n")
+		b.WriteString(fmt.Sprintf("Path: `%s`\n\n", pagePath))
+		b.WriteString(pageContent)
+		b.WriteString("\n")
 	}
 
-	return prompt
+	return b.String()
 }

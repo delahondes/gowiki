@@ -130,6 +130,7 @@ type Server struct {
 	presenceHub         *collab.Hub
 	collabRelay         *collab.Relay
 	aiProvider          aiassistant.Provider
+	aiRateLimiter       *aiassistant.UserRateLimiter
 	serveWeb            bool
 	webDirPath          string
 }
@@ -183,6 +184,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 			switch cfg.AIAssistant.Provider {
 			case "anthropic", "":
 				s.aiProvider = aiassistant.NewAnthropicProvider(apiKey)
+				s.aiRateLimiter = aiassistant.NewUserRateLimiter()
 				log.Printf("ai assistant: Anthropic provider initialized (model: %s)", cfg.AIAssistant.Model)
 			default:
 				log.Printf("ai assistant: unknown provider %q, disabled", cfg.AIAssistant.Provider)
