@@ -218,21 +218,6 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// For action mode: compute structured edits from the AI's output.
-	if req.Mode == "action" && pageContent != "" {
-		modifiedContent := fullResponse.String()
-		// Strip markdown code fences if the AI wrapped its output in them.
-		modifiedContent = stripCodeFences(modifiedContent)
-		edits := aiassistant.ComputeEdits(pageContent, modifiedContent)
-
-		data, _ := json.Marshal(map[string]any{
-			"type":  "edits",
-			"edits": edits,
-		})
-		fmt.Fprintf(w, "event: edits\ndata: %s\n\n", data)
-		flusher.Flush()
-	}
-
 	// Send done event with usage.
 	data, _ := json.Marshal(map[string]any{
 		"type":          "done",
@@ -241,23 +226,6 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	})
 	fmt.Fprintf(w, "event: done\ndata: %s\n\n", data)
 	flusher.Flush()
-}
-
-// stripCodeFences removes wrapping ```markdown ... ``` if the AI added them.
-func stripCodeFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```markdown\n") {
-		s = strings.TrimPrefix(s, "```markdown\n")
-		if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
-			s = s[:idx]
-		}
-	} else if strings.HasPrefix(s, "```\n") {
-		s = strings.TrimPrefix(s, "```\n")
-		if idx := strings.LastIndex(s, "\n```"); idx >= 0 {
-			s = s[:idx]
-		}
-	}
-	return s
 }
 
 // buildAISystemPrompt assembles the system prompt from conventions + page context.
@@ -303,10 +271,19 @@ func buildAISystemPrompt(mode, pageContent, pagePath string) string {
 	case "action":
 		b.WriteString("# Instructions\n\n")
 		b.WriteString("The user will give you an instruction to modify the page.\n")
-		b.WriteString("Output ONLY the complete modified page markdown.\n")
-		b.WriteString("Do not include explanations, commentary, or code fences around the output.\n")
-		b.WriteString("Do not change parts of the document that the instruction does not mention.\n")
-		b.WriteString("Preserve all existing formatting, directives, and structure.\n\n")
+		b.WriteString("Return ONLY the targeted edits as a JSON array — do NOT return the full page.\n")
+		b.WriteString("Each edit replaces an exact region of the page. Only include the parts that change.\n")
+		b.WriteString("The `original` field must be an EXACT verbatim copy-paste from the page content.\n")
+		b.WriteString("For insertions, use a small surrounding context as `original` (e.g. the line before and after the insertion point) and include it in `proposed` with the new content added.\n\n")
+		b.WriteString("Output ONLY a JSON array. No prose before or after.\n")
+		b.WriteString("Each edit is a JSON object with these fields:\n")
+		b.WriteString("- `original` (string): EXACT verbatim text from the page to be replaced\n")
+		b.WriteString("- `proposed` (string): replacement text\n")
+		b.WriteString("- `rationale` (string): brief explanation of the change\n\n")
+		b.WriteString("Example — adding a row to a table:\n")
+		b.WriteString("```json\n")
+		b.WriteString(`[{"original": "| Alice | Admin |\n| Bob | Editor |", "proposed": "| Alice | Admin |\n| Bob | Editor |\n| Carol | Viewer |", "rationale": "Added Carol as viewer"}]`)
+		b.WriteString("\n```\n\n")
 
 	case "review":
 		b.WriteString("# Instructions\n\n")

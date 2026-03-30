@@ -4098,29 +4098,21 @@ async function aiSend(sendMode = "action") {
   try {
     const { fullText, edits, usage } = await aiStreamRequest(message, sendMode, aiMsg)
 
-    if (sendMode === "review") {
-      // Parse proposals from the AI response.
-      const proposals = parseReviewProposals(fullText)
-      if (proposals.length > 0) {
-        aiMsg.textContent = ""
-        aiMsg.innerHTML = ""
-        renderReviewPanel(aiMsg, proposals)
-      } else {
-        aiMsg.textContent = "No proposals returned. Raw response:\n\n" + fullText
-      }
+    // Both modes return JSON proposals. Parse them.
+    const proposals = parseReviewProposals(fullText)
+
+    if (proposals.length === 0) {
+      aiMsg.textContent = "No changes proposed. Raw response:\n\n" + fullText
+    } else if (sendMode === "review") {
+      // Review mode: show interactive panel for accept/reject.
+      aiMsg.textContent = ""
+      aiMsg.innerHTML = ""
+      renderReviewPanel(aiMsg, proposals)
     } else {
-      // Action mode: apply structured edits.
-      if (edits && edits.length > 0) {
-        const applied = applyAIEdits(edits)
-        if (applied > 0) {
-          aiMsg.textContent = `Applied ${applied} edit${applied > 1 ? "s" : ""} to the page.`
-          aiMsg.classList.add("ai-msg-applied")
-          await createAICommentsForEdits(edits)
-          saveDraftExplicit()
-        } else {
-          aiMsg.textContent = "No changes to apply (page already matches)."
-        }
-      }
+      // Action mode: auto-apply all verified proposals.
+      aiMsg.textContent = ""
+      aiMsg.innerHTML = ""
+      await autoApplyProposals(aiMsg, proposals)
     }
 
     // Show token usage.
@@ -4373,6 +4365,78 @@ function renderReviewPanel(container, proposals) {
   container.appendChild(actionBar)
 }
 
+async function autoApplyProposals(container, proposals) {
+  const markdown = getCurrentMarkdown()
+
+  // Verify and position each proposal.
+  const positioned = []
+  const failed = []
+  for (const p of proposals) {
+    const idx = markdown.indexOf(p.original)
+    if (idx < 0) {
+      failed.push(p)
+      continue
+    }
+    const secondIdx = markdown.indexOf(p.original, idx + 1)
+    if (secondIdx >= 0) {
+      failed.push(p) // ambiguous
+      continue
+    }
+    positioned.push({ ...p, idx })
+  }
+
+  if (positioned.length === 0) {
+    container.textContent = "Could not verify any proposed edit against the document."
+    container.classList.add("ai-msg-error")
+    if (failed.length > 0) {
+      container.textContent += `\n${failed.length} edit(s) had mismatched original text.`
+    }
+    return
+  }
+
+  // Sort and check overlaps.
+  positioned.sort((a, b) => a.idx - b.idx)
+  for (let i = 1; i < positioned.length; i++) {
+    const prev = positioned[i - 1]
+    if (prev.idx + prev.original.length > positioned[i].idx) {
+      positioned.splice(i, 1)
+      i--
+    }
+  }
+
+  // Apply in reverse order.
+  let result = markdown
+  for (let i = positioned.length - 1; i >= 0; i--) {
+    const p = positioned[i]
+    result = result.slice(0, p.idx) + p.proposed + result.slice(p.idx + p.original.length)
+  }
+
+  if (editMode === "visual" && editorView) {
+    const newDoc = markdownToPM(result, registry)
+    const tr = editorView.state.tr
+    tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
+    editorView.dispatch(tr)
+  } else if (editMode === "raw" && rawEditor) {
+    rawEditor.value = result
+    rawEditor.dispatchEvent(new Event("input"))
+  }
+
+  // Create AI comments.
+  for (const p of positioned) {
+    if (p.proposed && p.proposed.trim()) {
+      const selected = p.proposed.length > 200 ? p.proposed.slice(0, 200) : p.proposed
+      await createAIComment(selected, "", "", p.rationale || "AI edit")
+    }
+  }
+
+  saveDraftExplicit()
+
+  let msg = `Applied ${positioned.length} edit${positioned.length > 1 ? "s" : ""}.`
+  if (failed.length > 0) msg += ` (${failed.length} could not be verified and were skipped)`
+  container.textContent = msg
+  container.classList.add("ai-msg-applied")
+}
+
 async function applyAcceptedProposals(proposals, states, container) {
   const accepted = []
   for (let i = 0; i < proposals.length; i++) {
@@ -4516,48 +4580,6 @@ async function createAICommentsForEdits(edits) {
     const comment = edit.comment || "AI modification"
     await createAIComment(selected, "", "", comment)
   }
-}
-
-function applyAIEdits(edits) {
-  if (editMode === "visual" && editorView) {
-    return applyAIEditsVisual(edits)
-  } else if (editMode === "raw" && rawEditor) {
-    return applyAIEditsRaw(edits)
-  }
-  return 0
-}
-
-function applyAIEditsVisual(edits) {
-  // For visual mode: re-parse the full modified markdown and replace the document.
-  // This is simpler and more reliable than trying to map line-based edits to PM positions.
-  const currentMd = getCurrentMarkdown()
-  const lines = currentMd.split("\n")
-
-  // Apply edits in reverse order to preserve line numbers.
-  const sortedEdits = [...edits].sort((a, b) => b.old_start - a.old_start)
-  for (const edit of sortedEdits) {
-    const newLines = edit.new_text ? edit.new_text.split("\n") : []
-    lines.splice(edit.old_start, edit.old_end - edit.old_start, ...newLines)
-  }
-
-  const newMarkdown = lines.join("\n")
-  const newDoc = markdownToPM(newMarkdown, registry)
-  const tr = editorView.state.tr
-  tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
-  editorView.dispatch(tr)
-  return edits.length
-}
-
-function applyAIEditsRaw(edits) {
-  const lines = rawEditor.value.split("\n")
-  const sortedEdits = [...edits].sort((a, b) => b.old_start - a.old_start)
-  for (const edit of sortedEdits) {
-    const newLines = edit.new_text ? edit.new_text.split("\n") : []
-    lines.splice(edit.old_start, edit.old_end - edit.old_start, ...newLines)
-  }
-  rawEditor.value = lines.join("\n")
-  rawEditor.dispatchEvent(new Event("input"))
-  return edits.length
 }
 
 function buildMenubar() {
