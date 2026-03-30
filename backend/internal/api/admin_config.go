@@ -49,5 +49,8 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		s.oauthClient = nil // Clear stale client if config is now invalid/empty.
 	}
 
+	// Re-initialize AI assistant provider if config changed.
+	s.reinitAIProvider()
+
 	writeJSON(w, http.StatusOK, s.configStore.Get())
 }

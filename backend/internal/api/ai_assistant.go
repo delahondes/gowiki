@@ -9,6 +9,32 @@ import (
 	"gowiki/backend/internal/aiassistant"
 )
 
+// reinitAIProvider re-creates the AI provider after a config change.
+func (s *Server) reinitAIProvider() {
+	cfg := s.configStore.Get()
+	if !cfg.AIAssistant.Enabled {
+		s.aiProvider = nil
+		s.aiRateLimiter = nil
+		return
+	}
+	apiKey := cfg.AIAssistant.EffectiveAPIKey()
+	if apiKey == "" {
+		s.aiProvider = nil
+		s.aiRateLimiter = nil
+		return
+	}
+	switch cfg.AIAssistant.Provider {
+	case "anthropic", "":
+		s.aiProvider = aiassistant.NewAnthropicProvider(apiKey)
+		if s.aiRateLimiter == nil {
+			s.aiRateLimiter = aiassistant.NewUserRateLimiter()
+		}
+	default:
+		s.aiProvider = nil
+		s.aiRateLimiter = nil
+	}
+}
+
 // requireAIAssistantAccess checks that:
 // 1. The AI assistant is enabled in config
 // 2. The user belongs to an allowed group (if allowed_groups is set)
@@ -284,12 +310,14 @@ func buildAISystemPrompt(mode, pageContent, pagePath string) string {
 
 	case "review":
 		b.WriteString("# Instructions\n\n")
-		b.WriteString("Analyze the page and produce a structured list of improvement proposals.\n")
+		b.WriteString("The user will tell you what to review. Propose changes accordingly.\n")
+		b.WriteString("The `original` field must be an EXACT verbatim copy-paste from the page content — the exact characters as they appear. If you cannot match exactly, do not propose the change.\n")
+		b.WriteString("If the page is correct for what was asked, return an empty array [].\n\n")
 		b.WriteString("Output ONLY a JSON array. No prose before or after.\n")
 		b.WriteString("Each proposal is a JSON object with these fields:\n")
 		b.WriteString("- `number` (int): sequential proposal number\n")
 		b.WriteString("- `location` (string): section or paragraph description\n")
-		b.WriteString("- `original` (string): exact text to be replaced\n")
+		b.WriteString("- `original` (string): EXACT verbatim text from the page to be replaced\n")
 		b.WriteString("- `proposed` (string): replacement text\n")
 		b.WriteString("- `rationale` (string): brief explanation\n\n")
 		b.WriteString("Example:\n")
@@ -298,12 +326,15 @@ func buildAISystemPrompt(mode, pageContent, pagePath string) string {
 		b.WriteString("\n```\n\n")
 	}
 
-	// Page content as context.
+	// Page content as context, wrapped in XML tags so code fences inside
+	// the content are not confused with prompt formatting.
 	if pageContent != "" {
 		b.WriteString("# Current Page\n\n")
 		b.WriteString(fmt.Sprintf("Path: `%s`\n\n", pagePath))
+		b.WriteString("The page content is enclosed in <page-content> tags. Everything between these tags is the raw markdown of the page, verbatim.\n\n")
+		b.WriteString("<page-content>\n")
 		b.WriteString(pageContent)
-		b.WriteString("\n")
+		b.WriteString("\n</page-content>\n")
 	}
 
 	return b.String()

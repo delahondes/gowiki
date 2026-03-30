@@ -2333,6 +2333,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 #app.ai-panel-visible {
   grid-template-columns: 220px minmax(0, 1fr) 350px 48px;
 }
+#app.ai-panel-visible.ai-panel-wide {
+  grid-template-columns: 220px minmax(0, 1fr) minmax(450px, 50%) 48px;
+}
 
 #ai-panel {
   display: flex;
@@ -2377,6 +2380,16 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   margin-right: 6px;
 }
 .ai-panel-clear-comments:hover { background: #e8eaf6; border-color: #9fa8da; color: #5c6bc0; }
+
+.ai-panel-width-toggle {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.78em;
+  color: #777;
+  padding: 2px 8px;
+}
 
 .ai-panel-messages {
   flex: 1;
@@ -2458,6 +2471,148 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 .ai-panel-send:hover { background: #3a7cc0; }
 .ai-panel-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ai-panel-review {
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.ai-panel-review:hover { background: #5a6268; }
+.ai-panel-review:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── AI Review Panel ────────────────────── */
+
+.ai-review-container { padding: 0; }
+.ai-review-header { font-weight: 600; padding: 8px; border-bottom: 1px solid #e0e0e0; }
+
+.ai-review-list { display: flex; flex-direction: column; }
+
+.ai-review-item {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  transition: background 0.15s;
+}
+.ai-review-item-accepted { background: #e8f5e9; }
+.ai-review-item-rejected { background: #fce4ec; opacity: 0.6; }
+.ai-review-item-clarify { background: #fff3e0; }
+.ai-review-item-unverified { background: #f5f5f5; opacity: 0.6; }
+.ai-review-warning {
+  color: #c62828;
+  font-size: 0.8em;
+  font-weight: 600;
+  margin-bottom: 4px;
+  padding: 2px 6px;
+  background: #fdecea;
+  border-radius: 3px;
+}
+
+.ai-review-num { font-weight: 700; font-size: 0.85em; color: #555; margin-bottom: 4px; }
+.ai-review-location { font-size: 0.8em; color: #888; margin-bottom: 6px; }
+
+.ai-review-diff {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+.ai-review-original {
+  background: #fef8f7;
+  padding: 4px 6px;
+  border-radius: 3px;
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-review-original del {
+  background: #fcc;
+  text-decoration: none;
+  border-radius: 2px;
+}
+.ai-review-arrow { color: #999; padding-top: 4px; flex-shrink: 0; }
+.ai-review-proposed {
+  background: #f6fdf6;
+  padding: 4px 6px;
+  border-radius: 3px;
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ai-review-proposed ins {
+  background: #cfc;
+  text-decoration: none;
+  border-radius: 2px;
+}
+
+.ai-review-rationale {
+  font-size: 0.8em;
+  color: #666;
+  font-style: italic;
+  margin-bottom: 6px;
+}
+
+.ai-review-actions { display: flex; gap: 4px; }
+
+.ai-review-btn {
+  padding: 3px 10px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.ai-review-accept { color: #2e7d32; border-color: #81c784; }
+.ai-review-accept:hover { background: #e8f5e9; }
+.ai-review-reject { color: #c62828; border-color: #ef9a9a; }
+.ai-review-reject:hover { background: #fdecea; }
+.ai-review-clarify { color: #e65100; border-color: #ffb74d; }
+.ai-review-clarify:hover { background: #fff3e0; }
+
+.ai-review-clarify-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.ai-review-clarify-input {
+  flex: 1;
+  border: 1px solid #ffb74d;
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 0.85em;
+}
+
+.ai-review-action-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #ddd;
+  background: #f5f5f5;
+}
+.ai-review-apply-btn {
+  background: #2e7d32;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.ai-review-apply-btn:hover { background: #1b5e20; }
+.ai-review-refine-btn {
+  background: #e65100;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.ai-review-refine-btn:hover { background: #bf360c; }
 
 @media (max-width: 900px) {
   #app.ai-panel-visible { grid-template-columns: 1fr; }

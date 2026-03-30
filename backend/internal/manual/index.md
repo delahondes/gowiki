@@ -52,7 +52,8 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Database](./admin-database) — Structured data tables
 - [API Tokens](./admin-tokens) — Creating tokens for AI and programmatic access
 
-## AI Content API
+## AI
 
-- [Overview](./ai-api) — Using AI assistants with the wiki
-- [Conventions](./ai-conventions) — Rules AI agents must follow
+- [Integrated AI Assistant](./ai-assistant) — Using the built-in AI assistant in the editor
+- [AI Content API](./ai-api) — Using external AI assistants with the wiki
+- [AI Conventions](./ai-conventions) — Rules AI agents must follow

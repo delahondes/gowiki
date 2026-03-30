@@ -4016,12 +4016,14 @@ function openAIPanel() {
     <div class="ai-panel-header">
       <span class="ai-panel-title">AI Assistant</span>
       <button class="ai-panel-clear-comments" title="Clear AI comments">Clear AI notes</button>
+      <button class="ai-panel-width-toggle" title="Toggle panel width">Wide</button>
       <button class="ai-panel-close" title="Close">\u2715</button>
     </div>
     <div class="ai-panel-messages"></div>
     <div class="ai-panel-input-row">
       <textarea class="ai-panel-input" placeholder="Ask AI to modify this page..." rows="2"></textarea>
-      <button class="ai-panel-send" title="Send">&#9654;</button>
+      <button class="ai-panel-send" title="Send (Ctrl+Enter)">&#9654;</button>
+      <button class="ai-panel-review" title="Review mode — AI analyzes and proposes changes">Review</button>
     </div>
   `
   appRoot.appendChild(aiPanelEl)
@@ -4036,13 +4038,21 @@ function openAIPanel() {
     aiAddMessage("assistant", "AI comments cleared.").classList.add("ai-msg-applied")
   })
 
+  const widthBtn = aiPanelEl.querySelector(".ai-panel-width-toggle")
+  widthBtn.addEventListener("click", () => {
+    const isWide = appRoot.classList.toggle("ai-panel-wide")
+    widthBtn.textContent = isWide ? "Narrow" : "Wide"
+  })
+
   const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
+  const reviewBtn = aiPanelEl.querySelector(".ai-panel-review")
   const input = aiPanelEl.querySelector(".ai-panel-input")
-  sendBtn.addEventListener("click", () => aiSend())
+  sendBtn.addEventListener("click", () => aiSend("action"))
+  reviewBtn.addEventListener("click", () => aiSend("review"))
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      aiSend()
+      aiSend("action")
     }
   })
   input.focus()
@@ -4068,7 +4078,7 @@ function aiAddMessage(role, text) {
   return msg
 }
 
-async function aiSend() {
+async function aiSend(sendMode = "action") {
   if (!aiPanelEl || aiPanelBusy) return
   const input = aiPanelEl.querySelector(".ai-panel-input")
   const message = input.value.trim()
@@ -4076,92 +4086,40 @@ async function aiSend() {
 
   input.value = ""
   aiPanelBusy = true
+  aiSetButtonsDisabled(true)
 
   // Show user message.
-  aiAddMessage("user", message)
+  aiAddMessage("user", message + (sendMode === "review" ? " [review]" : ""))
 
   // Show AI response placeholder.
   const aiMsg = aiAddMessage("assistant", "")
   aiMsg.textContent = "Thinking..."
 
-  const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
-  sendBtn.disabled = true
-
   try {
-    const resp = await fetch("/api/ai/assistant/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        page_path: `/${pagePath}`,
-        message,
-        mode: "action",
-      }),
-    })
+    const { fullText, edits, usage } = await aiStreamRequest(message, sendMode, aiMsg)
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: "Request failed" }))
-      aiMsg.textContent = `Error: ${err.error || resp.statusText}`
-      aiMsg.classList.add("ai-msg-error")
-      return
-    }
-
-    // Read SSE stream.
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
-    let fullText = ""
-    let edits = null
-    let usage = null
-
-    aiMsg.textContent = ""
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      // Parse SSE events from buffer.
-      const lines = buffer.split("\n")
-      buffer = lines.pop() // keep incomplete line in buffer
-      let currentEventType = null
-
-      for (const line of lines) {
-        if (line.startsWith("event: ")) {
-          currentEventType = line.slice(7).trim()
-        } else if (line.startsWith("data: ")) {
-          const data = line.slice(6)
-          try {
-            const parsed = JSON.parse(data)
-            if (parsed.type === "token" && parsed.text) {
-              fullText += parsed.text
-              aiMsg.textContent = fullText
-              const messagesEl = aiPanelEl.querySelector(".ai-panel-messages")
-              messagesEl.scrollTop = messagesEl.scrollHeight
-            } else if (parsed.type === "edits" && parsed.edits) {
-              edits = parsed.edits
-            } else if (parsed.type === "done") {
-              usage = parsed
-            } else if (parsed.type === "error") {
-              aiMsg.textContent += `\n\nError: ${parsed.text}`
-              aiMsg.classList.add("ai-msg-error")
-            }
-          } catch { /* skip malformed JSON */ }
-        }
-      }
-    }
-
-    // Apply edits to the editor if we got structured edits.
-    if (edits && edits.length > 0) {
-      const applied = applyAIEdits(edits)
-      if (applied > 0) {
-        aiMsg.textContent = `Applied ${applied} edit${applied > 1 ? "s" : ""} to the page.`
-        aiMsg.classList.add("ai-msg-applied")
-        // Create AI comments for each edit to mark modified regions.
-        await createAICommentsForEdits(edits)
-        // Save draft after AI edits.
-        saveDraftExplicit()
+    if (sendMode === "review") {
+      // Parse proposals from the AI response.
+      const proposals = parseReviewProposals(fullText)
+      if (proposals.length > 0) {
+        aiMsg.textContent = ""
+        aiMsg.innerHTML = ""
+        renderReviewPanel(aiMsg, proposals)
       } else {
-        aiMsg.textContent = "No changes to apply (page already matches)."
+        aiMsg.textContent = "No proposals returned. Raw response:\n\n" + fullText
+      }
+    } else {
+      // Action mode: apply structured edits.
+      if (edits && edits.length > 0) {
+        const applied = applyAIEdits(edits)
+        if (applied > 0) {
+          aiMsg.textContent = `Applied ${applied} edit${applied > 1 ? "s" : ""} to the page.`
+          aiMsg.classList.add("ai-msg-applied")
+          await createAICommentsForEdits(edits)
+          saveDraftExplicit()
+        } else {
+          aiMsg.textContent = "No changes to apply (page already matches)."
+        }
       }
     }
 
@@ -4178,10 +4136,373 @@ async function aiSend() {
     aiMsg.classList.add("ai-msg-error")
   } finally {
     aiPanelBusy = false
-    if (aiPanelEl) {
-      const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
-      if (sendBtn) sendBtn.disabled = false
+    aiSetButtonsDisabled(false)
+  }
+}
+
+function aiSetButtonsDisabled(disabled) {
+  if (!aiPanelEl) return
+  for (const btn of aiPanelEl.querySelectorAll(".ai-panel-send, .ai-panel-review")) {
+    btn.disabled = disabled
+  }
+}
+
+async function aiStreamRequest(message, sendMode, aiMsg) {
+  const resp = await fetch("/api/ai/assistant/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      page_path: `/${pagePath}`,
+      message,
+      mode: sendMode,
+    }),
+  })
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: "Request failed" }))
+    throw new Error(err.error || resp.statusText)
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let fullText = ""
+  let edits = null
+  let usage = null
+
+  aiMsg.textContent = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const lines = buffer.split("\n")
+    buffer = lines.pop()
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      try {
+        const parsed = JSON.parse(line.slice(6))
+        if (parsed.type === "token" && parsed.text) {
+          fullText += parsed.text
+          aiMsg.textContent = fullText
+          const messagesEl = aiPanelEl?.querySelector(".ai-panel-messages")
+          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
+        } else if (parsed.type === "edits" && parsed.edits) {
+          edits = parsed.edits
+        } else if (parsed.type === "done") {
+          usage = parsed
+        } else if (parsed.type === "error") {
+          throw new Error(parsed.text)
+        }
+      } catch (e) {
+        if (e.message && !e.message.includes("JSON")) throw e
+      }
     }
+  }
+
+  return { fullText, edits, usage }
+}
+
+// ── Review mode ──
+
+function parseReviewProposals(text) {
+  // The AI should return a JSON array. Try to extract it from the response.
+  const jsonMatch = text.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
+  try {
+    const arr = JSON.parse(jsonMatch[0])
+    if (!Array.isArray(arr)) return []
+    return arr.filter(p => p.original && p.proposed)
+  } catch { return [] }
+}
+
+// Character-level inline diff for review display.
+function charDiffHtml(oldStr, newStr) {
+  // Simple LCS-based char diff.
+  const m = oldStr.length, n = newStr.length
+  // For very long strings, fall back to no highlighting.
+  if (m > 2000 || n > 2000) {
+    return {
+      oldHtml: `<del>${escapeHtml(oldStr)}</del>`,
+      newHtml: `<ins>${escapeHtml(newStr)}</ins>`,
+    }
+  }
+  // Build LCS table.
+  const prev = new Uint16Array(n + 1)
+  const curr = new Uint16Array(n + 1)
+  const dp = [prev]
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldStr[i - 1] === newStr[j - 1]) curr[j] = prev[j - 1] + 1
+      else curr[j] = prev[j] > curr[j - 1] ? prev[j] : curr[j - 1]
+    }
+    dp.push(new Uint16Array(curr))
+    prev.set(curr)
+    curr.fill(0)
+  }
+  // Backtrack.
+  const ops = []
+  let i = m, j = n
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldStr[i - 1] === newStr[j - 1]) {
+      ops.push({ type: "=", ch: oldStr[i - 1] }); i--; j--
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.push({ type: "+", ch: newStr[j - 1] }); j--
+    } else {
+      ops.push({ type: "-", ch: oldStr[i - 1] }); i--
+    }
+  }
+  ops.reverse()
+  // Build HTML.
+  let oldHtml = "", newHtml = ""
+  for (const op of ops) {
+    const esc = escapeHtml(op.ch)
+    if (op.type === "=") { oldHtml += esc; newHtml += esc }
+    else if (op.type === "-") { oldHtml += `<del>${esc}</del>` }
+    else { newHtml += `<ins>${esc}</ins>` }
+  }
+  return { oldHtml, newHtml }
+}
+
+function renderReviewPanel(container, proposals) {
+  container.classList.add("ai-review-container")
+
+  // Validate each proposal against the actual document content.
+  const markdown = getCurrentMarkdown()
+  proposals.forEach(p => {
+    p._verified = markdown.includes(p.original)
+  })
+  const verified = proposals.filter(p => p._verified).length
+
+  const header = document.createElement("div")
+  header.className = "ai-review-header"
+  header.textContent = `${proposals.length} proposal${proposals.length > 1 ? "s" : ""} (${verified} verified)`
+  container.appendChild(header)
+
+  const list = document.createElement("div")
+  list.className = "ai-review-list"
+  container.appendChild(list)
+
+  const states = proposals.map(p => ({
+    status: p._verified ? "pending" : "rejected",
+    clarification: "",
+  }))
+
+  proposals.forEach((p, i) => {
+    const item = document.createElement("div")
+    item.dataset.index = i
+
+    if (!p._verified) {
+      item.className = "ai-review-item ai-review-item-unverified"
+    } else {
+      item.className = "ai-review-item"
+    }
+
+    const diff = charDiffHtml(p.original, p.proposed)
+    const warningHtml = p._verified ? "" : `<div class="ai-review-warning">Original text not found in document — cannot apply</div>`
+
+    item.innerHTML = `
+      <div class="ai-review-num">#${p.number || i + 1}${p._verified ? "" : " \u26A0"}</div>
+      <div class="ai-review-location">${escapeHtml(p.location || "")}</div>
+      ${warningHtml}
+      <div class="ai-review-diff">
+        <div class="ai-review-original">${diff.oldHtml}</div>
+        <div class="ai-review-arrow">\u2192</div>
+        <div class="ai-review-proposed">${diff.newHtml}</div>
+      </div>
+      <div class="ai-review-rationale">${escapeHtml(p.rationale || "")}</div>
+      <div class="ai-review-actions">
+        <button class="ai-review-btn ai-review-accept" ${p._verified ? "" : "disabled"} title="${p._verified ? "Accept" : "Cannot accept — original not found"}">Accept</button>
+        <button class="ai-review-btn ai-review-reject" title="Reject">Reject</button>
+        <button class="ai-review-btn ai-review-clarify" title="Clarify">Clarify</button>
+      </div>
+      <div class="ai-review-clarify-row" style="display:none">
+        <input class="ai-review-clarify-input" placeholder="Your clarification..." />
+      </div>
+    `
+
+    const acceptBtn = item.querySelector(".ai-review-accept")
+    const rejectBtn = item.querySelector(".ai-review-reject")
+    const clarifyBtn = item.querySelector(".ai-review-clarify")
+    const clarifyRow = item.querySelector(".ai-review-clarify-row")
+    const clarifyInput = item.querySelector(".ai-review-clarify-input")
+
+    if (p._verified) {
+      acceptBtn.addEventListener("click", () => {
+        states[i].status = "accepted"
+        item.className = "ai-review-item ai-review-item-accepted"
+        clarifyRow.style.display = "none"
+      })
+    }
+    rejectBtn.addEventListener("click", () => {
+      states[i].status = "rejected"
+      item.className = "ai-review-item ai-review-item-rejected"
+      clarifyRow.style.display = "none"
+    })
+    clarifyBtn.addEventListener("click", () => {
+      states[i].status = "clarify"
+      item.className = "ai-review-item ai-review-item-clarify"
+      clarifyRow.style.display = "flex"
+      clarifyInput.focus()
+    })
+    clarifyInput.addEventListener("input", () => {
+      states[i].clarification = clarifyInput.value
+    })
+
+    list.appendChild(item)
+  })
+
+  // Bottom action bar.
+  const actionBar = document.createElement("div")
+  actionBar.className = "ai-review-action-bar"
+
+  const applyBtn = document.createElement("button")
+  applyBtn.className = "ai-review-apply-btn"
+  applyBtn.textContent = "Apply accepted"
+  applyBtn.addEventListener("click", () => applyAcceptedProposals(proposals, states, container))
+  actionBar.appendChild(applyBtn)
+
+  const refineBtn = document.createElement("button")
+  refineBtn.className = "ai-review-refine-btn"
+  refineBtn.textContent = "Refine clarifications"
+  refineBtn.addEventListener("click", () => refineClarifications(proposals, states, container))
+  actionBar.appendChild(refineBtn)
+
+  container.appendChild(actionBar)
+}
+
+async function applyAcceptedProposals(proposals, states, container) {
+  const accepted = []
+  for (let i = 0; i < proposals.length; i++) {
+    if (states[i].status === "accepted") {
+      accepted.push(proposals[i])
+    }
+  }
+  if (accepted.length === 0) {
+    aiAddMessage("assistant", "No proposals accepted.").classList.add("ai-msg-error")
+    return
+  }
+
+  const markdown = getCurrentMarkdown()
+
+  // Find the position of each proposal in the document.
+  // Each proposal must match exactly once at a unique position.
+  const positioned = []
+  const failed = []
+  for (const p of accepted) {
+    const idx = markdown.indexOf(p.original)
+    if (idx < 0) {
+      failed.push(`#${p.number || "?"}: not found in document`)
+      continue
+    }
+    // Check for ambiguous matches (appears more than once).
+    const secondIdx = markdown.indexOf(p.original, idx + 1)
+    if (secondIdx >= 0) {
+      failed.push(`#${p.number || "?"}: ambiguous (appears multiple times)`)
+      continue
+    }
+    positioned.push({ ...p, idx })
+  }
+
+  if (positioned.length === 0) {
+    aiAddMessage("assistant", "Could not match any proposal.\n" + failed.join("\n")).classList.add("ai-msg-error")
+    return
+  }
+
+  // Check for overlapping proposals.
+  positioned.sort((a, b) => a.idx - b.idx)
+  for (let i = 1; i < positioned.length; i++) {
+    const prev = positioned[i - 1]
+    const prevEnd = prev.idx + prev.original.length
+    if (prevEnd > positioned[i].idx) {
+      failed.push(`#${positioned[i].number || "?"}: overlaps with #${prev.number || "?"}`)
+      positioned.splice(i, 1)
+      i--
+    }
+  }
+
+  // Apply in reverse order so positions stay valid.
+  let result = markdown
+  for (let i = positioned.length - 1; i >= 0; i--) {
+    const p = positioned[i]
+    result = result.slice(0, p.idx) + p.proposed + result.slice(p.idx + p.original.length)
+  }
+
+  if (editMode === "visual" && editorView) {
+    const newDoc = markdownToPM(result, registry)
+    const tr = editorView.state.tr
+    tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
+    editorView.dispatch(tr)
+  } else if (editMode === "raw" && rawEditor) {
+    rawEditor.value = result
+    rawEditor.dispatchEvent(new Event("input"))
+  }
+
+  for (const p of positioned) {
+    if (p.proposed && p.proposed.trim()) {
+      const selected = p.proposed.length > 200 ? p.proposed.slice(0, 200) : p.proposed
+      await createAIComment(selected, "", "", p.rationale || "AI review change")
+    }
+  }
+
+  saveDraftExplicit()
+  let msg = `Applied ${positioned.length} proposal${positioned.length > 1 ? "s" : ""}.`
+  if (failed.length > 0) msg += `\nSkipped: ${failed.join(", ")}`
+  aiAddMessage("assistant", msg).classList.add("ai-msg-applied")
+}
+
+async function refineClarifications(proposals, states, container) {
+  const clarified = []
+  for (let i = 0; i < proposals.length; i++) {
+    if (states[i].status === "clarify" && states[i].clarification.trim()) {
+      clarified.push({
+        ...proposals[i],
+        user_clarification: states[i].clarification.trim(),
+      })
+    }
+  }
+  if (clarified.length === 0) {
+    aiAddMessage("assistant", "No clarifications to refine.").classList.add("ai-msg-error")
+    return
+  }
+
+  aiPanelBusy = true
+  aiSetButtonsDisabled(true)
+
+  const refineMsg = aiAddMessage("assistant", "Refining clarified proposals...")
+
+  try {
+    const message = "The user has provided clarifications on the following proposals. " +
+      "Please revise only these proposals based on the user's feedback. " +
+      "Return a JSON array with the same format.\n\n" +
+      JSON.stringify(clarified, null, 2)
+
+    const { fullText, usage } = await aiStreamRequest(message, "review", refineMsg)
+    const revised = parseReviewProposals(fullText)
+
+    if (revised.length > 0) {
+      refineMsg.textContent = ""
+      refineMsg.innerHTML = ""
+      const newStates = revised.map(() => ({ status: "pending", clarification: "" }))
+      renderReviewPanel(refineMsg, revised)
+    } else {
+      refineMsg.textContent = "No revised proposals returned:\n\n" + fullText
+    }
+
+    if (usage && (usage.input_tokens || usage.output_tokens)) {
+      const usageEl = document.createElement("div")
+      usageEl.className = "ai-msg-usage"
+      usageEl.textContent = `Tokens: ${usage.input_tokens || 0} in, ${usage.output_tokens || 0} out`
+      refineMsg.appendChild(usageEl)
+    }
+  } catch (err) {
+    refineMsg.textContent = `Error: ${err.message}`
+    refineMsg.classList.add("ai-msg-error")
+  } finally {
+    aiPanelBusy = false
+    aiSetButtonsDisabled(false)
   }
 }
 
@@ -9794,6 +10115,54 @@ async function renderAdminConfigTab(container) {
     aiRequireSummaryLabel.appendChild(document.createTextNode("Require summary for token-authenticated writes"))
     form.appendChild(aiRequireSummaryLabel)
 
+    // AI Assistant section
+    const aiaHeading = document.createElement("h3")
+    aiaHeading.textContent = "Integrated AI Assistant"
+    form.appendChild(aiaHeading)
+
+    const aiaConfig = config.ai_assistant || {}
+    const aiaCosts = aiaConfig.costs || {}
+
+    const aiaEnabledCheckbox = document.createElement("input")
+    aiaEnabledCheckbox.type = "checkbox"
+    aiaEnabledCheckbox.checked = !!aiaConfig.enabled
+    const aiaEnabledLabel = document.createElement("label")
+    aiaEnabledLabel.style.display = "flex"
+    aiaEnabledLabel.style.alignItems = "center"
+    aiaEnabledLabel.style.gap = "8px"
+    aiaEnabledLabel.style.margin = "8px 0"
+    aiaEnabledLabel.appendChild(aiaEnabledCheckbox)
+    aiaEnabledLabel.appendChild(document.createTextNode("Enable integrated AI assistant (browser-based, server-side LLM proxy)"))
+    form.appendChild(aiaEnabledLabel)
+
+    const aiaProviderSelect = adminFormSelect(form, "Provider", [
+      { value: "anthropic", label: "Anthropic (Claude)" },
+    ], aiaConfig.provider || "anthropic")
+
+    const aiaApiKeyInput = adminFormField(form, "API key (or set AI_ASSISTANT_API_KEY env var)", "password", aiaConfig.api_key || "")
+    const aiaModelInput = adminFormField(form, "Model", "text", aiaConfig.model || "claude-sonnet-4-20250514")
+    const aiaMaxTokensInput = adminFormField(form, "Max response tokens per request", "number", String(aiaConfig.max_tokens ?? 4096))
+    aiaMaxTokensInput.min = "256"
+
+    const aiaGroupsNote = document.createElement("div")
+    aiaGroupsNote.style.cssText = "font-size:0.85em;color:#666;margin:8px 0 4px 0"
+    aiaGroupsNote.textContent = "Allowed groups (comma-separated). Empty = all authenticated users."
+    form.appendChild(aiaGroupsNote)
+    const aiaGroupsInput = adminFormField(form, "Allowed groups", "text", (aiaConfig.allowed_groups || []).join(", "))
+
+    const aiaCostHeading = document.createElement("h4")
+    aiaCostHeading.textContent = "Cost control"
+    aiaCostHeading.style.margin = "12px 0 4px 0"
+    form.appendChild(aiaCostHeading)
+
+    const aiaRateLimitInput = adminFormField(form, "Hourly rate limit per user (0 = unlimited)", "number", String(aiaCosts.rate_limit_per_user ?? 30))
+    aiaRateLimitInput.min = "0"
+    const aiaDailyLimitInput = adminFormField(form, "Daily limit per user (0 = unlimited)", "number", String(aiaCosts.daily_limit_per_user ?? 100))
+    aiaDailyLimitInput.min = "0"
+    const aiaMonthlyBudgetInput = adminFormField(form, "Monthly budget USD (0 = unlimited)", "number", String(aiaCosts.monthly_budget ?? 0))
+    aiaMonthlyBudgetInput.min = "0"
+    aiaMonthlyBudgetInput.step = "0.01"
+
     // Tags section
     const tagsHeading = document.createElement("h3")
     tagsHeading.textContent = "Tags"
@@ -9996,6 +10365,22 @@ async function renderAdminConfigTab(container) {
           rate_limit_write: parseInt(aiRateLimitWriteInput.value, 10) || 30,
           max_tokens_per_user: parseInt(aiMaxTokensInput.value, 10) || 5,
           require_summary: aiRequireSummaryCheckbox.checked,
+        },
+        ai_assistant: {
+          enabled: aiaEnabledCheckbox.checked,
+          provider: aiaProviderSelect.value,
+          api_key: aiaApiKeyInput.value,
+          model: aiaModelInput.value.trim(),
+          max_tokens: parseInt(aiaMaxTokensInput.value, 10) || 4096,
+          allowed_groups: aiaGroupsInput.value.split(",").map(s => s.trim()).filter(Boolean),
+          costs: {
+            rate_limit_per_user: parseInt(aiaRateLimitInput.value, 10) || 0,
+            daily_limit_per_user: parseInt(aiaDailyLimitInput.value, 10) || 0,
+            monthly_budget: parseFloat(aiaMonthlyBudgetInput.value) || 0,
+            max_tokens_per_request: parseInt(aiaMaxTokensInput.value, 10) || 4096,
+            max_context_tokens: 16000,
+            warn_at_percentage: 80,
+          },
         },
         todo: {
           enabled: todoConfig.enabled || false,
