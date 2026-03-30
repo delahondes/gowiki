@@ -20,6 +20,7 @@ interface CommentEntry {
   created_at: string
   updated_at: string
   resolved: boolean
+  ai?: boolean
 }
 
 // --- Anchoring ---
@@ -335,7 +336,7 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
 
 function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
   const box = document.createElement("div")
-  box.className = "comment-box" + (c.resolved ? " comment-resolved" : "") + (orphaned ? " comment-orphaned" : "")
+  box.className = "comment-box" + (c.resolved ? " comment-resolved" : "") + (orphaned ? " comment-orphaned" : "") + (c.ai ? " comment-ai" : "")
 
   // Tooltip showing the anchored text.
   const tooltip = document.createElement("div")
@@ -371,7 +372,15 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
 
   const authorEl = document.createElement("div")
   authorEl.className = "comment-author"
-  authorEl.textContent = `${c.author} \u00B7 ${new Date(c.created_at).toLocaleDateString()}`
+  if (c.ai) {
+    const aiBadge = document.createElement("span")
+    aiBadge.className = "comment-ai-badge"
+    aiBadge.textContent = "AI"
+    authorEl.appendChild(aiBadge)
+    authorEl.appendChild(document.createTextNode(` ${c.author} \u00B7 ${new Date(c.created_at).toLocaleDateString()}`))
+  } else {
+    authorEl.textContent = `${c.author} \u00B7 ${new Date(c.created_at).toLocaleDateString()}`
+  }
   box.appendChild(authorEl)
 
   if (orphaned) {
@@ -395,6 +404,14 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
     resolveBtn.textContent = c.resolved ? "Unresolve" : "Resolve"
     resolveBtn.addEventListener("click", async (e) => { e.stopPropagation(); await resolveComment(c.id) })
     actions.appendChild(resolveBtn)
+
+    // AI toggle: lets user convert AI comment to regular (survives publish) or vice versa.
+    const toggleAIBtn = document.createElement("button")
+    toggleAIBtn.className = "comment-action-btn"
+    toggleAIBtn.textContent = c.ai ? "Keep on publish" : "Mark as AI"
+    toggleAIBtn.title = c.ai ? "Convert to regular comment (will survive publish)" : "Mark as AI comment (will be stripped on publish)"
+    toggleAIBtn.addEventListener("click", async (e) => { e.stopPropagation(); await toggleAIComment(c.id) })
+    actions.appendChild(toggleAIBtn)
   }
 
   if (currentUser === c.author || currentIsAdmin) {
@@ -736,6 +753,26 @@ async function deleteComment(commentId: string) {
   await refreshComments()
 }
 
+async function toggleAIComment(commentId: string) {
+  if (!currentAuthFetch) return
+  const resp = await currentAuthFetch(
+    `${API_BASE}/${commentId}/toggle-ai?page=${encodePagePath(currentPagePath)}`,
+    { method: "PATCH" }
+  )
+  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to toggle AI flag"); return }
+  await refreshComments()
+}
+
+async function clearAIComments() {
+  if (!currentAuthFetch) return
+  const resp = await currentAuthFetch(
+    `${API_BASE}/?page=${encodePagePath(currentPagePath)}`,
+    { method: "DELETE" }
+  )
+  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to clear AI comments"); return }
+  await refreshComments()
+}
+
 function encodePagePath(p: string): string {
   return p.split("/").map(encodeURIComponent).join("/")
 }
@@ -815,6 +852,26 @@ export function addComment() {
 
 export function getCommentCount(): number {
   return currentComments.filter((c) => !c.resolved).length
+}
+
+export { clearAIComments }
+
+export async function createAIComment(selectedText: string, beforeContext: string, afterContext: string, commentText: string): Promise<boolean> {
+  if (!currentAuthFetch || !currentPagePath) return false
+  const resp = await currentAuthFetch(`${API_BASE}${encodePagePath(currentPagePath)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      anchor: { selected: selectedText, before: beforeContext, after: afterContext },
+      text: commentText,
+      ai: true,
+    }),
+  })
+  if (resp.ok) {
+    await refreshComments()
+    return true
+  }
+  return false
 }
 
 // --- Plugin registration ---
@@ -937,6 +994,22 @@ const commentStyles = `
 .comment-action-delete:hover { background: #ffebee; border-color: #c62828; }
 .comment-action-submit { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
 .comment-action-submit:hover { background: #c8e6c9; }
+
+/* --- AI comments --- */
+.comment-ai { background: #e8eaf6; border-color: #9fa8da; }
+.comment-ai:hover, .comment-ai.comment-box-active { border-color: #7986cb; }
+.comment-ai-badge {
+  display: inline-block;
+  background: #5c6bc0;
+  color: #fff;
+  font-size: 0.7em;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
+}
 
 /* --- Tooltip --- */
 .comment-tooltip {

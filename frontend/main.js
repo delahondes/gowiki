@@ -15,7 +15,7 @@ import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
-import { initComments, destroyComments, addComment, getCommentCount, reapplyComments } from "./plugins/comment.ts"
+import { initComments, destroyComments, addComment, getCommentCount, reapplyComments, createAIComment, clearAIComments } from "./plugins/comment.ts"
 import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI } from "./signing/keystore.ts"
 const HLJS_THEMES = [
   "github", "atom-one-light", "vs", "xcode", "idea",
@@ -4015,6 +4015,7 @@ function openAIPanel() {
   aiPanelEl.innerHTML = `
     <div class="ai-panel-header">
       <span class="ai-panel-title">AI Assistant</span>
+      <button class="ai-panel-clear-comments" title="Clear AI comments">Clear AI notes</button>
       <button class="ai-panel-close" title="Close">\u2715</button>
     </div>
     <div class="ai-panel-messages"></div>
@@ -4028,6 +4029,12 @@ function openAIPanel() {
 
   const closeBtn = aiPanelEl.querySelector(".ai-panel-close")
   closeBtn.addEventListener("click", closeAIPanel)
+
+  const clearBtn = aiPanelEl.querySelector(".ai-panel-clear-comments")
+  clearBtn.addEventListener("click", async () => {
+    await clearAIComments()
+    aiAddMessage("assistant", "AI comments cleared.").classList.add("ai-msg-applied")
+  })
 
   const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
   const input = aiPanelEl.querySelector(".ai-panel-input")
@@ -4149,8 +4156,10 @@ async function aiSend() {
       if (applied > 0) {
         aiMsg.textContent = `Applied ${applied} edit${applied > 1 ? "s" : ""} to the page.`
         aiMsg.classList.add("ai-msg-applied")
+        // Create AI comments for each edit to mark modified regions.
+        await createAICommentsForEdits(edits)
         // Save draft after AI edits.
-        if (typeof saveDraftExplicit === "function") saveDraftExplicit()
+        saveDraftExplicit()
       } else {
         aiMsg.textContent = "No changes to apply (page already matches)."
       }
@@ -4173,6 +4182,18 @@ async function aiSend() {
       const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
       if (sendBtn) sendBtn.disabled = false
     }
+  }
+}
+
+async function createAICommentsForEdits(edits) {
+  for (const edit of edits) {
+    // Use the new text as anchor (it's what's in the document now).
+    const newText = edit.new_text || ""
+    if (!newText.trim()) continue
+    // Take first 200 chars as selected text for the anchor.
+    const selected = newText.length > 200 ? newText.slice(0, 200) : newText
+    const comment = edit.comment || "AI modification"
+    await createAIComment(selected, "", "", comment)
   }
 }
 
@@ -7997,6 +8018,8 @@ async function publishDraft() {
     currentPageVersion = result.page.meta.version || 0
   }
   setStatus(`Published ${new Date().toLocaleTimeString()}`)
+  // Strip AI comments on publish.
+  clearAIComments()
 
   if (result.orphaned_media && result.orphaned_media.length > 0) {
     promptOrphanDeletion(result.orphaned_media)

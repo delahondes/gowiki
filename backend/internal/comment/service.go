@@ -35,7 +35,7 @@ func (svc *Service) List(pagePath string) ([]Comment, error) {
 }
 
 // Create adds a new comment to a page.
-func (svc *Service) Create(pagePath string, anchor Anchor, text, author string) (Comment, error) {
+func (svc *Service) Create(pagePath string, anchor Anchor, text, author string, ai bool) (Comment, error) {
 	if strings.TrimSpace(text) == "" {
 		return Comment{}, fmt.Errorf("comment text is required")
 	}
@@ -68,6 +68,7 @@ func (svc *Service) Create(pagePath string, anchor Anchor, text, author string) 
 		Author:    author,
 		CreatedAt: now,
 		UpdatedAt: now,
+		AI:        ai,
 	}
 
 	comments, err := svc.store.Load(pagePath)
@@ -136,6 +137,45 @@ func (svc *Service) Delete(pagePath, commentID, user string, isAdmin bool) error
 		}
 	}
 	return fmt.Errorf("comment %s not found", commentID)
+}
+
+// ToggleAI flips the AI flag on a comment.
+func (svc *Service) ToggleAI(pagePath, commentID string) error {
+	comments, err := svc.store.Load(pagePath)
+	if err != nil {
+		return err
+	}
+	for i := range comments {
+		if comments[i].ID == commentID {
+			comments[i].AI = !comments[i].AI
+			comments[i].UpdatedAt = time.Now().UTC()
+			return svc.store.Save(pagePath, comments)
+		}
+	}
+	return fmt.Errorf("comment %s not found", commentID)
+}
+
+// DeleteAIComments removes all comments with AI=true for a page.
+func (svc *Service) DeleteAIComments(pagePath string) (int, error) {
+	comments, err := svc.store.Load(pagePath)
+	if err != nil {
+		return 0, err
+	}
+	kept := comments[:0]
+	removed := 0
+	for _, c := range comments {
+		if c.AI {
+			removed++
+		} else {
+			kept = append(kept, c)
+		}
+	}
+	if removed > 0 {
+		if err := svc.store.Save(pagePath, kept); err != nil {
+			return 0, err
+		}
+	}
+	return removed, nil
 }
 
 func generateID(selected, text string, t time.Time) string {

@@ -18,7 +18,9 @@ func RegisterWriteRoutes(r chi.Router, svc *Service, extractUsername func(*http.
 	r.Post("/*", handleCreate(svc, extractUsername))
 	r.Put("/{commentID}", handleUpdate(svc, extractUsername, isAdmin))
 	r.Patch("/{commentID}/resolve", handleResolve(svc, extractUsername))
+	r.Patch("/{commentID}/toggle-ai", handleToggleAI(svc, extractUsername))
 	r.Delete("/{commentID}", handleDelete(svc, extractUsername, isAdmin))
+	r.Delete("/", handleDeleteAIComments(svc))
 }
 
 func extractPagePath(r *http.Request) string {
@@ -40,6 +42,7 @@ func handleList(svc *Service) http.HandlerFunc {
 type createRequest struct {
 	Anchor Anchor `json:"anchor"`
 	Text   string `json:"text"`
+	AI     bool   `json:"ai,omitempty"`
 }
 
 func handleCreate(svc *Service, extractUsername func(*http.Request) string) http.HandlerFunc {
@@ -57,7 +60,7 @@ func handleCreate(svc *Service, extractUsername func(*http.Request) string) http
 			return
 		}
 
-		comment, err := svc.Create(pagePath, req.Anchor, req.Text, username)
+		comment, err := svc.Create(pagePath, req.Anchor, req.Text, username, req.AI)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -148,6 +151,48 @@ func handleDelete(svc *Service, extractUsername func(*http.Request) string, isAd
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
+	}
+}
+
+func handleToggleAI(svc *Service, extractUsername func(*http.Request) string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pagePath := r.URL.Query().Get("page")
+		if pagePath == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page query parameter is required"})
+			return
+		}
+		pagePath = "/" + strings.TrimLeft(pagePath, "/")
+
+		commentID := chi.URLParam(r, "commentID")
+		username := extractUsername(r)
+		if username == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			return
+		}
+
+		if err := svc.ToggleAI(pagePath, commentID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
+	}
+}
+
+func handleDeleteAIComments(svc *Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pagePath := r.URL.Query().Get("page")
+		if pagePath == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "page query parameter is required"})
+			return
+		}
+		pagePath = "/" + strings.TrimLeft(pagePath, "/")
+
+		removed, err := svc.DeleteAIComments(pagePath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
 	}
 }
 
