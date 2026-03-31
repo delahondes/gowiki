@@ -907,6 +907,7 @@ function serializeCellContent(
   cell: Node,
   recurse: (node: Node) => string
 ): string {
+  if (!cell) return ""
   let prefix = ""
   const dirParts: string[] = []
   if (cell.attrs.cellColor) dirParts.push(`color=${cell.attrs.cellColor}`)
