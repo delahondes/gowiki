@@ -65,8 +65,11 @@ func (s *Server) handleAINamespace(w http.ResponseWriter, r *http.Request) {
 		}
 		rel := strings.TrimPrefix(pagePath, prefix)
 
-		// ACL check.
+		// ACL check: user permission + @ai permission.
 		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
+			continue
+		}
+		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
 			continue
 		}
 
@@ -144,9 +147,13 @@ func (s *Server) handleAIBatchRead(w http.ResponseWriter, r *http.Request) {
 		pagePath := strings.Trim(p, "/")
 		results[i].Path = p
 
-		// ACL check.
+		// ACL check: user permission + @ai permission.
 		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
 			results[i].Error = "access denied"
+			continue
+		}
+		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+			results[i].Error = "AI access denied for this page"
 			continue
 		}
 
@@ -171,9 +178,13 @@ func (s *Server) handleAIPreview(w http.ResponseWriter, r *http.Request) {
 	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
 	username := UsernameFromContext(r.Context())
 
-	// ACL check.
+	// ACL check: user permission + @ai permission.
 	if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
 		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+		writeError(w, http.StatusForbidden, "AI access denied for this page")
 		return
 	}
 
@@ -225,9 +236,13 @@ func (s *Server) handleAIMeta(w http.ResponseWriter, r *http.Request) {
 	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
 	username := UsernameFromContext(r.Context())
 
-	// ACL check.
+	// ACL check: user permission + @ai permission.
 	if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
 		writeError(w, http.StatusForbidden, "access denied")
+		return
+	}
+	if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+		writeError(w, http.StatusForbidden, "AI access denied for this page")
 		return
 	}
 
