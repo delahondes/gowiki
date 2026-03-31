@@ -173,7 +173,10 @@ function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext
   // Only markdown-it "inline" tokens should recurse into children.
   // Some non-container tokens (e.g. image) also carry children for alt text.
   if (tok.type === "inline" && Array.isArray(tok.children)) {
-    for (const child of tok.children) handleToken(child, registry, ctx, strict)
+    for (const child of tok.children) {
+      ctx.token = child
+      handleToken(child, registry, ctx, strict)
+    }
     return
   }
 

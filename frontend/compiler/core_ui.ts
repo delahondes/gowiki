@@ -185,10 +185,6 @@ function buildPropGroup(
 
       let tr = state.tr
 
-      // If the node is an inline image inside a paragraph with other content,
-      // extract it into its own paragraph first so block-level properties work.
-      if (promoteInlineImage(view, pos, attrs)) return
-
       tr = tr.setNodeMarkup(pos, live.type, attrs)
       if (wasNodeSelection) {
         tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
