@@ -189,6 +189,7 @@ The backend detects and rejects circular includes at save time (not render time)
 | `~~strikethrough~~` | implemented |
 | `_underline_` | implemented |
 | `~subscript~`, `^superscript^` | implemented |
+| `==highlight==`, `==[color]highlight==` | implemented |
 | `^[inline footnote]` | implemented (content supports inline markdown: links, bold, italic, code, strikethrough) |
 | ATX headings | implemented |
 | `- unordered list` | implemented |

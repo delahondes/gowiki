@@ -18,10 +18,12 @@ import { mermaidPlugin } from "./mermaid"
 import { slidePlugin } from "./slide"
 import { captionPlugin } from "./caption"
 import { footnotePlugin } from "./footnote"
+import { highlightPlugin } from "./highlight"
 
 export const plugins: Plugin[] = [
   captionPlugin,
   footnotePlugin,
+  highlightPlugin,
   imagePlugin,
   blockquotePlugin,
   tablePlugin,

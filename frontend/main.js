@@ -153,6 +153,7 @@ let reviewflowLinkInsertCommand = null
 let reviewflowQueryInsertCommand = null
 let versionLinkInsertCommand = null
 let changesInsertCommand = null
+let highlightCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -250,6 +251,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "changes") {
     if (name === "insert") changesInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "highlight") {
+    highlightCommand = cmd
     return
   }
 
@@ -4823,6 +4829,20 @@ function buildMenubar() {
       rawWrapSelection(rawEditor, "^", "^")
     }
   }, "superscript")
+
+  // Highlight
+  if (schema.marks.highlight) {
+    const hlBtn = addButton("\u{1F58D}", "Highlight", () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.highlight)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "==", "==")
+      }
+    }, "highlight")
+    hlBtn.style.background = "linear-gradient(to top, yellow 40%, transparent 40%)"
+    hlBtn.style.borderRadius = "3px"
+  }
 
   // Footnote
   if (footnoteInsertCommand) {
