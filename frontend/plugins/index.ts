@@ -19,6 +19,7 @@ import { slidePlugin } from "./slide"
 import { captionPlugin } from "./caption"
 import { footnotePlugin } from "./footnote"
 import { highlightPlugin } from "./highlight"
+import { flowMarkerPlugin } from "./flow_marker"
 
 export const plugins: Plugin[] = [
   captionPlugin,
@@ -41,4 +42,5 @@ export const plugins: Plugin[] = [
   chartPlugin,
   mermaidPlugin,
   slidePlugin,
+  flowMarkerPlugin,
 ]

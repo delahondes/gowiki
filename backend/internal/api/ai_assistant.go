@@ -218,6 +218,24 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// For both modes: try to parse proposals from the AI response and
+	// insert flow markers into the page content for verified proposals.
+	if pageContent != "" {
+		proposals := parseAIProposals(fullResponse.String())
+		if len(proposals) > 0 {
+			markedContent, verified := insertProposalMarkers(pageContent, proposals)
+			if len(verified) > 0 {
+				data, _ := json.Marshal(map[string]any{
+					"type":      "markers",
+					"markdown":  markedContent,
+					"proposals": verified,
+				})
+				fmt.Fprintf(w, "event: markers\ndata: %s\n\n", data)
+				flusher.Flush()
+			}
+		}
+	}
+
 	// Send done event with usage.
 	data, _ := json.Marshal(map[string]any{
 		"type":          "done",
@@ -226,6 +244,102 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	})
 	fmt.Fprintf(w, "event: done\ndata: %s\n\n", data)
 	flusher.Flush()
+}
+
+// aiProposal represents a single AI-generated change proposal.
+type aiProposal struct {
+	Number    int    `json:"number"`
+	Location  string `json:"location"`
+	Original  string `json:"original"`
+	Proposed  string `json:"proposed"`
+	Rationale string `json:"rationale"`
+	Marker    string `json:"marker,omitempty"`    // marker ID (set by backend)
+	Verified  bool   `json:"verified,omitempty"`  // true if original was found in content
+}
+
+// parseAIProposals extracts a JSON array of proposals from the AI response.
+func parseAIProposals(response string) []aiProposal {
+	// Find JSON array in the response.
+	start := strings.Index(response, "[")
+	if start == -1 {
+		return nil
+	}
+	end := strings.LastIndex(response, "]")
+	if end == -1 || end <= start {
+		return nil
+	}
+	var proposals []aiProposal
+	if err := json.Unmarshal([]byte(response[start:end+1]), &proposals); err != nil {
+		return nil
+	}
+	return proposals
+}
+
+// insertProposalMarkers locates each proposal's original text in the content
+// and wraps it with flow markers. Returns the modified content and the list
+// of verified proposals (with marker IDs assigned).
+func insertProposalMarkers(content string, proposals []aiProposal) (string, []aiProposal) {
+	type positioned struct {
+		idx      int
+		proposal *aiProposal
+	}
+
+	var found []positioned
+	for i := range proposals {
+		p := &proposals[i]
+		if p.Original == "" {
+			continue
+		}
+		idx := strings.Index(content, p.Original)
+		if idx < 0 {
+			continue
+		}
+		// Check for ambiguity.
+		if strings.Index(content[idx+1:], p.Original) >= 0 {
+			continue // ambiguous, skip
+		}
+		markerID := fmt.Sprintf("p%d", p.Number)
+		p.Marker = markerID
+		p.Verified = true
+		found = append(found, positioned{idx: idx, proposal: p})
+	}
+
+	if len(found) == 0 {
+		return content, nil
+	}
+
+	// Sort by position descending so we can insert markers without shifting.
+	for i := 0; i < len(found)-1; i++ {
+		for j := i + 1; j < len(found); j++ {
+			if found[j].idx > found[i].idx {
+				found[i], found[j] = found[j], found[i]
+			}
+		}
+	}
+
+	// Check for overlaps — skip overlapping proposals.
+	result := content
+	var verified []aiProposal
+	lastStart := len(result)
+	for _, f := range found {
+		endPos := f.idx + len(f.proposal.Original)
+		if endPos > lastStart {
+			continue // overlaps with a previously inserted marker
+		}
+		closeMarker := fmt.Sprintf("{#/%s}", f.proposal.Marker)
+		openMarker := fmt.Sprintf("{#%s}", f.proposal.Marker)
+		result = result[:endPos] + closeMarker + result[endPos:]
+		result = result[:f.idx] + openMarker + result[f.idx:]
+		lastStart = f.idx
+		verified = append(verified, *f.proposal)
+	}
+
+	// Reverse verified to get ascending order.
+	for i, j := 0, len(verified)-1; i < j; i, j = i+1, j-1 {
+		verified[i], verified[j] = verified[j], verified[i]
+	}
+
+	return result, verified
 }
 
 // buildAISystemPrompt assembles the system prompt from conventions + page context.

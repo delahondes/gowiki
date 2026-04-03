@@ -4102,23 +4102,35 @@ async function aiSend(sendMode = "action") {
   aiMsg.textContent = "Thinking..."
 
   try {
-    const { fullText, edits, usage } = await aiStreamRequest(message, sendMode, aiMsg)
+    const { fullText, edits, usage, markers } = await aiStreamRequest(message, sendMode, aiMsg)
 
-    // Both modes return JSON proposals. Parse them.
-    const proposals = parseReviewProposals(fullText)
+    // Use marker-based proposals if the backend provided them.
+    if (markers && markers.proposals && markers.proposals.length > 0) {
+      // Update editor content with markers inserted.
+      applyMarkedContent(markers.markdown)
 
-    if (proposals.length === 0) {
-      aiMsg.textContent = "No changes proposed. Raw response:\n\n" + fullText
-    } else if (sendMode === "review") {
-      // Review mode: show interactive panel for accept/reject.
       aiMsg.textContent = ""
       aiMsg.innerHTML = ""
-      renderReviewPanel(aiMsg, proposals)
+      if (sendMode === "review") {
+        renderReviewPanel(aiMsg, markers.proposals)
+      } else {
+        await autoApplyMarkerProposals(aiMsg, markers.proposals)
+      }
     } else {
-      // Action mode: auto-apply all verified proposals.
-      aiMsg.textContent = ""
-      aiMsg.innerHTML = ""
-      await autoApplyProposals(aiMsg, proposals)
+      // Fallback: parse proposals from raw text (no markers).
+      const proposals = parseReviewProposals(fullText)
+
+      if (proposals.length === 0) {
+        aiMsg.textContent = "No changes proposed. Raw response:\n\n" + fullText
+      } else if (sendMode === "review") {
+        aiMsg.textContent = ""
+        aiMsg.innerHTML = ""
+        renderReviewPanel(aiMsg, proposals)
+      } else {
+        aiMsg.textContent = ""
+        aiMsg.innerHTML = ""
+        await autoApplyProposals(aiMsg, proposals)
+      }
     }
 
     // Show token usage.
@@ -4167,6 +4179,7 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
   let fullText = ""
   let edits = null
   let usage = null
+  let markers = null
 
   aiMsg.textContent = ""
 
@@ -4189,6 +4202,8 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
           if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
         } else if (parsed.type === "edits" && parsed.edits) {
           edits = parsed.edits
+        } else if (parsed.type === "markers" && parsed.proposals) {
+          markers = parsed
         } else if (parsed.type === "done") {
           usage = parsed
         } else if (parsed.type === "error") {
@@ -4200,7 +4215,7 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
     }
   }
 
-  return { fullText, edits, usage }
+  return { fullText, edits, usage, markers }
 }
 
 // ── Review mode ──
@@ -4359,7 +4374,7 @@ function renderReviewPanel(container, proposals) {
   const applyBtn = document.createElement("button")
   applyBtn.className = "ai-review-apply-btn"
   applyBtn.textContent = "Apply accepted"
-  applyBtn.addEventListener("click", () => applyAcceptedProposals(proposals, states, container))
+  applyBtn.addEventListener("click", () => applyAcceptedProposals(proposals, states))
   actionBar.appendChild(applyBtn)
 
   const refineBtn = document.createElement("button")
@@ -4369,6 +4384,60 @@ function renderReviewPanel(container, proposals) {
   actionBar.appendChild(refineBtn)
 
   container.appendChild(actionBar)
+}
+
+function applyMarkedContent(markdown) {
+  if (editMode === "visual" && editorView) {
+    const newDoc = markdownToPM(markdown, registry)
+    const tr = editorView.state.tr
+    tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
+    editorView.dispatch(tr)
+  } else if (editMode === "raw" && rawEditor) {
+    rawEditor.value = markdown
+    rawEditor.dispatchEvent(new Event("input"))
+  }
+}
+
+async function autoApplyMarkerProposals(container, proposals) {
+  let markdown = getCurrentMarkdown()
+  let applied = 0
+  const failed = []
+
+  for (const p of proposals) {
+    if (!p.marker || !p.verified) {
+      failed.push(`#${p.number || "?"}: not verified`)
+      continue
+    }
+    const openTag = `{#${p.marker}}`
+    const closeTag = `{#/${p.marker}}`
+    const openIdx = markdown.indexOf(openTag)
+    const closeIdx = markdown.indexOf(closeTag)
+    if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
+      failed.push(`#${p.number || "?"}: markers not found`)
+      continue
+    }
+    // Replace: openTag + content + closeTag → proposed text (no markers)
+    markdown = markdown.slice(0, openIdx) + p.proposed + markdown.slice(closeIdx + closeTag.length)
+    applied++
+  }
+
+  if (applied > 0) {
+    applyMarkedContent(markdown)
+    for (const p of proposals) {
+      if (p.verified && p.proposed && p.proposed.trim()) {
+        const selected = p.proposed.length > 200 ? p.proposed.slice(0, 200) : p.proposed
+        await createAIComment(selected, "", "", p.rationale || "AI edit")
+      }
+    }
+    saveDraftExplicit()
+    let msg = `Applied ${applied} edit${applied > 1 ? "s" : ""}.`
+    if (failed.length > 0) msg += ` (${failed.length} skipped)`
+    container.textContent = msg
+    container.classList.add("ai-msg-applied")
+  } else {
+    container.textContent = "Could not apply any proposals.\n" + failed.join("\n")
+    container.classList.add("ai-msg-error")
+  }
 }
 
 async function autoApplyProposals(container, proposals) {
@@ -4443,84 +4512,91 @@ async function autoApplyProposals(container, proposals) {
   container.classList.add("ai-msg-applied")
 }
 
-async function applyAcceptedProposals(proposals, states, container) {
+async function applyAcceptedProposals(proposals, states) {
   const accepted = []
+  const rejected = []
   for (let i = 0; i < proposals.length; i++) {
-    if (states[i].status === "accepted") {
-      accepted.push(proposals[i])
-    }
+    if (states[i].status === "accepted") accepted.push(proposals[i])
+    else rejected.push(proposals[i])
   }
   if (accepted.length === 0) {
     aiAddMessage("assistant", "No proposals accepted.").classList.add("ai-msg-error")
+    cleanupMarkers(rejected)
     return
   }
 
-  const markdown = getCurrentMarkdown()
-
-  // Find the position of each proposal in the document.
-  // Each proposal must match exactly once at a unique position.
-  const positioned = []
+  let markdown = getCurrentMarkdown()
+  let applied = 0
   const failed = []
-  for (const p of accepted) {
-    const idx = markdown.indexOf(p.original)
-    if (idx < 0) {
-      failed.push(`#${p.number || "?"}: not found in document`)
-      continue
+  const hasMarkers = accepted.some(p => p.marker)
+
+  if (hasMarkers) {
+    // Marker-based replacement.
+    for (const p of accepted) {
+      if (!p.marker) { failed.push(`#${p.number || "?"}: no marker`); continue }
+      const openTag = `{#${p.marker}}`
+      const closeTag = `{#/${p.marker}}`
+      const openIdx = markdown.indexOf(openTag)
+      const closeIdx = markdown.indexOf(closeTag)
+      if (openIdx < 0 || closeIdx < 0 || closeIdx <= openIdx) {
+        failed.push(`#${p.number || "?"}: markers not found`)
+        continue
+      }
+      markdown = markdown.slice(0, openIdx) + p.proposed + markdown.slice(closeIdx + closeTag.length)
+      applied++
     }
-    // Check for ambiguous matches (appears more than once).
-    const secondIdx = markdown.indexOf(p.original, idx + 1)
-    if (secondIdx >= 0) {
-      failed.push(`#${p.number || "?"}: ambiguous (appears multiple times)`)
-      continue
+    // Remove markers from rejected proposals.
+    for (const p of rejected) {
+      if (!p.marker) continue
+      markdown = markdown.replace(`{#${p.marker}}`, "").replace(`{#/${p.marker}}`, "")
     }
-    positioned.push({ ...p, idx })
-  }
-
-  if (positioned.length === 0) {
-    aiAddMessage("assistant", "Could not match any proposal.\n" + failed.join("\n")).classList.add("ai-msg-error")
-    return
-  }
-
-  // Check for overlapping proposals.
-  positioned.sort((a, b) => a.idx - b.idx)
-  for (let i = 1; i < positioned.length; i++) {
-    const prev = positioned[i - 1]
-    const prevEnd = prev.idx + prev.original.length
-    if (prevEnd > positioned[i].idx) {
-      failed.push(`#${positioned[i].number || "?"}: overlaps with #${prev.number || "?"}`)
-      positioned.splice(i, 1)
-      i--
+  } else {
+    // Fallback: position-based string matching.
+    const positioned = []
+    for (const p of accepted) {
+      const idx = markdown.indexOf(p.original)
+      if (idx < 0) { failed.push(`#${p.number || "?"}: not found`); continue }
+      if (markdown.indexOf(p.original, idx + 1) >= 0) { failed.push(`#${p.number || "?"}: ambiguous`); continue }
+      positioned.push({ ...p, idx })
     }
-  }
-
-  // Apply in reverse order so positions stay valid.
-  let result = markdown
-  for (let i = positioned.length - 1; i >= 0; i--) {
-    const p = positioned[i]
-    result = result.slice(0, p.idx) + p.proposed + result.slice(p.idx + p.original.length)
-  }
-
-  if (editMode === "visual" && editorView) {
-    const newDoc = markdownToPM(result, registry)
-    const tr = editorView.state.tr
-    tr.replaceWith(0, editorView.state.doc.content.size, newDoc.content)
-    editorView.dispatch(tr)
-  } else if (editMode === "raw" && rawEditor) {
-    rawEditor.value = result
-    rawEditor.dispatchEvent(new Event("input"))
-  }
-
-  for (const p of positioned) {
-    if (p.proposed && p.proposed.trim()) {
-      const selected = p.proposed.length > 200 ? p.proposed.slice(0, 200) : p.proposed
-      await createAIComment(selected, "", "", p.rationale || "AI review change")
+    positioned.sort((a, b) => b.idx - a.idx)
+    for (const p of positioned) {
+      markdown = markdown.slice(0, p.idx) + p.proposed + markdown.slice(p.idx + p.original.length)
+      applied++
     }
   }
 
-  saveDraftExplicit()
-  let msg = `Applied ${positioned.length} proposal${positioned.length > 1 ? "s" : ""}.`
-  if (failed.length > 0) msg += `\nSkipped: ${failed.join(", ")}`
-  aiAddMessage("assistant", msg).classList.add("ai-msg-applied")
+  if (applied > 0) {
+    applyMarkedContent(markdown)
+    for (const p of accepted) {
+      if (p.proposed && p.proposed.trim()) {
+        const selected = p.proposed.length > 200 ? p.proposed.slice(0, 200) : p.proposed
+        await createAIComment(selected, "", "", p.rationale || "AI review change")
+      }
+    }
+    saveDraftExplicit()
+    let msg = `Applied ${applied} proposal${applied > 1 ? "s" : ""}.`
+    if (failed.length > 0) msg += ` Skipped: ${failed.join(", ")}`
+    aiAddMessage("assistant", msg).classList.add("ai-msg-applied")
+  } else {
+    aiAddMessage("assistant", "Could not apply any proposals.\n" + failed.join("\n")).classList.add("ai-msg-error")
+  }
+}
+
+function cleanupMarkers(proposals) {
+  if (!proposals || proposals.length === 0) return
+  let markdown = getCurrentMarkdown()
+  let changed = false
+  for (const p of proposals) {
+    if (!p.marker) continue
+    const openTag = `{#${p.marker}}`
+    const closeTag = `{#/${p.marker}}`
+    if (markdown.includes(openTag)) {
+      markdown = markdown.replace(openTag, "").replace(closeTag, "")
+      changed = true
+    }
+  }
+  if (changed) applyMarkedContent(markdown)
 }
 
 async function refineClarifications(proposals, states, container) {

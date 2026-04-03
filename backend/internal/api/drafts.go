@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -12,6 +13,19 @@ import (
 	markdown_pkg "gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/storage"
 )
+
+var flowMarkerRe = regexp.MustCompile(`\{#/?@?[A-Za-z0-9._-]+/?\}`)
+
+// stripFlowMarkers removes ephemeral flow markers from markdown.
+// Preserves bookmark markers ({#!...}).
+func stripFlowMarkers(md string) string {
+	return flowMarkerRe.ReplaceAllStringFunc(md, func(match string) string {
+		if strings.HasPrefix(match, "{#!") || strings.HasPrefix(match, "{#/!") {
+			return match // preserve bookmarks
+		}
+		return ""
+	})
+}
 
 type DraftManager interface {
 	EnterEditMode(pagePath, username string, force bool, currentPublished string) (markdown string, editToken string, err error)
@@ -175,6 +189,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Strip ephemeral flow markers before publishing.
+	md = stripFlowMarkers(md)
 
 	// Validate database system columns (e.g. id) before saving.
 	if s.databaseSync != nil {
