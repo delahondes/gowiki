@@ -398,6 +398,11 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		s.Changelog.Append(normalized, meta.Version, author, "", "edit")
 	}
 
+	// Canonicalize path for namespace indices before updating indexes.
+	if isIndex {
+		normalized = CanonicalPath(strings.TrimSuffix(normalized, "/") + "/index")
+	}
+
 	// Templates are excluded from indexes and syncs (but not changelog or search).
 	isTemplate := IsTemplatePath(normalized)
 
