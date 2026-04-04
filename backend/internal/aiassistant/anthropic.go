@@ -28,34 +28,48 @@ func NewAnthropicProvider(apiKey string) *AnthropicProvider {
 	}
 }
 
-// anthropicRequest is the JSON body for the Anthropic Messages API.
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Stream    bool               `json:"stream"`
+	Model     string              `json:"model"`
+	MaxTokens int                 `json:"max_tokens"`
+	System    []anthropicSysBlock `json:"system,omitempty"`
+	Messages  []json.RawMessage   `json:"messages"`
+	Stream    bool                `json:"stream"`
+	Tools     []Tool              `json:"tools,omitempty"`
 }
 
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type anthropicSysBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"`
 }
 
 // Chat implements Provider.Chat with SSE streaming.
 func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (<-chan ChatEvent, error) {
-	// Build the API request body.
-	msgs := make([]anthropicMessage, len(req.Messages))
-	for i, m := range req.Messages {
-		msgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
+	// Build messages as raw JSON to support both string and structured content.
+	var msgs []json.RawMessage
+	for _, m := range req.Messages {
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("marshal message: %w", err)
+		}
+		msgs = append(msgs, raw)
 	}
 
 	body := anthropicRequest{
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
-		System:    req.SystemPrompt,
-		Messages:  msgs,
-		Stream:    true,
+		System: []anthropicSysBlock{{
+			Type:         "text",
+			Text:         req.SystemPrompt,
+			CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+		}},
+		Messages: msgs,
+		Stream:   true,
+		Tools:    req.Tools,
 	}
 
 	bodyJSON, err := json.Marshal(body)
@@ -93,8 +107,11 @@ func (p *AnthropicProvider) readSSE(body io.ReadCloser, ch chan<- ChatEvent) {
 	defer body.Close()
 
 	var inputTokens, outputTokens int
+	var currentToolUse *ChatEvent // accumulates tool_use input JSON
 
 	scanner := bufio.NewScanner(body)
+	// Increase buffer for large responses.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -105,10 +122,18 @@ func (p *AnthropicProvider) readSSE(body io.ReadCloser, ch chan<- ChatEvent) {
 
 		var event struct {
 			Type    string `json:"type"`
+			Index   int    `json:"index"`
 			Delta   struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
+			ContentBlock struct {
+				Type  string `json:"type"`
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Input json.RawMessage `json:"input"`
+			} `json:"content_block"`
 			Message struct {
 				Usage struct {
 					InputTokens  int `json:"input_tokens"`
@@ -125,18 +150,46 @@ func (p *AnthropicProvider) readSSE(body io.ReadCloser, ch chan<- ChatEvent) {
 		}
 
 		switch event.Type {
+		case "content_block_start":
+			if event.ContentBlock.Type == "tool_use" {
+				currentToolUse = &ChatEvent{
+					Type:      "tool_use",
+					ToolUseID: event.ContentBlock.ID,
+					ToolName:  event.ContentBlock.Name,
+				}
+			}
+
 		case "content_block_delta":
 			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 				ch <- ChatEvent{Type: "token", Text: event.Delta.Text}
 			}
+			if event.Delta.Type == "input_json_delta" && currentToolUse != nil {
+				// Accumulate partial JSON for tool input.
+				currentToolUse.Text += event.Delta.PartialJSON
+			}
+
+		case "content_block_stop":
+			if currentToolUse != nil {
+				// Parse the accumulated tool input JSON.
+				var input map[string]any
+				if err := json.Unmarshal([]byte(currentToolUse.Text), &input); err == nil {
+					currentToolUse.ToolInput = input
+				}
+				currentToolUse.Text = ""
+				ch <- *currentToolUse
+				currentToolUse = nil
+			}
+
 		case "message_start":
 			if event.Message.Usage.InputTokens > 0 {
 				inputTokens = event.Message.Usage.InputTokens
 			}
+
 		case "message_delta":
 			if event.Usage.OutputTokens > 0 {
 				outputTokens = event.Usage.OutputTokens
 			}
+
 		case "message_stop":
 			ch <- ChatEvent{
 				Type:         "done",
@@ -144,6 +197,7 @@ func (p *AnthropicProvider) readSSE(body io.ReadCloser, ch chan<- ChatEvent) {
 				OutputTokens: outputTokens,
 			}
 			return
+
 		case "error":
 			ch <- ChatEvent{Type: "error", Text: data}
 			return

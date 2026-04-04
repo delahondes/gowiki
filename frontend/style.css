@@ -2397,6 +2397,8 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   padding: 8px;
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
+  align-content: flex-start;
   gap: 8px;
 }
 
@@ -2439,6 +2441,13 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   font-size: 0.8em;
   color: #999;
 }
+
+.ai-msg-link {
+  color: #1565c0;
+  text-decoration: underline;
+}
+.ai-msg-link:hover { color: #0d47a1; }
+.ai-msg code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 
 .ai-panel-input-row {
   display: flex;

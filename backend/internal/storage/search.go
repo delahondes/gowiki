@@ -130,7 +130,17 @@ func escapeQueryString(q string) string {
 
 // Search queries the index and returns results with path, title, and snippet.
 func (s *SearchIndex) Search(query string, limit int) ([]SearchResult, error) {
-	q := bleve.NewQueryStringQuery(escapeQueryString(query))
+	escaped := escapeQueryString(query)
+	// Search across name (path segments), title, and body.
+	// Boost name and title matches so path-based results appear first.
+	nameQ := bleve.NewMatchQuery(escaped)
+	nameQ.SetField("name")
+	nameQ.SetBoost(10)
+	titleQ := bleve.NewMatchQuery(escaped)
+	titleQ.SetField("title")
+	titleQ.SetBoost(5)
+	bodyQ := bleve.NewQueryStringQuery(escaped)
+	q := bleve.NewDisjunctionQuery(nameQ, titleQ, bodyQ)
 	req := bleve.NewSearchRequestOptions(q, limit, 0, false)
 	req.Fields = []string{"path", "title", "body"}
 	req.Highlight = bleve.NewHighlightWithStyle(ansi.Name)

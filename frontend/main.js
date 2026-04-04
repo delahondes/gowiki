@@ -4002,9 +4002,10 @@ function closeSymbolPanel() {
 let aiPanelEl = null
 let aiPanelOpen = false
 let aiPanelBusy = false
+let aiConversationHistory = [] // [{role: "user"|"assistant", content: "..."}]
 
 function toggleAIPanel() {
-  if (!aiAssistantEnabled || mode !== "edit") return
+  if (!aiAssistantEnabled) return
   if (aiPanelOpen) {
     closeAIPanel()
   } else {
@@ -4018,18 +4019,22 @@ function openAIPanel() {
 
   aiPanelEl = document.createElement("div")
   aiPanelEl.id = "ai-panel"
+  const isEditing = mode === "edit"
+  const placeholder = isEditing
+    ? "Ask AI to modify this page..."
+    : "Ask a question about this page or the wiki..."
   aiPanelEl.innerHTML = `
     <div class="ai-panel-header">
       <span class="ai-panel-title">AI Assistant</span>
-      <button class="ai-panel-clear-comments" title="Clear AI comments">Clear AI notes</button>
+      ${isEditing ? '<button class="ai-panel-clear-comments" title="Clear AI comments">Clear AI notes</button>' : ""}
       <button class="ai-panel-width-toggle" title="Toggle panel width">Wide</button>
       <button class="ai-panel-close" title="Close">\u2715</button>
     </div>
     <div class="ai-panel-messages"></div>
     <div class="ai-panel-input-row">
-      <textarea class="ai-panel-input" placeholder="Ask AI to modify this page..." rows="2"></textarea>
+      <textarea class="ai-panel-input" placeholder="${placeholder}" rows="2"></textarea>
       <button class="ai-panel-send" title="Send (Ctrl+Enter)">&#9654;</button>
-      <button class="ai-panel-review" title="Review mode — AI analyzes and proposes changes">Review</button>
+      ${isEditing ? '<button class="ai-panel-review" title="Review mode — AI analyzes and proposes changes">Review</button>' : ""}
     </div>
   `
   appRoot.appendChild(aiPanelEl)
@@ -4039,10 +4044,12 @@ function openAIPanel() {
   closeBtn.addEventListener("click", closeAIPanel)
 
   const clearBtn = aiPanelEl.querySelector(".ai-panel-clear-comments")
-  clearBtn.addEventListener("click", async () => {
-    await clearAIComments()
-    aiAddMessage("assistant", "AI comments cleared.").classList.add("ai-msg-applied")
-  })
+  if (clearBtn) {
+    clearBtn.addEventListener("click", async () => {
+      await clearAIComments()
+      aiAddMessage("assistant", "AI comments cleared.").classList.add("ai-msg-applied")
+    })
+  }
 
   const widthBtn = aiPanelEl.querySelector(".ai-panel-width-toggle")
   widthBtn.addEventListener("click", () => {
@@ -4053,12 +4060,13 @@ function openAIPanel() {
   const sendBtn = aiPanelEl.querySelector(".ai-panel-send")
   const reviewBtn = aiPanelEl.querySelector(".ai-panel-review")
   const input = aiPanelEl.querySelector(".ai-panel-input")
-  sendBtn.addEventListener("click", () => aiSend("action"))
-  reviewBtn.addEventListener("click", () => aiSend("review"))
+  const defaultMode = isEditing ? "action" : "question"
+  sendBtn.addEventListener("click", () => aiSend(defaultMode))
+  if (reviewBtn) reviewBtn.addEventListener("click", () => aiSend("review"))
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      aiSend("action")
+      aiSend(defaultMode)
     }
   })
   input.focus()
@@ -4066,6 +4074,7 @@ function openAIPanel() {
 
 function closeAIPanel() {
   aiPanelOpen = false
+  aiConversationHistory = []
   if (aiPanelEl) {
     aiPanelEl.remove()
     aiPanelEl = null
@@ -4080,8 +4089,17 @@ function aiAddMessage(role, text) {
   msg.className = `ai-msg ai-msg-${role}`
   msg.textContent = text
   messagesEl.appendChild(msg)
-  messagesEl.scrollTop = messagesEl.scrollHeight
+  aiScrollIfNeeded(messagesEl)
   return msg
+}
+
+function aiScrollIfNeeded(messagesEl) {
+  // Only auto-scroll if content overflows and user is near the bottom.
+  if (messagesEl.scrollHeight <= messagesEl.clientHeight) return // no overflow
+  const distFromBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight
+  if (distFromBottom < 100) {
+    messagesEl.scrollTop = messagesEl.scrollHeight
+  }
 }
 
 async function aiSend(sendMode = "action") {
@@ -4102,6 +4120,9 @@ async function aiSend(sendMode = "action") {
   aiMsg.textContent = "Thinking..."
 
   try {
+    // Add user message to conversation history.
+    aiConversationHistory.push({ role: "user", content: message })
+
     const { fullText, edits, usage, markers } = await aiStreamRequest(message, sendMode, aiMsg)
 
     // Use marker-based proposals if the backend provided them.
@@ -4116,6 +4137,9 @@ async function aiSend(sendMode = "action") {
       } else {
         await autoApplyMarkerProposals(aiMsg, markers.proposals)
       }
+    } else if (sendMode === "question") {
+      // Question mode: render markdown response with clickable links.
+      aiMsg.innerHTML = renderAIMarkdown(fullText)
     } else {
       // Fallback: parse proposals from raw text (no markers).
       const proposals = parseReviewProposals(fullText)
@@ -4131,6 +4155,11 @@ async function aiSend(sendMode = "action") {
         aiMsg.innerHTML = ""
         await autoApplyProposals(aiMsg, proposals)
       }
+    }
+
+    // Add assistant response to conversation history (for follow-ups).
+    if (fullText) {
+      aiConversationHistory.push({ role: "assistant", content: fullText })
     }
 
     // Show token usage.
@@ -4165,6 +4194,7 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
       page_path: `/${pagePath}`,
       message,
       mode: sendMode,
+      history: aiConversationHistory.slice(0, -1), // exclude current message (already in 'message')
     }),
   })
 
@@ -4199,7 +4229,7 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
           fullText += parsed.text
           aiMsg.textContent = fullText
           const messagesEl = aiPanelEl?.querySelector(".ai-panel-messages")
-          if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
+          if (messagesEl) aiScrollIfNeeded(messagesEl)
         } else if (parsed.type === "edits" && parsed.edits) {
           edits = parsed.edits
         } else if (parsed.type === "markers" && parsed.proposals) {
@@ -4216,6 +4246,22 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
   }
 
   return { fullText, edits, usage, markers }
+}
+
+// Simple markdown→HTML for AI responses (links, bold, italic, code, lists).
+function renderAIMarkdown(text) {
+  let html = escapeHtml(text)
+  // Links: [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="ai-msg-link">$1</a>')
+  // Bold: **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+  // Italic: *text*
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>")
+  // Inline code: `text`
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>")
+  // Line breaks
+  html = html.replace(/\n/g, "<br>")
+  return html
 }
 
 // ── Review mode ──
@@ -6050,6 +6096,7 @@ const actionIcons = {
   lock: "M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2ZM7 11V7a5 5 0 0 1 10 0v4",
   // Hourglass (main, shifted up-left) + small floppy (nudged down-right)
   saveDraft: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
+  ai: null, // text-only button, no SVG path
 }
 
 function makeActionIconBtn(iconName, tooltip, onClick, extraClass) {
@@ -6057,18 +6104,21 @@ function makeActionIconBtn(iconName, tooltip, onClick, extraClass) {
   btn.type = "button"
   btn.className = "gowiki-action-btn gowiki-action-btn--stroke" + (extraClass ? " " + extraClass : "")
   btn.title = tooltip
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-  svg.setAttribute("viewBox", "0 0 24 24")
   const pathData = actionIcons[iconName]
   if (pathData) {
-    for (const d of pathData.split(/(?=M)/)) {
-      // For multi-path icons split at each M, but actually just use one path
-    }
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    svg.setAttribute("viewBox", "0 0 24 24")
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path")
     p.setAttribute("d", pathData)
     svg.appendChild(p)
+    btn.appendChild(svg)
+  } else {
+    // Text-only button (e.g. "AI")
+    btn.textContent = iconName.toUpperCase()
+    btn.style.fontSize = "11px"
+    btn.style.fontWeight = "700"
+    btn.style.letterSpacing = "0.5px"
   }
-  btn.appendChild(svg)
   btn.addEventListener("click", (e) => onClick(e))
   return btn
 }
@@ -6275,6 +6325,11 @@ function renderActions() {
     actionsRoot.appendChild(makeActionSep())
     actionsRoot.appendChild(makeActionIconBtn("fullscreen", "Fullscreen (F11)", () => toggleFullscreen()))
 
+    if (aiAssistantEnabled) {
+      actionsRoot.appendChild(makeActionSep())
+      actionsRoot.appendChild(makeActionIconBtn("ai", "AI Assistant (Ctrl+L)", () => toggleAIPanel()))
+    }
+
   } else {
     // ── View mode actions ──
 
@@ -6338,6 +6393,11 @@ function renderActions() {
 
     actionsRoot.appendChild(makeActionSep())
     actionsRoot.appendChild(makeActionIconBtn("fullscreen", "Fullscreen (F11)", () => toggleFullscreen()))
+
+    if (aiAssistantEnabled && currentUser) {
+      actionsRoot.appendChild(makeActionSep())
+      actionsRoot.appendChild(makeActionIconBtn("ai", "AI Assistant (Ctrl+L)", () => toggleAIPanel()))
+    }
   }
 }
 
@@ -11531,13 +11591,13 @@ async function bootstrap() {
       void setEditMode(editMode === "visual" ? "raw" : "visual")
       return
     }
-    if (mode !== "edit") return
-    // CMD+L: toggle AI panel.
+    // CMD+L: toggle AI panel (works in all modes).
     if (e.key === "l" && !e.shiftKey && aiAssistantEnabled) {
       e.preventDefault()
       toggleAIPanel()
       return
     }
+    if (mode !== "edit") return
     // CMD+K: insert link in raw mode.
     if (e.key === "k" && !e.shiftKey && editMode === "raw" && rawEditor) {
       e.preventDefault()

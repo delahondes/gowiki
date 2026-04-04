@@ -94,7 +94,11 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PagePath string `json:"page_path"`
 		Message  string `json:"message"`
-		Mode     string `json:"mode"` // "action" or "review"
+		Mode     string `json:"mode"` // "action", "review", or "question"
+		History  []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"history"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -107,8 +111,8 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if req.Mode == "" {
 		req.Mode = "action"
 	}
-	if req.Mode != "action" && req.Mode != "review" {
-		writeError(w, http.StatusBadRequest, "mode must be 'action' or 'review'")
+	if req.Mode != "action" && req.Mode != "review" && req.Mode != "question" {
+		writeError(w, http.StatusBadRequest, "mode must be 'action', 'review', or 'question'")
 		return
 	}
 
@@ -156,24 +160,67 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// For question mode, build page listing and provide read_page tool.
+	var pageListing string
+	var tools []aiassistant.Tool
+	if req.Mode == "question" {
+		// Only include listing on first message (no history = first turn).
+		if len(req.History) == 0 {
+			if lister, ok := s.store.(SitemapLister); ok {
+				if allPages, err := lister.ListAllPages(); err == nil {
+					var sb strings.Builder
+					for _, p := range allPages {
+						if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, p.Path, "view") {
+							continue
+						}
+						sb.WriteString(fmt.Sprintf("- [%s](%s)\n", p.Title, p.Path))
+					}
+					pageListing = sb.String()
+				}
+			}
+		}
+		tools = []aiassistant.Tool{{
+			Name:        "read_page",
+			Description: "Read the full content of a wiki page. Use this to answer questions that require specific page content.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "The wiki page path, e.g. /regulatory/qms/soft/sop01/",
+					},
+				},
+				"required": []string{"path"},
+			},
+		}}
+	}
+
 	// Build system prompt.
-	systemPrompt := buildAISystemPrompt(req.Mode, pageContent, req.PagePath)
+	systemPrompt := buildAISystemPrompt(req.Mode, pageContent, req.PagePath, pageListing)
+
+	// Build LLM messages: history + current message.
+	var messages []aiassistant.Message
+	for _, h := range req.History {
+		if h.Role == "user" || h.Role == "assistant" {
+			messages = append(messages, aiassistant.Message{Role: h.Role, Content: h.Content})
+		}
+	}
+	// For the first question, prepend the page listing as a user context message.
+	if pageListing != "" && len(req.History) == 0 {
+		messages = append(messages,
+			aiassistant.Message{Role: "user", Content: "Here is the listing of all wiki pages for reference:\n\n" + pageListing},
+			aiassistant.Message{Role: "assistant", Content: "I have the wiki page listing. I can also use `read_page` to access any page's full content. How can I help?"},
+		)
+	}
+	messages = append(messages, aiassistant.Message{Role: "user", Content: req.Message})
 
 	// Build LLM request.
 	chatReq := aiassistant.ChatRequest{
 		SystemPrompt: systemPrompt,
-		Messages: []aiassistant.Message{
-			{Role: "user", Content: req.Message},
-		},
-		MaxTokens: cfg.AIAssistant.MaxTokens,
-		Model:     cfg.AIAssistant.Model,
-	}
-
-	// Call the provider.
-	eventCh, err := s.aiProvider.Chat(r.Context(), chatReq)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("AI provider error: %v", err))
-		return
+		Messages:     messages,
+		MaxTokens:    cfg.AIAssistant.MaxTokens,
+		Model:        cfg.AIAssistant.Model,
+		Tools:        tools,
 	}
 
 	// Stream SSE response.
@@ -187,40 +234,107 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect the full response while streaming tokens.
+	// Tool use loop: call provider, handle tool_use responses, repeat.
 	var fullResponse strings.Builder
 	var inputTokens, outputTokens int
+	maxToolRounds := 10 // safety limit only
 
-	for event := range eventCh {
-		switch event.Type {
-		case "token":
-			fullResponse.WriteString(event.Text)
-			// Stream token for progress display.
-			data, _ := json.Marshal(map[string]any{
-				"type": "token",
-				"text": event.Text,
-			})
-			fmt.Fprintf(w, "event: token\ndata: %s\n\n", data)
-			flusher.Flush()
-
-		case "done":
-			inputTokens = event.InputTokens
-			outputTokens = event.OutputTokens
-
-		case "error":
-			data, _ := json.Marshal(map[string]any{
-				"type":  "error",
-				"text":  event.Text,
-			})
-			fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
-			flusher.Flush()
+	for round := 0; round <= maxToolRounds; round++ {
+		eventCh, err := s.aiProvider.Chat(r.Context(), chatReq)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, fmt.Sprintf("AI provider error: %v", err))
 			return
 		}
+
+		var pendingToolUses []aiassistant.ChatEvent
+		roundDone := false
+
+		for event := range eventCh {
+			switch event.Type {
+			case "token":
+				fullResponse.WriteString(event.Text)
+				data, _ := json.Marshal(map[string]any{
+					"type": "token",
+					"text": event.Text,
+				})
+				fmt.Fprintf(w, "event: token\ndata: %s\n\n", data)
+				flusher.Flush()
+
+			case "tool_use":
+				pendingToolUses = append(pendingToolUses, event)
+				// Notify frontend that the AI is reading a page.
+				data, _ := json.Marshal(map[string]any{
+					"type": "token",
+					"text": fmt.Sprintf("\n*Reading %s...*\n", event.ToolInput["path"]),
+				})
+				fmt.Fprintf(w, "event: token\ndata: %s\n\n", data)
+				flusher.Flush()
+
+			case "done":
+				inputTokens += event.InputTokens
+				outputTokens += event.OutputTokens
+				roundDone = true
+
+			case "error":
+				data, _ := json.Marshal(map[string]any{
+					"type": "error",
+					"text": event.Text,
+				})
+				fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
+				flusher.Flush()
+				return
+			}
+		}
+
+		// If no tool uses, we're done.
+		if len(pendingToolUses) == 0 || !roundDone {
+			break
+		}
+
+		// Execute tools and build follow-up messages.
+		// First, add the assistant's response (with tool_use blocks) to messages.
+		var assistantBlocks []aiassistant.ContentBlock
+		if text := fullResponse.String(); text != "" {
+			assistantBlocks = append(assistantBlocks, aiassistant.ContentBlock{
+				Type: "text",
+				Text: text,
+			})
+		}
+		for _, tu := range pendingToolUses {
+			assistantBlocks = append(assistantBlocks, aiassistant.ContentBlock{
+				Type:  "tool_use",
+				ID:    tu.ToolUseID,
+				Name:  tu.ToolName,
+				Input: tu.ToolInput,
+			})
+		}
+		chatReq.Messages = append(chatReq.Messages, aiassistant.Message{
+			Role:    "assistant",
+			Content: assistantBlocks,
+		})
+
+		// Execute each tool and add results.
+		var toolResults []aiassistant.ContentBlock
+		for _, tu := range pendingToolUses {
+			result := s.executeAITool(tu.ToolName, tu.ToolInput, username)
+			toolResults = append(toolResults, aiassistant.ContentBlock{
+				Type:      "tool_result",
+				ToolUseID: tu.ToolUseID,
+				Content:   result,
+			})
+		}
+		chatReq.Messages = append(chatReq.Messages, aiassistant.Message{
+			Role:    "user",
+			Content: toolResults,
+		})
+
+		// Reset response buffer for the next round.
+		fullResponse.Reset()
 	}
 
-	// For both modes: try to parse proposals from the AI response and
+	// For action/review modes: try to parse proposals from the AI response and
 	// insert flow markers into the page content for verified proposals.
-	if pageContent != "" {
+	if pageContent != "" && req.Mode != "question" {
 		proposals := parseAIProposals(fullResponse.String())
 		if len(proposals) > 0 {
 			markedContent, verified := insertProposalMarkers(pageContent, proposals)
@@ -244,6 +358,34 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	})
 	fmt.Fprintf(w, "event: done\ndata: %s\n\n", data)
 	flusher.Flush()
+}
+
+// executeAITool runs a tool call and returns the result as text.
+func (s *Server) executeAITool(name string, input map[string]any, username string) string {
+	switch name {
+	case "read_page":
+		pagePath, _ := input["path"].(string)
+		if pagePath == "" {
+			return "Error: path is required"
+		}
+		pagePath = strings.TrimSpace(pagePath)
+		// Check @ai ACL.
+		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+			return "Error: AI access denied for this page"
+		}
+		// Check user ACL.
+		groups := s.effectiveGroups(username)
+		if s.aclStore != nil && !s.aclStore.CheckPermission(username, groups, pagePath, "view") {
+			return "Error: access denied"
+		}
+		page, err := s.store.Get(pagePath)
+		if err != nil {
+			return "Error: page not found"
+		}
+		return page.Markdown
+	default:
+		return fmt.Sprintf("Error: unknown tool %q", name)
+	}
 }
 
 // aiProposal represents a single AI-generated change proposal.
@@ -343,7 +485,7 @@ func insertProposalMarkers(content string, proposals []aiProposal) (string, []ai
 }
 
 // buildAISystemPrompt assembles the system prompt from conventions + page context.
-func buildAISystemPrompt(mode, pageContent, pagePath string) string {
+func buildAISystemPrompt(mode, pageContent, pagePath, _ string) string {
 	var b strings.Builder
 
 	b.WriteString("You are an AI assistant integrated into Gowiki, a wiki system. ")
@@ -415,6 +557,15 @@ func buildAISystemPrompt(mode, pageContent, pagePath string) string {
 		b.WriteString("```json\n")
 		b.WriteString(`[{"number": 1, "location": "Section 3, paragraph 1", "original": "The datas shows", "proposed": "The data show", "rationale": "Grammar: 'data' is plural"}]`)
 		b.WriteString("\n```\n\n")
+
+	case "question":
+		b.WriteString("# Instructions\n\n")
+		b.WriteString("The user is asking a question about the wiki or its content.\n")
+		b.WriteString("Answer concisely and helpfully. Use markdown formatting in your response.\n")
+		b.WriteString("When referencing wiki pages, use markdown links with the page path: [Page Title](/path/to/page).\n")
+		b.WriteString("You have access to the wiki page listing (provided at the start of the conversation).\n")
+		b.WriteString("You can use the `read_page` tool to read the full content of any page when needed.\n")
+		b.WriteString("Do not modify any page content — just answer the question.\n\n")
 	}
 
 	// Page content as context, wrapped in XML tags so code fences inside
