@@ -15,6 +15,7 @@ import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler
 import { openMediaManager } from "./media_manager.js"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
+import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
 import { initComments, destroyComments, addComment, getCommentCount, reapplyComments, createAIComment, clearAIComments } from "./plugins/comment.ts"
 import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI } from "./signing/keystore.ts"
 const HLJS_THEMES = [
@@ -4952,18 +4953,97 @@ function buildMenubar() {
     }
   }, "superscript")
 
-  // Highlight
+  // Highlight with color dropdown
   if (schema.marks.highlight) {
-    const hlBtn = addButton("\u{1F58D}", "Highlight", () => {
+    const hlWrap = document.createElement("span")
+    hlWrap.style.position = "relative"
+    hlWrap.style.display = "inline-block"
+
+    const hlBtn = document.createElement("span")
+    hlBtn.className = "gowiki-raw-menuitem"
+    hlBtn.textContent = "\u{1F58D}"
+    hlBtn.title = "Highlight"
+    hlBtn.style.background = "linear-gradient(to top, yellow 40%, transparent 40%)"
+    hlBtn.style.borderRadius = "3px 0 0 3px"
+    hlBtn.style.paddingRight = "2px"
+    hlBtn.addEventListener("mousedown", e => {
+      e.preventDefault()
       if (editMode === "visual" && editorView) {
         toggleMark(schema.marks.highlight)(editorView.state, editorView.dispatch)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
         rawWrapSelection(rawEditor, "==", "==")
       }
-    }, "highlight")
-    hlBtn.style.background = "linear-gradient(to top, yellow 40%, transparent 40%)"
-    hlBtn.style.borderRadius = "3px"
+    })
+
+    const hlArrow = document.createElement("span")
+    hlArrow.className = "gowiki-raw-menuitem"
+    hlArrow.textContent = "\u25BE"
+    hlArrow.title = "Highlight color"
+    hlArrow.style.fontSize = "10px"
+    hlArrow.style.padding = "2px 3px"
+    hlArrow.style.borderRadius = "0 3px 3px 0"
+    hlArrow.style.marginLeft = "-1px"
+
+    let hlDropdown = null
+    function closeHlDropdown() {
+      if (hlDropdown) { hlDropdown.remove(); hlDropdown = null }
+      document.removeEventListener("mousedown", hlOutsideClick)
+    }
+    function hlOutsideClick(e) {
+      if (hlDropdown && !hlDropdown.contains(e.target) && e.target !== hlArrow) closeHlDropdown()
+    }
+    hlArrow.addEventListener("mousedown", e => {
+      e.preventDefault()
+      if (hlDropdown) { closeHlDropdown(); return }
+      hlDropdown = document.createElement("div")
+      hlDropdown.style.cssText = "position:absolute;top:100%;left:0;z-index:999;background:#fff;border:1px solid #ccc;border-radius:4px;padding:4px;display:flex;gap:3px;box-shadow:0 2px 8px rgba(0,0,0,.15)"
+      for (const c of HIGHLIGHT_COLORS) {
+        const swatch = document.createElement("span")
+        swatch.title = c.name
+        swatch.style.cssText = `display:inline-block;width:20px;height:20px;border-radius:3px;cursor:pointer;border:1px solid #ccc;background:${c.value}`
+        swatch.addEventListener("mousedown", ev => {
+          ev.preventDefault()
+          closeHlDropdown()
+          if (editMode === "visual" && editorView) {
+            const { from, to } = editorView.state.selection
+            if (from === to) return
+            const markType = schema.marks.highlight
+            editorView.dispatch(editorView.state.tr.addMark(from, to, markType.create({ color: c.value })))
+            editorView.focus()
+          } else if (editMode === "raw" && rawEditor) {
+            // Strip existing ==...== highlight wrapper if present, then re-wrap.
+            let sel = rawEditor.value.substring(rawEditor.selectionStart, rawEditor.selectionEnd)
+            const hlMatch = sel.match(/^==(?:\{[^}]*\})?([\s\S]*)==$/)
+            if (hlMatch) {
+              // Selection includes delimiters — strip and re-wrap.
+              const inner = hlMatch[1]
+              const s = rawEditor.selectionStart
+              rawEditor.focus()
+              if (c.value === "yellow") {
+                rawInsertText(rawEditor, "==" + inner + "==")
+              } else {
+                rawInsertText(rawEditor, `=={${c.value}}` + inner + "==")
+              }
+            } else {
+              if (c.value === "yellow") {
+                rawWrapSelection(rawEditor, "==", "==")
+              } else {
+                rawWrapSelection(rawEditor, `=={${c.value}}`, "==")
+              }
+            }
+          }
+        })
+        hlDropdown.appendChild(swatch)
+      }
+      hlWrap.appendChild(hlDropdown)
+      document.addEventListener("mousedown", hlOutsideClick)
+    })
+
+    hlWrap.appendChild(hlBtn)
+    hlWrap.appendChild(hlArrow)
+    bar.appendChild(hlWrap)
+    refs["highlight"] = hlBtn
   }
 
   // Footnote

@@ -1,9 +1,8 @@
 import { Registry } from "./registry"
-import { serializeInlineFragment } from "./pm_to_markdown"
 import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
-import type { NodeSpec, MarkSpec, Node as PMNode } from "prosemirror-model"
+import type { NodeSpec, MarkSpec, Node as PMNode, Fragment, Mark } from "prosemirror-model"
 import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { highlightPlugin, isKnownLanguage } from "../highlight"
@@ -721,6 +720,74 @@ function registerMarkdownPrinters(reg: Registry) {
     return body
   }
 
+  // Mark-tracking inline serializer: opens/closes marks at transitions
+  // rather than per text node. Prevents ==text1====text2== duplication
+  // when adjacent text nodes share the same highlight mark.
+  function serializeInline(content: Fragment, recurse: (node: PMNode) => string): string {
+    const nodes: PMNode[] = []
+    content.forEach(n => nodes.push(n))
+
+    let out = ""
+    // Stored outermost-first (reversed from PM's inner-first order).
+    let active: Mark[] = []
+
+    function getOpen(mark: Mark): string {
+      const p = reg.getPMMark(mark.type.name)
+      if (!p) return ""
+      return typeof p.open === "function" ? p.open(mark) : p.open
+    }
+    function getClose(mark: Mark): string {
+      const p = reg.getPMMark(mark.type.name)
+      if (!p) return ""
+      return typeof p.close === "function" ? p.close(mark) : p.close
+    }
+    function closeAll() {
+      for (let i = active.length - 1; i >= 0; i--) out += getClose(active[i])
+      active = []
+    }
+
+    for (const node of nodes) {
+      if (!node.isText) {
+        closeAll()
+        out += recurse(node)
+        continue
+      }
+      // autoText links are self-contained — fall through to recurse.
+      if (node.marks.some((m: Mark) => m.type.name === "link" && (m.attrs as any).autoText)) {
+        closeAll()
+        out += recurse(node)
+        continue
+      }
+
+      // Outermost-first for correct nesting (PM stores inner-first).
+      const marks = [...node.marks].reverse()
+
+      // Common prefix — marks that are already open and stay open.
+      let common = 0
+      while (common < active.length && common < marks.length &&
+             active[common].eq(marks[common])) common++
+
+      // Close marks that changed (innermost = end of array first).
+      for (let i = active.length - 1; i >= common; i--) out += getClose(active[i])
+      // Open new marks.
+      for (let i = common; i < marks.length; i++) out += getOpen(marks[i])
+      active = marks
+
+      // Emit text.
+      const hasCode = node.marks.some((m: Mark) => m.type.name === "code" || m.type.name === "code_expand")
+      if (hasCode) {
+        out += node.text ?? ""
+      } else if (marks.length === 0) {
+        out += recurse(node) // uses serializePlainTextWithAutoLinks path
+      } else {
+        // Escape markdown-significant chars. Must match escapeMarkdownText in pm_to_markdown.
+        out += (node.text ?? "").replace(/[\\*_`>{}~^]/g, (ch: string) => "\\" + ch)
+      }
+    }
+    closeAll()
+    return out
+  }
+
   reg.registerPMNode("paragraph", {
     print(node, ctx, recurse) {
       if (node.content.size === 0) {
@@ -757,7 +824,7 @@ function registerMarkdownPrinters(reg: Registry) {
         return out + "\n\n"
       }
 
-      return serializeInlineFragment(node.content, reg, recurse) + "\n\n"
+      return serializeInline(node.content, recurse) + "\n\n"
     },
   })
 
@@ -765,8 +832,7 @@ function registerMarkdownPrinters(reg: Registry) {
     print(node, ctx, recurse) {
       const level = node.attrs.level
       const numbered = node.attrs.numbered
-      const out = serializeInlineFragment(node.content, reg, recurse)
-      return "#".repeat(level) + " " + (numbered ? "1. " : "") + out + "\n\n"
+      return "#".repeat(level) + " " + (numbered ? "1. " : "") + serializeInline(node.content, recurse) + "\n\n"
     },
   })
 
