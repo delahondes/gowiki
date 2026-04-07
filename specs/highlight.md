@@ -4,13 +4,13 @@
 
 ```
 ==highlighted text==
-==[red]highlighted text==
-==[#ff9900]highlighted text==
+=={red}highlighted text==
+=={#ff9900}highlighted text==
 ```
 
 - `==text==` — default highlight (yellow background)
-- `==[color]text==` — colored highlight, where color is a named CSS color or hex code
-- The `[color]` prefix is optional; when absent, defaults to yellow
+- `=={color}text==` — colored highlight, where color is a named CSS color or hex code
+- The `{color}` prefix is optional; when absent, defaults to yellow
 
 ## Mark schema
 
@@ -23,19 +23,20 @@
 The mark is parsed as a markdown-it inline rule:
 
 1. Detect `==` opening delimiter
-2. If followed by `[`, parse color until `]`, then parse content until closing `==`
-3. If not followed by `[`, parse content until closing `==` with default color
+2. If followed by `{`, parse color until `}`, then parse content until closing `==`
+3. If not followed by `{`, parse content until closing `==` with default color
 4. Nesting of other inline marks inside is allowed (`==*bold highlight*==`)
 5. The `==` delimiter must not be preceded/followed by whitespace (same as `*italic*` — no `== spaced ==`)
+6. Color value must match `/^#?[a-zA-Z0-9]+$/` — only color names or hex codes
 
-Regex pattern for the full match: `==(?:\[([^\]]+)\])?(.*?)==`
+Regex pattern for the full match: `==(?:\{([^}]+)\})?(.*?)==`
 
 ## Serialization
 
 - Default color: `==text==`
-- Non-default color: `==[color]text==`
+- Non-default color: `=={color}text==`
 
-Bijectivity: the serializer always omits `[yellow]` since it's the default. Any other color is always written.
+Bijectivity: the serializer always omits `{yellow}` since it's the default. Any other color is always written.
 
 ## Rendering
 
@@ -79,10 +80,10 @@ Highlight can be combined with any other inline mark:
 
 ## Implementation
 
-This is a simple inline mark plugin, similar to `strikethrough` (`~~text~~`). The only addition is the optional `[color]` prefix.
+This is a simple inline mark plugin, similar to `strikethrough` (`~~text~~`). The only addition is the optional `{color}` prefix.
 
 ### Files to modify
 
 1. **New plugin**: `frontend/plugins/highlight.ts` — schema, parser rule, serializer, toolbar command, CSS
 2. **Plugin index**: `frontend/plugins/index.ts` — register the plugin
-3. **CLAUDE.md dialect table**: add `==[color]highlight==` as implemented
+3. **CLAUDE.md dialect table**: add `=={color}highlight==` as implemented

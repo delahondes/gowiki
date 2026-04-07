@@ -48,7 +48,7 @@ export const highlightPlugin: WikiPlugin = {
       },
     })
 
-    // ── Markdown-it inline rule: ==text== and ==[color]text== ──
+    // ── Markdown-it inline rule: ==text== and =={color}text== ──
     reg.registerMarkdownItPlugin((md: any) => {
       md.inline.ruler.push("gowiki_highlight", (state: any, silent: boolean) => {
         const src = state.src
@@ -71,14 +71,17 @@ export const highlightPlugin: WikiPlugin = {
         if (closePos === -1 || closePos <= start + 2) return false
 
         if (!silent) {
-          // Check for optional [color] prefix after ==
+          // Check for optional {color} prefix after ==
           let color = DEFAULT_COLOR
           let contentStart = start + 2
-          if (src.charCodeAt(contentStart) === 0x5B) { // [
-            const bracketEnd = src.indexOf("]", contentStart + 1)
-            if (bracketEnd !== -1 && bracketEnd < closePos) {
-              color = src.slice(contentStart + 1, bracketEnd).trim()
-              contentStart = bracketEnd + 1
+          if (src.charCodeAt(contentStart) === 0x7B) { // {
+            const braceEnd = src.indexOf("}", contentStart + 1)
+            if (braceEnd !== -1 && braceEnd < closePos) {
+              const candidate = src.slice(contentStart + 1, braceEnd).trim()
+              if (/^#?[a-zA-Z0-9]+$/.test(candidate)) {
+                color = candidate
+                contentStart = braceEnd + 1
+              }
             }
           }
 
@@ -121,7 +124,7 @@ export const highlightPlugin: WikiPlugin = {
       open: (mark: any) => {
         const color = mark.attrs.color || DEFAULT_COLOR
         if (color === DEFAULT_COLOR) return "=="
-        return `==[${color}]`
+        return `=={${color}}`
       },
       close: "==",
     })

@@ -12,7 +12,7 @@ export class PrintContext {
 
 
 
-import { Node as PMNode } from "prosemirror-model"
+import { Fragment, Mark, Node as PMNode } from "prosemirror-model"
 import { Registry } from "./registry"
 
 function escapeMarkdownText(text: string): string {
@@ -37,6 +37,98 @@ function serializePlainTextWithAutoLinks(text: string): string {
     last = start + match.length
   }
   out += escapeMarkdownText(text.slice(last))
+  return out
+}
+
+function getMarkOpen(mark: Mark, registry: Registry): string {
+  const printer = registry.getPMMark(mark.type.name)
+  if (!printer) return ""
+  return typeof printer.open === "function" ? printer.open(mark) : printer.open
+}
+
+function getMarkClose(mark: Mark, registry: Registry): string {
+  const printer = registry.getPMMark(mark.type.name)
+  if (!printer) return ""
+  return typeof printer.close === "function" ? printer.close(mark) : printer.close
+}
+
+/**
+ * Serialize inline content with mark-tracking: marks are opened/closed
+ * at transitions rather than per text node. This prevents duplicate
+ * delimiters like ==== when adjacent text nodes share the same mark.
+ */
+export function serializeInlineFragment(
+  fragment: Fragment,
+  registry: Registry,
+  printNode: (node: PMNode) => string
+): string {
+  const nodes: PMNode[] = []
+  fragment.forEach(n => nodes.push(n))
+
+  let out = ""
+  let activeMarks: readonly Mark[] = []
+
+  function closeAllMarks() {
+    for (let i = activeMarks.length - 1; i >= 0; i--) {
+      out += getMarkClose(activeMarks[i], registry)
+    }
+    activeMarks = []
+  }
+
+  for (const node of nodes) {
+    if (!node.isText) {
+      // Non-text inline node (image, flow_marker, etc.):
+      // close all active marks, emit node, reset marks.
+      closeAllMarks()
+      out += printNode(node)
+      continue
+    }
+
+    // Link with autoText: self-contained serialization via printNode.
+    if (node.marks.some(m => m.type.name === "link" && m.attrs.autoText)) {
+      closeAllMarks()
+      out += printNode(node)
+      continue
+    }
+
+    // ProseMirror stores marks inner-first (em before highlight).
+    // For serialization we need outermost-first so the prefix comparison
+    // keeps outer marks open while toggling inner marks.
+    const nodeMarks = [...node.marks].reverse()
+
+    // Find the longest common prefix of active marks and this node's marks.
+    let commonLen = 0
+    while (commonLen < activeMarks.length && commonLen < nodeMarks.length &&
+           activeMarks[commonLen].eq(nodeMarks[commonLen])) {
+      commonLen++
+    }
+
+    // Close marks no longer active (innermost first = end of array first).
+    for (let i = activeMarks.length - 1; i >= commonLen; i--) {
+      out += getMarkClose(activeMarks[i], registry)
+    }
+
+    // Open new marks (outermost already open, add inner marks).
+    for (let i = commonLen; i < nodeMarks.length; i++) {
+      out += getMarkOpen(nodeMarks[i], registry)
+    }
+
+    activeMarks = nodeMarks
+
+    // Emit text content.
+    const hasCodeMark = node.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+    if (hasCodeMark) {
+      out += node.text ?? ""
+    } else if (nodeMarks.length === 0) {
+      out += serializePlainTextWithAutoLinks(node.text ?? "")
+    } else {
+      out += escapeMarkdownText(node.text ?? "")
+    }
+  }
+
+  // Close remaining marks.
+  closeAllMarks()
+
   return out
 }
 

@@ -1,4 +1,5 @@
 import { Registry } from "./registry"
+import { serializeInlineFragment } from "./pm_to_markdown"
 import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
@@ -756,11 +757,7 @@ function registerMarkdownPrinters(reg: Registry) {
         return out + "\n\n"
       }
 
-      let out = ""
-      node.content.forEach((child) => {
-        out += recurse(child)
-      })
-      return out + "\n\n"
+      return serializeInlineFragment(node.content, reg, recurse) + "\n\n"
     },
   })
 
@@ -768,10 +765,7 @@ function registerMarkdownPrinters(reg: Registry) {
     print(node, ctx, recurse) {
       const level = node.attrs.level
       const numbered = node.attrs.numbered
-      let out = ""
-      node.content.forEach((child) => {
-        out += recurse(child)
-      })
+      const out = serializeInlineFragment(node.content, reg, recurse)
       return "#".repeat(level) + " " + (numbered ? "1. " : "") + out + "\n\n"
     },
   })
