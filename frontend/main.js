@@ -5048,7 +5048,7 @@ function buildMenubar() {
 
   // Footnote
   if (footnoteInsertCommand) {
-    addButton("fn", "Insert footnote", () => {
+    const fnBtn = addButton("", shortcutHint("Insert footnote", "Shift-N"), () => {
       if (editMode === "visual" && editorView) {
         footnoteInsertCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
@@ -5056,6 +5056,11 @@ function buildMenubar() {
         rawWrapSelection(rawEditor, "^[", "]")
       }
     })
+    const fnImg = document.createElement("img")
+    fnImg.src = "/icons/footnote.svg"
+    fnImg.style.height = "1.2em"
+    fnImg.style.verticalAlign = "middle"
+    fnBtn.appendChild(fnImg)
   }
 
   // Inline code
@@ -5816,6 +5821,12 @@ function renderEdit(nextEditMode) {
     },
     "Mod-Shift-s": () => {
       void publishDraft()
+      return true
+    },
+    "Mod-Shift-n": (state, dispatch) => {
+      if (footnoteInsertCommand) {
+        footnoteInsertCommand(state, dispatch)
+      }
       return true
     },
     "Mod-Shift-;": () => {

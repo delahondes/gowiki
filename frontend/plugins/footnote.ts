@@ -36,18 +36,34 @@ function renderFootnoteContent(raw: string): string {
 
 /* ─── Footnote numbering state ─────────────────────────── */
 
-const footnoteNumberingKey = new PluginKey<Map<number, number>>("gowiki.footnoteNumbering")
+const footnoteNumberingKey = new PluginKey<FootnoteNumbering>("gowiki.footnoteNumbering")
 
-function buildFootnoteNumbering(doc: PMNode): Map<number, number> {
-  const map = new Map<number, number>()
+interface FootnoteNumbering {
+  /** pos → display number */
+  posToNumber: Map<number, number>
+  /** Deduplicated list of { number, content } for the footnote section */
+  entries: Array<{ number: number; content: string }>
+}
+
+function buildFootnoteNumbering(doc: PMNode): FootnoteNumbering {
+  const posToNumber = new Map<number, number>()
+  /** content → assigned display number */
+  const contentToNumber = new Map<string, number>()
+  const entries: Array<{ number: number; content: string }> = []
   let counter = 0
   doc.descendants((node, pos) => {
     if (node.type.name === "footnote") {
-      counter++
-      map.set(pos, counter)
+      const content = node.attrs.content
+      let num = contentToNumber.get(content)
+      if (num === undefined) {
+        num = ++counter
+        contentToNumber.set(content, num)
+        entries.push({ number: num, content })
+      }
+      posToNumber.set(pos, num)
     }
   })
-  return map
+  return { posToNumber, entries }
 }
 
 /* ─── Footnote NodeView ────────────────────────────────── */
@@ -72,16 +88,14 @@ class FootnoteNodeView {
     this.renderNumber(footnoteNumberingKey.getState(view.state))
   }
 
-  private renderNumber(numbering: Map<number, number> | null | undefined) {
-    // Find this node's position to look up its number
-    // Since we can't easily get pos here, just use the numbering map via the outer view
+  private renderNumber(numbering: FootnoteNumbering | null | undefined) {
+    if (!numbering) { this.dom.textContent = "?"; return }
+    // Find this node's position to look up its deduplicated number
     const doc = this.outerView.state.doc
     let myNumber = 0
-    let counter = 0
-    doc.descendants((n, _pos) => {
-      if (n.type.name === "footnote") {
-        counter++
-        if (n === this.node) myNumber = counter
+    doc.descendants((n, pos) => {
+      if (n.type.name === "footnote" && n === this.node) {
+        myNumber = numbering.posToNumber.get(pos) || 0
       }
     })
     this.dom.textContent = String(myNumber || "?")
@@ -331,13 +345,8 @@ export const footnotePlugin: WikiPlugin = {
           editorView.dom.parentNode?.appendChild(section)
 
           function rebuild(doc: PMNode) {
-            const footnotes: string[] = []
-            doc.descendants((node) => {
-              if (node.type.name === "footnote") {
-                footnotes.push(node.attrs.content)
-              }
-            })
-            if (footnotes.length === 0) {
+            const numbering = buildFootnoteNumbering(doc)
+            if (numbering.entries.length === 0) {
               section.style.display = "none"
               return
             }
@@ -346,9 +355,9 @@ export const footnotePlugin: WikiPlugin = {
             const hr = document.createElement("hr")
             section.appendChild(hr)
             const ol = document.createElement("ol")
-            for (const text of footnotes) {
+            for (const entry of numbering.entries) {
               const li = document.createElement("li")
-              li.innerHTML = renderFootnoteContent(text)
+              li.innerHTML = renderFootnoteContent(entry.content)
               ol.appendChild(li)
             }
             section.appendChild(ol)
