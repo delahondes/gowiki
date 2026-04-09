@@ -4733,7 +4733,15 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
         const parsed = JSON.parse(line.slice(6))
         if (parsed.type === "token" && parsed.text) {
           fullText += parsed.text
-          aiMsg.textContent = fullText
+          if (sendMode === "question") {
+            aiMsg.innerHTML = renderAIMarkdown(fullText)
+          } else {
+            // Action/review: don't show raw JSON, show progress instead.
+            const count = (fullText.match(/"original"/g) || []).length
+            aiMsg.textContent = count > 0
+              ? `Analyzing... ${count} proposal${count > 1 ? "s" : ""} so far`
+              : "Analyzing..."
+          }
           const messagesEl = aiPanelEl?.querySelector(".ai-panel-messages")
           if (messagesEl) aiScrollIfNeeded(messagesEl)
         } else if (parsed.type === "edits" && parsed.edits) {

@@ -21,7 +21,7 @@ function parseDirective(line: string): DirectiveToken | null {
   const parts = inner.split(/\s+/)
   const name = parts[0].replace(/\r/g, "")
   if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) {
-    throw new Error(`Invalid directive name: ${name}`)
+    return null // not a valid directive — skip
   }
 
   const attrs: Record<string, string> = {}
