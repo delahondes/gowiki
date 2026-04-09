@@ -1108,7 +1108,7 @@ const linkStatusKey = new PluginKey("gowiki.linkStatus")
 
 function resolveInternalHref(href: string, pageNamespace: string): string | null {
   if (!href || /^https?:\/\//i.test(href) || /^mailto:/i.test(href)) return null
-  if (href.startsWith("#")) return null
+  if (href.startsWith("#")) return href // anchor link — resolved locally
   // Decode percent-encoded characters (match backend resolve.go)
   try { href = decodeURIComponent(href) } catch {}
   let resolved: string
@@ -1145,7 +1145,7 @@ function collectLinkRanges(
         const path = resolveInternalHref(href, pageNamespace)
         if (path) {
           ranges.push({ from: pos, to: pos + node.nodeSize, path })
-          pathSet.add(path)
+          if (!path.startsWith("#")) pathSet.add(path)
         }
       }
     }
@@ -1159,11 +1159,29 @@ function buildLinkDecorations(
   pageNamespace: string,
   statusMap: Map<string, boolean>
 ): DecorationSet {
-  if (statusMap.size === 0) return DecorationSet.empty
+  // Collect heading slugs for anchor link validation.
+  const headingSlugs = new Set<string>()
+  const slugCounts = new Map<string, number>()
+  doc.descendants((node: any) => {
+    if (node.type.name === "heading") {
+      const base = slugify(node.textContent)
+      const count = slugCounts.get(base) ?? 0
+      slugCounts.set(base, count + 1)
+      headingSlugs.add(count === 0 ? base : `${base}-${count}`)
+      return false
+    }
+  })
+
   const { ranges } = collectLinkRanges(doc, pageNamespace)
   const decorations: Decoration[] = []
   for (const { from, to, path } of ranges) {
-    const exists = statusMap.get(path)
+    let exists: boolean | undefined
+    if (path.startsWith("#")) {
+      // Anchor link: check if heading slug exists in current document.
+      exists = headingSlugs.has(path.slice(1))
+    } else {
+      exists = statusMap.get(path)
+    }
     if (exists === undefined) continue
     const cls = exists ? "gowiki-link-exists" : "gowiki-link-missing"
     decorations.push(Decoration.inline(from, to, { class: cls }))

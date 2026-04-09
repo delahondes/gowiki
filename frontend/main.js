@@ -13,6 +13,7 @@ import { pmToMarkdown } from "./compiler/pm_to_markdown.ts"
 import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
+import { slugify } from "./compiler/slugify.ts"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
@@ -371,7 +372,7 @@ function promptLinkForm(initialTarget, initialText) {
 
     const searchHint = document.createElement("div")
     searchHint.style.cssText = "font-size:11px;color:#888;margin-bottom:4px"
-    searchHint.textContent = "Type to search wiki pages, or enter a URL directly"
+    searchHint.textContent = "Type to search wiki pages, # for sections, or enter a URL"
     searchPanel.appendChild(searchHint)
 
     const searchResults = document.createElement("div")
@@ -416,8 +417,38 @@ function promptLinkForm(initialTarget, initialText) {
       searchActiveIndex = idx
     }
 
+    function getDocumentHeadings() {
+      if (!editorView) return []
+      const headings = []
+      editorView.state.doc.descendants((node) => {
+        if (node.type.name === "heading") {
+          headings.push({ title: node.textContent, slug: slugify(node.textContent) })
+          return false
+        }
+      })
+      // Deduplicate slugs (same logic as heading ID decoration).
+      const counts = new Map()
+      return headings.map(h => {
+        const count = counts.get(h.slug) ?? 0
+        counts.set(h.slug, count + 1)
+        const id = count === 0 ? h.slug : `${h.slug}-${count}`
+        return { title: h.title, path: "#" + id }
+      })
+    }
+
     async function doLinkSearch(query) {
-      if (!query || query.length < 2) { renderLinkSearchResults([]); return }
+      if (!query || query.length < 1) { renderLinkSearchResults([]); return }
+      // Anchor search: # prefix shows document headings.
+      if (query.startsWith("#")) {
+        const filter = query.slice(1).toLowerCase()
+        const headings = getDocumentHeadings()
+        const matches = headings.filter(h =>
+          h.title.toLowerCase().includes(filter) || h.path.toLowerCase().includes(filter)
+        )
+        renderLinkSearchResults(matches)
+        return
+      }
+      if (query.length < 2) { renderLinkSearchResults([]); return }
       // Don't search if it looks like a URL
       if (/^https?:\/\//i.test(query) || /^mailto:/i.test(query)) { renderLinkSearchResults([]); return }
       try {
