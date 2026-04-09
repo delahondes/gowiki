@@ -1770,32 +1770,541 @@ function textOffsetToPmPos(doc, targetOffset) {
   return doc.content.size > 0 ? doc.content.size - 1 : 0
 }
 
+// ── Structural content address for raw↔visual cursor mapping ──
+// Both raw markdown and PM doc share the same block structure in the same order.
+// A content address is { nodeIndex, plainOffset } identifying:
+//   - Which content node (paragraph, heading, table cell, list item) by sequential index
+//   - Plain-text character offset within that node (markdown syntax stripped)
+
+// Enumerate content nodes from raw markdown. Returns array of
+// { rawStart, rawEnd, type } for each content node.
+function scanMarkdownContentNodes(markdown) {
+  const nodes = []
+  const lines = markdown.split("\n")
+  let i = 0
+  let inCodeFence = false, fenceMarker = ""
+
+  while (i < lines.length) {
+    const line = lines[i]
+    const lineStart = lines.slice(0, i).reduce((s, l) => s + l.length + 1, 0)
+
+    // Code fence toggle
+    const fenceMatch = line.match(/^(`{3,}|~{3,})/)
+    if (fenceMatch) {
+      if (!inCodeFence) {
+        inCodeFence = true
+        fenceMarker = fenceMatch[1][0]
+        // Collect code block content (everything between fences)
+        const startLine = i + 1
+        i++
+        while (i < lines.length) {
+          const cl = lines[i]
+          if (cl.startsWith(fenceMarker.repeat(fenceMatch[1].length))) break
+          i++
+        }
+        // The code block body is one content node
+        if (startLine < i) {
+          const codeStart = lines.slice(0, startLine).reduce((s, l) => s + l.length + 1, 0)
+          const codeEnd = lines.slice(0, i).reduce((s, l) => s + l.length + 1, 0) - 1
+          nodes.push({ rawStart: codeStart, rawEnd: codeEnd, type: "code_block" })
+        }
+        inCodeFence = false
+        i++
+        continue
+      }
+    }
+
+    // Blank line — skip
+    if (line.trim() === "") { i++; continue }
+
+    // Directive on its own line: {name ...}
+    if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(line)) { i++; continue }
+
+    // Table separator row: | --- | --- |
+    if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) { i++; continue }
+
+    // Horizontal rule: --- or *** or ___
+    if (/^([-*_])\1{2,}\s*$/.test(line)) { i++; continue }
+
+    // Table row: | cell | cell |
+    if (line.includes("|") && /^\|/.test(line.trim())) {
+      // Split into cells, each cell is a content node
+      const stripped = line.replace(/^\|/, "").replace(/\|\s*$/, "")
+      let cellOffset = line.indexOf(stripped.charAt(0) || "|")
+      // Find cell boundaries by scanning for unescaped |
+      const cellTexts = []
+      let cur = "", depth = 0, ci = 0
+      for (ci = 0; ci < stripped.length; ci++) {
+        const ch = stripped[ci]
+        if (ch === "\\" && ci + 1 < stripped.length) { cur += ch + stripped[ci + 1]; ci++; continue }
+        if (ch === "`") depth = depth ? 0 : 1
+        if (ch === "|" && !depth) {
+          cellTexts.push(cur)
+          cur = ""
+          continue
+        }
+        cur += ch
+      }
+      cellTexts.push(cur)
+
+      let scanPos = lineStart
+      for (const cellRaw of cellTexts) {
+        const trimmed = cellRaw.trim()
+        if (trimmed === "") {
+          // Find position of this empty cell
+          scanPos = markdown.indexOf("|", scanPos) + 1
+          nodes.push({ rawStart: scanPos, rawEnd: scanPos, type: "table_cell" })
+          continue
+        }
+        // Find the cell content in the line
+        const cellStart = markdown.indexOf(trimmed, scanPos)
+        if (cellStart >= 0) {
+          nodes.push({ rawStart: cellStart, rawEnd: cellStart + trimmed.length, type: "table_cell" })
+          scanPos = cellStart + trimmed.length
+        }
+      }
+      i++
+      continue
+    }
+
+    // Heading: ## text
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/)
+    if (headingMatch) {
+      const prefix = headingMatch[1].length + 1 // # + space
+      const contentStart = lineStart + prefix
+      nodes.push({ rawStart: contentStart, rawEnd: lineStart + line.length, type: "heading" })
+      i++
+      continue
+    }
+
+    // List item: - text or 1. text
+    const listMatch = line.match(/^(\s*(?:[-*]|\d+\.)\s+)(.*)$/)
+    if (listMatch) {
+      const prefix = listMatch[1].length
+      const contentStart = lineStart + prefix
+      // Collect continuation lines (indented, not new list item, not blank)
+      let endLine = i
+      while (endLine + 1 < lines.length) {
+        const next = lines[endLine + 1]
+        if (next.trim() === "") break
+        if (/^\s*(?:[-*]|\d+\.)\s/.test(next)) break
+        if (/^#{1,6}\s/.test(next)) break
+        if (/^\|/.test(next.trim())) break
+        endLine++
+      }
+      const endPos = lines.slice(0, endLine).reduce((s, l) => s + l.length + 1, 0) + lines[endLine].length
+      nodes.push({ rawStart: contentStart, rawEnd: endPos, type: "list_item" })
+      i = endLine + 1
+      continue
+    }
+
+    // Blockquote: > text
+    if (line.startsWith("> ") || line === ">") {
+      const prefix = line.startsWith("> ") ? 2 : 1
+      const contentStart = lineStart + prefix
+      nodes.push({ rawStart: contentStart, rawEnd: lineStart + line.length, type: "paragraph" })
+      i++
+      continue
+    }
+
+    // Paragraph: consecutive non-blank, non-special lines
+    {
+      const paraStart = lineStart
+      let endLine = i
+      while (endLine + 1 < lines.length) {
+        const next = lines[endLine + 1]
+        if (next.trim() === "") break
+        if (/^#{1,6}\s/.test(next)) break
+        if (/^\s*(?:[-*]|\d+\.)\s/.test(next)) break
+        if (/^\|/.test(next.trim())) break
+        if (/^(`{3,}|~{3,})/.test(next)) break
+        if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(next)) break
+        if (/^([-*_])\1{2,}\s*$/.test(next)) break
+        if (next.startsWith("> ")) break
+        endLine++
+      }
+      const endPos = lines.slice(0, endLine).reduce((s, l) => s + l.length + 1, 0) + lines[endLine].length
+      nodes.push({ rawStart: paraStart, rawEnd: endPos, type: "paragraph" })
+      i = endLine + 1
+    }
+  }
+  return nodes
+}
+
+// Compute plain-text offset from a raw offset within a content node's text.
+// Strips markdown inline syntax (delimiters, link URLs, etc.) and counts
+// only the characters that appear as visible text in PM.
+function rawToPlainOffset(rawText, rawOffset) {
+  let plain = 0
+  let i = 0
+  const len = rawText.length
+  const target = Math.min(rawOffset, len)
+
+  while (i < target) {
+    // Escape: \X → X
+    if (rawText[i] === "\\" && i + 1 < len) {
+      i += 2; plain++; continue
+    }
+    // Footnote: ^[...] → atom (0 plain chars)
+    if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
+      let depth = 1, j = i + 2
+      while (j < len && depth > 0) {
+        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "[") depth++
+        if (rawText[j] === "]") depth--
+        j++
+      }
+      if (depth === 0) {
+        if (target <= j) return plain // cursor inside → clamp
+        i = j; continue
+      }
+    }
+    // Flow marker: {#...} → atom (0 plain chars)
+    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) {
+        if (target <= j + 1) return plain
+        i = j + 1; continue
+      }
+    }
+    // Caption ref: {ref ...} → atom (0 plain chars)
+    if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) {
+        if (target <= j + 1) return plain
+        i = j + 1; continue
+      }
+    }
+    // Template var: {{...}} → atom (0 plain chars)
+    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
+      const j = rawText.indexOf("}}", i + 2)
+      if (j >= 0) {
+        if (target <= j + 2) return plain
+        i = j + 2; continue
+      }
+    }
+    // Highlight: == or =={color=X} → delimiter (0 plain chars)
+    if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
+      i += 2
+      if (i < len && rawText[i] === "{") {
+        const j = rawText.indexOf("}", i)
+        if (j >= 0) i = j + 1 // skip {color=X}
+      }
+      continue
+    }
+    // Link: [text](url) → "text"
+    if (rawText[i] === "[") {
+      let depth = 1, j = i + 1
+      while (j < len && depth > 0) {
+        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "[") depth++
+        if (rawText[j] === "]") depth--
+        j++
+      }
+      if (depth === 0 && j < len && rawText[j] === "(") {
+        // Found [text](, now find )
+        let pd = 1, k = j + 1
+        while (k < len && pd > 0) {
+          if (rawText[k] === "\\") { k += 2; continue }
+          if (rawText[k] === "(") pd++
+          if (rawText[k] === ")") pd--
+          k++
+        }
+        if (pd === 0) {
+          // [text](url): [ is at i, ] is at j-1, ( is at j, ) is at k-1
+          const textStart = i + 1, textEnd = j - 1
+          if (target <= textStart) { i = textStart; continue } // cursor on [ → skip to text
+          if (target <= textEnd) {
+            // Cursor is inside link text — recurse for nested inline
+            i++ // skip [
+            continue // process text content normally
+          }
+          if (target < k) return plain + rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
+          // Past ): skip entire link, add text length
+          const innerPlain = rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
+          plain += innerPlain
+          i = k
+          continue
+        }
+      }
+    }
+    // Bold: ** delimiter
+    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") {
+      i += 2; continue
+    }
+    // Italic: * delimiter (single)
+    if (rawText[i] === "*") { i++; continue }
+    // Strikethrough: ~~
+    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") {
+      i += 2; continue
+    }
+    // Subscript: ~ (single, not ~~)
+    if (rawText[i] === "~") { i++; continue }
+    // Superscript: ^ (single, not ^[)
+    if (rawText[i] === "^") { i++; continue }
+    // Underline: _
+    if (rawText[i] === "_") { i++; continue }
+    // Code: ` or @`
+    if (rawText[i] === "`") { i++; continue }
+    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
+    // Regular character
+    i++; plain++
+  }
+  return plain
+}
+
+// Compute a structural content address from a raw markdown cursor position.
+function computeContentAddress(markdown, cursorPos) {
+  const nodes = scanMarkdownContentNodes(markdown)
+  // Find which content node contains the cursor
+  for (let idx = 0; idx < nodes.length; idx++) {
+    const n = nodes[idx]
+    if (cursorPos >= n.rawStart && cursorPos <= n.rawEnd) {
+      const rawText = markdown.slice(n.rawStart, n.rawEnd)
+      const rawOffsetInNode = cursorPos - n.rawStart
+      const plainOffset = n.type === "code_block"
+        ? rawOffsetInNode
+        : rawToPlainOffset(rawText, rawOffsetInNode)
+      return { nodeIndex: idx, plainOffset }
+    }
+  }
+  // Cursor is between nodes — snap to nearest
+  for (let idx = 0; idx < nodes.length; idx++) {
+    if (nodes[idx].rawStart > cursorPos) {
+      return { nodeIndex: idx, plainOffset: 0 }
+    }
+  }
+  return nodes.length > 0
+    ? { nodeIndex: nodes.length - 1, plainOffset: 0 }
+    : { nodeIndex: 0, plainOffset: 0 }
+}
+
+// Content node types in PM that directly contain inline text.
+const PM_CONTENT_TYPES = new Set([
+  "paragraph", "heading", "code_block",
+])
+
+// Container types to descend into when counting content nodes.
+// Only structural containers that correspond to raw markdown structure.
+// Excludes includes, queries, and other expanded content not in raw markdown.
+// table_cell/table_header contain paragraphs, so they are containers.
+const PM_CONTAINER_TYPES = new Set([
+  "doc", "table", "table_row", "table_cell", "table_header",
+  "bullet_list", "ordered_list", "list_item", "blockquote", "spoiler",
+])
+
+// Compute a structural content address from a PM cursor position.
+function computePmContentAddress(doc, pmPos) {
+  let idx = 0
+  let result = null
+  doc.descendants((node, pos) => {
+    if (result) return false
+    if (PM_CONTENT_TYPES.has(node.type.name)) {
+      const nodeEnd = pos + node.nodeSize
+      if (pmPos >= pos && pmPos <= nodeEnd) {
+        // Cursor is inside this content node. Count plain-text chars to pmPos.
+        let charCount = 0
+        if (node.type.name === "code_block") {
+          charCount = Math.max(0, pmPos - pos - 1)
+        } else {
+          node.forEach((child, offset) => {
+            if (result) return
+            const childPos = pos + 1 + offset
+            const childEnd = childPos + child.nodeSize
+            if (pmPos <= childPos) { result = { nodeIndex: idx, plainOffset: charCount }; return }
+            if (child.isText) {
+              if (pmPos < childEnd) {
+                charCount += pmPos - childPos
+                result = { nodeIndex: idx, plainOffset: charCount }
+                return
+              }
+              charCount += child.text.length
+            } else if (child.type.name === "hard_break") {
+              charCount += 1
+            }
+            // Atom nodes: 0 plain chars
+          })
+        }
+        if (!result) result = { nodeIndex: idx, plainOffset: charCount }
+        return false
+      }
+      idx++
+      return false // don't descend into content nodes
+    }
+    // Only descend into structural containers, skip includes/queries/etc.
+    return PM_CONTAINER_TYPES.has(node.type.name)
+  })
+  return result || { nodeIndex: Math.max(0, idx - 1), plainOffset: 0 }
+}
+
+// Reverse of rawToPlainOffset: given a plain-text target offset,
+// find the corresponding raw character position in the markdown text.
+function plainToRawOffset(rawText, plainTarget) {
+  let plain = 0
+  let i = 0
+  const len = rawText.length
+
+  while (i < len && plain < plainTarget) {
+    // Escape: \X → X
+    if (rawText[i] === "\\" && i + 1 < len) {
+      i += 2; plain++; continue
+    }
+    // Footnote: ^[...] → atom (0 plain chars)
+    if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
+      let depth = 1, j = i + 2
+      while (j < len && depth > 0) {
+        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "[") depth++
+        if (rawText[j] === "]") depth--
+        j++
+      }
+      if (depth === 0) { i = j; continue }
+    }
+    // Flow marker: {#...} → atom (0 plain chars)
+    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) { i = j + 1; continue }
+    }
+    // Caption ref: {ref ...} → atom (0 plain chars)
+    if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) { i = j + 1; continue }
+    }
+    // Template var: {{...}} → atom (0 plain chars)
+    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
+      const j = rawText.indexOf("}}", i + 2)
+      if (j >= 0) { i = j + 2; continue }
+    }
+    // Highlight: == or =={color=X} → delimiter (0 plain chars)
+    if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
+      i += 2
+      if (i < len && rawText[i] === "{") {
+        const j = rawText.indexOf("}", i)
+        if (j >= 0) i = j + 1
+      }
+      continue
+    }
+    // Link: [text](url) → "text"
+    if (rawText[i] === "[") {
+      let depth = 1, j = i + 1
+      while (j < len && depth > 0) {
+        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "[") depth++
+        if (rawText[j] === "]") depth--
+        j++
+      }
+      if (depth === 0 && j < len && rawText[j] === "(") {
+        let pd = 1, k = j + 1
+        while (k < len && pd > 0) {
+          if (rawText[k] === "\\") { k += 2; continue }
+          if (rawText[k] === "(") pd++
+          if (rawText[k] === ")") pd--
+          k++
+        }
+        if (pd === 0) {
+          i++ // skip [, process text content normally
+          continue
+        }
+      }
+    }
+    // Bold: ** delimiter
+    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") { i += 2; continue }
+    // Italic: * delimiter
+    if (rawText[i] === "*") { i++; continue }
+    // Strikethrough: ~~
+    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") { i += 2; continue }
+    // Subscript: ~
+    if (rawText[i] === "~") { i++; continue }
+    // Superscript: ^
+    if (rawText[i] === "^") { i++; continue }
+    // Underline: _
+    if (rawText[i] === "_") { i++; continue }
+    // Code: ` or @`
+    if (rawText[i] === "`") { i++; continue }
+    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
+    // Regular character
+    i++; plain++
+  }
+  return i
+}
+
+// Resolve a structural content address to a raw markdown cursor position.
+function resolveRawContentAddress(markdown, nodeIndex, plainOffset) {
+  const nodes = scanMarkdownContentNodes(markdown)
+  if (nodeIndex >= nodes.length) {
+    return nodes.length > 0 ? nodes[nodes.length - 1].rawEnd : 0
+  }
+  const n = nodes[nodeIndex]
+  if (n.type === "code_block") {
+    return Math.min(n.rawStart + plainOffset, n.rawEnd)
+  }
+  const rawText = markdown.slice(n.rawStart, n.rawEnd)
+  return n.rawStart + plainToRawOffset(rawText, plainOffset)
+}
+
+// Resolve a structural content address to a PM position.
+function resolveContentAddress(doc, nodeIndex, plainOffset) {
+  let idx = 0
+  let result = 1 // fallback: start of doc content
+  let done = false
+  doc.descendants((node, pos) => {
+    if (done) return false
+    if (PM_CONTENT_TYPES.has(node.type.name)) {
+      if (idx === nodeIndex) {
+        // Found the target node. Resolve plainOffset within it.
+        if (node.type.name === "code_block") {
+          result = Math.min(pos + 1 + plainOffset, pos + node.nodeSize - 1)
+        } else {
+          let charCount = 0
+          let found = false
+          node.forEach((child, offset) => {
+            if (found) return
+            const childPos = pos + 1 + offset
+            if (child.isText) {
+              const textLen = child.text.length
+              if (charCount + textLen >= plainOffset) {
+                result = childPos + (plainOffset - charCount)
+                found = true
+                return
+              }
+              charCount += textLen
+            } else if (child.type.name === "hard_break") {
+              if (charCount + 1 >= plainOffset) {
+                result = childPos
+                found = true
+                return
+              }
+              charCount += 1
+            }
+            // Atom nodes (footnote, flow_marker, etc.): 0 plain chars, skip
+          })
+          if (!found) result = pos + node.nodeSize - 1 // end of node
+        }
+        done = true
+        return false
+      }
+      idx++
+      return false // don't descend into content nodes
+    }
+    // Only descend into structural containers, skip includes/queries/etc.
+    return PM_CONTAINER_TYPES.has(node.type.name)
+  })
+  return result
+}
+
 async function setEditMode(nextEditMode) {
   if (mode !== "edit") return
   if (nextEditMode === editMode) return
 
-  // Capture text context around the cursor for landmark-based restoration,
-  // and the cursor's pixel distance from the top of the viewport.
-  let cursorContext = null
-  let cursorScreenTop = 200 // pixels from viewport top — the target after switch
-  if (editMode === "visual" && editorView) {
-    const { fullText, textOffset } = pmPosToTextOffset(editorView.state.doc, editorView.state.selection.from)
-    cursorContext = extractCursorContext(fullText, textOffset, false)
-    try {
-      cursorScreenTop = editorView.coordsAtPos(editorView.state.selection.from).top
-    } catch {}
-  } else if (editMode === "raw" && rawEditor) {
-    cursorContext = extractCursorContext(rawEditor.value, rawEditor.selectionStart, true)
-    // Measure exact cursor position using mirror div (handles wrapped lines).
-    const cursorOffset = getTextareaCursorOffset(rawEditor, rawEditor.selectionStart)
-    const textareaRect = rawEditor.getBoundingClientRect()
-    cursorScreenTop = textareaRect.top + cursorOffset.y
-  }
-
+  // Compute structural content address from the current mode (no injection).
+  let contentAddress = null
   let markdown = currentMarkdown
+
   if (editMode === "visual" && editorView) {
+    contentAddress = computePmContentAddress(editorView.state.doc, editorView.state.selection.from)
     markdown = pmToMarkdown(editorView.state.doc, registry)
   } else if (editMode === "raw" && rawEditor) {
+    contentAddress = computeContentAddress(rawEditor.value, rawEditor.selectionStart)
     markdown = rawEditor.value
   }
 
@@ -1822,76 +2331,62 @@ async function setEditMode(nextEditMode) {
   renderEdit(editMode)
   renderActions()
 
-  // Re-render remote block indicators and update our position after mode switch.
   setTimeout(() => {
     renderRemoteBlockIndicators()
     updateEditOffset()
   }, 100)
 
-  // Restore cursor position using text context matching.
-  if (cursorContext) {
+  // Resolve the content address in the target mode.
+  if (contentAddress) {
     requestAnimationFrame(() => {
       const scroller = document.querySelector("#app")
       if (nextEditMode === "raw" && rawEditor) {
-        const pos = findContextPosition(rawEditor.value, cursorContext, true)
-        console.log("[mode-switch] visual→raw", { pos, rawLen: rawEditor.value.length, fraction: cursorContext.fraction, beforeTail: cursorContext.plainBefore.substring(cursorContext.plainBefore.length - 30), afterHead: cursorContext.plainAfter.substring(0, 30), rawAtPos: pos >= 0 ? rawEditor.value.substring(Math.max(0,pos-20), pos+20) : "N/A" })
-        if (pos >= 0) {
-          rawEditor.setSelectionRange(pos, pos)
-          rawEditor.focus()
-          // Wait for textarea auto-resize, then scroll #app so cursor
-          // appears at the same screen Y as before the switch.
-          requestAnimationFrame(() => {
-            const cursorOffset = getTextareaCursorOffset(rawEditor, pos)
-            const textareaRect = rawEditor.getBoundingClientRect()
-            const currentScreenY = textareaRect.top + cursorOffset.y
-            // Scroll so cursor is in the middle of the viewport.
-            if (scroller) scroller.scrollTop += currentScreenY - window.innerHeight / 2
-            // Re-measure after scroll for actual cursor position (may differ near top/bottom).
-            const finalRect = rawEditor.getBoundingClientRect()
-            const finalOffset = getTextareaCursorOffset(rawEditor, pos)
-            showCursorBeacon(finalRect.left + finalOffset.x, finalRect.top + finalOffset.y)
-          })
-        } else {
-          rawEditor.focus()
-        }
+        const pos = resolveRawContentAddress(rawEditor.value, contentAddress.nodeIndex, contentAddress.plainOffset)
+        rawEditor.setSelectionRange(pos, pos)
+        rawEditor.focus()
+        requestAnimationFrame(() => {
+          autoResizeRawEditor(rawEditor)
+          const cursorOffset = getTextareaCursorOffset(rawEditor, pos)
+          const textareaRect = rawEditor.getBoundingClientRect()
+          const currentScreenY = textareaRect.top + cursorOffset.y
+          if (scroller) scroller.scrollTop += currentScreenY - window.innerHeight / 2
+          const finalRect = rawEditor.getBoundingClientRect()
+          const finalOffset = getTextareaCursorOffset(rawEditor, pos)
+          showCursorBeacon(finalRect.left + finalOffset.x, finalRect.top + finalOffset.y)
+        })
       } else if (nextEditMode === "visual" && editorView) {
+        const targetPos = resolveContentAddress(
+          editorView.state.doc,
+          contentAddress.nodeIndex,
+          contentAddress.plainOffset
+        )
+        const clampedPos = Math.min(targetPos, editorView.state.doc.content.size)
         try {
-          const { fullText } = pmDocTextWithPositions(editorView.state.doc)
-          const textPos = findContextPosition(fullText, cursorContext, false)
-          console.log("[mode-switch] raw→visual", { textPos, pmLen: fullText.length, fraction: cursorContext.fraction, beforeTail: cursorContext.plainBefore.substring(cursorContext.plainBefore.length - 30), afterHead: cursorContext.plainAfter.substring(0, 30), pmAtPos: textPos >= 0 ? fullText.substring(Math.max(0,textPos-20), textPos+20) : "N/A" })
-          if (textPos >= 0) {
-            const pmPos = textOffsetToPmPos(editorView.state.doc, textPos)
-            const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
-            const $pos = editorView.state.doc.resolve(clampedPos)
-            const sel = TextSelection.near($pos)
-            // Use scrollIntoView to let PM place cursor on screen reliably,
-            // then adjust to center it.
-            editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
-            // Delay to let images/includes load and shift layout.
-            const scrollToCenter = (showBeacon) => {
-              try {
-                const coords = editorView.coordsAtPos(clampedPos)
-                const offset = coords.top - window.innerHeight / 2
-                if (scroller) scroller.scrollTop += offset
-                if (showBeacon) {
-                  // Re-measure after scroll — cursor may not be at center near top/bottom.
-                  const finalCoords = editorView.coordsAtPos(clampedPos)
-                  showCursorBeacon(finalCoords.left, finalCoords.top)
-                }
-              } catch {}
+          const $pos = editorView.state.doc.resolve(clampedPos)
+          const sel = TextSelection.near($pos)
+          editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
+        } catch { /* position out of range, cursor stays at default */ }
+        const scrollToCenter = (showBeacon) => {
+          try {
+            const coords = editorView.coordsAtPos(clampedPos)
+            const offset = coords.top - window.innerHeight / 2
+            if (scroller) scroller.scrollTop += offset
+            if (showBeacon) {
+              const finalCoords = editorView.coordsAtPos(clampedPos)
+              showCursorBeacon(finalCoords.left, finalCoords.top)
             }
-            // Try multiple times as layout settles. Beacon on the final pass.
-            requestAnimationFrame(() => {
-              scrollToCenter(false)
-              setTimeout(() => scrollToCenter(true), 150)
-            })
-          }
-          editorView.focus()
-        } catch {
-          editorView.focus()
+          } catch {}
         }
+        requestAnimationFrame(() => {
+          scrollToCenter(false)
+          setTimeout(() => scrollToCenter(true), 150)
+        })
+        editorView.focus()
       }
     })
+  } else {
+    if (nextEditMode === "raw" && rawEditor) rawEditor.focus()
+    else if (nextEditMode === "visual" && editorView) editorView.focus()
   }
 }
 
