@@ -1459,18 +1459,23 @@ function restoreCursorFromLocalStorage() {
               const $pos = editorView.state.doc.resolve(clampedPos)
               const sel = TextSelection.near($pos)
               editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
-              requestAnimationFrame(() => {
+              const scrollToCursor = (showBeacon) => {
                 try {
                   const coords = editorView.coordsAtPos(clampedPos)
                   if (scroller) scroller.scrollTop += coords.top - window.innerHeight / 2
-                  setTimeout(() => {
-                    try {
-                      const finalCoords = editorView.coordsAtPos(clampedPos)
-                      if (scroller) scroller.scrollTop += finalCoords.top - window.innerHeight / 2
-                      showCursorBeacon(finalCoords.left, finalCoords.top)
-                    } catch {}
-                  }, 150)
+                  if (showBeacon) {
+                    const fc = editorView.coordsAtPos(clampedPos)
+                    showCursorBeacon(fc.left, fc.top)
+                  }
                 } catch {}
+              }
+              requestAnimationFrame(() => {
+                scrollToCursor(false)
+                setTimeout(() => scrollToCursor(true), 150)
+                // Re-scroll when async content loads (queries, includes, images).
+                const obs = new MutationObserver(() => scrollToCursor(false))
+                obs.observe(editorView.dom, { childList: true, subtree: true, attributes: true })
+                setTimeout(() => obs.disconnect(), 5000)
               })
             } catch {}
           }
