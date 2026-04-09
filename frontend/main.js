@@ -2380,6 +2380,11 @@ async function setEditMode(nextEditMode) {
         requestAnimationFrame(() => {
           scrollToCenter(false)
           setTimeout(() => scrollToCenter(true), 150)
+          // Watch for layout shifts from async content (queries, includes, images, mermaid).
+          // Re-scroll when the editor DOM changes, then tear down after 5s.
+          const obs = new MutationObserver(() => scrollToCenter(false))
+          obs.observe(editorView.dom, { childList: true, subtree: true, attributes: true })
+          setTimeout(() => obs.disconnect(), 5000)
         })
         editorView.focus()
       }
