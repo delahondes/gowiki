@@ -66,10 +66,12 @@ func (s *Server) handleAINamespace(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(pagePath, prefix)
 
 		// ACL check: user permission + @ai permission.
-		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
+		// ACL patterns expect canonical paths with leading /.
+		aclPath := "/" + pagePath
+		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), aclPath, "view") {
 			continue
 		}
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, aclPath, "view") {
 			continue
 		}
 
@@ -148,11 +150,13 @@ func (s *Server) handleAIBatchRead(w http.ResponseWriter, r *http.Request) {
 		results[i].Path = p
 
 		// ACL check: user permission + @ai permission.
-		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), pagePath, "view") {
+		// ACL patterns expect canonical paths with leading /.
+		aclPath := "/" + pagePath
+		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), aclPath, "view") {
 			results[i].Error = "access denied"
 			continue
 		}
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, aclPath, "view") {
 			results[i].Error = "AI access denied for this page"
 			continue
 		}
