@@ -1721,7 +1721,7 @@ export const tablePlugin: GowikiPlugin = {
           if (dirMatch) formulaStart = dirMatch[0].length
 
           if (content.charAt(formulaStart) !== "=" || content.length <= formulaStart + 1) continue
-          // Skip highlight syntax (==text== or =={color}text==) — not a formula.
+          // Skip highlight syntax (==text== or =={color=VALUE}text==) — not a formula.
           if (content.charAt(formulaStart + 1) === "=") continue
 
           // Escape markdown-significant chars in the formula part

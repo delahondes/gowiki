@@ -35,16 +35,16 @@ Recommended trap content:
 
 ### Highlight traps
 - `==plain highlight==`
-- `=={#ccffcc}colored highlight==`
+- `=={color=#ccffcc}colored highlight==`
 - `==[*italic inside brackets in highlight*]==`
 - `==\{\}*escaped braces then italic*==`
-- `=={#ccffcc}\{\}**bold colored**==`
+- `=={color=#ccffcc}\{\}**bold colored**==`
 - `==text with = signs inside==`
 
 ### Highlight in table cells
 - `| ==[*placeholder*]== |` — highlight with brackets in cell
 - `| ==\*literal stars\*== |` — escaped stars in highlight in cell
-- `| =={#cce5ff}colored cell== |` — colored highlight in cell
+- `| =={color=#cce5ff}colored cell== |` — colored highlight in cell
 
 ### Mark nesting
 - `==**bold highlight**==`
@@ -59,7 +59,7 @@ Recommended trap content:
 - `==\{not a color\}text==` — escaped braces that look like color syntax
 
 ### Ordered/unordered lists with highlights
-- `1. =={#ccffcc}\{\}**item**==`
+- `1. =={color=#ccffcc}\{\}**item**==`
 - `- ==highlighted list item==`
 
 ### Formulas in table cells (not highlights)

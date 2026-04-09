@@ -72,9 +72,9 @@ test("highlight with bold", "==**bold**==")
 test("highlight with italic", "==*italic*==")
 test("highlight with mixed", "==[*italic in brackets*]==")
 test("highlight with escaped braces", "==\\{\\}*houhou*==")
-test("highlight color green", "=={#ccffcc}green text==")
-test("highlight color with bold", "=={#ccffcc}**bold green**==")
-test("highlight color with mixed marks", "=={#ccffcc}before *italic* after==")
+test("highlight color green", "=={color=#ccffcc}green text==")
+test("highlight color with bold", "=={color=#ccffcc}**bold green**==")
+test("highlight color with mixed marks", "=={color=#ccffcc}before *italic* after==")
 
 console.log("\n=== Table cell highlight tests ===\n")
 
@@ -100,6 +100,6 @@ console.log("\n=== Paragraph tests ===\n")
 test("two paragraphs", "First paragraph\n\nSecond paragraph")
 test("heading + paragraph", "# Heading\n\nParagraph")
 test("ordered list with highlight",
-  "1. un\n2. =={#ccffcc}\\{\\}**deux**==\n3. trois")
+  "1. un\n2. =={color=#ccffcc}\\{\\}**deux**==\n3. trois")
 
 console.log("")

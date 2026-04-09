@@ -6,27 +6,27 @@ Highlight text with a colored background.
 
 ```
 ==highlighted text==
-=={red}highlighted text==
-=={#ff9900}highlighted text==
+=={color=red}highlighted text==
+=={color=#ff9900}highlighted text==
 ```
 
 - `==text==` — default yellow highlight
-- `=={color}text==` — custom color (CSS color name or hex code)
+- `=={color=VALUE}text==` — custom color (CSS color name or hex code)
 
 ## 1. Examples
 
 | Syntax | Result |
 | --- | --- |
 | `==important==` | Yellow highlight |
-| `=={#ccffcc}approved==` | Green highlight |
-| `=={#cce5ff}info==` | Blue highlight |
-| `=={#ffcccc}warning==` | Red highlight |
+| `=={color=#ccffcc}approved==` | Green highlight |
+| `=={color=#cce5ff}info==` | Blue highlight |
+| `=={color=#ffcccc}warning==` | Red highlight |
 
 ## 1. Using in the editor
 
 - Select text and click the highlight button (crayon icon with yellow underline) in the toolbar
 - In raw mode, wrap text with `==` delimiters
-- To change color, edit the `{color}` prefix in raw mode
+- To change color, edit the `{color=VALUE}` prefix in raw mode, or use the color dropdown next to the highlight button
 
 ## 1. Nesting
 

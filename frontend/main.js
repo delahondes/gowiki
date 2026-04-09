@@ -5023,13 +5023,13 @@ function buildMenubar() {
               if (c.value === "yellow") {
                 rawInsertText(rawEditor, "==" + inner + "==")
               } else {
-                rawInsertText(rawEditor, `=={${c.value}}` + inner + "==")
+                rawInsertText(rawEditor, `=={color=${c.value}}` + inner + "==")
               }
             } else {
               if (c.value === "yellow") {
                 rawWrapSelection(rawEditor, "==", "==")
               } else {
-                rawWrapSelection(rawEditor, `=={${c.value}}`, "==")
+                rawWrapSelection(rawEditor, `=={color=${c.value}}`, "==")
               }
             }
           }
