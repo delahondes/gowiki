@@ -520,7 +520,9 @@ func buildAISystemPrompt(mode, pageContent, pagePath, _ string) string {
 	b.WriteString("- Do NOT use HTML entities\n")
 	b.WriteString("- Do NOT use setext headings\n")
 	b.WriteString("- Do NOT remove or reformat content you were not asked to change\n")
-	b.WriteString("- Do NOT silently change document structure\n\n")
+	b.WriteString("- Do NOT silently change document structure\n")
+	b.WriteString("- Do NOT renumber headings — numbered headings (`## 1. Title`) are managed by the wiki system and must not be modified\n")
+	b.WriteString("- Do NOT suggest changes to heading numbers, section numbers, or list numbering\n\n")
 
 	// Mode-specific instructions.
 	switch mode {

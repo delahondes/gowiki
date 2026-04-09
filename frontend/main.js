@@ -4631,24 +4631,21 @@ async function aiSend(sendMode = "action") {
 
     const { fullText, edits, usage, markers } = await aiStreamRequest(message, sendMode, aiMsg)
 
-    // Use marker-based proposals if the backend provided them.
-    if (markers && markers.proposals && markers.proposals.length > 0) {
-      // Update editor content with markers inserted.
-      applyMarkedContent(markers.markdown)
-
-      aiMsg.textContent = ""
-      aiMsg.innerHTML = ""
-      if (sendMode === "review") {
-        renderReviewPanel(aiMsg, markers.proposals)
-      } else {
-        await autoApplyMarkerProposals(aiMsg, markers.proposals)
-      }
-    } else if (sendMode === "question") {
-      // Question mode: render markdown response with clickable links.
+    if (sendMode === "question") {
       aiMsg.innerHTML = renderAIMarkdown(fullText)
     } else {
-      // Fallback: parse proposals from raw text (no markers).
-      const proposals = parseReviewProposals(fullText)
+      // Use backend-verified proposals if available, otherwise parse from text.
+      const proposals = (markers && markers.proposals && markers.proposals.length > 0)
+        ? markers.proposals
+        : parseReviewProposals(fullText)
+
+      // Validate proposals against current document content.
+      // Strip marker fields — we don't insert markers into the document.
+      const markdown = getCurrentMarkdown()
+      proposals.forEach(p => {
+        delete p.marker
+        p._verified = markdown.includes(p.original)
+      })
 
       if (proposals.length === 0) {
         aiMsg.textContent = "No changes proposed. Raw response:\n\n" + fullText
@@ -4863,65 +4860,185 @@ function renderReviewPanel(container, proposals) {
     clarification: "",
   }))
 
+  let activeIndex = -1
+  let floatingPanel = null
+  let autoAdvance = true
+
+  function removeFloatingPanel() {
+    if (floatingPanel) { floatingPanel.remove(); floatingPanel = null }
+  }
+
+  // Advance to the next proposal after an action.
+  function advanceToNext(currentIndex) {
+    if (!autoAdvance) return
+    // Find next pending proposal.
+    for (let j = currentIndex + 1; j < proposals.length; j++) {
+      if (states[j].status === "pending") {
+        activeIndex = j
+        showFloatingProposal(proposals[j], j)
+        return
+      }
+    }
+    // No more pending — close panel.
+    removeFloatingPanel()
+    activeIndex = -1
+  }
+
+  // Find the PM position for the start of a proposal's original text.
+  function findProposalPos(p) {
+    if (!p._verified || editMode !== "visual" || !editorView) return -1
+    const docText = editorView.state.doc.textContent
+    // Strip markdown syntax from original to match against PM plain text.
+    const plain = stripMarkdownForContext(p.original).replace(/\n/g, "")
+    // Try full match.
+    let idx = docText.indexOf(plain)
+    if (idx >= 0) return textOffsetToPmPos(editorView.state.doc, idx)
+    // Try with collapsed whitespace.
+    const collapsed = plain.replace(/\s+/g, " ").trim()
+    if (collapsed.length > 10) {
+      const docCollapsed = docText.replace(/\s+/g, " ")
+      const cIdx = docCollapsed.indexOf(collapsed)
+      if (cIdx >= 0) return textOffsetToPmPos(editorView.state.doc, cIdx)
+    }
+    // Try prefix (first 30 chars).
+    if (plain.length > 30) {
+      const prefix = plain.slice(0, 30)
+      idx = docText.indexOf(prefix)
+      if (idx >= 0) return textOffsetToPmPos(editorView.state.doc, idx)
+    }
+    // Last resort: structural address from raw markdown.
+    const md = getCurrentMarkdown()
+    const rawIdx = md.indexOf(p.original)
+    if (rawIdx < 0) return -1
+    const addr = computeContentAddress(md, rawIdx)
+    return resolveContentAddress(editorView.state.doc, addr.nodeIndex, addr.plainOffset)
+  }
+
+  // Show a floating panel anchored near the matching text in the editor.
+  function showFloatingProposal(p, i) {
+    removeFloatingPanel()
+    const pmPos = findProposalPos(p)
+    if (pmPos < 0) {
+      // Can't locate text — mark the item and try the next one.
+      const item = list.children[i]
+      if (item) item.style.opacity = "0.4"
+      if (autoAdvance) advanceToNext(i)
+      return
+    }
+
+    // Place cursor and scroll to it.
+    const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
+    try {
+      const $pos = editorView.state.doc.resolve(clampedPos)
+      editorView.dispatch(editorView.state.tr.setSelection(TextSelection.near($pos)).scrollIntoView())
+    } catch {}
+
+    // Wait for scroll to settle, then position the panel.
+    requestAnimationFrame(() => {
+      try {
+        const coords = editorView.coordsAtPos(clampedPos)
+        const scroller = document.querySelector("#app")
+        if (scroller) scroller.scrollTop += coords.top - window.innerHeight / 3
+      } catch {}
+
+      requestAnimationFrame(() => {
+        let anchorTop
+        try {
+          anchorTop = editorView.coordsAtPos(clampedPos).top
+        } catch { return }
+
+        const diff = charDiffHtml(p.original, p.proposed)
+        const warningHtml = p._verified ? "" : `<div class="ai-review-warning">Original text not found</div>`
+
+        floatingPanel = document.createElement("div")
+        floatingPanel.className = "ai-review-floating"
+        floatingPanel.innerHTML = `
+          ${warningHtml}
+          <div class="ai-review-diff">
+            <div class="ai-review-original">${diff.oldHtml}</div>
+            <div class="ai-review-arrow">\u2192</div>
+            <div class="ai-review-proposed">${diff.newHtml}</div>
+          </div>
+          <div class="ai-review-rationale">${escapeHtml(p.rationale || "")}</div>
+          <div class="ai-review-actions">
+            <button class="ai-review-btn ai-review-accept" ${p._verified ? "" : "disabled"}>Accept</button>
+            <button class="ai-review-btn ai-review-reject">Reject</button>
+            <button class="ai-review-btn ai-review-clarify">Clarify</button>
+          </div>
+          <div class="ai-review-clarify-row" style="display:none">
+            <input class="ai-review-clarify-input" placeholder="Your clarification..." />
+          </div>
+          <label class="ai-review-auto-advance" style="display:flex;align-items:center;gap:4px;margin-top:6px;font-size:0.8em;color:#666;cursor:pointer">
+            <input type="checkbox" class="ai-review-auto-cb" ${autoAdvance ? "checked" : ""}> Open next automatically
+          </label>
+        `
+        // Position: fixed, right side of editor area, vertically aligned with the text.
+        const editorRect = editorView.dom.getBoundingClientRect()
+        floatingPanel.style.cssText = `position:fixed;top:${anchorTop}px;right:${window.innerWidth - editorRect.right + 8}px;max-width:350px;z-index:100`
+        document.body.appendChild(floatingPanel)
+
+        // Wire action buttons.
+        const acceptBtn = floatingPanel.querySelector(".ai-review-accept")
+        const rejectBtn = floatingPanel.querySelector(".ai-review-reject")
+        const clarifyBtn = floatingPanel.querySelector(".ai-review-clarify")
+        const clarifyRow = floatingPanel.querySelector(".ai-review-clarify-row")
+        const clarifyInput = floatingPanel.querySelector(".ai-review-clarify-input")
+
+        function updateItemClass() {
+          const item = list.children[i]
+          if (!item) return
+          const s = states[i].status
+          item.className = "ai-review-item" + (s === "accepted" ? " ai-review-item-accepted" : s === "rejected" ? " ai-review-item-rejected" : s === "clarify" ? " ai-review-item-clarify" : "")
+        }
+
+        if (p._verified) {
+          acceptBtn.addEventListener("click", () => {
+            states[i].status = "accepted"
+            updateItemClass()
+            advanceToNext(i)
+          })
+        }
+        rejectBtn.addEventListener("click", () => {
+          states[i].status = "rejected"
+          updateItemClass()
+          advanceToNext(i)
+        })
+        clarifyBtn.addEventListener("click", () => {
+          states[i].status = "clarify"
+          updateItemClass()
+          clarifyRow.style.display = "flex"
+          clarifyInput.focus()
+        })
+        clarifyInput.addEventListener("input", () => {
+          states[i].clarification = clarifyInput.value
+        })
+        const autoCb = floatingPanel.querySelector(".ai-review-auto-cb")
+        if (autoCb) autoCb.addEventListener("change", () => { autoAdvance = autoCb.checked })
+      })
+    })
+  }
+
   proposals.forEach((p, i) => {
     const item = document.createElement("div")
     item.dataset.index = i
+    item.className = "ai-review-item" + (!p._verified ? " ai-review-item-unverified" : "")
 
-    if (!p._verified) {
-      item.className = "ai-review-item ai-review-item-unverified"
-    } else {
-      item.className = "ai-review-item"
-    }
+    const excerpt = p.original.replace(/\n/g, " ").slice(0, 40) + (p.original.length > 40 ? "\u2026" : "")
+    const statusIcon = !p._verified ? " \u26A0" : ""
 
-    const diff = charDiffHtml(p.original, p.proposed)
-    const warningHtml = p._verified ? "" : `<div class="ai-review-warning">Original text not found in document — cannot apply</div>`
+    item.innerHTML = `<span class="ai-review-num">#${i + 1}${statusIcon}</span> <span class="ai-review-excerpt">${escapeHtml(excerpt)}</span>`
+    item.className += " ai-review-item-header"
+    item.style.cursor = "pointer"
 
-    item.innerHTML = `
-      <div class="ai-review-num">#${p.number || i + 1}${p._verified ? "" : " \u26A0"}</div>
-      <div class="ai-review-location">${escapeHtml(p.location || "")}</div>
-      ${warningHtml}
-      <div class="ai-review-diff">
-        <div class="ai-review-original">${diff.oldHtml}</div>
-        <div class="ai-review-arrow">\u2192</div>
-        <div class="ai-review-proposed">${diff.newHtml}</div>
-      </div>
-      <div class="ai-review-rationale">${escapeHtml(p.rationale || "")}</div>
-      <div class="ai-review-actions">
-        <button class="ai-review-btn ai-review-accept" ${p._verified ? "" : "disabled"} title="${p._verified ? "Accept" : "Cannot accept — original not found"}">Accept</button>
-        <button class="ai-review-btn ai-review-reject" title="Reject">Reject</button>
-        <button class="ai-review-btn ai-review-clarify" title="Clarify">Clarify</button>
-      </div>
-      <div class="ai-review-clarify-row" style="display:none">
-        <input class="ai-review-clarify-input" placeholder="Your clarification..." />
-      </div>
-    `
-
-    const acceptBtn = item.querySelector(".ai-review-accept")
-    const rejectBtn = item.querySelector(".ai-review-reject")
-    const clarifyBtn = item.querySelector(".ai-review-clarify")
-    const clarifyRow = item.querySelector(".ai-review-clarify-row")
-    const clarifyInput = item.querySelector(".ai-review-clarify-input")
-
-    if (p._verified) {
-      acceptBtn.addEventListener("click", () => {
-        states[i].status = "accepted"
-        item.className = "ai-review-item ai-review-item-accepted"
-        clarifyRow.style.display = "none"
-      })
-    }
-    rejectBtn.addEventListener("click", () => {
-      states[i].status = "rejected"
-      item.className = "ai-review-item ai-review-item-rejected"
-      clarifyRow.style.display = "none"
-    })
-    clarifyBtn.addEventListener("click", () => {
-      states[i].status = "clarify"
-      item.className = "ai-review-item ai-review-item-clarify"
-      clarifyRow.style.display = "flex"
-      clarifyInput.focus()
-    })
-    clarifyInput.addEventListener("input", () => {
-      states[i].clarification = clarifyInput.value
+    item.addEventListener("click", () => {
+      // Toggle: clicking the same item closes the panel.
+      if (activeIndex === i) {
+        removeFloatingPanel()
+        activeIndex = -1
+        return
+      }
+      activeIndex = i
+      showFloatingProposal(p, i)
     })
 
     list.appendChild(item)

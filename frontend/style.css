@@ -2501,13 +2501,33 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .ai-review-list { display: flex; flex-direction: column; }
 
 .ai-review-item {
-  padding: 10px;
   border-bottom: 1px solid #eee;
   transition: background 0.15s;
 }
+.ai-review-item-header {
+  padding: 6px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-review-item-header:hover { background: #f0f0f0; }
+.ai-review-floating {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  font-size: 0.85em;
+  max-height: 60vh;
+  overflow-y: auto;
+}
 .ai-review-item-accepted { background: #e8f5e9; }
+.ai-review-item-accepted > .ai-review-item-header::after { content: " \2713"; color: #2e7d32; font-weight: 700; }
 .ai-review-item-rejected { background: #fce4ec; opacity: 0.6; }
+.ai-review-item-rejected > .ai-review-item-header::after { content: " \2717"; color: #c62828; font-weight: 700; }
 .ai-review-item-clarify { background: #fff3e0; }
+.ai-review-item-clarify > .ai-review-item-header::after { content: " ?"; color: #e65100; font-weight: 700; }
 .ai-review-item-unverified { background: #f5f5f5; opacity: 0.6; }
 .ai-review-warning {
   color: #c62828;
@@ -2519,8 +2539,8 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border-radius: 3px;
 }
 
-.ai-review-num { font-weight: 700; font-size: 0.85em; color: #555; margin-bottom: 4px; }
-.ai-review-location { font-size: 0.8em; color: #888; margin-bottom: 6px; }
+.ai-review-num { font-weight: 700; font-size: 0.85em; color: #555; }
+.ai-review-excerpt { font-size: 0.8em; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ai-review-diff {
   display: flex;
