@@ -3,7 +3,7 @@ import type { CompileContext } from "./kernel"
 import { schema as basicSchema } from "prosemirror-schema-basic"
 import { addListNodes } from "prosemirror-schema-list"
 import type { NodeSpec, MarkSpec, Node as PMNode, Fragment, Mark } from "prosemirror-model"
-import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { Plugin as PMPlugin, PluginKey, TextSelection } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { highlightPlugin, isKnownLanguage } from "../highlight"
 import { slugify } from "./slugify"
@@ -138,8 +138,179 @@ export function registerCoreNodes(reg: Registry) {
   registerHeadingNumbers(reg)
   registerCodeExpand(reg)
   registerLinkStatus(reg)
+  registerAnchorAutoText(reg)
 
   reg.registerStyle("clearfix", `.gowiki-clear { clear: both; }`)
+}
+
+/* --------------------------------------------------
+ * Auto-text anchor links: [](#slug) → "1.2. Section Title"
+ * Updates the display text of autoText links targeting #anchors
+ * with the heading title and number from the current document.
+ * -------------------------------------------------- */
+
+function registerAnchorAutoText(reg: Registry) {
+  const anchorAutoKey = new PluginKey("gowiki.anchorAutoText")
+
+  function buildHeadingMap(doc: any): Map<string, string> {
+    const map = new Map<string, string>()
+    const slugCounts = new Map<string, number>()
+    const counters = [0, 0, 0, 0, 0, 0]
+
+    doc.descendants((node: any) => {
+      if (node.type.name === "heading") {
+        const text = node.textContent
+        const level: number = node.attrs.level
+        const numbered = node.attrs.numbered
+
+        if (numbered) {
+          counters[level - 1]++
+          for (let i = level; i < 6; i++) counters[i] = 0
+        } else {
+          for (let i = level; i < 6; i++) counters[i] = 0
+        }
+
+        const base = slugify(text)
+        const count = slugCounts.get(base) ?? 0
+        slugCounts.set(base, count + 1)
+        const slug = count === 0 ? base : `${base}-${count}`
+
+        let display = text
+        if (numbered) {
+          const parts: number[] = []
+          for (let i = 0; i < level; i++) {
+            if (counters[i] > 0) parts.push(counters[i])
+          }
+          display = parts.join(".") + ". " + text
+        }
+
+        map.set(slug, display)
+        return false
+      }
+    })
+    return map
+  }
+
+  reg.registerEditorPlugin(() => {
+    function buildAnchorDecorations(doc: any): Decoration[] {
+      const headingMap = buildHeadingMap(doc)
+      if (headingMap.size === 0) return []
+
+      const decorations: Decoration[] = []
+      doc.descendants((node: any, pos: number) => {
+        if (!node.isText) return
+        for (const mark of node.marks) {
+          if (mark.type.name === "link" && mark.attrs.autoText) {
+            const href = String(mark.attrs.href ?? "")
+            if (href.startsWith("#")) {
+              const slug = href.slice(1)
+              const display = headingMap.get(slug)
+              if (display) {
+                // Replace the placeholder text visually with a widget.
+                // Hide the original text node and show the display text instead.
+                decorations.push(Decoration.inline(pos, pos + node.nodeSize, {
+                  class: "gowiki-anchor-autotext",
+                  "data-display": display,
+                }))
+              }
+            }
+          }
+        }
+      })
+      return decorations
+    }
+
+    // Track auto-text anchor link ranges for cursor skipping.
+    let anchorRanges: Array<{ from: number; to: number }> = []
+
+    function updateRanges(doc: any) {
+      anchorRanges = []
+      doc.descendants((node: any, pos: number) => {
+        if (!node.isText) return
+        for (const mark of node.marks) {
+          if (mark.type.name === "link" && mark.attrs.autoText && String(mark.attrs.href ?? "").startsWith("#")) {
+            anchorRanges.push({ from: pos, to: pos + node.nodeSize })
+          }
+        }
+      })
+    }
+
+    function buildAllDecorations(doc: any, selFrom: number): Decoration[] {
+      const decos = buildAnchorDecorations(doc)
+      // Add selection highlight for the anchor link the cursor is on.
+      for (const r of anchorRanges) {
+        if (selFrom >= r.from && selFrom <= r.to) {
+          decos.push(Decoration.inline(r.from, r.to, {
+            class: "gowiki-anchor-autotext-selected",
+          }))
+          break
+        }
+      }
+      return decos
+    }
+
+    return new PMPlugin({
+      key: anchorAutoKey,
+      state: {
+        init(_, state) {
+          updateRanges(state.doc)
+          return DecorationSet.create(state.doc, buildAllDecorations(state.doc, state.selection.from))
+        },
+        apply(tr, old, _oldState, newState) {
+          if (tr.docChanged) {
+            updateRanges(newState.doc)
+            return DecorationSet.create(newState.doc, buildAllDecorations(newState.doc, newState.selection.from))
+          }
+          // Selection changed — rebuild to update highlight.
+          if (tr.selectionSet || tr.docChanged) {
+            return DecorationSet.create(newState.doc, buildAllDecorations(newState.doc, newState.selection.from))
+          }
+          return old
+        },
+      },
+      props: {
+        decorations(state) {
+          return anchorAutoKey.getState(state)
+        },
+        handleKeyDown(view, event) {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return false
+          const { from, to } = view.state.selection
+          if (from !== to) return false
+          for (const r of anchorRanges) {
+            if (from >= r.from && from <= r.to) {
+              const target = event.key === "ArrowRight" ? r.to : r.from
+              if (target !== from) {
+                view.dispatch(view.state.tr.setSelection(
+                  TextSelection.create(view.state.doc, target)
+                ))
+                return true
+              }
+            }
+          }
+          return false
+        },
+      },
+    })
+  })
+
+  reg.registerStyle("anchorAutoText", `
+    .gowiki-anchor-autotext {
+      font-size: 0;
+      line-height: 0;
+      cursor: pointer;
+    }
+    .gowiki-anchor-autotext::before {
+      content: attr(data-display);
+      font-size: 14px;
+      line-height: normal;
+    }
+    .gowiki-anchor-autotext-selected::before {
+      outline: 2px solid #ffd43b;
+      outline-offset: 1px;
+      border-radius: 2px;
+      background: rgba(255, 212, 59, 0.15);
+    }
+  `)
 }
 
 /* --------------------------------------------------

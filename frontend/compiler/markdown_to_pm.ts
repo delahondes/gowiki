@@ -298,6 +298,8 @@ function applyInlineDirectives(children: any[], registry: Registry): any[] {
 function defaultLinkTextForTarget(target: string): string {
   if (/^https?:\/\//i.test(target)) return target
   if (/^mailto:/i.test(target)) return target.replace(/^mailto:/i, "")
+  // Anchor link: use the slug as placeholder (updated live by anchorAutoText plugin).
+  if (target.startsWith("#")) return target.slice(1).replace(/-/g, " ") || "section"
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
   const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")

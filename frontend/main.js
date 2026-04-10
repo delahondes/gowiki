@@ -391,18 +391,30 @@ function promptLinkForm(initialTarget, initialText) {
       for (const r of results) {
         const item = document.createElement("div")
         item.className = "gowiki-link-search-item"
-        const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
+        const isAnchor = r.path.startsWith("#")
+        const displayPath = isAnchor ? r.path : (r.path.startsWith("/") ? r.path : "/" + r.path)
         const titleSpan = document.createElement("span")
         titleSpan.className = "gowiki-link-search-title"
         titleSpan.textContent = r.title || displayPath
         const pathSpan = document.createElement("span")
         pathSpan.className = "gowiki-link-search-path"
         pathSpan.textContent = displayPath
+        if (isAnchor) {
+          const hintSpan = document.createElement("span")
+          hintSpan.style.cssText = "font-size:10px;color:#999;margin-left:6px"
+          hintSpan.textContent = "shift: auto-title"
+          item.appendChild(hintSpan)
+        }
         item.appendChild(titleSpan)
         item.appendChild(pathSpan)
-        item.addEventListener("click", () => {
+        item.addEventListener("click", (e) => {
           targetInput.value = displayPath
-          if (!textInput.value) textInput.value = r.title || ""
+          if (isAnchor && e.shiftKey) {
+            // Shift-click: leave text blank for auto-title.
+            textInput.value = ""
+          } else if (!textInput.value) {
+            textInput.value = r.title || ""
+          }
           searchResults.innerHTML = ""
           searchItems = []
           targetInput.focus()
@@ -480,6 +492,9 @@ function promptLinkForm(initialTarget, initialText) {
     function close(value) {
       clearTimeout(searchTimer)
       overlay.remove()
+      // Restore focus to editor.
+      if (editorView) editorView.focus()
+      else if (rawEditor) rawEditor.focus()
       resolve(value)
     }
 
@@ -511,6 +526,7 @@ function promptLinkForm(initialTarget, initialText) {
         }
       } else if (event.key === "Escape") {
         event.preventDefault()
+        event.stopPropagation()
         if (searchItems.length > 0) {
           renderLinkSearchResults([])
         } else {
@@ -530,6 +546,7 @@ function promptLinkForm(initialTarget, initialText) {
         submit()
       } else if (event.key === "Escape") {
         event.preventDefault()
+        event.stopPropagation()
         close(null)
       }
     })
