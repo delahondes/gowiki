@@ -56,6 +56,10 @@ Key divergences from CommonMark:
 
 Round-trip between raw, visual, and view modes must be lossless. Deterministic serialization is a hard requirement.
 
+## ProseMirror visual feedback
+
+All visual feedback in the editor (selection highlights, status indicators, cursor position markers) MUST be implemented as ProseMirror decorations (DecorationSet in plugin state), NEVER as direct DOM class manipulation. Direct DOM mutation inside PM's update cycle causes infinite loops. Decorations rebuild from state on every transaction and are managed by PM's rendering pipeline. Rebuild decorations when `tr.selectionSet` or `tr.docChanged` in the plugin's `state.apply()`.
+
 ## Content and link resolution
 
 All user content (pages and attachments) lives under `data/content/`. Metadata lives under `data/meta/` mirroring the same folder structure.
