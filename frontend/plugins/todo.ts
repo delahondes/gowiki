@@ -746,6 +746,304 @@ class TodoListNodeView {
   }
 }
 
+// --- Todo Calendar NodeView ---
+
+const STATUS_ICONS: Record<string, string> = {
+  open: "○",
+  in_progress: "◐",
+  done: "●",
+  cancelled: "✕",
+}
+const STATUS_COLORS: Record<string, string> = {
+  open: "#1565c0",
+  in_progress: "#f57f17",
+  done: "#2e7d32",
+  cancelled: "#9e9e9e",
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+class TodoCalendarNodeView {
+  dom: HTMLElement
+  private node: PMNode
+  private view: EditorView
+  private getPos: () => number | undefined
+  private currentYear: number
+
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+    this.node = node
+    this.view = view
+    this.getPos = getPos
+    this.currentYear = parseInt(node.attrs.year) || new Date().getFullYear()
+
+    this.dom = document.createElement("div")
+    this.dom.className = "gowiki-todo-calendar"
+    this.dom.contentEditable = "false"
+
+    this.fetchAndRender()
+  }
+
+  private async fetchAndRender() {
+    const user = (window as any).__gowikiCurrentUser
+    if (!user?.username) {
+      this.dom.innerHTML = ""
+      return
+    }
+
+    const ns = this.node.attrs.namespace || "/"
+    const depth = parseInt(this.node.attrs.depth) || 0
+
+    const params = new URLSearchParams()
+    params.set("page_prefix", ns)
+    params.set("due_after", `${this.currentYear}-01-01`)
+    params.set("due_before", `${this.currentYear}-12-31`)
+    params.set("status", "open,in_progress,done")
+    params.set("limit", "200")
+
+    let allTasks: TodoTask[] = []
+    let cursor = ""
+    try {
+      // Paginate to get all tasks for the year.
+      do {
+        if (cursor) params.set("cursor", cursor)
+        const data = await gate.list(Object.fromEntries(params))
+        allTasks = allTasks.concat(data.tasks || [])
+        cursor = data.cursor || ""
+      } while (cursor && allTasks.length < 2000)
+    } catch {
+      this.dom.innerHTML = ""
+      const msg = document.createElement("div")
+      msg.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
+      msg.textContent = "Todo calendar: requires a database connection"
+      this.dom.appendChild(msg)
+      return
+    }
+
+    // Filter to only tasks with due dates.
+    const tasks = allTasks.filter(t => t.due_date)
+
+    // Group by page, then by month.
+    const pageMonthMap = new Map<string, Map<number, TodoTask[]>>()
+    for (const t of tasks) {
+      const page = t.source_page || "(no page)"
+      const month = parseInt(t.due_date.slice(5, 7)) - 1 // 0-indexed
+      if (!pageMonthMap.has(page)) pageMonthMap.set(page, new Map())
+      const months = pageMonthMap.get(page)!
+      if (!months.has(month)) months.set(month, [])
+      months.get(month)!.push(t)
+    }
+
+    // Build folder tree for grouping.
+    const nsClean = ns.replace(/\/+$/, "")
+    const pages = Array.from(pageMonthMap.keys()).sort()
+
+    interface FolderNode { label: string; pages: string[]; children: Map<string, FolderNode> }
+    const root: FolderNode = { label: "", pages: [], children: new Map() }
+
+    for (const page of pages) {
+      const rel = page.startsWith(nsClean) ? page.slice(nsClean.length) : page
+      const parts = rel.replace(/^\/+/, "").split("/")
+
+      let maxParts = depth > 0 ? depth : parts.length
+      const folderParts = parts.slice(0, Math.min(maxParts, parts.length - 1))
+      let current = root
+      for (const part of folderParts) {
+        if (!current.children.has(part)) {
+          current.children.set(part, { label: part, pages: [], children: new Map() })
+        }
+        current = current.children.get(part)!
+      }
+      current.pages.push(page)
+    }
+
+    this.renderCalendar(root, pageMonthMap, nsClean)
+  }
+
+  private renderCalendar(
+    root: { label: string; pages: string[]; children: Map<string, any> },
+    pageMonthMap: Map<string, Map<number, TodoTask[]>>,
+    nsClean: string,
+  ) {
+    this.dom.innerHTML = ""
+
+    // Year navigation.
+    const nav = document.createElement("div")
+    nav.className = "gowiki-todo-cal-nav"
+    const prevBtn = document.createElement("button")
+    prevBtn.textContent = "◀"
+    prevBtn.addEventListener("click", () => { this.currentYear--; this.fetchAndRender() })
+    const yearLabel = document.createElement("span")
+    yearLabel.className = "gowiki-todo-cal-year"
+    yearLabel.textContent = String(this.currentYear)
+    const nextBtn = document.createElement("button")
+    nextBtn.textContent = "▶"
+    nextBtn.addEventListener("click", () => { this.currentYear++; this.fetchAndRender() })
+    nav.appendChild(prevBtn)
+    nav.appendChild(yearLabel)
+    nav.appendChild(nextBtn)
+    this.dom.appendChild(nav)
+
+    if (pageMonthMap.size === 0) {
+      const empty = document.createElement("div")
+      empty.className = "gowiki-todo-cal-empty"
+      empty.textContent = "No todos with due dates in " + this.currentYear
+      this.dom.appendChild(empty)
+      return
+    }
+
+    // Table.
+    const table = document.createElement("table")
+    table.className = "gowiki-todo-cal-table"
+
+    // Header row.
+    const thead = document.createElement("thead")
+    const hr = document.createElement("tr")
+    const thPage = document.createElement("th")
+    thPage.textContent = "Page"
+    thPage.className = "gowiki-todo-cal-page-col"
+    hr.appendChild(thPage)
+    for (const m of MONTH_NAMES) {
+      const th = document.createElement("th")
+      th.textContent = m
+      th.className = "gowiki-todo-cal-month-col"
+      hr.appendChild(th)
+    }
+    thead.appendChild(hr)
+    table.appendChild(thead)
+
+    const tbody = document.createElement("tbody")
+
+    const renderPageRow = (page: string, indentLevel: number) => {
+      const months = pageMonthMap.get(page)
+      if (!months) return
+
+      const tr = document.createElement("tr")
+
+      // Page cell.
+      const tdPage = document.createElement("td")
+      tdPage.className = "gowiki-todo-cal-page-cell"
+      tdPage.style.paddingLeft = (8 + indentLevel * 16) + "px"
+      const pageLink = document.createElement("a")
+      const displayPath = page.startsWith(nsClean) ? page.slice(nsClean.length) : page
+      pageLink.textContent = displayPath.replace(/^\/+/, "") || page
+      pageLink.href = page
+      pageLink.addEventListener("click", (e) => {
+        e.preventDefault()
+        window.location.href = page
+      })
+      tdPage.appendChild(pageLink)
+      tr.appendChild(tdPage)
+
+      // Month cells.
+      const today = new Date().toISOString().slice(0, 10)
+      for (let m = 0; m < 12; m++) {
+        const td = document.createElement("td")
+        td.className = "gowiki-todo-cal-cell"
+        const cellTasks = months.get(m)
+        if (cellTasks && cellTasks.length > 0) {
+          for (const t of cellTasks) {
+            const chip = document.createElement("div")
+            chip.className = "gowiki-todo-cal-chip"
+            const overdue = (t.status === "open" || t.status === "in_progress") &&
+              t.due_date && t.due_date.slice(0, 10) < today
+            if (overdue) chip.classList.add("gowiki-todo-cal-chip-overdue")
+            if (t.status === "done") chip.classList.add("gowiki-todo-cal-chip-done")
+            const icon = document.createElement("span")
+            icon.textContent = STATUS_ICONS[t.status] || "○"
+            icon.style.color = overdue ? "#c62828" : (STATUS_COLORS[t.status] || "#666")
+            chip.appendChild(icon)
+            const label = document.createElement("span")
+            label.className = "gowiki-todo-cal-chip-label"
+            label.textContent = t.title
+            chip.appendChild(label)
+            const assignee = formatAssigneeSync(t.assignee?.target || "")
+            chip.title = `${t.title} (${t.status})\n${assignee}`
+            if (t.assignee?.target) {
+              resolveAssigneeLabels(t.assignee.target).then(resolved => {
+                chip.title = `${t.title} (${t.status})\n${resolved}`
+              })
+            }
+            td.appendChild(chip)
+          }
+        }
+        tr.appendChild(td)
+      }
+
+      tbody.appendChild(tr)
+    }
+
+    const renderFolder = (folder: { label: string; pages: string[]; children: Map<string, any> }, indentLevel: number) => {
+      const sortedPages = folder.pages.slice().sort()
+      // Pages ending with a trailing slash are the folder's own index —
+      // render them first inside the folder.
+      const indexPages = sortedPages.filter(p => p.endsWith("/"))
+      const leafPages = sortedPages.filter(p => !p.endsWith("/"))
+
+      for (const page of indexPages) {
+        renderPageRow(page, indentLevel)
+      }
+
+      // For each child folder, check whether a sibling leaf page has the
+      // same name (DokuWiki-style "eponym" namespace index). If so, render
+      // that leaf right before the folder header to keep them grouped.
+      const usedLeaves = new Set<string>()
+      const sortedChildren = Array.from(folder.children.entries()).sort(([a], [b]) => a.localeCompare(b))
+
+      for (const [childName, child] of sortedChildren) {
+        const eponym = leafPages.find(p => {
+          const segs = p.replace(/\/+$/, "").split("/")
+          return segs[segs.length - 1] === childName
+        })
+        if (eponym) {
+          renderPageRow(eponym, indentLevel)
+          usedLeaves.add(eponym)
+        }
+
+        const folderRow = document.createElement("tr")
+        folderRow.className = "gowiki-todo-cal-folder-row"
+        const folderTd = document.createElement("td")
+        folderTd.colSpan = 13
+        folderTd.style.paddingLeft = (8 + indentLevel * 16) + "px"
+        folderTd.textContent = "📁 " + child.label
+        folderRow.appendChild(folderTd)
+        tbody.appendChild(folderRow)
+
+        renderFolder(child, indentLevel + 1)
+      }
+
+      // Remaining leaves (no eponym folder).
+      for (const page of leafPages) {
+        if (!usedLeaves.has(page)) renderPageRow(page, indentLevel)
+      }
+    }
+
+    renderFolder(root, 0)
+    table.appendChild(tbody)
+    this.dom.appendChild(table)
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    const attrsChanged = JSON.stringify(node.attrs) !== JSON.stringify(this.node.attrs)
+    this.node = node
+    if (attrsChanged) {
+      this.currentYear = parseInt(node.attrs.year) || new Date().getFullYear()
+      this.fetchAndRender()
+    }
+    return true
+  }
+
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
+    return true
+  }
+
+  ignoreMutation(): boolean { return true }
+
+  destroy() {}
+}
+
 // --- Styles ---
 
 const todoStyles = `
@@ -968,6 +1266,134 @@ const todoStyles = `
   height: 18px;
   border-radius: 9px;
   padding: 0 4px;
+}
+
+/* Calendar */
+.gowiki-todo-calendar {
+  margin: 12px 0;
+}
+
+.gowiki-todo-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.gowiki-todo-cal-nav button {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px 8px;
+  font-size: 14px;
+}
+
+.gowiki-todo-cal-nav button:hover {
+  background: #f0f0f0;
+}
+
+.gowiki-todo-cal-year {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.gowiki-todo-cal-empty {
+  color: #999;
+  font-style: italic;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.gowiki-todo-cal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.gowiki-todo-cal-page-col {
+  width: 200px;
+  text-align: left;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.gowiki-todo-cal-month-col {
+  text-align: center;
+  font-weight: 600;
+  font-size: 11px;
+  color: #666;
+  padding: 4px 2px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.gowiki-todo-cal-page-cell {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gowiki-todo-cal-page-cell a {
+  color: #1a56db;
+  text-decoration: none;
+}
+
+.gowiki-todo-cal-page-cell a:hover {
+  text-decoration: underline;
+}
+
+.gowiki-todo-cal-cell {
+  padding: 2px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: top;
+}
+
+.gowiki-todo-cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gowiki-todo-cal-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #555;
+}
+
+.gowiki-todo-cal-chip-overdue .gowiki-todo-cal-chip-label {
+  color: #c62828;
+  font-weight: 600;
+}
+
+.gowiki-todo-cal-chip-done {
+  opacity: 0.45;
+}
+
+.gowiki-todo-cal-chip-done .gowiki-todo-cal-chip-label {
+  color: #888;
+  text-decoration: line-through;
+}
+
+.gowiki-todo-cal-folder-row td {
+  font-weight: 600;
+  font-size: 12px;
+  color: #444;
+  padding: 6px 8px 2px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+#app.gowiki-editing .gowiki-todo-calendar.ProseMirror-selectednode {
+  outline: 2px solid #ffd43b;
+  outline-offset: 1px;
 }
 `
 
@@ -1222,6 +1648,133 @@ export const todoPlugin: WikiPlugin = {
           Math.min(tr.doc.content.size, approxPos + 5),
           (n, pos) => {
             if (n.type === listType) insertedAt = pos
+          }
+        )
+        if (insertedAt !== null) {
+          try {
+            tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
+            tr = enablePropertiesPanel(tr)
+          } catch { /* leave default selection */ }
+        }
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
+
+    // --- Todo Calendar node ---
+
+    const todoCalendarProperties = [
+      {
+        name: "namespace",
+        label: "Namespace",
+        default: "/",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? "/"),
+        helpText: "Root namespace, e.g. /projects/",
+      },
+      {
+        name: "year",
+        label: "Year",
+        default: "",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+        helpText: "Default: current year",
+      },
+      {
+        name: "depth",
+        label: "Folder depth",
+        default: "",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+        helpText: "Max subfolder levels (0 = unlimited)",
+      },
+    ]
+
+    reg.registerSchema({
+      nodes: {
+        todo_calendar: {
+          group: "block",
+          atom: true,
+          attrs: {
+            namespace: { default: "/" },
+            year: { default: "" },
+            depth: { default: "" },
+          },
+          toDOM(node: PMNode) {
+            const ns = node.attrs.namespace || "/"
+            return [
+              "div",
+              { class: "gowiki-todo-calendar", "data-namespace": ns },
+              `Todo Calendar (${ns})`,
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "div.gowiki-todo-calendar",
+              getAttrs(dom: HTMLElement) {
+                return { namespace: dom.getAttribute("data-namespace") || "/" }
+              },
+            },
+          ],
+        },
+      },
+    })
+
+    reg.registerSelfContainedDirective("todo-calendar", {
+      tokenType: "todo_calendar",
+      nodeType: "todo_calendar",
+      properties: todoCalendarProperties,
+    })
+
+    reg.registerText("todo_calendar", {
+      run(ctx, tok) {
+        const attrs = tok.meta?.attrs ?? {}
+        ctx.push(
+          ctx.schema.nodes.todo_calendar.create({
+            namespace: attrs.namespace ?? "/",
+            year: attrs.year ?? "",
+            depth: attrs.depth ?? "",
+          })
+        )
+      },
+    })
+
+    reg.registerPMNode("todo_calendar", {
+      print(node) {
+        const parts: string[] = []
+        if (node.attrs.namespace && node.attrs.namespace !== "/") parts.push(`namespace="${node.attrs.namespace}"`)
+        if (node.attrs.year) parts.push(`year=${node.attrs.year}`)
+        if (node.attrs.depth) parts.push(`depth=${node.attrs.depth}`)
+        return `{todo-calendar${parts.length ? " " + parts.join(" ") : ""}}\n\n`
+      },
+    })
+
+    reg.registerEditorPlugin((_schema: Schema) => {
+      return new PMPlugin({
+        key: new PluginKey("gowiki.todocalendar"),
+        props: {
+          nodeViews: {
+            todo_calendar(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new TodoCalendarNodeView(node, view, getPos)
+            },
+          },
+        },
+      })
+    })
+
+    reg.registerCommand("todo-calendar", "insert", (state, dispatch) => {
+      const calType = reg.schema.nodes.todo_calendar
+      if (!calType) return false
+      if (dispatch) {
+        const node = calType.create({})
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        let insertedAt: number | null = null
+        tr.doc.nodesBetween(
+          Math.max(0, approxPos - 200),
+          Math.min(tr.doc.content.size, approxPos + 5),
+          (n, pos) => {
+            if (n.type === calType) insertedAt = pos
           }
         )
         if (insertedAt !== null) {

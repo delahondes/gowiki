@@ -399,6 +399,17 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/meta/*", s.handleAIMeta)
 	})
 
+	// MCP (Model Context Protocol) server — the AI API re-exposed as tools,
+	// resources, and prompts over Streamable HTTP. Auth reuses the same
+	// bearer token middleware as the AI Content API.
+	mcpHandler := s.buildMCPHandler()
+	r.Route("/api/mcp/v1", func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Use(s.rateLimitToken)
+		r.Handle("/*", http.StripPrefix("/api/mcp/v1", mcpHandler))
+		r.Handle("/", mcpHandler)
+	})
+
 	// Integrated AI assistant — session auth + allowed_groups check.
 	r.Route("/api/ai/assistant", func(r chi.Router) {
 		r.Use(s.requireSessionAuth)

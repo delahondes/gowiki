@@ -395,11 +395,12 @@ function renderTagBadge(tag: { label: string; icon: string; color: string }): HT
 const lookupTableCache = new Map<string, { data: Map<number, string>; timestamp: number }>()
 const lookupTableInflight = new Map<string, Promise<Map<number, string>>>()
 
-async function getLookupOptions(tableName: string): Promise<Map<number, string>> {
-  const cached = lookupTableCache.get(tableName)
+async function getLookupOptions(tableName: string, displayColumn?: string): Promise<Map<number, string>> {
+  const key = tableName + "\x00" + (displayColumn || "")
+  const cached = lookupTableCache.get(key)
   if (cached && Date.now() - cached.timestamp < 30000) return cached.data
 
-  const inflight = lookupTableInflight.get(tableName)
+  const inflight = lookupTableInflight.get(key)
   if (inflight) return inflight
 
   const promise = (async () => {
@@ -410,15 +411,20 @@ async function getLookupOptions(tableName: string): Promise<Map<number, string>>
     const result = new Map<number, string>()
     for (const r of rows) {
       const fields = r.fields || {}
-      const display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
+      let display: unknown
+      if (displayColumn && fields[displayColumn] != null && fields[displayColumn] !== "") {
+        display = fields[displayColumn]
+      } else {
+        display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
+      }
       result.set(r.id, String(display))
     }
-    lookupTableCache.set(tableName, { data: result, timestamp: Date.now() })
+    lookupTableCache.set(key, { data: result, timestamp: Date.now() })
     return result
   })()
 
-  lookupTableInflight.set(tableName, promise)
-  promise.finally(() => lookupTableInflight.delete(tableName))
+  lookupTableInflight.set(key, promise)
+  promise.finally(() => lookupTableInflight.delete(key))
   return promise
 }
 
@@ -1030,7 +1036,7 @@ class DatabaseQueryNodeView {
         } else if (f.type === "lookup" && f.foreign_key) {
           if (val && Number(val) !== 0) {
             td.textContent = "..."
-            getLookupOptions(f.foreign_key).then(opts => {
+            getLookupOptions(f.foreign_key, f.display_column).then(opts => {
               td.textContent = opts.get(Number(val)) || String(val)
             })
           }
@@ -1163,7 +1169,7 @@ class DatabaseQueryNodeView {
         })
       })
     } else if (field.type === "lookup" && field.foreign_key) {
-      getLookupOptions(field.foreign_key).then(opts => {
+      getLookupOptions(field.foreign_key, field.display_column).then(opts => {
         const options: { value: string; label: string }[] = []
         opts.forEach((label, id) => options.push({ value: String(id), label }))
         createOverlaySelectKeyed(td, {
@@ -1413,7 +1419,7 @@ class DatabaseNewRowNodeView {
         sel.appendChild(empty)
         inputs.set(f.name, sel)
         row.appendChild(sel)
-        getLookupOptions(f.foreign_key).then(opts => {
+        getLookupOptions(f.foreign_key, f.display_column).then(opts => {
           opts.forEach((label, id) => {
             const opt = document.createElement("option")
             opt.value = String(id)
@@ -1739,7 +1745,7 @@ class DatabaseRowNodeView {
       emptyOpt.textContent = "-- Select --"
       sel.appendChild(emptyOpt)
       isolateInput(sel)
-      getLookupOptions(f.foreign_key).then(opts => {
+      getLookupOptions(f.foreign_key, f.display_column).then(opts => {
         opts.forEach((label, id) => {
           const opt = document.createElement("option")
           opt.value = String(id)
@@ -1870,7 +1876,7 @@ class DatabaseRowNodeView {
       } else if (f && f.type === "lookup" && f.foreign_key) {
         if (val && Number(val) !== 0) {
           tdVal.textContent = "..."
-          getLookupOptions(f.foreign_key).then(opts => {
+          getLookupOptions(f.foreign_key, f.display_column).then(opts => {
             tdVal.textContent = opts.get(Number(val)) || String(val)
           })
         }
@@ -2007,7 +2013,7 @@ class DatabaseRowNodeView {
         })
       })
     } else if (fieldDef && fieldDef.type === "lookup" && fieldDef.foreign_key) {
-      getLookupOptions(fieldDef.foreign_key).then(opts => {
+      getLookupOptions(fieldDef.foreign_key, fieldDef.display_column).then(opts => {
         const options: { value: string; label: string }[] = []
         opts.forEach((label, id) => options.push({ value: String(id), label }))
         createOverlaySelectKeyed(td, {

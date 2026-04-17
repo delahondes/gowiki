@@ -67,6 +67,7 @@ type FieldDef struct {
 	DisplayOrder int        `json:"display_order"`
 	Placeholder  string     `json:"placeholder"`
 	ForeignKey   string     `json:"foreign_key"`
+	DisplayColumn string    `json:"display_column"`
 	CreatedAt    time.Time  `json:"created_at"`
 	ArchivedAt   *time.Time `json:"archived_at,omitempty"`
 	EnumValues   []string   `json:"enum_values,omitempty"`

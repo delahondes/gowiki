@@ -239,6 +239,11 @@ func main() {
 	if todoService != nil {
 		reviewflowService.SetTodoIntegrator(reviewflow.NewTodoAdapter(todoService))
 		log.Printf("reviewflow plugin: todo integration active")
+		if n, err := reviewflowService.ReconcileValidatedTasks(); err != nil {
+			log.Printf("reviewflow plugin: task reconciliation failed: %v", err)
+		} else if n > 0 {
+			log.Printf("reviewflow plugin: reconciled %d review task(s) — marked done on validated pages", n)
+		}
 	}
 	reviewflowService.SetGroupResolver(func(username string) []string {
 		u, err := userStore.Get(username)

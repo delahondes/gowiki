@@ -252,7 +252,7 @@ func (s *SchemaStore) ListFields(ctx context.Context, tableID int) ([]FieldDef, 
 		return nil, fmt.Errorf("database not connected")
 	}
 
-	rows, err := p.Query(ctx, `SELECT id, table_id, name, label, type, required, default_value, display_order, placeholder, foreign_key, created_at, archived_at FROM database_fields WHERE table_id = $1 ORDER BY display_order, id`, tableID)
+	rows, err := p.Query(ctx, `SELECT id, table_id, name, label, type, required, default_value, display_order, placeholder, foreign_key, display_column, created_at, archived_at FROM database_fields WHERE table_id = $1 ORDER BY display_order, id`, tableID)
 	if err != nil {
 		return nil, fmt.Errorf("list fields: %w", err)
 	}
@@ -261,7 +261,7 @@ func (s *SchemaStore) ListFields(ctx context.Context, tableID int) ([]FieldDef, 
 	var fields []FieldDef
 	for rows.Next() {
 		var f FieldDef
-		if err := rows.Scan(&f.ID, &f.TableID, &f.Name, &f.Label, &f.Type, &f.Required, &f.DefaultValue, &f.DisplayOrder, &f.Placeholder, &f.ForeignKey, &f.CreatedAt, &f.ArchivedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.TableID, &f.Name, &f.Label, &f.Type, &f.Required, &f.DefaultValue, &f.DisplayOrder, &f.Placeholder, &f.ForeignKey, &f.DisplayColumn, &f.CreatedAt, &f.ArchivedAt); err != nil {
 			return nil, fmt.Errorf("scan field: %w", err)
 		}
 
@@ -304,8 +304,8 @@ func (s *SchemaStore) CreateField(ctx context.Context, f *FieldDef, changedBy st
 	}
 	defer tx.Rollback(ctx)
 
-	err = tx.QueryRow(ctx, `INSERT INTO database_fields (table_id, name, label, type, required, default_value, display_order, placeholder, foreign_key) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at`,
-		f.TableID, f.Name, f.Label, f.Type, f.Required, f.DefaultValue, f.DisplayOrder, f.Placeholder, f.ForeignKey).
+	err = tx.QueryRow(ctx, `INSERT INTO database_fields (table_id, name, label, type, required, default_value, display_order, placeholder, foreign_key, display_column) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, created_at`,
+		f.TableID, f.Name, f.Label, f.Type, f.Required, f.DefaultValue, f.DisplayOrder, f.Placeholder, f.ForeignKey, f.DisplayColumn).
 		Scan(&f.ID, &f.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert field def: %w", err)
@@ -383,8 +383,8 @@ func (s *SchemaStore) UpdateField(ctx context.Context, f *FieldDef, changedBy st
 	}
 	defer tx.Rollback(ctx)
 
-	_, err = tx.Exec(ctx, `UPDATE database_fields SET label=$1, required=$2, default_value=$3, display_order=$4, placeholder=$5, foreign_key=$6 WHERE id=$7`,
-		f.Label, f.Required, f.DefaultValue, f.DisplayOrder, f.Placeholder, f.ForeignKey, f.ID)
+	_, err = tx.Exec(ctx, `UPDATE database_fields SET label=$1, required=$2, default_value=$3, display_order=$4, placeholder=$5, foreign_key=$6, display_column=$7 WHERE id=$8`,
+		f.Label, f.Required, f.DefaultValue, f.DisplayOrder, f.Placeholder, f.ForeignKey, f.DisplayColumn, f.ID)
 	if err != nil {
 		return fmt.Errorf("update field: %w", err)
 	}

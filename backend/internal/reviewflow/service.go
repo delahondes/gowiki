@@ -21,7 +21,13 @@ type TodoIntegrator interface {
 	// Called when a page is invalidated (new version saved).
 	CreateReviewTasks(pagePath string, roles map[string]string, versionTag string, dueDate string) error
 	// CancelReviewTasks cancels any open reviewflow todo tasks for a page.
+	// Used when the reviewflow directive is removed or the page content changes
+	// (old review obsolete, not performed).
 	CancelReviewTasks(pagePath string) error
+	// CompleteReviewTasks marks the reviewflow tasks whose (role, user) pair
+	// appears in confirmedByRole as done. Used when all roles confirm and the
+	// version becomes fully validated — the review actually happened.
+	CompleteReviewTasks(pagePath string, confirmedByRole map[string]string) (int, error)
 }
 
 // Service implements reviewflow business logic.
@@ -93,6 +99,39 @@ func (svc *Service) SetPageReader(pr PageReader) {
 // SetTodoIntegrator sets the todo integration for creating review tasks.
 func (svc *Service) SetTodoIntegrator(ti TodoIntegrator) {
 	svc.todo = ti
+}
+
+// ReconcileValidatedTasks scans every reviewflow state file and marks review
+// todo tasks done for each (role, user) confirmation recorded for the current
+// page version — including partial confirmations where not all roles have
+// signed yet. Repairs historical drift (migrated validations, earlier buggy
+// integrations) and is idempotent: tasks already done are skipped.
+func (svc *Service) ReconcileValidatedTasks() (int, error) {
+	if svc.todo == nil {
+		return 0, nil
+	}
+	total := 0
+	err := svc.store.WalkStates(func(pagePath string, st *State) error {
+		if st == nil || st.CurrentPageVersion == 0 {
+			return nil
+		}
+		confirmed := make(map[string]string)
+		for _, c := range st.Confirmations {
+			if c.PageVersion == st.CurrentPageVersion {
+				confirmed[c.Role] = c.User
+			}
+		}
+		if len(confirmed) == 0 {
+			return nil
+		}
+		n, err := svc.todo.CompleteReviewTasks(pagePath, confirmed)
+		if err != nil {
+			return nil
+		}
+		total += n
+		return nil
+	})
+	return total, err
 }
 
 // SyncFromMarkdown parses the reviewflow directive from page markdown and
@@ -221,6 +260,12 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 	}
 	st.Confirmations = append(st.Confirmations, conf)
 
+	// Mark this user's specific review task as done right away — they
+	// performed their review, regardless of whether other roles have confirmed.
+	if svc.todo != nil {
+		_, _ = svc.todo.CompleteReviewTasks(pagePath, map[string]string{role: user})
+	}
+
 	// Check if all roles are now confirmed.
 	if svc.allConfirmed(st) {
 		confirmedBy := make(map[string]string)
@@ -238,9 +283,9 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 		st.VersionHistory = append(st.VersionHistory, vr)
 		st.ValidatedVersion = st.CurrentPageVersion
 
-		// Cancel review tasks — all roles confirmed.
+		// Mark review tasks done — all roles confirmed (reviews actually performed).
 		if svc.todo != nil {
-			_ = svc.todo.CancelReviewTasks(pagePath)
+			_, _ = svc.todo.CompleteReviewTasks(pagePath, confirmedBy)
 		}
 
 		// Update attic entry with reviewflow metadata.

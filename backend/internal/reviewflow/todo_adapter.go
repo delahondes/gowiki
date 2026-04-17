@@ -80,3 +80,44 @@ func (a *TodoAdapter) CancelReviewTasks(pagePath string) error {
 	}
 	return nil
 }
+
+// CompleteReviewTasks marks the reviewflow task for each confirmed (role, user)
+// pair as done. It looks up tasks by node_key (deterministic from page+role+user)
+// and picks the most recent match when multiple exist. Tasks already in done
+// status are left untouched. Returns the number of tasks transitioned.
+func (a *TodoAdapter) CompleteReviewTasks(pagePath string, confirmedByRole map[string]string) (int, error) {
+	if len(confirmedByRole) == 0 {
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	store := a.todoService.Store()
+	tasks, err := store.ListForPage(ctx, pagePath)
+	if err != nil {
+		return 0, fmt.Errorf("list tasks for page: %w", err)
+	}
+
+	n := 0
+	for role, user := range confirmedByRole {
+		key := reviewTaskNodeKey(pagePath, role, user)
+		var target *todo.Task
+		for _, t := range tasks {
+			if t.NodeKey != key || t.Tags != "reviewflow" {
+				continue
+			}
+			if target == nil || t.CreatedAt.After(target.CreatedAt) {
+				target = t
+			}
+		}
+		if target == nil || target.Status == todo.StatusDone {
+			continue
+		}
+		if _, err := store.MarkDone(ctx, target.ID); err != nil {
+			log.Printf("reviewflow: failed to mark todo %s done: %v", target.ID, err)
+			continue
+		}
+		n++
+	}
+	return n, nil
+}

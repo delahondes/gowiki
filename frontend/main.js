@@ -150,6 +150,7 @@ let mermaidInsertCommand = null
 let slidesInsertCommand = null
 let todoInsertCommand = null
 let todoListInsertCommand = null
+let todoCalendarInsertCommand = null
 let reviewflowInsertCommand = null
 let reviewflowLinkInsertCommand = null
 let reviewflowQueryInsertCommand = null
@@ -228,6 +229,11 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "todo-list") {
     if (name === "insert") todoListInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "todo-calendar") {
+    if (name === "insert") todoCalendarInsertCommand = cmd
     return
   }
 
@@ -6190,6 +6196,19 @@ function buildMenubar() {
     })
   }
 
+  // Todo Calendar
+  if (todoCalendarInsertCommand) {
+    addImgButton("/icons/calendar.svg", "Insert todo calendar", () => {
+      if (editMode === "visual" && editorView) {
+        todoCalendarInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawEditor.focus()
+        rawInsertText(rawEditor, "{todo-calendar}\n\n")
+      }
+    })
+  }
+
   // Reviewflow
   if (reviewflowInsertCommand) {
     addImgButton("/icons/reviewflow.svg", "Insert reviewflow", () => {
@@ -8259,37 +8278,50 @@ function renderBannerUser() {
   if (!el) return
   el.innerHTML = ""
   if (currentUser) {
-    const span = document.createElement("span")
-    span.textContent = currentUser.username
-    el.appendChild(span)
+    const wrapper = document.createElement("div")
+    wrapper.className = "banner-user-menu"
+
+    const toggle = document.createElement("button")
+    toggle.className = "banner-user-toggle"
+    toggle.textContent = currentUser.username + " ▾"
+    wrapper.appendChild(toggle)
+
+    const dropdown = document.createElement("div")
+    dropdown.className = "banner-user-dropdown"
+    dropdown.style.display = "none"
+
     if (currentUser.is_admin) {
       const adminLink = document.createElement("a")
       adminLink.textContent = "Admin"
       adminLink.href = "/_admin"
       adminLink.addEventListener("click", (e) => {
         e.preventDefault()
+        dropdown.style.display = "none"
         window.location.href = "/_admin"
       })
-      el.appendChild(adminLink)
+      dropdown.appendChild(adminLink)
     }
     const tokensLink = document.createElement("a")
     tokensLink.textContent = "API Tokens"
     tokensLink.addEventListener("click", (e) => {
       e.preventDefault()
+      dropdown.style.display = "none"
       showMyTokensModal()
     })
-    el.appendChild(tokensLink)
+    dropdown.appendChild(tokensLink)
     const signingLink = document.createElement("a")
     signingLink.textContent = "Signing Key"
     signingLink.addEventListener("click", (e) => {
       e.preventDefault()
+      dropdown.style.display = "none"
       showSigningKeyModal()
     })
-    el.appendChild(signingLink)
+    dropdown.appendChild(signingLink)
     const logout = document.createElement("a")
     logout.textContent = "Logout"
     logout.addEventListener("click", async (e) => {
       e.preventDefault()
+      dropdown.style.display = "none"
       await fetch("/api/auth/logout", { method: "POST" })
       currentUser = null
       window.__gowikiCurrentUser = null
@@ -8299,7 +8331,17 @@ function renderBannerUser() {
       renderBannerUser()
       await reloadPageContent()
     })
-    el.appendChild(logout)
+    dropdown.appendChild(logout)
+
+    toggle.addEventListener("click", () => {
+      dropdown.style.display = dropdown.style.display === "none" ? "flex" : "none"
+    })
+    document.addEventListener("click", (e) => {
+      if (!wrapper.contains(e.target)) dropdown.style.display = "none"
+    })
+
+    wrapper.appendChild(dropdown)
+    el.appendChild(wrapper)
   } else {
     const login = document.createElement("a")
     login.textContent = "Login"
@@ -11781,6 +11823,7 @@ async function showDatabaseFieldEditModal(tableId, existing) {
     { value: "image", label: "Image" },
     { value: "color", label: "Color" },
     { value: "tag", label: "Tag" },
+    { value: "lookup", label: "Lookup" },
   ]
 
   return showAdminModal(existing ? `Edit Field: ${existing.name}` : "Add Field", (body, close, showError) => {
@@ -11833,14 +11876,51 @@ async function showDatabaseFieldEditModal(tableId, existing) {
     tagInput.type = "text"
     tagInput.style.width = "100%"
     tagInput.placeholder = "e.g. tags"
-    if (existing && existing.foreign_key) tagInput.value = existing.foreign_key
+    if (existing && existing.type === "tag" && existing.foreign_key) tagInput.value = existing.foreign_key
     tagSection.appendChild(tagInput)
     body.appendChild(tagSection)
+
+    // Lookup section (shown for lookup type): target table + display column.
+    const lookupSection = document.createElement("div")
+    lookupSection.style.display = "none"
+    lookupSection.style.marginTop = "8px"
+
+    const lookupTableLabel = document.createElement("label")
+    lookupTableLabel.textContent = "Target Table (name of the table to reference)"
+    lookupTableLabel.style.display = "block"
+    lookupTableLabel.style.fontWeight = "500"
+    lookupTableLabel.style.marginBottom = "4px"
+    lookupSection.appendChild(lookupTableLabel)
+
+    const lookupTableInput = document.createElement("input")
+    lookupTableInput.type = "text"
+    lookupTableInput.style.width = "100%"
+    lookupTableInput.placeholder = "e.g. customers"
+    if (existing && existing.type === "lookup" && existing.foreign_key) lookupTableInput.value = existing.foreign_key
+    lookupSection.appendChild(lookupTableInput)
+
+    const lookupColLabel = document.createElement("label")
+    lookupColLabel.textContent = "Display Column (field name from the target table shown in place of the row id)"
+    lookupColLabel.style.display = "block"
+    lookupColLabel.style.fontWeight = "500"
+    lookupColLabel.style.marginTop = "8px"
+    lookupColLabel.style.marginBottom = "4px"
+    lookupSection.appendChild(lookupColLabel)
+
+    const lookupColInput = document.createElement("input")
+    lookupColInput.type = "text"
+    lookupColInput.style.width = "100%"
+    lookupColInput.placeholder = "e.g. name"
+    if (existing && existing.display_column) lookupColInput.value = existing.display_column
+    lookupSection.appendChild(lookupColInput)
+
+    body.appendChild(lookupSection)
 
     function updateEnumVisibility() {
       const t = typeSelect.value
       enumSection.style.display = (t === "enum" || t === "multi_enum") ? "block" : "none"
       tagSection.style.display = t === "tag" ? "block" : "none"
+      lookupSection.style.display = t === "lookup" ? "block" : "none"
     }
     typeSelect.addEventListener("change", updateEnumVisibility)
     updateEnumVisibility()
@@ -11865,6 +11945,13 @@ async function showDatabaseFieldEditModal(tableId, existing) {
       // Add foreign_key for tag type.
       if (payload.type === "tag") {
         payload.foreign_key = tagInput.value.trim()
+      }
+
+      // Add foreign_key + display_column for lookup type.
+      if (payload.type === "lookup") {
+        payload.foreign_key = lookupTableInput.value.trim()
+        payload.display_column = lookupColInput.value.trim()
+        if (!payload.foreign_key) { showError("Target Table is required for lookup fields"); return }
       }
 
       const url = existing
@@ -12668,6 +12755,23 @@ function renderRecentPages(recent) {
       window.location.href = recent[i].path
     })
     bar.appendChild(link)
+  }
+
+  trimOverflowingBreadcrumbs(bar)
+}
+
+function trimOverflowingBreadcrumbs(bar) {
+  const barRight = bar.getBoundingClientRect().right
+  const children = Array.from(bar.children)
+  for (let i = children.length - 1; i >= 0; i--) {
+    const child = children[i]
+    const rect = child.getBoundingClientRect()
+    if (rect.right > barRight + 1) {
+      child.style.display = "none"
+      if (i > 0 && children[i - 1].classList.contains("gowiki-recent-sep")) {
+        children[i - 1].style.display = "none"
+      }
+    }
   }
 }
 

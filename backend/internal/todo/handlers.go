@@ -60,15 +60,21 @@ func (h *handlers) handleList(w http.ResponseWriter, r *http.Request) {
 	if page != "" && !strings.HasPrefix(page, "/") {
 		page = "/" + page
 	}
+	pagePrefix := r.URL.Query().Get("page_prefix")
+	if pagePrefix != "" && !strings.HasPrefix(pagePrefix, "/") {
+		pagePrefix = "/" + pagePrefix
+	}
 	opts := ListOptions{
-		Status:    Status(r.URL.Query().Get("status")),
-		Assignee:  r.URL.Query().Get("assignee"),
-		Page:      page,
-		Tag:       r.URL.Query().Get("tag"),
-		DueBefore: r.URL.Query().Get("due_before"),
-		Priority:  Priority(r.URL.Query().Get("priority")),
-		Cursor:    r.URL.Query().Get("cursor"),
-		Limit:     parseInt(r.URL.Query().Get("limit")),
+		Status:     Status(r.URL.Query().Get("status")),
+		Assignee:   r.URL.Query().Get("assignee"),
+		Page:       page,
+		PagePrefix: pagePrefix,
+		Tag:        r.URL.Query().Get("tag"),
+		DueBefore:  r.URL.Query().Get("due_before"),
+		DueAfter:   r.URL.Query().Get("due_after"),
+		Priority:   Priority(r.URL.Query().Get("priority")),
+		Cursor:     r.URL.Query().Get("cursor"),
+		Limit:      parseInt(r.URL.Query().Get("limit")),
 	}
 
 	tasks, cursor, err := h.svc.Store().List(r.Context(), opts)

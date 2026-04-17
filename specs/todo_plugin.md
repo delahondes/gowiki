@@ -536,7 +536,7 @@ When the **reviewflow** plugin is active alongside the todo plugin, reviewflow a
    - Cancels any existing open reviewflow todo tasks for that page
    - Creates one new todo task per role, assigned to the role's user
 
-2. **Role confirmed** — When a user confirms their role, the task remains open (it tracks the page-level review, not individual confirmations). When **all roles** confirm and the version becomes fully validated, all reviewflow tasks for the page are cancelled.
+2. **Role confirmed** — When a user confirms their role, their specific task is marked **done** immediately (the review was performed). Other roles' tasks remain open until their respective users confirm. When **all roles** confirm and the version becomes fully validated, all reviewflow tasks for the page are in done status.
 
 3. **Directive removed** — If a page save removes the `{reviewflow}` directive, all open reviewflow tasks for that page are cancelled.
 

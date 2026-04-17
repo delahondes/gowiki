@@ -342,6 +342,24 @@ func (s *TodoStore) Cancel(ctx context.Context, id string) (*Task, error) {
 	return s.Get(ctx, id)
 }
 
+// MarkDone sets a task to done status directly, bypassing per-member
+// completion tracking. Intended for administrative reconciliation where the
+// task represents a side-effect completion (e.g. reviewflow validation).
+func (s *TodoStore) MarkDone(ctx context.Context, id string) (*Task, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	now := time.Now().UTC()
+	_, err := p.Exec(ctx, `UPDATE todo_tasks SET status = $1, updated_at = $2 WHERE id = $3`,
+		string(StatusDone), now, id)
+	if err != nil {
+		return nil, fmt.Errorf("mark done: %w", err)
+	}
+	return s.Get(ctx, id)
+}
+
 // List returns tasks matching the given options with cursor-based pagination.
 func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string, error) {
 	p := s.pool.GetPool()
@@ -379,6 +397,11 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 		args = append(args, opts.Page)
 		argN++
 	}
+	if opts.PagePrefix != "" {
+		conditions = append(conditions, fmt.Sprintf("source_page LIKE $%d", argN))
+		args = append(args, opts.PagePrefix+"%")
+		argN++
+	}
 	if opts.Tag != "" {
 		conditions = append(conditions, fmt.Sprintf("tags LIKE $%d", argN))
 		args = append(args, "%"+opts.Tag+"%")
@@ -387,6 +410,11 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 	if opts.DueBefore != "" {
 		conditions = append(conditions, fmt.Sprintf("due_date <= $%d", argN))
 		args = append(args, opts.DueBefore)
+		argN++
+	}
+	if opts.DueAfter != "" {
+		conditions = append(conditions, fmt.Sprintf("due_date >= $%d", argN))
+		args = append(args, opts.DueAfter)
 		argN++
 	}
 	if opts.Priority != "" {

@@ -41,10 +41,13 @@ CREATE TABLE IF NOT EXISTS database_fields (
     display_order INTEGER NOT NULL DEFAULT 0,
     placeholder TEXT NOT NULL DEFAULT '',
     foreign_key TEXT NOT NULL DEFAULT '',
+    display_column TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     archived_at TIMESTAMPTZ,
     UNIQUE (table_id, name)
 );
+
+ALTER TABLE database_fields ADD COLUMN IF NOT EXISTS display_column TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS database_enum_values (
     id SERIAL PRIMARY KEY,

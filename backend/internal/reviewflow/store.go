@@ -106,3 +106,42 @@ func (s *Store) Delete(pagePath string) error {
 	}
 	return err
 }
+
+// WalkStates invokes fn for every reviewflow state file under metaRoot.
+// pagePath is the canonical page path (leading slash, trailing slash for
+// namespace indexes).
+func (s *Store) WalkStates(fn func(pagePath string, st *State) error) error {
+	return filepath.Walk(s.metaRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || info.IsDir() {
+			return err
+		}
+		if !strings.HasSuffix(path, ".reviewflow.json") {
+			return nil
+		}
+		rel, err := filepath.Rel(s.metaRoot, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		rel = strings.TrimSuffix(rel, ".reviewflow.json")
+
+		var pagePath string
+		if strings.HasSuffix(rel, "/index") {
+			pagePath = "/" + strings.TrimSuffix(rel, "/index") + "/"
+		} else if rel == "index" {
+			pagePath = "/"
+		} else {
+			pagePath = "/" + rel
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var st State
+		if err := json.Unmarshal(data, &st); err != nil {
+			return nil
+		}
+		return fn(pagePath, &st)
+	})
+}
