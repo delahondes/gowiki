@@ -151,6 +151,8 @@ let slidesInsertCommand = null
 let todoInsertCommand = null
 let todoListInsertCommand = null
 let todoCalendarInsertCommand = null
+let publicationInsertCommand = null
+let referencesInsertCommand = null
 let reviewflowInsertCommand = null
 let reviewflowLinkInsertCommand = null
 let reviewflowQueryInsertCommand = null
@@ -259,6 +261,16 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "changes") {
     if (name === "insert") changesInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "publication") {
+    if (name === "insert") publicationInsertCommand = cmd
+    return
+  }
+
+  if (namespace === "references") {
+    if (name === "insert") referencesInsertCommand = cmd
     return
   }
 
@@ -6298,6 +6310,36 @@ function buildMenubar() {
       } else if (editMode === "raw" && rawEditor) {
         rawEditor.focus()
         rawInsertText(rawEditor, "{todo-calendar}\n\n")
+      }
+    })
+  }
+
+  // Publication (bibliography citation)
+  if (publicationInsertCommand) {
+    addImgButton("/icons/publication.svg", "Insert citation (PubMed / DOI)", () => {
+      if (editMode === "visual" && editorView) {
+        publicationInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{publication pmid=}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet)
+        const cursorPos = start + snippet.length - 1
+        rawEditor.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+  }
+
+  // References list
+  if (referencesInsertCommand) {
+    addImgButton("/icons/references.svg", "Insert references list", () => {
+      if (editMode === "visual" && editorView) {
+        referencesInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawEditor.focus()
+        rawInsertText(rawEditor, "{references}\n\n")
       }
     })
   }

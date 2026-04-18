@@ -27,6 +27,7 @@ import (
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
+	"gowiki/backend/internal/bibliography"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
@@ -127,6 +128,7 @@ type Server struct {
 	todoService         *todo.TodoService
 	reviewflowService   *reviewflow.Service
 	commentService      *comment.Service
+	bibliographyService *bibliography.Service
 	presenceHub         *collab.Hub
 	collabRelay         *collab.Relay
 	aiProvider          aiassistant.Provider
@@ -135,7 +137,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -160,6 +162,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		todoService:       todoService,
 		reviewflowService: reviewflowService,
 		commentService:    commentService,
+		bibliographyService: bibliographyService,
 		tokenStore:        tokenStore,
 		caStore:           caStore,
 		certStore:         certStore,
@@ -458,6 +461,14 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 				r.Use(s.requireAuth)
 				todo.RegisterWriteRoutes(r, s.todoService, s.userStore, s.groupStore, extractUsername, &pageCheckerAdapter{store: s.store}, rfChecker)
 			})
+		})
+	}
+
+	// Bibliography plugin endpoints.
+	if s.bibliographyService != nil {
+		r.Route("/api/plugin/bibliography/v1", func(r chi.Router) {
+			r.Use(s.optionalAuth)
+			bibliography.RegisterRoutes(r, s.bibliographyService)
 		})
 	}
 

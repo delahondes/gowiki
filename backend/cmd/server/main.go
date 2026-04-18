@@ -17,6 +17,7 @@ import (
 
 	"gowiki/backend/internal/api"
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/bibliography"
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
@@ -261,6 +262,17 @@ func main() {
 	store.CommentStore = commentStore
 	log.Printf("comment plugin: active")
 
+	// Initialize bibliography plugin (PubMed + DOI citation resolver).
+	var bibliographyService *bibliography.Service
+	if cfg.Bibliography.Enabled {
+		publicURL := ""
+		if cfg.Server.TLSDomain != "" {
+			publicURL = "https://" + cfg.Server.TLSDomain
+		}
+		bibliographyService = bibliography.NewService(metaRoot, cfg.Bibliography, publicURL)
+		log.Printf("bibliography plugin: active (PubMed api_key=%v)", cfg.Bibliography.PubmedAPIKey != "")
+	}
+
 	// Initialize API token store for AI Content API.
 	tokenStore, err := auth.NewTokenStore(metaRoot)
 	if err != nil {
@@ -274,7 +286,7 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore, bibliographyService)
 	if serveWebEnabled {
 		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}

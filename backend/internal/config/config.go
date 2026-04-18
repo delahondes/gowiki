@@ -23,6 +23,14 @@ type Config struct {
 	Reviewflow    ReviewflowConfig  `yaml:"reviewflow" json:"reviewflow"`
 	AIAPI         AIAPIConfig       `yaml:"ai_api" json:"ai_api"`
 	AIAssistant   AIAssistantConfig `yaml:"ai_assistant" json:"ai_assistant"`
+	Bibliography  BibliographyConfig `yaml:"bibliography" json:"bibliography"`
+}
+
+// BibliographyConfig controls the bibliography (PubMed/DOI citation) plugin.
+type BibliographyConfig struct {
+	Enabled            bool   `yaml:"enabled" json:"enabled"`
+	PubmedAPIKey       string `yaml:"pubmed_api_key" json:"pubmed_api_key"`             // optional NCBI API key (raises rate limit to 10/s)
+	AdminContactEmail  string `yaml:"admin_contact_email" json:"admin_contact_email"`   // included in the User-Agent header per NIH etiquette
 }
 
 // ServerConfig holds network/serving settings.
@@ -227,6 +235,9 @@ func DefaultConfig() Config {
 				MonthlyBudget:       0,
 				WarnAtPercentage:    80,
 			},
+		},
+		Bibliography: BibliographyConfig{
+			Enabled: false,
 		},
 	}
 }
