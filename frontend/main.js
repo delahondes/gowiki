@@ -789,6 +789,99 @@ function encodePagePath(path) {
     .join("/")
 }
 
+// selectTemplateForNewPage fetches the templates applicable to a new page
+// path and returns the chosen markdown. When several templates match, a
+// picker modal is shown and the user's selection decides.
+//
+// Returns null when the user wants a blank page or when no template applies.
+async function selectTemplateForNewPage(pagePath) {
+  let templates = []
+  try {
+    const resp = await fetch(`/api/templates/for/${encodePagePath(pagePath)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      templates = Array.isArray(data.templates) ? data.templates : []
+    }
+  } catch (err) {
+    console.error("[gowiki] template fetch error:", err)
+    return null
+  }
+
+  if (templates.length === 0) return null
+  if (templates.length === 1) return templates[0].markdown || null
+
+  return new Promise(resolve => {
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-login-overlay gowiki-template-picker-overlay"
+
+    const dialog = document.createElement("div")
+    dialog.className = "gowiki-login-dialog gowiki-template-picker"
+    dialog.style.minWidth = "360px"
+
+    const title = document.createElement("h3")
+    title.textContent = "Start from a template"
+    title.style.margin = "0 0 12px"
+    dialog.appendChild(title)
+
+    const subtitle = document.createElement("div")
+    subtitle.style.color = "#666"
+    subtitle.style.fontSize = "13px"
+    subtitle.style.marginBottom = "12px"
+    subtitle.textContent = "Several templates apply to this page. Pick one, or start blank."
+    dialog.appendChild(subtitle)
+
+    const list = document.createElement("div")
+    list.className = "gowiki-template-picker-list"
+
+    const makeRow = (opts) => {
+      const row = document.createElement("button")
+      row.type = "button"
+      row.className = "gowiki-template-picker-row"
+      const label = document.createElement("div")
+      label.className = "gowiki-template-picker-label"
+      label.textContent = opts.label
+      row.appendChild(label)
+      if (opts.hint) {
+        const hint = document.createElement("div")
+        hint.className = "gowiki-template-picker-hint"
+        hint.textContent = opts.hint
+        row.appendChild(hint)
+      }
+      row.addEventListener("click", () => {
+        document.body.removeChild(overlay)
+        resolve(opts.markdown)
+      })
+      return row
+    }
+
+    for (const tmpl of templates) {
+      const suffix = tmpl.constrained ? " (" + tmpl.slug + "*)" : ""
+      list.appendChild(makeRow({
+        label: tmpl.label + suffix,
+        hint: tmpl.template_path,
+        markdown: tmpl.markdown || "",
+      }))
+    }
+    list.appendChild(makeRow({
+      label: "Blank page",
+      hint: "Start from an empty page",
+      markdown: null,
+    }))
+
+    dialog.appendChild(list)
+    overlay.appendChild(dialog)
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        document.body.removeChild(overlay)
+        resolve(null)
+      }
+    })
+
+    document.body.appendChild(overlay)
+  })
+}
+
 function splitPathParts(raw) {
   return String(raw ?? "")
     .split("/")
@@ -8830,23 +8923,10 @@ async function reloadPageContent() {
       }
     }
   } else {
-    // Page doesn't exist — try to fetch a template.
-    let templateMarkdown = null
-    try {
-      const tmplUrl = `/api/template/${encodePagePath(pagePath)}`
-      console.log("[gowiki] reloadPageContent fetching template:", tmplUrl)
-      const tmplResp = await fetch(tmplUrl)
-      console.log("[gowiki] reloadPageContent template response:", tmplResp.status)
-      if (tmplResp.ok) {
-        const tmplData = await tmplResp.json()
-        console.log("[gowiki] reloadPageContent template data:", tmplData)
-        templateMarkdown = tmplData.markdown
-      }
-    } catch (err) {
-      console.error("[gowiki] reloadPageContent template fetch error:", err)
-    }
-    currentMarkdown = templateMarkdown || defaultMarkdown
-    hasTemplate = !!templateMarkdown
+    // Page doesn't exist — show the "does not exist" view. Templates are
+    // offered only when the user enters edit mode (inside enterEditMode).
+    currentMarkdown = defaultMarkdown
+    hasTemplate = false
     isNewPage = true
     currentPageVersion = 0
     currentPageMeta = null
@@ -8964,9 +9044,23 @@ async function enterEditMode(force, asNamespaceIndex = false) {
   const urlHasTrailingSlash = window.location.pathname.endsWith("/") && window.location.pathname !== "/"
   const createAsNamespace = asNamespaceIndex || (isNewPage && urlHasTrailingSlash)
   const editPath = createAsNamespace ? encodePagePath(pagePath) + "/" : encodePagePath(pagePath)
-  const resp = await authFetch(`/api/edit/${editPath}${forceParam}`, {
-    method: "POST",
-  })
+
+  // For a new page, let the user pick a template (if any apply) before we
+  // ask the backend to set up the draft. The chosen markdown (or null for
+  // a blank page) is passed to /api/edit so the backend doesn't re-resolve.
+  let initialMarkdown = null
+  let initialMarkdownChosen = false
+  if (isNewPage) {
+    initialMarkdown = await selectTemplateForNewPage(pagePath)
+    initialMarkdownChosen = true
+  }
+
+  const fetchOpts = { method: "POST" }
+  if (initialMarkdownChosen) {
+    fetchOpts.headers = { "Content-Type": "application/json" }
+    fetchOpts.body = JSON.stringify({ initial_markdown: initialMarkdown || "" })
+  }
+  const resp = await authFetch(`/api/edit/${editPath}${forceParam}`, fetchOpts)
   if (resp.status === 423) {
     const body = await resp.json()
     const lockOwner = body.locked_by || "another user"
@@ -12602,23 +12696,10 @@ async function bootstrap() {
       }
     }
   } else {
-    // Page doesn't exist — try to fetch a template.
-    let templateMarkdown = null
-    try {
-      const tmplUrl = `/api/template/${encodePagePath(pagePath)}`
-      console.log("[gowiki] fetching template:", tmplUrl)
-      const tmplResp = await fetch(tmplUrl)
-      console.log("[gowiki] template response:", tmplResp.status)
-      if (tmplResp.ok) {
-        const tmplData = await tmplResp.json()
-        console.log("[gowiki] template data:", tmplData)
-        templateMarkdown = tmplData.markdown
-      }
-    } catch (err) {
-      console.error("[gowiki] template fetch error:", err)
-    }
-    currentMarkdown = templateMarkdown || defaultMarkdown
-    hasTemplate = !!templateMarkdown
+    // Page doesn't exist — show the "does not exist" view. Templates are
+    // offered only when the user enters edit mode (inside enterEditMode).
+    currentMarkdown = defaultMarkdown
+    hasTemplate = false
     isNewPage = true
     currentPageVersion = 0
     currentPageMeta = null

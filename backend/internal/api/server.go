@@ -263,6 +263,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/backlinks/*", s.handleBacklinks)
 		r.Post("/api/pages/check", s.handleCheckPages)
 		r.Get("/api/template/*", s.handleGetTemplate)
+		r.Get("/api/templates/for/*", s.handleGetTemplatesFor)
 		r.Get("/api/templates", s.handleListTemplates)
 	})
 

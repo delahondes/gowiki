@@ -4,20 +4,21 @@
 
 Page templates provide default content for new pages. A file named `_template.md` placed in a namespace (directory) defines the initial markdown content for any new page created in that namespace or its sub-namespaces.
 
-This follows the DokuWiki convention where `_template.txt` in a namespace applies to all pages created below it.
+Alongside the default, a namespace can hold any number of **named templates** (`_template<name>.md` or `_template_<slug>.md`). When more than one template applies to a target page the user gets a picker showing all candidates plus a "Blank page" option.
+
+This follows the DokuWiki convention where `_template.txt` in a namespace applies to all pages created below it, extended with named variants for multi-template workflows.
 
 ### Design Goals
 
-- **Convention over configuration** — a `_template.md` file in a directory is the template for that directory
-- **Inheritance with override** — templates cascade: closest `_template.md` wins
+- **Convention over configuration** — a `_template*.md` file in a directory is a template for that directory
+- **Inheritance with override** — templates cascade: closest wins, per slug
 - **Editable as regular pages** — templates are standard markdown files, editable through the wiki UI
 - **Runtime variables** — templates use the same `{{VARIABLES}}` as any other page, resolved at render time (no special substitution model)
-- **Backend-driven** — the backend resolves which template applies; the frontend never searches for templates
+- **Backend-driven** — the backend resolves which templates apply; the frontend never scans the filesystem
 
 ### Non-Goals
 
-- Template selection UI (pick from a list of templates) — may come later
-- Per-page template assignment (metadata-based) — may come later
+- Per-page template assignment via metadata — not planned
 - Template inheritance merging (combine parent + child template) — closest wins, no merging
 - Template-specific editor mode or preview
 - Creation-time variable substitution — all variables are runtime (see §3)
@@ -28,44 +29,51 @@ This follows the DokuWiki convention where `_template.txt` in a namespace applie
 
 ### Location and naming
 
+Three filename shapes are recognised. The **underscore between `_template` and the suffix is the constraint marker**:
+
+| Filename | Slug | Constrained? |
+|---|---|---|
+| `_template.md` | `""` (default) | no — always applies |
+| `_template1.md`, `_templatefoo.md` | `1`, `foo` | no — just a differentiator/label |
+| `_template_sop.md`, `_template_foo_bar.md` | `sop`, `foo_bar` | yes — target page's filename must start with the slug (case-insensitive) |
+
+- Default applies to every page in the namespace tree.
+- An unconstrained named variant (`_templateX.md` with no underscore after `_template`) applies to every page in the namespace tree; its slug is just a label in the picker.
+- A constrained variant (`_template_X.md`) applies only when the target page's last path segment starts with the slug.
+
+Example:
+
 ```
 data/content/
-  _template.md              ← root template (applies to all pages without a closer template)
-  docs/
-    _template.md            ← template for /docs/* pages
-    setup/
-      _template.md          ← template for /docs/setup/* pages
-      install.md
-    guide.md
-  projects/
-    project-a/
-      index.md
-      notes.md
+  _template.md                   ← default template, any new page uses it
+  regulatory/
+    qms/
+      _template.md               ← overrides the root default for /regulatory/qms/**
+      _template_sop.md           ← used only for pages whose name starts with "sop"
+      _template_ins.md           ← used only for pages whose name starts with "ins"
+      _template1.md              ← always applies (label "1"); shows up in the picker
+    meetingminutes/
+      _template.md
 ```
 
 ### Resolution order
 
-When creating a new page at path `/docs/setup/install`:
+When creating a new page at path `/regulatory/qms/sop01`:
 
-1. Check `data/content/docs/setup/_template.md` — if exists, use it
-2. Check `data/content/docs/_template.md` — if exists, use it
-3. Check `data/content/_template.md` — if exists, use it
-4. No template found — use empty page (current behavior)
+1. Walk up from the target namespace to root, reading every `_template*.md` at each level.
+2. Drop constrained templates whose slug isn't a prefix of the target page's filename.
+3. Deduplicate by slug: for each slug, keep the variant found in the closest (deepest) namespace.
+4. Result is the full list of applicable templates, default first.
 
-**Closest wins.** The first `_template.md` found walking up from the target namespace is used. No merging or chaining.
+At that point:
+
+- **0 templates** → blank page (same default behavior as today).
+- **1 template** → applied silently.
+- **2+ templates** → the frontend shows a picker listing each template's label plus a "Blank page" option; the user's click decides.
 
 ### Visibility rules
 
-`_template.md` files are **hidden from normal wiki operation**:
-
-- Not listed in sitemap
-- Not listed in search results
-- Not listed in recent changes
-- Not listed in orphan detection
-- Not navigable as regular pages (visiting `/_template` returns 404)
-- Backlinks from templates are not tracked
-
-Templates are only accessible through a dedicated management interface (see §6).
+`_template*.md` files are **excluded from the sitemap, orphan detection, and recent-changes listings**. They **remain indexed for full-text search** so admins can find them via the search bar. They are still editable through the standard page API (see §4).
 
 ---
 
@@ -108,32 +116,47 @@ One model is simpler than two. With runtime-only variables:
 
 ## 4. Backend API
 
-### Template resolution endpoint
+### Applicable-templates endpoint (primary)
+
+```
+GET /api/templates/for/{path}
+```
+
+Returns every template applicable to the target path, after walking up the namespace tree and filtering constrained templates by the filename-prefix rule.
+
+**Response (200):**
+```json
+{
+  "templates": [
+    {
+      "slug": "",
+      "label": "Default",
+      "markdown": "# {{PAGE}}\n\nAuthor: {{AUTHORNAME}}\n",
+      "template_path": "/regulatory/qms/_template",
+      "constrained": false
+    },
+    {
+      "slug": "sop",
+      "label": "sop",
+      "markdown": "# {{PAGE}}\n\n## Scope\n\n## Procedure\n",
+      "template_path": "/regulatory/qms/_template_sop",
+      "constrained": true
+    }
+  ]
+}
+```
+
+The list is ordered default-first, then named templates alphabetically by slug. When the list is empty the frontend creates a blank page. When the list has exactly one entry it is applied silently. When it has two or more, the frontend shows a picker.
+
+### Legacy single-template endpoint
 
 ```
 GET /api/template/{path}
 ```
 
-Returns the raw template content for creating a new page at `{path}`. No variable substitution — just the file lookup.
+Backward-compatible: returns `{ markdown, template_path }` for the default template (or the first match if no default applies). Kept for existing integrations; new callers should use `/api/templates/for/{path}`.
 
-**Response (200):**
-```json
-{
-  "markdown": "# {{PAGE}}\n\nAuthor: {{AUTHORNAME}}\nCreated: {{CREATIONDATE}}\n",
-  "template_path": "/docs/_template"
-}
-```
-
-- `markdown`: the raw template content (variables not substituted)
-- `template_path`: which `_template.md` was used (for display/debugging)
-
-**Response (404):**
-No template found — the frontend uses its default empty content.
-
-The backend performs:
-1. Walk up from the target page's namespace looking for `_template.md`
-2. Read the template content
-3. Return it as-is
+**Response (404):** No template applies.
 
 ### Template CRUD
 
@@ -153,20 +176,18 @@ The `_template` path segment maps to `_template.md` on disk. The backend allows 
 GET /api/templates
 ```
 
-Returns all templates in the wiki:
+Returns every `_template*.md` file in the wiki (default and named variants). Used by the template management UI.
 
 ```json
 {
   "templates": [
-    { "path": "/", "has_template": true },
-    { "path": "/docs", "has_template": true },
-    { "path": "/docs/setup", "has_template": false },
-    { "path": "/projects", "has_template": true }
+    { "namespace": "/", "path": "/_template" },
+    { "namespace": "/regulatory/qms", "path": "/regulatory/qms/_template" },
+    { "namespace": "/regulatory/qms", "path": "/regulatory/qms/_template_sop" },
+    { "namespace": "/regulatory/qms", "path": "/regulatory/qms/_template_ins" }
   ]
 }
 ```
-
-This is used by the template management UI.
 
 ---
 
@@ -174,19 +195,15 @@ This is used by the template management UI.
 
 ### New page creation flow
 
-Current flow:
-1. User clicks "New page" → enters path → navigates to `/{path}?action=create`
-2. Page loads with `isNewPage = true`, `currentMarkdown = defaultMarkdown`
-3. Auto-enters edit mode
+1. User navigates to a path that doesn't exist yet.
+2. Frontend calls `GET /api/templates/for/{path}`.
+3. Based on the returned list:
+   - 0 entries → blank page with the default empty content
+   - 1 entry → apply silently
+   - 2+ entries → show a picker modal; each row is `label` + `template_path`, plus a trailing "Blank page" row
+4. The chosen markdown (or blank) becomes the initial editor content and the editor opens.
 
-New flow:
-1. User clicks "New page" → enters path → navigates to `/{path}?action=create`
-2. Frontend calls `GET /api/template/{path}`
-3. If 200: use returned markdown as initial content
-4. If 404: use empty default content (current behavior)
-5. Auto-enters edit mode with the template content
-
-The template fetch is a single additional API call during page creation. It happens before the editor is initialized, so there is no flash of empty content.
+The template fetch is a single additional API call during page creation. The picker is modal and resolves synchronously before the editor initializes, so there is no flash of incorrect content.
 
 ### Template editing
 
@@ -222,12 +239,16 @@ Templates only apply to **new** pages. Re-editing an existing page never re-appl
 
 1. **Runtime variables, no creation-time substitution** — All `{{VARIABLES}}` in templates work exactly like in any other page: stored as-is, resolved at render time. This gives one consistent model instead of two. Values stay correct after renames and moves. The creation date use case is covered by `{{CREATIONDATE}}`, a new global variable resolved from page metadata.
 
-2. **Closest template wins, no merging** — A `_template.md` in a child namespace completely overrides the parent template. There is no mechanism to "extend" a parent template. This keeps the mental model simple: one template file = one template. If you need shared sections, use includes.
+2. **Closest template wins per slug, no merging** — For each slug, the closest namespace wins. There is no mechanism to "extend" a template. If you need shared sections, use includes.
 
-3. **Hidden from normal wiki operation** — Templates are infrastructure, not content. They don't appear in search, sitemap, or recent changes. This prevents clutter and confusion. They're editable through the standard page editor but accessed through a separate management path.
+3. **Underscore = constraint** — `_templateX.md` means "unconstrained alternative named X"; `_template_X.md` means "applies only to pages whose filename starts with X". This makes the naming self-documenting: adding an underscore is the act of adding a filter.
 
-4. **Backend resolves, no substitution** — The frontend never searches for `_template.md` files. It calls one endpoint and gets back raw markdown. The backend just walks up directories looking for the file — no variable processing needed.
+4. **Picker, not auto-pick** — When several templates match, the user chooses. The system never picks silently between alternatives (the auto-pick behaviour only holds when exactly one template matches, i.e. today's behaviour).
 
-5. **Standard page API for editing** — Templates use the existing `GET/PUT /api/pages/` endpoints with a `_template` path. No new editor infrastructure is needed. The `_` prefix convention ensures no collision with user pages (underscores in page names are valid but `_template` is explicitly reserved).
+5. **Templates are indexed for search but excluded from sitemap/orphan/recent-changes** — Admins should be able to find a template via full-text search; it just shouldn't appear as navigable content in the site's structural views.
 
-6. **`_template.md` naming** — The underscore prefix signals "special/hidden file," consistent with conventions in many systems. The `.md` extension is required by the content storage convention.
+6. **Backend resolves, no substitution** — The frontend calls one endpoint and gets back a list. The backend walks up directories, applies the slug-prefix filter, and returns matching templates as-is.
+
+7. **Standard page API for editing** — Templates use the existing `GET/PUT /api/pages/` endpoints with `_template*` paths. No new editor infrastructure is needed.
+
+8. **`_template*.md` naming** — The underscore prefix signals "special/hidden file," consistent with conventions in many systems. The `.md` extension is required by the content storage convention.

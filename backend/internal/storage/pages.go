@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,9 +37,17 @@ var ErrDestinationExists = errors.New("destination already exists")
 var ErrNamespaceNotEmpty = errors.New("namespace not empty")
 var ErrNoTemplate = errors.New("no template found")
 
-// IsTemplatePath reports whether a normalized page path refers to a template file.
+// IsTemplatePath reports whether a normalized page path refers to a template
+// file. Matches the default `_template` as well as named variants like
+// `_template1` or `_template_sop`.
 func IsTemplatePath(pagePath string) bool {
-	return pagePath == "/_template" || strings.HasSuffix(pagePath, "/_template")
+	base := path.Base(pagePath)
+	if !strings.HasPrefix(base, "_template") {
+		return false
+	}
+	// Reuse the filename parser by appending the .md suffix it expects.
+	_, _, ok := parseTemplateFilename(base + ".md")
+	return ok
 }
 
 // CircularIncludeError is returned when saving a page would create a cycle
@@ -1225,8 +1234,8 @@ func (s *FileStore) RebuildIndexes() error {
 		if !strings.HasSuffix(absPath, ".md") {
 			return nil
 		}
-		// Skip template files.
-		if filepath.Base(absPath) == "_template.md" {
+		// Skip template files (default and named variants).
+		if _, _, ok := parseTemplateFilename(filepath.Base(absPath)); ok {
 			return nil
 		}
 
@@ -1311,31 +1320,135 @@ func (s *FileStore) RebuildIndexes() error {
 	return nil
 }
 
-// ResolveTemplate walks up from the target page's namespace looking for
-// _template.md and returns its content and logical path. Returns ErrNoTemplate
-// if no template is found.
+// TemplateMatch is a single template applicable to a target page path.
+type TemplateMatch struct {
+	// Slug is the filename slug that differentiates this template from the
+	// default. Empty for `_template.md`, or the suffix for `_template<suffix>.md`
+	// / `_template_<slug>.md`.
+	Slug string `json:"slug"`
+	// Label is the display label the picker shows. Defaults to the slug (or
+	// "Default" for the bare template).
+	Label string `json:"label"`
+	// Markdown is the raw template content.
+	Markdown string `json:"markdown"`
+	// TemplatePath is the logical path of the template file (no extension),
+	// useful for display or edit links — e.g. "/docs/_template_sop".
+	TemplatePath string `json:"template_path"`
+	// Constrained is true when the template name encoded a filename-prefix
+	// constraint (i.e. `_template_<slug>.md`) that narrowed the match set.
+	Constrained bool `json:"constrained"`
+}
+
+// parseTemplateFilename extracts the slug and the filename-prefix constraint
+// from a `_template*.md` filename. Returns ok=false for any other filename.
+//
+// Rules (underscore = constraint):
+//   _template.md           → slug="", constrained=false    (default)
+//   _template1.md          → slug="1", constrained=false   (unconstrained variant)
+//   _templatefoo.md        → slug="foo", constrained=false
+//   _template_sop.md       → slug="sop", constrained=true
+//   _template_foo_bar.md   → slug="foo_bar", constrained=true
+func parseTemplateFilename(name string) (slug string, constrained bool, ok bool) {
+	const prefix = "_template"
+	if !strings.HasSuffix(name, ".md") {
+		return "", false, false
+	}
+	stem := strings.TrimSuffix(name, ".md")
+	if !strings.HasPrefix(stem, prefix) {
+		return "", false, false
+	}
+	rest := stem[len(prefix):]
+	if rest == "" {
+		return "", false, true
+	}
+	if rest[0] == '_' {
+		slug = rest[1:]
+		if slug == "" {
+			// "_template_.md" is malformed — treat as no template.
+			return "", false, false
+		}
+		return slug, true, true
+	}
+	return rest, false, true
+}
+
+// ResolveTemplate walks up from the target page's namespace looking for the
+// default `_template.md` and returns its content and logical path. Kept for
+// backward compatibility; new callers should use ResolveTemplates.
 func (s *FileStore) ResolveTemplate(pagePath string) (string, string, error) {
-	normalized, err := normalizePagePath(pagePath)
+	matches, err := s.ResolveTemplates(pagePath)
 	if err != nil {
 		return "", "", err
 	}
+	for _, m := range matches {
+		if m.Slug == "" {
+			return m.Markdown, m.TemplatePath, nil
+		}
+	}
+	if len(matches) == 0 {
+		return "", "", ErrNoTemplate
+	}
+	// No bare default — fall back to the first match so the legacy endpoint
+	// still returns something useful.
+	return matches[0].Markdown, matches[0].TemplatePath, nil
+}
 
-	// Determine namespace: parent directory of the target page.
+// ResolveTemplates returns every `_template*.md` applicable to the given
+// target page path. The list is ordered with the default (if any) first,
+// followed by named templates sorted by slug. When the same slug appears at
+// multiple levels of the namespace tree, the closest (deepest) wins.
+func (s *FileStore) ResolveTemplates(pagePath string) ([]TemplateMatch, error) {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return nil, err
+	}
+	leaf := strings.ToLower(path.Base(normalized))
+
 	ns := path.Dir(normalized)
 	if ns == "." {
 		ns = "/"
 	}
 
-	// Walk up from the namespace to root, checking for _template.md.
+	seen := make(map[string]TemplateMatch) // slug → nearest match
+	// Walk up from the namespace to root, reading every _template*.md at each level.
 	for {
-		tmplPath := filepath.Join(s.contentRoot, filepath.FromSlash(ns), "_template.md")
-		if fileExists(tmplPath) {
-			content, err := os.ReadFile(tmplPath)
-			if err != nil {
-				return "", "", fmt.Errorf("read template: %w", err)
+		dir := filepath.Join(s.contentRoot, filepath.FromSlash(ns))
+		entries, err := os.ReadDir(dir)
+		if err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				slug, constrained, ok := parseTemplateFilename(e.Name())
+				if !ok {
+					continue
+				}
+				// Apply the filename-prefix constraint, if any.
+				if constrained && !strings.HasPrefix(leaf, strings.ToLower(slug)) {
+					continue
+				}
+				// Nearest wins — skip if a closer namespace already defined this slug.
+				if _, already := seen[slug]; already {
+					continue
+				}
+				content, readErr := os.ReadFile(filepath.Join(dir, e.Name()))
+				if readErr != nil {
+					continue
+				}
+				label := slug
+				if slug == "" {
+					label = "Default"
+				}
+				logicalStem := strings.TrimSuffix(e.Name(), ".md")
+				tmplPath := path.Join(ns, logicalStem)
+				seen[slug] = TemplateMatch{
+					Slug:         slug,
+					Label:        label,
+					Markdown:     string(content),
+					TemplatePath: tmplPath,
+					Constrained:  constrained,
+				}
 			}
-			logicalPath := path.Join(ns, "_template")
-			return string(content), logicalPath, nil
 		}
 		if ns == "/" {
 			break
@@ -1343,7 +1456,29 @@ func (s *FileStore) ResolveTemplate(pagePath string) (string, string, error) {
 		ns = path.Dir(ns)
 	}
 
-	return "", "", ErrNoTemplate
+	if len(seen) == 0 {
+		return nil, nil
+	}
+
+	// Sort: default first, then named alphabetically.
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == "" {
+			return true
+		}
+		if keys[j] == "" {
+			return false
+		}
+		return keys[i] < keys[j]
+	})
+	out := make([]TemplateMatch, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, seen[k])
+	}
+	return out, nil
 }
 
 // TemplateEntry describes a template file for listing purposes.
@@ -1352,14 +1487,19 @@ type TemplateEntry struct {
 	Path      string `json:"path"`
 }
 
-// ListTemplates returns all _template.md files found under content/.
+// ListTemplates returns every _template*.md file found under content/,
+// including named variants (e.g. _template_sop.md).
 func (s *FileStore) ListTemplates() ([]TemplateEntry, error) {
 	var templates []TemplateEntry
 	err := filepath.Walk(s.contentRoot, func(absPath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || filepath.Base(absPath) != "_template.md" {
+		if info.IsDir() {
+			return nil
+		}
+		base := filepath.Base(absPath)
+		if _, _, ok := parseTemplateFilename(base); !ok {
 			return nil
 		}
 		rel, relErr := filepath.Rel(s.contentRoot, absPath)
@@ -1367,8 +1507,10 @@ func (s *FileStore) ListTemplates() ([]TemplateEntry, error) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
-		ns := "/" + strings.TrimSuffix(rel, "/_template.md")
-		if ns == "/." || ns == "/" {
+		// Namespace: directory of the template file.
+		relDir := path.Dir(rel)
+		ns := "/" + relDir
+		if relDir == "." || relDir == "" {
 			ns = "/"
 		}
 		tmplPath := "/" + strings.TrimSuffix(rel, ".md")
@@ -1396,8 +1538,8 @@ func (s *FileStore) ListAllPages() ([]PageEntry, error) {
 		if info.IsDir() || !strings.HasSuffix(absPath, ".md") {
 			return nil
 		}
-		// Skip template files.
-		if filepath.Base(absPath) == "_template.md" {
+		// Skip template files (default and named variants).
+		if _, _, ok := parseTemplateFilename(filepath.Base(absPath)); ok {
 			return nil
 		}
 

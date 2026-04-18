@@ -51,6 +51,29 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 	username := UsernameFromContext(r.Context())
 	force := r.URL.Query().Get("force") == "true"
 
+	// Optional request body lets the frontend supply the initial markdown
+	// for a new page (the chosen template, or empty for a blank page). When
+	// present, the backend uses it verbatim instead of re-resolving a
+	// template server-side. An empty string + InitialMarkdownSet==true means
+	// "blank page requested" and is distinct from an absent field.
+	var reqBody struct {
+		InitialMarkdown    string `json:"initial_markdown"`
+		InitialMarkdownSet bool   `json:"-"`
+	}
+	if r.Header.Get("Content-Type") != "" && r.ContentLength != 0 {
+		raw := map[string]any{}
+		if err := json.NewDecoder(r.Body).Decode(&raw); err == nil {
+			if v, ok := raw["initial_markdown"]; ok {
+				if s, ok := v.(string); ok {
+					reqBody.InitialMarkdown = s
+					reqBody.InitialMarkdownSet = true
+				} else if v == nil {
+					reqBody.InitialMarkdownSet = true
+				}
+			}
+		}
+	}
+
 	// Get current published content as fallback.
 	var published string
 	page, err := s.store.Get(pagePath)
@@ -77,17 +100,20 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		// New page — resolve template if available.
-		if tmpl, ok := s.store.(TemplateResolver); ok {
+		// New page — prefer the explicit body, fall back to server-side default.
+		if reqBody.InitialMarkdownSet {
+			published = reqBody.InitialMarkdown
+		} else if tmpl, ok := s.store.(TemplateResolver); ok {
 			if content, _, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
 				published = content
-				// Apply tag mutations (e.g. remove "tpl" tags from templates).
-				if s.configStore != nil {
-					mutations := s.configStore.Get().Tags.TemplateMutations
-					if len(mutations) > 0 {
-						published = markdown_pkg.ApplyTagMutations(published, mutations)
-					}
-				}
+			}
+		}
+		// Apply tag mutations (e.g. strip "tpl" tags) to any template-derived
+		// content, regardless of whether it came from the body or the fallback.
+		if published != "" && s.configStore != nil {
+			mutations := s.configStore.Get().Tags.TemplateMutations
+			if len(mutations) > 0 {
+				published = markdown_pkg.ApplyTagMutations(published, mutations)
 			}
 		}
 	}

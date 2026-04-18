@@ -16,6 +16,11 @@ type TemplateResolver interface {
 	ResolveTemplate(pagePath string) (markdown string, templatePath string, err error)
 }
 
+// TemplateMultiResolver resolves every template applicable to a page path.
+type TemplateMultiResolver interface {
+	ResolveTemplates(pagePath string) ([]storage.TemplateMatch, error)
+}
+
 // TemplateLister is implemented by storage.FileStore.
 type TemplateLister interface {
 	ListTemplates() ([]storage.TemplateEntry, error)
@@ -47,6 +52,32 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"markdown":      markdown,
 		"template_path": tmplPath,
+	})
+}
+
+func (s *Server) handleGetTemplatesFor(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	resolver, ok := s.store.(TemplateMultiResolver)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "templates not supported")
+		return
+	}
+
+	matches, err := resolver.ResolveTemplates(pagePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if matches == nil {
+		matches = []storage.TemplateMatch{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"templates": matches,
 	})
 }
 

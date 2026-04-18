@@ -1460,6 +1460,40 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   justify-content: center;
 }
 
+.gowiki-template-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gowiki-template-picker-row {
+  display: block;
+  text-align: left;
+  background: #f5f8ff;
+  border: 1px solid #d2d9e5;
+  border-radius: 5px;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+  color: #222;
+}
+
+.gowiki-template-picker-row:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+}
+
+.gowiki-template-picker-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.gowiki-template-picker-hint {
+  color: #666;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
 .gowiki-login-dialog {
   background: white;
   border-radius: 6px;
