@@ -801,6 +801,46 @@ function encodePagePath(path) {
     .join("/")
 }
 
+// waitForQuietDOM resolves once the given root has been visually stable for
+// `quietMs`. "Stable" means: every <img> is loaded (or has failed), and no
+// DOM mutation has been observed for the last `quietMs` milliseconds.
+// `maxWaitMs` is a safety cap so a misbehaving renderer never blocks forever.
+//
+// Used by the PDF export path to defer the data-export-ready signal until
+// async renderers (mermaid, charts, includes, images) have settled.
+async function waitForQuietDOM(root, quietMs = 750, maxWaitMs = 20000) {
+  const start = Date.now()
+
+  // Wait for all images inside the root to finish loading.
+  const imgs = Array.from(root.querySelectorAll("img"))
+  await Promise.all(imgs.map(img => {
+    if (img.complete) return Promise.resolve()
+    return new Promise(resolve => {
+      const finish = () => {
+        img.removeEventListener("load", finish)
+        img.removeEventListener("error", finish)
+        resolve()
+      }
+      img.addEventListener("load", finish)
+      img.addEventListener("error", finish)
+    })
+  }))
+
+  // Then watch for DOM activity; declare "quiet" after quietMs of stillness.
+  let lastActivity = Date.now()
+  const observer = new MutationObserver(() => { lastActivity = Date.now() })
+  observer.observe(root, { childList: true, subtree: true, attributes: true, characterData: true })
+
+  try {
+    while (Date.now() - start < maxWaitMs) {
+      await new Promise(r => setTimeout(r, 100))
+      if (Date.now() - lastActivity >= quietMs) return
+    }
+  } finally {
+    observer.disconnect()
+  }
+}
+
 // selectTemplateForNewPage fetches the templates applicable to a new page
 // path and returns the chosen markdown. When several templates match, a
 // picker modal is shown and the user's selection decides.
@@ -12509,17 +12549,73 @@ async function bootstrap() {
     document.body.classList.add("gowiki-export")
 
     let page
+    let fetchErr = null
     try {
       page = await fetchPage(pagePath)
-    } catch {
-      document.body.setAttribute("data-export-ready", "true")
-      return
+    } catch (err) {
+      fetchErr = err
+      console.error("[gowiki] export: fetchPage failed:", err)
     }
     if (page) {
       currentMarkdown = page.markdown
       currentDoc = markdownToPM(currentMarkdown, registry)
       mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view")
+    } else {
+      // Surface the failure in the PDF body rather than producing a blank
+      // page — the Chrome printer otherwise leaves us with only headers.
+      const msg = document.createElement("div")
+      msg.style.cssText = "padding:40px; font-size:14pt; color:#c62828;"
+      if (fetchErr) {
+        msg.textContent = `Export failed: ${fetchErr.message || String(fetchErr)}`
+      } else {
+        msg.textContent = `Page not found: /${pagePath}`
+      }
+      contentRoot.appendChild(msg)
     }
+
+    // Set document.title so Chrome's header template substitutes the .title
+    // placeholder. Prefer the page's first heading; fall back to the page path
+    // so the header never shows the default index.html title.
+    const pageHeading = contentRoot.querySelector("h1, h2, h3, h4, h5, h6")
+    if (pageHeading && pageHeading.textContent.trim()) {
+      document.title = pageHeading.textContent.trim()
+    } else {
+      document.title = "/" + pagePath
+    }
+
+    // Append an end-of-document "Printed from …" block with a QR code linking
+    // back to the live page. Uses the browser-visible URL stripped of the
+    // ?export=pdf parameter.
+    const originalURL = (() => {
+      const u = new URL(window.location.href)
+      u.searchParams.delete("export")
+      return u.toString()
+    })()
+    const endBlock = document.createElement("div")
+    endBlock.className = "gowiki-export-endblock"
+    const link = document.createElement("a")
+    link.className = "gowiki-export-endblock-link"
+    link.href = originalURL
+    link.textContent = originalURL
+    const text = document.createElement("div")
+    text.className = "gowiki-export-endblock-text"
+    text.appendChild(document.createTextNode("Printed from "))
+    text.appendChild(link)
+    const qr = document.createElement("img")
+    qr.className = "gowiki-export-endblock-qr"
+    qr.src = "/api/qrcode?data=" + encodeURIComponent(originalURL) + "&size=144"
+    qr.alt = "QR code"
+    qr.width = 72
+    qr.height = 72
+    endBlock.appendChild(text)
+    endBlock.appendChild(qr)
+    contentRoot.appendChild(endBlock)
+
+    // Wait for the DOM to settle before signalling readiness. This matters
+    // for async renderers (mermaid, charts, images, includes) that finish
+    // after mountReadOnlyView returns.
+    await waitForQuietDOM(contentRoot, 750, 20000)
+
     document.body.setAttribute("data-export-ready", "true")
     return
   }

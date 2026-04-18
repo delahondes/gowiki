@@ -281,6 +281,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/site/info", s.handleSiteInfo)
 		r.Get("/api/users/display", s.handleUsersDisplay)
 		r.Get("/api/users/list", s.handleUsersList)
+		r.Get("/api/qrcode", s.handleQRCode)
 	})
 
 	// WebSocket endpoints + collab — require auth, no ACL.

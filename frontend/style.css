@@ -2409,7 +2409,56 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 
 .gowiki-export {
   max-width: 100%;
-  font-size: 12pt;
+  font-size: 10pt;
+  line-height: 1.35;
+}
+
+/* Tighten typography in export mode so the page breathes less. Headings
+   still use em-based sizes (from pm.css) so they scale with body. */
+.gowiki-export .ProseMirror h1 { font-size: 1.6em; margin: 0.6em 0 0.35em; }
+.gowiki-export .ProseMirror h2 { font-size: 1.3em; margin: 0.6em 0 0.3em; }
+.gowiki-export .ProseMirror h3 { font-size: 1.1em; margin: 0.5em 0 0.3em; }
+.gowiki-export .ProseMirror h4,
+.gowiki-export .ProseMirror h5,
+.gowiki-export .ProseMirror h6 { font-size: 1em; margin: 0.5em 0 0.3em; }
+.gowiki-export .ProseMirror p { margin: 0.3em 0; }
+.gowiki-export .ProseMirror ul,
+.gowiki-export .ProseMirror ol { margin: 0.3em 0; padding-left: 1.5em; }
+.gowiki-export .ProseMirror li { margin: 0.1em 0; }
+.gowiki-export .ProseMirror table { font-size: 0.95em; }
+.gowiki-export .ProseMirror pre { font-size: 0.9em; line-height: 1.3; }
+.gowiki-export .ProseMirror blockquote { margin: 0.4em 0; }
+
+/* End-of-document footer block added only in PDF export mode. */
+.gowiki-export-endblock {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  font-size: 9pt;
+  color: #555;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.gowiki-export-endblock-text {
+  flex: 1;
+  word-break: break-all;
+}
+
+.gowiki-export-endblock-link {
+  color: #1a56db;
+  text-decoration: underline;
+}
+
+.gowiki-export-endblock-qr {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  image-rendering: -webkit-optimize-contrast;
 }
 
 /* ── AI Assistant Panel ────────────────────── */

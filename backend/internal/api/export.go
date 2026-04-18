@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"html"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+
+	"gowiki/backend/internal/auth"
 )
 
 func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
@@ -48,9 +51,11 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 		host = host[:idx]
 	}
 
-	// Forward session cookie if present.
+	// Forward session cookie if present. Without this, Chrome loads the
+	// export URL unauthenticated and the frontend's /api/pages fetch fails
+	// with 403 on any ACL-protected page.
 	var sessionCookie *http.Cookie
-	if cookie, err := r.Cookie("session"); err == nil {
+	if cookie, err := r.Cookie(auth.CookieName); err == nil {
 		sessionCookie = cookie
 	}
 
@@ -79,17 +84,29 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 		chromedp.WaitVisible(`[data-export-ready]`, chromedp.ByQuery),
 	)
 
+	// Determine the wiki's site title for the running header. Falls back to
+	// "Gowiki" if no configuration is loaded (e.g. dev mode without a store).
+	siteTitle := "Gowiki"
+	if s.configStore != nil {
+		if t := strings.TrimSpace(s.configStore.Get().Site.Title); t != "" {
+			siteTitle = t
+		}
+	}
+
 	var pdfBuf []byte
 	tasks = append(tasks, chromedp.ActionFunc(func(ctx context.Context) error {
 		var err error
 		pdfBuf, _, err = page.PrintToPDF().
 			WithPrintBackground(true).
-			WithMarginTop(0.5).
-			WithMarginBottom(0.5).
+			WithMarginTop(0.7).
+			WithMarginBottom(0.7).
 			WithMarginLeft(0.5).
 			WithMarginRight(0.5).
 			WithPaperWidth(8.27). // A4
 			WithPaperHeight(11.69).
+			WithDisplayHeaderFooter(true).
+			WithHeaderTemplate(pdfHeaderTemplate(siteTitle)).
+			WithFooterTemplate(pdfFooterTemplate()).
 			Do(ctx)
 		return err
 	}))
@@ -102,4 +119,28 @@ func (s *Server) handleExportPDF(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, pagePath))
 	w.Write(pdfBuf)
+}
+
+// pdfHeaderTemplate returns the running-header HTML Chrome injects on every
+// printed page. Chrome only respects a handful of classes in these templates
+// (.title, .date, .url, .pageNumber, .totalPages); any inline CSS must be
+// explicit as @media print rules don't apply here.
+//
+// The page title is substituted by Chrome from document.title; the frontend
+// sets that to the page's first heading in export mode.
+func pdfHeaderTemplate(siteTitle string) string {
+	return `<div style="font-size:9px; color:#888; width:100%; padding:4px 0.5in 0; -webkit-print-color-adjust:exact; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,sans-serif; display:flex; justify-content:space-between; align-items:center;">
+  <span class="title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%;"></span>
+  <span>` + html.EscapeString(siteTitle) + `</span>
+</div>`
+}
+
+// pdfFooterTemplate returns the running-footer HTML. It shows the document
+// generation date on the left and the page count on the right. Chrome
+// substitutes `.date`, `.pageNumber` and `.totalPages` at print time.
+func pdfFooterTemplate() string {
+	return `<div style="font-size:9px; color:#888; width:100%; padding:0 0.5in 4px; -webkit-print-color-adjust:exact; box-sizing:border-box; font-family:-apple-system,BlinkMacSystemFont,sans-serif; display:flex; justify-content:space-between;">
+  <span>Generated <span class="date"></span></span>
+  <span>Page <span class="pageNumber"></span> / <span class="totalPages"></span></span>
+</div>`
 }
