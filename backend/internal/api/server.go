@@ -237,6 +237,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Post("/api/auth/login", s.handleLogin)
 	r.Post("/api/auth/logout", s.handleLogout)
 	r.Get("/api/auth/me", s.handleMe)
+	r.Get("/api/auth/me/preferences", s.handleGetMePreferences)
+	r.Put("/api/auth/me/preferences", s.handlePutMePreferences)
 	r.Get("/api/auth/providers", s.handleAuthProviders)
 	r.Get("/api/auth/oauth/login", s.handleOAuthLogin)
 	r.Get("/api/auth/oauth/callback", s.handleOAuthCallback)
@@ -282,6 +284,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/users/display", s.handleUsersDisplay)
 		r.Get("/api/users/list", s.handleUsersList)
 		r.Get("/api/qrcode", s.handleQRCode)
+		r.Get("/api/theme/overrides.css", s.handleThemeOverridesCSS)
 	})
 
 	// WebSocket endpoints + collab — require auth, no ACL.
@@ -972,6 +975,10 @@ func (s *Server) handleRecentChanges(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.configStore.Get()
+	themeDefault := cfg.Themes.Default
+	if themeDefault == "" {
+		themeDefault = "auto"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":               cfg.Site.Title,
 		"version":             Version,
@@ -979,6 +986,10 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 		"user_display":        cfg.Site.UserDisplay,
 		"code_theme":          cfg.Site.CodeTheme,
 		"ai_assistant_enabled": cfg.AIAssistant.Enabled,
+		"theme": map[string]any{
+			"default":             themeDefault,
+			"allow_user_override": cfg.Themes.AllowUserOverride,
+		},
 	})
 }
 

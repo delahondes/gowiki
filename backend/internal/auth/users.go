@@ -31,6 +31,9 @@ type User struct {
 	Disabled     bool     `json:"disabled"`
 	CreatedAt    string   `json:"created_at"`
 	LastLogin    string   `json:"last_login,omitempty"`
+	// ThemePreference is the user's chosen theme: "light", "dark", "auto",
+	// or "" when unset (falls back to the wiki's Themes.Default).
+	ThemePreference string `json:"theme_preference,omitempty"`
 }
 
 // EffectiveGroups returns the union of local Groups and OAuthGroups.
@@ -362,4 +365,19 @@ func (s *UserStore) UpdateLastLogin(username string) {
 			return
 		}
 	}
+}
+
+// UpdateThemePreference stores the user's theme choice ("light", "dark",
+// "auto", or "" to reset).
+func (s *UserStore) UpdateThemePreference(username, pref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, u := range s.users {
+		if u.Username == username {
+			s.users[i].ThemePreference = pref
+			return s.saveLocked()
+		}
+	}
+	return ErrUserNotFound
 }

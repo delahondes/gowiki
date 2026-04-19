@@ -145,9 +145,10 @@ const blockquoteProperties: NodePropertySpec[] = [
 
 const blockquoteStyles = `
 .ProseMirror blockquote {
-  border-left: 4px solid #ddd;
+  border-left: 4px solid var(--gw-color-border);
   margin: 0.5em 0;
   padding: 0.5em 1em;
+  color: var(--gw-color-text);
 }
 
 .ProseMirror blockquote.gowiki-bq-tip::before,
@@ -206,7 +207,41 @@ const blockquoteStyles = `
 
 /* Custom class */
 .ProseMirror blockquote.gowiki-bq-custom {
-  background: #f8f9fa;
+  background: var(--gw-color-surface);
+}
+
+/* Dark-mode admonition palette — keep the semantic hue, darken the tint
+   so the banner reads well against a dark page without blasting the eye. */
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-tip {
+  background: #18302a;
+  border-left-color: #34d399;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-tip::before {
+  color: #6ee7b7;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-note {
+  background: #182438;
+  border-left-color: #60a5fa;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-note::before {
+  color: #93c5fd;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-important {
+  background: #33270d;
+  border-left-color: #fbbf24;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-important::before {
+  color: #fcd34d;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-warning {
+  background: #331514;
+  border-left-color: #f87171;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-warning::before {
+  color: #fca5a5;
+}
+html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-custom {
+  background: var(--gw-color-surface);
 }
 
 .ProseMirror blockquote.gowiki-bq-custom.gowiki-bq-icon-lightbulb::before,

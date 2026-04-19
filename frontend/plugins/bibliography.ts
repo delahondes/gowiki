@@ -563,7 +563,7 @@ const bibliographyStyles = `
 }
 
 .gowiki-cite-link {
-  color: #1a56db;
+  color: var(--gw-color-link);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -578,14 +578,14 @@ const bibliographyStyles = `
 }
 
 .gowiki-cite-warn {
-  color: #c62828;
-  border-bottom: 2px dotted #c62828;
+  color: var(--gw-color-error);
+  border-bottom: 2px dotted var(--gw-color-error);
   cursor: help;
 }
 
 .gowiki-cite-error {
-  color: #c62828;
-  background: #ffebee;
+  color: var(--gw-color-error);
+  background: var(--gw-color-error-bg);
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 13px;
@@ -599,12 +599,12 @@ const bibliographyStyles = `
   margin-top: 4px;
   min-width: 260px;
   max-width: 420px;
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+  background: var(--gw-color-bg);
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
+  box-shadow: var(--gw-shadow-md);
   padding: 8px 10px;
-  color: #222;
+  color: var(--gw-color-text);
   font-size: 13px;
   line-height: 1.4;
   white-space: normal;
@@ -617,14 +617,15 @@ const bibliographyStyles = `
 .gowiki-cite-popup-title {
   font-weight: 600;
   margin-bottom: 4px;
+  color: var(--gw-color-text);
 }
 
 .gowiki-cite-popup-meta {
-  color: #444;
+  color: var(--gw-color-text);
 }
 
 .gowiki-cite-popup-journal {
-  color: #666;
+  color: var(--gw-color-muted);
   font-style: italic;
   margin-top: 2px;
 }
@@ -632,7 +633,7 @@ const bibliographyStyles = `
 .gowiki-references {
   margin-top: 32px;
   padding-top: 16px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--gw-color-border);
 }
 
 .gowiki-references-auto {
@@ -656,7 +657,7 @@ const bibliographyStyles = `
 
 .gowiki-references-item {
   margin-bottom: 4px;
-  color: #444;
+  color: var(--gw-color-text-soft);
 }
 
 .gowiki-references-link {
@@ -665,12 +666,12 @@ const bibliographyStyles = `
 }
 
 .gowiki-references-link:hover {
-  color: #1a56db;
+  color: var(--gw-color-link);
   text-decoration: underline;
 }
 
 .gowiki-references-empty {
-  color: #999;
+  color: var(--gw-color-subtle);
   font-style: italic;
   font-size: 13px;
 }

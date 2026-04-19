@@ -145,7 +145,7 @@ class FootnoteNodeView {
 const footnoteStyles = `
 .gowiki-footnote {
   cursor: pointer;
-  color: #1a73e8;
+  color: var(--gw-color-link);
   font-size: 0.75em;
   vertical-align: super;
   line-height: 0;
@@ -165,10 +165,12 @@ const footnoteStyles = `
 
 .gowiki-footnote-tooltip {
   position: fixed;
-  background: #333;
-  color: #fff;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-text);
+  border: 1px solid var(--gw-color-border);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--gw-radius-sm);
+  box-shadow: var(--gw-shadow-md);
   font-size: 0.85em;
   max-width: 300px;
   z-index: 1000;
@@ -177,20 +179,20 @@ const footnoteStyles = `
 }
 
 .gowiki-footnote-tooltip a {
-  color: #8cb4ff;
+  color: var(--gw-color-link);
   text-decoration: underline;
 }
 
 .gowiki-footnote-section {
   margin-top: 2em;
   font-size: 0.85em;
-  color: #555;
+  color: var(--gw-color-text-soft);
   line-height: 1.6;
 }
 
 .gowiki-footnote-section hr {
   border: none;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--gw-color-border);
   margin-bottom: 0.75em;
 }
 
@@ -204,7 +206,7 @@ const footnoteStyles = `
 }
 
 .gowiki-footnote-section a {
-  color: var(--gowiki-link-color, #2563eb);
+  color: var(--gw-color-link);
 }
 `
 

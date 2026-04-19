@@ -60,8 +60,8 @@ const tagStyles = `
 
 .gowiki-tag-badge {
   display: inline-block;
-  background: #e8f0fe;
-  color: #1a56db;
+  background: var(--gw-color-accent);
+  color: var(--gw-color-link);
   padding: 2px 10px;
   border-radius: 12px;
   font-size: 13px;
@@ -73,13 +73,13 @@ const tagStyles = `
 }
 
 .gowiki-tag-query-loading {
-  color: #636e72;
+  color: var(--gw-color-muted);
   font-style: italic;
   padding: 8px;
 }
 
 .gowiki-tag-query-error {
-  color: #d63031;
+  color: var(--gw-color-error);
   font-style: italic;
   padding: 8px;
 }
@@ -93,17 +93,18 @@ const tagStyles = `
 .gowiki-tag-query th,
 .gowiki-tag-query td {
   padding: 6px 10px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--gw-color-border);
   text-align: left;
 }
 
 .gowiki-tag-query th {
-  background: #f8f9fa;
+  background: var(--gw-color-table-head-bg);
+  color: var(--gw-color-table-head-fg);
   font-weight: 600;
 }
 
 .gowiki-tag-query a {
-  color: #1e3f72;
+  color: var(--gw-color-link);
   text-decoration: none;
 }
 
@@ -121,7 +122,7 @@ const tagStyles = `
 }
 
 #app.gowiki-editing .gowiki-tag-query {
-  background: #f8f9fa;
+  background: var(--gw-color-surface);
   padding: 8px;
 }
 

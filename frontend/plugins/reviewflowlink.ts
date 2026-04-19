@@ -214,9 +214,9 @@ const reviewflowLinkStyles = `
 }
 
 .gowiki-rfl-error {
-  color: #c62828;
+  color: var(--gw-color-error);
   font-size: 13px;
-  border-bottom: 2px dotted #c62828;
+  border-bottom: 2px dotted var(--gw-color-error);
   padding-bottom: 1px;
 }
 
@@ -227,10 +227,10 @@ const reviewflowLinkStyles = `
   text-decoration: none;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #e8f5e9;
+  background: var(--gw-color-success-bg);
   border: 1px solid #c8e6c9;
   font-size: 13px;
-  color: #2e7d32;
+  color: var(--gw-color-success);
 }
 
 .gowiki-rfl-link:hover {
@@ -246,7 +246,7 @@ const reviewflowLinkStyles = `
 }
 
 .gowiki-rfl-version-badge {
-  background: #1565c0;
+  background: var(--gw-color-info);
   color: white;
   font-size: 11px;
   font-weight: 600;
@@ -256,8 +256,8 @@ const reviewflowLinkStyles = `
 
 .gowiki-rfl-inline-badge {
   display: inline-block;
-  background: #e3f2fd;
-  color: #1565c0;
+  background: var(--gw-color-info-bg);
+  color: var(--gw-color-info);
   padding: 1px 8px;
   border-radius: 10px;
   font-size: inherit;

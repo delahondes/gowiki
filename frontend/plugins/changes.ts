@@ -66,7 +66,7 @@ const changesStyles = `
 
 .gowiki-changes-item {
   padding: 3px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
 }
 
 .gowiki-changes-item:last-child {

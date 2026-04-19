@@ -7,12 +7,29 @@ import { enablePropertiesPanel } from "../compiler/core_ui"
 let mermaidPromise: Promise<any> | null = null
 let renderCounter = 0
 
+// Track every live mermaid NodeView so we can re-render them all when the
+// user flips light/dark. We use a WeakSet-like pattern but with a plain Set
+// because we want to iterate; destroy() must remove the instance.
+const liveMermaidViews = new Set<MermaidNodeView>()
+
+function currentMermaidTheme(): "default" | "dark" {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "default"
+}
+
+function initMermaid(api: any) {
+  api.initialize({
+    startOnLoad: false,
+    theme: currentMermaidTheme(),
+    securityLevel: "strict",
+  })
+}
+
 function ensureMermaid(): Promise<any> {
   if (!mermaidPromise) {
     mermaidPromise = new Promise((resolve, reject) => {
       if ((window as any).mermaid) {
         const api = (window as any).mermaid
-        api.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" })
+        initMermaid(api)
         resolve(api)
         return
       }
@@ -20,7 +37,7 @@ function ensureMermaid(): Promise<any> {
       script.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
       script.onload = () => {
         const api = (window as any).mermaid
-        api.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" })
+        initMermaid(api)
         resolve(api)
       }
       script.onerror = () => reject(new Error("Failed to load Mermaid library"))
@@ -28,6 +45,18 @@ function ensureMermaid(): Promise<any> {
     })
   }
   return mermaidPromise
+}
+
+// Listen for theme changes and re-render every mermaid diagram on the page.
+if (typeof window !== "undefined") {
+  window.addEventListener("gowiki:theme-changed", () => {
+    // Re-initialise so the next render picks up the new theme.
+    const api = (window as any).mermaid
+    if (api) initMermaid(api)
+    for (const v of liveMermaidViews) {
+      try { v.rerender() } catch { /* ignore */ }
+    }
+  })
 }
 
 // ── Info string parsing ──
@@ -102,6 +131,11 @@ class MermaidNodeView {
     this.updateCaption()
     this.dom.appendChild(this.captionEl)
 
+    liveMermaidViews.add(this)
+    this.renderDiagram()
+  }
+
+  rerender() {
     this.renderDiagram()
   }
 
@@ -112,7 +146,7 @@ class MermaidNodeView {
       return
     }
 
-    this.renderArea.innerHTML = '<div style="color:#999;font-size:0.85em">Rendering...</div>'
+    this.renderArea.innerHTML = '<div style="color:var(--gw-color-subtle);font-size:0.85em">Rendering...</div>'
     const currentData = data
     setTimeout(async () => {
       if ((this.node.attrs.data || "").trim() !== currentData) return
@@ -178,7 +212,9 @@ class MermaidNodeView {
     return true
   }
 
-  destroy() {}
+  destroy() {
+    liveMermaidViews.delete(this)
+  }
 }
 
 // ── Property definitions (size only — data is edited in raw mode) ──
@@ -232,8 +268,8 @@ const mermaidStyles = `
   height: auto;
 }
 #app.gowiki-editing .gowiki-mermaid {
-  border: 1px dashed #ccc;
-  border-radius: 6px;
+  border: 1px dashed var(--gw-color-border);
+  border-radius: var(--gw-radius);
   padding: 0.5em;
   cursor: default;
 }
@@ -244,24 +280,24 @@ const mermaidStyles = `
 .gowiki-mermaid-caption {
   text-align: center;
   font-size: 0.9em;
-  color: #555;
+  color: var(--gw-color-muted);
   font-style: italic;
   margin-top: 4px;
 }
 .gowiki-mermaid-empty {
-  color: #999;
+  color: var(--gw-color-subtle);
   font-style: italic;
   padding: 1em;
   text-align: center;
 }
 .gowiki-mermaid-error {
-  color: #c62828;
-  background: #fce4ec;
-  border: 1px solid #ef9a9a;
-  border-radius: 4px;
+  color: var(--gw-color-error);
+  background: var(--gw-color-error-bg);
+  border: 1px solid var(--gw-color-error);
+  border-radius: var(--gw-radius-sm);
   padding: 0.5em 1em;
   font-size: 0.85em;
-  font-family: monospace;
+  font-family: var(--gw-font-mono);
   white-space: pre-wrap;
   text-align: left;
 }

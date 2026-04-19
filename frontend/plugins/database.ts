@@ -134,25 +134,27 @@ const databaseStyles = `
 
 .gowiki-database-table th,
 .gowiki-database-table td {
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--gw-color-border);
   padding: 4px 8px;
   text-align: left;
   font-size: 13px;
 }
 
 .gowiki-database-table th {
-  background: #f1f3f5;
+  background: var(--gw-color-table-head-bg);
+  color: var(--gw-color-table-head-fg);
   font-weight: 600;
   cursor: pointer;
   user-select: none;
 }
 
 .gowiki-database-table th:hover {
-  background: #e9ecef;
+  background: var(--gw-color-table-head-bg);
+  filter: brightness(1.1);
 }
 
 .gowiki-database-table tr:nth-child(even) {
-  background: #f8f9fa;
+  background: var(--gw-color-surface);
 }
 
 .gowiki-database-pagination {

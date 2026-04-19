@@ -1,6 +1,20 @@
 body {
   margin: 0;
   overflow: hidden;
+  background: var(--gw-color-bg);
+  color: var(--gw-color-text);
+  font-family: var(--gw-font-sans);
+  font-size: var(--gw-font-size-base);
+  line-height: var(--gw-line-height-base);
+}
+
+/* Global link color — plugins/content that don't set their own. */
+a {
+  color: var(--gw-color-link);
+}
+
+a:hover {
+  color: var(--gw-color-link-hover);
 }
 
 /* ── Banner ─────────────────────────────────────────── */
@@ -9,12 +23,13 @@ body {
   display: flex;
   align-items: center;
   height: 48px;
-  background: #1e3f72;
-  color: white;
+  background: var(--gw-color-banner-bg);
+  color: var(--gw-color-banner-fg);
   padding: 0 16px;
   position: sticky;
   top: 0;
   z-index: 100;
+  border-bottom: 1px solid var(--gw-color-border);
 }
 
 /* ── Recent pages bar ───────────────────────────────── */
@@ -84,16 +99,29 @@ body {
 #search-input {
   width: 140px;
   padding: 6px 12px;
-  border-radius: 4px;
-  border: none;
+  border-radius: var(--gw-radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--gw-color-banner-fg);
   font-size: 14px;
   outline: none;
-  transition: width 0.25s ease;
+  transition: width 0.25s ease, background 0.25s ease;
+}
+
+#search-input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 #search-input:focus {
   width: 300px;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+  background: var(--gw-color-bg);
+  color: var(--gw-color-text);
+  border-color: var(--gw-color-border);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+#search-input:focus::placeholder {
+  color: var(--gw-color-subtle);
 }
 
 #search-results {
@@ -103,11 +131,11 @@ body {
   width: 400px;
   max-height: 400px;
   overflow-y: auto;
-  background: white;
+  background: var(--gw-color-bg);
   border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   z-index: 200;
-  color: #222;
+  color: var(--gw-color-text);
 }
 
 .search-results-hidden {
@@ -129,7 +157,7 @@ body {
 
 .search-result-item:hover,
 .search-result-item.search-result-active {
-  background: #e8f0fe;
+  background: var(--gw-color-accent);
 }
 
 .search-result-title {
@@ -152,7 +180,7 @@ body {
 }
 
 .search-result-snippet mark {
-  background: #fff3a8;
+  background: var(--gw-color-highlight);
   color: inherit;
   padding: 0 1px;
   border-radius: 2px;
@@ -170,7 +198,7 @@ body {
 .search-page-heading {
   margin: 0 0 16px;
   font-size: 1.4em;
-  color: #333;
+  color: var(--gw-color-text);
 }
 
 .search-page-empty {
@@ -187,7 +215,7 @@ body {
 }
 
 .search-page-item:hover {
-  background: #f5f8ff;
+  background: var(--gw-color-surface-alt);
 }
 
 .search-page-item-title {
@@ -205,18 +233,18 @@ body {
 
 .search-page-item-snippet {
   font-size: 0.9em;
-  color: #555;
+  color: var(--gw-color-muted);
   line-height: 1.4;
 }
 
 .search-page-item-snippet mark {
-  background: #fff3bf;
+  background: var(--gw-color-highlight);
   padding: 0 2px;
   border-radius: 2px;
 }
 
 ::highlight(search-highlight) {
-  background-color: #fff3bf;
+  background-color: var(--gw-color-highlight);
 }
 
 /* ── App layout ────────────────────────────────────── */
@@ -274,9 +302,9 @@ body {
 
 #left .gowiki-sidebar {
   padding: 8px 4px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--gw-color-border);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--gw-color-surface);
 }
 
 #left .gowiki-sidebar .ProseMirror {
@@ -349,7 +377,7 @@ body {
 .gowiki-ack-banner.gowiki-ack-done {
   border-color: #4caf50;
   background: #e8f5e9;
-  color: #2e7d32;
+  color: var(--gw-color-success);
   text-align: center;
   font-weight: 600;
   padding: 12px 20px;
@@ -442,16 +470,16 @@ body {
   border-radius: 6px;
   background: transparent;
   pointer-events: auto;
-  color: #555;
+  color: var(--gw-color-muted);
   cursor: pointer;
   position: relative;
   flex-shrink: 0;
 }
 
 .gowiki-action-btn:hover {
-  background: #e8e8e8;
-  border-color: #c9c9c9;
-  color: #222;
+  background: var(--gw-color-accent);
+  border-color: var(--gw-color-border);
+  color: var(--gw-color-link);
 }
 
 .gowiki-action-btn:disabled {
@@ -477,12 +505,12 @@ body {
 }
 
 .gowiki-action-delete {
-  color: #c33;
+  color: var(--gw-color-error);
 }
 
 .gowiki-action-delete:hover {
-  background: #fce8e8;
-  color: #c33;
+  background: var(--gw-color-error-bg);
+  color: var(--gw-color-error);
 }
 
 /* Text-based button for in-content use (Back to page, Restore, etc.) */
@@ -492,7 +520,7 @@ body {
   border: 1px solid #c9c9c9;
   border-radius: 4px;
   background: #f7f7f7;
-  color: #222;
+  color: var(--gw-color-text);
   text-align: left;
   cursor: pointer;
   font-size: inherit;
@@ -519,7 +547,7 @@ body {
   position: absolute;
   top: -3px;
   right: -3px;
-  background: #1e3f72;
+  background: var(--gw-color-primary);
   color: white;
   font-size: 9px;
   font-weight: 700;
@@ -564,7 +592,7 @@ body {
 }
 
 .gowiki-action-toast.gowiki-toast-error {
-  background: #c62828;
+  background: var(--gw-color-error);
   color: #fff;
   pointer-events: auto;
   display: flex;
@@ -576,7 +604,7 @@ body {
 
 .gowiki-status {
   min-height: 1.2em;
-  color: #666;
+  color: var(--gw-color-muted);
   font-size: 0.9em;
 }
 
@@ -672,7 +700,7 @@ body.gowiki-fullscreen #main {
 }
 
 .gowiki-raw-menuitem-active {
-  background: #dce8ff;
+  background: var(--gw-color-accent);
   border-radius: 3px;
 }
 
@@ -809,8 +837,8 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .ProseMirror a.gowiki-mailto-link,
 .ProseMirror a.gowiki-mailto-link:has(.gowiki-link-exists),
 .ProseMirror a.gowiki-mailto-link:has(.gowiki-link-missing) {
-  color: #1565c0 !important;
-  text-decoration-color: #1565c0 !important;
+  color: var(--gw-color-info) !important;
+  text-decoration-color: var(--gw-color-info) !important;
   text-decoration-thickness: from-font;
 }
 .ProseMirror a.gowiki-mailto-link::before {
@@ -847,7 +875,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-raw-wrapper {
   display: flex;
   flex-direction: column;
-  border: 3px solid #1e3f72;
+  border: 3px solid var(--gw-color-primary);
 }
 
 .gowiki-raw-editor {
@@ -903,8 +931,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  background: #f7f7f7;
-  border-bottom: 1px solid #ddd;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-text);
+  border-bottom: 1px solid var(--gw-color-border);
   padding: 2px 4px;
   font-size: 14px;
   line-height: 1;
@@ -929,7 +958,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-raw-menuitem:hover {
-  background: #e0e0e0;
+  background: var(--gw-color-border);
 }
 
 .gowiki-raw-menusep {
@@ -954,7 +983,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   top: 100%;
   left: 0;
   z-index: 50;
-  background: white;
+  background: var(--gw-color-bg);
   border: 1px solid #ccc;
   border-radius: 3px;
   padding: 2px 0;
@@ -994,7 +1023,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   top: 100%;
   left: 0;
   z-index: 60;
-  background: white;
+  background: var(--gw-color-bg);
   border: 1px solid #ccc;
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
@@ -1081,7 +1110,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-link-modal {
   width: 420px;
   max-width: calc(100vw - 24px);
-  background: #fff;
+  background: var(--gw-color-bg);
   border: 1px solid #b7b7b7;
   border-radius: 6px;
   padding: 12px;
@@ -1139,7 +1168,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   overflow-y: auto;
   border: 1px solid #ddd;
   border-radius: 4px;
-  background: #fff;
+  background: var(--gw-color-bg);
 }
 
 .gowiki-link-search-results:empty {
@@ -1152,7 +1181,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   display: flex;
   align-items: baseline;
   gap: 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
 }
 
 .gowiki-link-search-item:last-child {
@@ -1244,7 +1273,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 24px);
   overflow: auto;
-  background: #fff;
+  background: var(--gw-color-bg);
   border: 1px solid #b7b7b7;
   border-radius: 6px;
   padding: 12px;
@@ -1300,7 +1329,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 
 .gowiki-media-row {
   padding: 6px 4px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
 }
 
 .gowiki-media-row:last-child {
@@ -1364,18 +1393,18 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-media-btn-primary {
-  background: #1565c0 !important;
+  background: var(--gw-color-info) !important;
   color: #fff !important;
-  border-color: #1565c0 !important;
+  border-color: var(--gw-color-info) !important;
 }
 
 .gowiki-media-btn-danger {
-  color: #c62828 !important;
+  color: var(--gw-color-error) !important;
   border-color: #ef9a9a !important;
 }
 
 .gowiki-media-modal-empty {
-  color: #666;
+  color: var(--gw-color-muted);
   font-style: italic;
   padding: 6px;
 }
@@ -1428,10 +1457,12 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   top: calc(100% + 4px);
   right: 0;
   flex-direction: column;
-  background: white;
-  border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  min-width: 150px;
+  background: var(--gw-color-bg);
+  color: var(--gw-color-text);
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
+  box-shadow: var(--gw-shadow-md);
+  min-width: 180px;
   z-index: 200;
   overflow: hidden;
 }
@@ -1439,15 +1470,60 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .banner-user-dropdown a {
   display: block;
   padding: 8px 14px;
-  color: #333 !important;
+  color: var(--gw-color-text) !important;
   font-size: 13px;
   text-decoration: none !important;
   white-space: nowrap;
 }
 
 .banner-user-dropdown a:hover {
-  background: #e8f0fe;
-  color: #1a73e8 !important;
+  background: var(--gw-color-accent);
+  color: var(--gw-color-link) !important;
+}
+
+.banner-user-appearance {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--gw-color-border-soft);
+}
+
+.banner-user-appearance-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gw-color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.banner-user-appearance-seg {
+  display: flex;
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
+  overflow: hidden;
+}
+
+.banner-user-appearance-btn {
+  flex: 1;
+  background: var(--gw-color-bg);
+  border: none;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--gw-color-text);
+  border-right: 1px solid var(--gw-color-border);
+}
+
+.banner-user-appearance-btn:last-child {
+  border-right: none;
+}
+
+.banner-user-appearance-btn:hover {
+  background: var(--gw-color-surface-alt);
+}
+
+.banner-user-appearance-btn.is-active {
+  background: var(--gw-color-primary);
+  color: var(--gw-color-primary-fg);
 }
 
 .gowiki-login-overlay {
@@ -1469,17 +1545,17 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-template-picker-row {
   display: block;
   text-align: left;
-  background: #f5f8ff;
+  background: var(--gw-color-surface-alt);
   border: 1px solid #d2d9e5;
   border-radius: 5px;
   padding: 10px 14px;
   font: inherit;
   cursor: pointer;
-  color: #222;
+  color: var(--gw-color-text);
 }
 
 .gowiki-template-picker-row:hover {
-  background: #e8f0fe;
+  background: var(--gw-color-accent);
   border-color: #1a73e8;
 }
 
@@ -1489,13 +1565,13 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-template-picker-hint {
-  color: #666;
+  color: var(--gw-color-muted);
   font-size: 12px;
   margin-top: 2px;
 }
 
 .gowiki-login-dialog {
-  background: white;
+  background: var(--gw-color-bg);
   border-radius: 6px;
   padding: 24px;
   min-width: 300px;
@@ -1528,7 +1604,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-login-dialog input:focus {
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
   outline: none;
   box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
 }
@@ -1550,9 +1626,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-login-actions button.primary {
-  background: #1e3f72;
+  background: var(--gw-color-primary);
   color: white;
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
 }
 
 .gowiki-login-error {
@@ -1616,7 +1692,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-access-denied a {
-  color: #1e3f72;
+  color: var(--gw-color-primary);
   font-weight: 600;
   text-decoration: underline;
 }
@@ -1690,8 +1766,8 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-history-btn-restore {
-  color: #1e3f72;
-  border-color: #1e3f72;
+  color: var(--gw-color-primary);
+  border-color: var(--gw-color-primary);
 }
 
 .gowiki-history-draft-row {
@@ -1722,7 +1798,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-history-validated-badge {
   display: inline-block;
   background: #e8f5e9;
-  color: #2e7d32;
+  color: var(--gw-color-success);
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
@@ -1733,7 +1809,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-history-version-tag {
   display: inline-block;
   background: #e3f2fd;
-  color: #1565c0;
+  color: var(--gw-color-info);
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
@@ -1750,7 +1826,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 /* ── Version view ─────────────────────────────────── */
 
 .gowiki-version-header {
-  background: #e8f0fe;
+  background: var(--gw-color-accent);
   padding: 10px 14px;
   border-radius: 4px;
   margin-bottom: 16px;
@@ -1762,7 +1838,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border: 1px solid #ddd;
   border-radius: 4px;
   padding: 16px;
-  background: white;
+  background: var(--gw-color-bg);
 }
 
 .gowiki-version-view {
@@ -1772,7 +1848,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 /* ── Diff viewer ──────────────────────────────────── */
 
 .gowiki-diff-header {
-  background: #e8f0fe;
+  background: var(--gw-color-accent);
   padding: 10px 14px;
   border-radius: 4px;
   margin-bottom: 16px;
@@ -1786,7 +1862,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border: 1px solid #ddd;
   border-radius: 4px;
   overflow-x: auto;
-  background: #fafafa;
+  background: var(--gw-color-surface);
 }
 
 .gowiki-diff-line {
@@ -1796,7 +1872,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-diff-equal {
-  color: #555;
+  color: var(--gw-color-muted);
 }
 
 .gowiki-diff-separator {
@@ -1825,14 +1901,14 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   margin-top: 16px;
   border: 1px solid #ddd;
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--gw-color-surface);
 }
 
 .gowiki-diff-media-heading {
   padding: 10px 14px;
   font-weight: 600;
   font-size: 14px;
-  background: #e8f0fe;
+  background: var(--gw-color-accent);
   border-radius: 4px 4px 0 0;
   border-bottom: 1px solid #ddd;
 }
@@ -1849,7 +1925,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-diff-media-label {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--gw-color-text);
   margin-bottom: 8px;
   font-family: monospace;
 }
@@ -1864,7 +1940,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   flex: 1;
   text-align: center;
   font-size: 13px;
-  color: #666;
+  color: var(--gw-color-muted);
 }
 
 .gowiki-diff-media-cell img {
@@ -1913,19 +1989,19 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   font-size: 14px;
   border-bottom: 2px solid transparent;
   margin-bottom: -2px;
-  color: #555;
+  color: var(--gw-color-muted);
   transition: color 0.15s, border-color 0.15s;
 }
 
 .gowiki-admin-tab:hover {
   background: #f5f5f5;
-  color: #333;
+  color: var(--gw-color-text);
 }
 
 .gowiki-admin-tab-active {
-  border-bottom-color: #1e3f72;
+  border-bottom-color: var(--gw-color-primary);
   font-weight: 600;
-  color: #1e3f72;
+  color: var(--gw-color-primary);
 }
 
 .gowiki-admin-content {
@@ -1948,11 +2024,11 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .gowiki-admin-table th {
   text-align: left;
   padding: 8px 12px;
-  background: #f5f5f5;
-  border-bottom: 2px solid #ddd;
+  background: var(--gw-color-table-head-bg);
+  color: var(--gw-color-table-head-fg);
+  border-bottom: 2px solid var(--gw-color-border);
   font-weight: 600;
   font-size: 13px;
-  color: #444;
 }
 
 .gowiki-admin-table td {
@@ -1962,7 +2038,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-table tbody tr:hover {
-  background: #fafafa;
+  background: var(--gw-color-surface);
 }
 
 .gowiki-admin-actions-cell {
@@ -1986,9 +2062,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-btn-primary {
-  background: #1e3f72;
+  background: var(--gw-color-primary);
   color: white;
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
 }
 
 .gowiki-admin-btn-primary:hover {
@@ -1999,7 +2075,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   padding: 3px 8px;
   border: 1px solid #ccc;
   border-radius: 3px;
-  background: white;
+  background: var(--gw-color-bg);
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
@@ -2075,7 +2151,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-modal {
-  background: white;
+  background: var(--gw-color-bg);
   border-radius: 6px;
   padding: 24px;
   min-width: 360px;
@@ -2142,7 +2218,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-modal-body input:focus {
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
   outline: none;
   box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
 }
@@ -2158,7 +2234,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-modal-body select:focus {
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
   outline: none;
   box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
 }
@@ -2180,9 +2256,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-modal-actions button.primary {
-  background: #1e3f72;
+  background: var(--gw-color-primary);
   color: white;
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
 }
 
 .gowiki-admin-modal-actions button.primary:hover {
@@ -2216,7 +2292,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-input-inline:focus {
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
   outline: none;
   box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
 }
@@ -2232,7 +2308,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   margin: 24px 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid #eee;
-  color: #333;
+  color: var(--gw-color-text);
 }
 
 .gowiki-admin-config-form h3:first-child {
@@ -2259,7 +2335,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-admin-config-form input[type="text"]:focus {
-  border-color: #1e3f72;
+  border-color: var(--gw-color-primary);
   outline: none;
   box-shadow: 0 0 0 2px rgba(30, 63, 114, 0.2);
 }
@@ -2282,9 +2358,10 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   margin: 0 0 16px 20px;
   padding: 12px 16px;
   max-width: 250px;
-  background: #f8f9fa;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-text);
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -2306,7 +2383,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-toc li a {
-  color: #1e3f72;
+  color: var(--gw-color-link);
   text-decoration: none;
   display: block;
   padding: 2px 0;
@@ -2392,7 +2469,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-sitemap .gowiki-sitemap-title {
-  color: #666;
+  color: var(--gw-color-muted);
   font-size: 0.85em;
   white-space: nowrap;
   overflow: hidden;
@@ -2439,7 +2516,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   justify-content: space-between;
   gap: 18px;
   font-size: 9pt;
-  color: #555;
+  color: var(--gw-color-muted);
   page-break-inside: avoid;
   break-inside: avoid;
 }
@@ -2450,7 +2527,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .gowiki-export-endblock-link {
-  color: #1a56db;
+  color: var(--gw-color-link);
   text-decoration: underline;
 }
 
@@ -2474,7 +2551,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   display: flex;
   flex-direction: column;
   border-left: 1px solid #ddd;
-  background: #fafafa;
+  background: var(--gw-color-surface);
   height: 100%;
   overflow: hidden;
   font-size: 0.88em;
@@ -2486,7 +2563,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid #ddd;
-  background: #f0f0f0;
+  background: var(--gw-color-border-soft);
   font-weight: 600;
 }
 
@@ -2495,7 +2572,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border: none;
   cursor: pointer;
   font-size: 1.1em;
-  color: #666;
+  color: var(--gw-color-muted);
   padding: 2px 6px;
   border-radius: 3px;
 }
@@ -2550,8 +2627,8 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .ai-msg-assistant {
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--gw-color-bg);
+  border: 1px solid var(--gw-color-border);
   align-self: flex-start;
   max-width: 95%;
 }
@@ -2565,7 +2642,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 .ai-msg-applied {
   background: #e8f5e9;
   border-color: #c8e6c9;
-  color: #2e7d32;
+  color: var(--gw-color-success);
   font-weight: 500;
 }
 
@@ -2576,11 +2653,11 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 }
 
 .ai-msg-link {
-  color: #1565c0;
+  color: var(--gw-color-info);
   text-decoration: underline;
 }
 .ai-msg-link:hover { color: #0d47a1; }
-.ai-msg code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+.ai-msg code { background: var(--gw-color-border-soft); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
 
 .ai-panel-input-row {
   display: flex;
@@ -2629,7 +2706,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 /* ── AI Review Panel ────────────────────── */
 
 .ai-review-container { padding: 0; }
-.ai-review-header { font-weight: 600; padding: 8px; border-bottom: 1px solid #e0e0e0; }
+.ai-review-header { font-weight: 600; padding: 8px; border-bottom: 1px solid var(--gw-color-border); }
 
 .ai-review-list { display: flex; flex-direction: column; }
 
@@ -2644,9 +2721,9 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   align-items: center;
   gap: 6px;
 }
-.ai-review-item-header:hover { background: #f0f0f0; }
+.ai-review-item-header:hover { background: var(--gw-color-border-soft); }
 .ai-review-floating {
-  background: #fff;
+  background: var(--gw-color-bg);
   border: 1px solid #ccc;
   border-radius: 6px;
   padding: 10px;
@@ -2656,14 +2733,14 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   overflow-y: auto;
 }
 .ai-review-item-accepted { background: #e8f5e9; }
-.ai-review-item-accepted > .ai-review-item-header::after { content: " \2713"; color: #2e7d32; font-weight: 700; }
+.ai-review-item-accepted > .ai-review-item-header::after { content: " \2713"; color: var(--gw-color-success); font-weight: 700; }
 .ai-review-item-rejected { background: #fce4ec; opacity: 0.6; }
-.ai-review-item-rejected > .ai-review-item-header::after { content: " \2717"; color: #c62828; font-weight: 700; }
+.ai-review-item-rejected > .ai-review-item-header::after { content: " \2717"; color: var(--gw-color-error); font-weight: 700; }
 .ai-review-item-clarify { background: #fff3e0; }
 .ai-review-item-clarify > .ai-review-item-header::after { content: " ?"; color: #e65100; font-weight: 700; }
 .ai-review-item-unverified { background: #f5f5f5; opacity: 0.6; }
 .ai-review-warning {
-  color: #c62828;
+  color: var(--gw-color-error);
   font-size: 0.8em;
   font-weight: 600;
   margin-bottom: 4px;
@@ -2672,7 +2749,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   border-radius: 3px;
 }
 
-.ai-review-num { font-weight: 700; font-size: 0.85em; color: #555; }
+.ai-review-num { font-weight: 700; font-size: 0.85em; color: var(--gw-color-muted); }
 .ai-review-excerpt { font-size: 0.8em; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ai-review-diff {
@@ -2713,7 +2790,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
 
 .ai-review-rationale {
   font-size: 0.8em;
-  color: #666;
+  color: var(--gw-color-muted);
   font-style: italic;
   margin-bottom: 6px;
 }
@@ -2724,13 +2801,13 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   padding: 3px 10px;
   border: 1px solid #ccc;
   border-radius: 3px;
-  background: #fff;
+  background: var(--gw-color-bg);
   cursor: pointer;
   font-size: 0.85em;
 }
-.ai-review-accept { color: #2e7d32; border-color: #81c784; }
+.ai-review-accept { color: var(--gw-color-success); border-color: #81c784; }
 .ai-review-accept:hover { background: #e8f5e9; }
-.ai-review-reject { color: #c62828; border-color: #ef9a9a; }
+.ai-review-reject { color: var(--gw-color-error); border-color: #ef9a9a; }
 .ai-review-reject:hover { background: #fdecea; }
 .ai-review-clarify { color: #e65100; border-color: #ffb74d; }
 .ai-review-clarify:hover { background: #fff3e0; }
@@ -2756,7 +2833,7 @@ a.gowiki-link-missing { color: #e65100; text-decoration-color: #e65100; }
   background: #f5f5f5;
 }
 .ai-review-apply-btn {
-  background: #2e7d32;
+  background: var(--gw-color-success);
   color: white;
   border: none;
   border-radius: 4px;

@@ -3,9 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <title>Gowiki</title>
+    <script>
+      // No-flash theme boot: resolve the user's preference before first paint.
+      // Order: localStorage → cookie (set at login) → OS preference → light.
+      (function () {
+        try {
+          var pref = localStorage.getItem("gowiki-theme")
+          if (!pref) {
+            var m = document.cookie.match(/(?:^|; )gowiki_theme=([^;]+)/)
+            if (m) pref = decodeURIComponent(m[1])
+          }
+          if (!pref || pref === "auto") {
+            pref = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+          }
+          document.documentElement.dataset.theme = pref
+        } catch (e) {
+          document.documentElement.dataset.theme = "light"
+        }
+      })()
+    </script>
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
     <link rel="icon" href="/icons/favicon.ico" sizes="16x16 32x32 48x48">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="stylesheet" href="/theme.css" />
+    <link rel="stylesheet" href="/api/theme/overrides.css" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/pm.css" />
     <link rel="stylesheet" href="/menu.css" />

@@ -66,8 +66,8 @@
 .ProseMirror blockquote {
   margin: 1em 0;
   padding-left: 1em;
-  border-left: 3px solid #ddd;
-  color: #555;
+  border-left: 3px solid var(--gw-color-border);
+  color: var(--gw-color-muted);
 }
 
 .ProseMirror ul,
@@ -76,16 +76,22 @@
 }
 
 .ProseMirror code {
-  background: #f5f5f5;
+  background: var(--gw-color-code-inline-bg);
+  color: var(--gw-color-code-text);
   padding: 0.2em 0.4em;
-  border-radius: 3px;
-  font-family: monospace;
+  border-radius: var(--gw-radius-sm);
+  font-family: var(--gw-font-mono);
 }
 
 .ProseMirror pre {
-  background: #f5f5f5;
+  background: var(--gw-color-code-bg);
+  color: var(--gw-color-code-text);
   padding: 0.75em;
-  border-radius: 4px;
-  font-family: monospace;
+  border-radius: var(--gw-radius);
+  font-family: var(--gw-font-mono);
   overflow-x: auto;
+}
+
+.ProseMirror ::selection {
+  background: var(--gw-color-selection);
 }

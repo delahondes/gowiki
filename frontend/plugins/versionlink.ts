@@ -215,9 +215,9 @@ const versionLinkStyles = `
 }
 
 .gowiki-vl-error {
-  color: #c62828;
+  color: var(--gw-color-error);
   font-size: 13px;
-  border-bottom: 2px dotted #c62828;
+  border-bottom: 2px dotted var(--gw-color-error);
   padding-bottom: 1px;
 }
 
@@ -228,10 +228,10 @@ const versionLinkStyles = `
   text-decoration: none;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #e3f2fd;
+  background: var(--gw-color-info-bg);
   border: 1px solid #bbdefb;
   font-size: 13px;
-  color: #1565c0;
+  color: var(--gw-color-info);
 }
 
 .gowiki-vl-link:hover {
@@ -239,7 +239,7 @@ const versionLinkStyles = `
 }
 
 .gowiki-vl-version-badge {
-  background: #1565c0;
+  background: var(--gw-color-info);
   color: white;
   font-size: 11px;
   font-weight: 600;

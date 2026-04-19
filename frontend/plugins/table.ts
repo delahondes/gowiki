@@ -939,13 +939,15 @@ const tableStyles = `
 
 .ProseMirror th,
 .ProseMirror td {
-  border: 1px solid #ccc;
+  border: 1px solid var(--gw-color-border);
   padding: 0.25em 0.5em;
   vertical-align: top;
+  color: var(--gw-color-text);
 }
 
 .ProseMirror th {
-  background: #f7f7f7;
+  background: var(--gw-color-table-head-bg);
+  color: var(--gw-color-table-head-fg);
   font-weight: 600;
   text-align: left;
 }

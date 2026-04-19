@@ -5,8 +5,9 @@
   flex-wrap: wrap;
   align-items: center;
 
-  background: #f7f7f7;
-  border-bottom: 1px solid #ddd;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-text);
+  border-bottom: 1px solid var(--gw-color-border);
 
   padding: 2px 4px;
 
@@ -89,11 +90,11 @@
 
 /* Hover / active */
 .ProseMirror-menuitem:hover {
-  background: #e0e0e0;
+  background: var(--gw-color-surface-alt);
 }
 
 .ProseMirror-menu-active {
-  background: #d0d0d0;
+  background: var(--gw-color-accent);
 }
 
 /* Disabled */
@@ -121,9 +122,10 @@
 
   z-index: 50;
 
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 3px;
+  background: var(--gw-color-bg);
+  color: var(--gw-color-text);
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
 
   padding: 2px 0;
   min-width: 140px;
@@ -135,7 +137,7 @@
 }
 
 .ProseMirror-menu-dropdown-item:hover {
-  background: #eee;
+  background: var(--gw-color-surface-alt);
 }
 
 /* Editor content should come after the menu */

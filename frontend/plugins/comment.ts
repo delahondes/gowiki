@@ -929,17 +929,17 @@ const commentStyles = `
   font-size: 0.82em;
   padding: 3px 8px;
   cursor: pointer;
-  color: #888;
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  color: var(--gw-color-muted);
+  background: var(--gw-color-bg);
+  border: 1px solid var(--gw-color-border);
   border-radius: 3px;
   user-select: none;
   z-index: 5;
 }
 .comment-collapsed-toggle:hover {
-  background: #f5f5f0;
-  color: #555;
-  border-color: #ccc;
+  background: var(--gw-color-surface-alt);
+  color: var(--gw-color-text);
+  border-color: var(--gw-color-border);
 }
 .comment-header-arrow {
   font-size: 0.75em;
@@ -953,47 +953,51 @@ const commentStyles = `
   font-weight: 600;
   font-size: 0.95em;
   padding: 4px 6px 8px;
-  color: #555;
-  border-bottom: 1px solid #e0e0e0;
+  color: var(--gw-color-muted);
+  border-bottom: 1px solid var(--gw-color-border);
   margin-bottom: 6px;
   cursor: pointer;
   user-select: none;
   border-radius: 3px;
 }
 .comment-sidebar-header:hover {
-  background: #f5f5f0;
-  color: #333;
+  background: var(--gw-color-surface-alt);
+  color: var(--gw-color-text);
 }
 
-/* --- Comment boxes --- */
+/* --- Comment boxes ---
+   The yellow-parchment look is a signal "these are reviewer notes" that
+   the user relies on. We keep its light-mode palette hardcoded and only
+   override in dark mode below. */
 .comment-box {
   padding: 8px 8px 6px;
   margin-bottom: 4px;
   border: 1px solid #e0d8b0;
-  border-radius: 4px;
+  border-radius: var(--gw-radius-sm);
   background: #fffde7;
+  color: #222;
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .comment-box:hover, .comment-box-active {
   border-color: #d4c878;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  box-shadow: var(--gw-shadow-sm);
 }
 .comment-resolved { opacity: 0.6; background: #f8f8f5; border-color: #ddd; }
-.comment-orphaned { border-left: 3px solid #e57373; }
-.comment-orphan-label { color: #c62828; font-style: italic; font-size: 0.85em; }
+.comment-orphaned { border-left: 3px solid var(--gw-color-error); }
+.comment-orphan-label { color: var(--gw-color-error); font-style: italic; font-size: 0.85em; }
 .comment-author { font-size: 0.85em; color: #777; margin-bottom: 4px; }
 .comment-text { white-space: pre-wrap; word-break: break-word; line-height: 1.4; margin-bottom: 6px; }
 .comment-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .comment-action-btn {
-  font-size: 0.8em; padding: 2px 8px; border: 1px solid #ccc; border-radius: 3px;
-  background: #fff; cursor: pointer; color: #555;
+  font-size: 0.8em; padding: 2px 8px; border: 1px solid var(--gw-color-border); border-radius: 3px;
+  background: var(--gw-color-bg); cursor: pointer; color: var(--gw-color-muted);
 }
-.comment-action-btn:hover { background: #f0f0f0; border-color: #aaa; }
-.comment-action-delete { color: #c62828; }
-.comment-action-delete:hover { background: #ffebee; border-color: #c62828; }
-.comment-action-submit { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
-.comment-action-submit:hover { background: #c8e6c9; }
+.comment-action-btn:hover { background: var(--gw-color-border-soft); border-color: var(--gw-color-muted); }
+.comment-action-delete { color: var(--gw-color-error); }
+.comment-action-delete:hover { background: var(--gw-color-error-bg); border-color: var(--gw-color-error); }
+.comment-action-submit { background: var(--gw-color-success-bg); border-color: var(--gw-color-success); color: var(--gw-color-success); }
+.comment-action-submit:hover { background: var(--gw-color-success-bg); filter: brightness(1.1); }
 
 /* --- AI comments --- */
 .comment-ai { background: #e8eaf6; border-color: #9fa8da; }
@@ -1019,11 +1023,11 @@ const commentStyles = `
   margin-bottom: 4px;
   padding: 5px 8px;
   font-size: 0.82em;
-  color: #444;
-  background: #fffef5;
-  border: 1px solid #ddd;
+  color: var(--gw-color-text);
+  background: var(--gw-color-bg);
+  border: 1px solid var(--gw-color-border);
   border-radius: 3px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  box-shadow: var(--gw-shadow-sm);
   white-space: normal;
   word-break: break-word;
   line-height: 1.35;
@@ -1040,31 +1044,58 @@ const commentStyles = `
 }
 .comment-orphaned-label-header {
   font-size: 0.82em;
-  color: #c62828;
+  color: var(--gw-color-error);
   font-style: italic;
   padding: 4px 8px;
   margin-bottom: 4px;
-  border-top: 1px dashed #e0a0a0;
+  border-top: 1px dashed var(--gw-color-error);
 }
 
 .comment-resolved-toggle {
-  font-size: 0.85em; color: #888; cursor: pointer; padding: 4px 8px; margin: 4px 0; border-radius: 3px;
+  font-size: 0.85em; color: var(--gw-color-muted); cursor: pointer; padding: 4px 8px; margin: 4px 0; border-radius: 3px;
 }
-.comment-resolved-toggle:hover { background: #f5f5f5; color: #555; }
+.comment-resolved-toggle:hover { background: var(--gw-color-surface-alt); color: var(--gw-color-text); }
 
 /* --- Create form in sidebar --- */
 .comment-create-form {
-  background: #f1f8e9;
-  border-color: #81c784;
+  background: var(--gw-color-success-bg);
+  border-color: var(--gw-color-success);
   cursor: default;
 }
 .comment-create-label {
-  font-size: 0.85em; color: #555; margin-bottom: 6px; font-style: italic;
+  font-size: 0.85em; color: var(--gw-color-muted); margin-bottom: 6px; font-style: italic;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .comment-create-textarea, .comment-edit-textarea {
-  width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc;
+  width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid var(--gw-color-border);
+  background: var(--gw-color-bg); color: var(--gw-color-text);
   border-radius: 3px; font-size: 0.9em; font-family: inherit; resize: vertical; margin-bottom: 6px;
+}
+
+/* --- Dark-mode adjustments for the yellow-parchment comment boxes --- */
+html[data-theme="dark"] .comment-box {
+  background: #3a3520;
+  border-color: #5a4f30;
+  color: var(--gw-color-text);
+}
+html[data-theme="dark"] .comment-box:hover,
+html[data-theme="dark"] .comment-box-active {
+  border-color: #7a6c40;
+}
+html[data-theme="dark"] .comment-resolved {
+  background: #2a2a28;
+  border-color: var(--gw-color-border);
+}
+html[data-theme="dark"] .comment-author {
+  color: var(--gw-color-muted);
+}
+html[data-theme="dark"] .comment-ai {
+  background: #2a2c40;
+  border-color: #3f4a6e;
+}
+html[data-theme="dark"] .comment-ai:hover,
+html[data-theme="dark"] .comment-ai.comment-box-active {
+  border-color: #5c6bc0;
 }
 .comment-create-buttons { display: flex; gap: 6px; }
 

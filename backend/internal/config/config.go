@@ -24,6 +24,21 @@ type Config struct {
 	AIAPI         AIAPIConfig       `yaml:"ai_api" json:"ai_api"`
 	AIAssistant   AIAssistantConfig `yaml:"ai_assistant" json:"ai_assistant"`
 	Bibliography  BibliographyConfig `yaml:"bibliography" json:"bibliography"`
+	Themes        ThemeConfig        `yaml:"themes" json:"themes"`
+}
+
+// ThemeConfig controls the appearance/theme system.
+type ThemeConfig struct {
+	// Default applied when a user has no saved preference. Values:
+	// "light" | "dark" | "auto" (follows OS). Default "auto".
+	Default string `yaml:"default" json:"default"`
+	// When false, the user-facing theme switcher is hidden and the default
+	// is pinned for everyone.
+	AllowUserOverride bool `yaml:"allow_user_override" json:"allow_user_override"`
+	// PaletteOverrides maps palette var names (without the "--gw-color-"
+	// prefix) to CSS color values. Applied to the light theme only.
+	// Example: {"primary": "#2d5a47", "link": "#1e7a5e"}.
+	PaletteOverrides map[string]string `yaml:"palette_overrides" json:"palette_overrides"`
 }
 
 // BibliographyConfig controls the bibliography (PubMed/DOI citation) plugin.
@@ -238,6 +253,10 @@ func DefaultConfig() Config {
 		},
 		Bibliography: BibliographyConfig{
 			Enabled: false,
+		},
+		Themes: ThemeConfig{
+			Default:           "auto",
+			AllowUserOverride: true,
 		},
 	}
 }

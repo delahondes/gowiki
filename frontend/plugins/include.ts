@@ -101,9 +101,10 @@ const includeProperties = [
 const includeHeadingKey = new PluginKey("gowiki.includeHeadingNumbers")
 
 const includeStyles = `
-/* In edit mode: show a grey zone so the user can see the block is non-editable */
+/* In edit mode: show a subtle non-editable zone background. */
 #app.gowiki-editing .gowiki-include {
-  background: #f8f9fa;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-muted);
   margin: 0.5em 0;
 }
 
@@ -125,13 +126,13 @@ const includeStyles = `
 }
 
 .gowiki-include-loading {
-  color: #636e72;
+  color: var(--gw-color-muted);
   font-style: italic;
   padding: 8px;
 }
 
 .gowiki-include-error {
-  color: #d63031;
+  color: var(--gw-color-error);
   font-style: italic;
   padding: 8px;
 }

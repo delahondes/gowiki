@@ -150,6 +150,8 @@ let mermaidInsertCommand = null
 let slidesInsertCommand = null
 let todoInsertCommand = null
 let todoListInsertCommand = null
+let currentUserThemePref = "" // "light" | "dark" | "auto" | ""
+let themeAllowUserOverride = true
 let todoCalendarInsertCommand = null
 let publicationInsertCommand = null
 let referencesInsertCommand = null
@@ -800,6 +802,55 @@ function encodePagePath(path) {
     .map(part => encodeURIComponent(part))
     .join("/")
 }
+
+// resolveTheme translates a stored preference ("light"/"dark"/"auto"/"") into
+// an effective theme, consulting the OS for "auto" and falling back to the
+// admin default.
+function resolveTheme(pref, adminDefault) {
+  const p = pref || adminDefault || "auto"
+  if (p === "light" || p === "dark") return p
+  try {
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+  } catch { return "light" }
+}
+
+// applyTheme writes the effective theme to <html> and notifies plugins that
+// care (e.g. mermaid/chart re-render on theme change).
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme
+  try {
+    window.dispatchEvent(new CustomEvent("gowiki:theme-changed", { detail: { theme } }))
+  } catch { /* ignore */ }
+}
+
+// setThemePreference saves the user's pref and immediately applies the
+// resolved theme. Writes localStorage + the backend when authenticated.
+async function setThemePreference(pref) {
+  currentUserThemePref = pref
+  try { localStorage.setItem("gowiki-theme", pref) } catch { /* ignore */ }
+  const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+  applyTheme(resolveTheme(pref, adminDefault))
+  if (currentUser) {
+    try {
+      await fetch("/api/auth/me/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ theme_preference: pref }),
+      })
+    } catch { /* best effort */ }
+  }
+}
+
+// Keep "auto" tracking the OS preference in real time.
+try {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    const pref = currentUserThemePref || (localStorage.getItem("gowiki-theme") || "auto")
+    if (pref === "auto" || !pref) {
+      const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+      applyTheme(resolveTheme(pref, adminDefault))
+    }
+  })
+} catch { /* ignore on unsupported browsers */ }
 
 // waitForQuietDOM resolves once the given root has been visually stable for
 // `quietMs`. "Stable" means: every <img> is loaded (or has failed), and no
@@ -8232,6 +8283,7 @@ async function resolveSiteInfo() {
     const resp = await fetch("/api/site/info")
     if (resp.ok) {
       const data = await resp.json()
+      window.__gowikiSiteInfo = data
       if (data.title) {
         siteTitle = data.title
         document.getElementById("banner-title").textContent = siteTitle
@@ -8248,6 +8300,13 @@ async function resolveSiteInfo() {
       }
       if (data.ai_assistant_enabled) {
         aiAssistantEnabled = true
+      }
+      if (data.theme) {
+        themeAllowUserOverride = data.theme.allow_user_override !== false
+        // Re-resolve in case the admin default differs from what the
+        // no-flash script assumed (the script only has access to OS / cookie).
+        const pref = currentUserThemePref || (typeof localStorage !== "undefined" ? localStorage.getItem("gowiki-theme") : "") || ""
+        applyTheme(resolveTheme(pref, data.theme.default))
       }
     }
   } catch { /* keep default */ }
@@ -8445,6 +8504,41 @@ async function checkAuth() {
     currentUser = null
   }
   window.__gowikiCurrentUser = currentUser
+
+  // Load the user's persisted theme preference and apply it. The
+  // no-flash boot script already painted something reasonable; this
+  // corrects it to the user's actual preference once we know them.
+  if (currentUser) {
+    try {
+      const prefResp = await fetch("/api/auth/me/preferences")
+      if (prefResp.ok) {
+        const data = await prefResp.json()
+        const serverPref = data.theme_preference || ""
+        // Prefer the server's answer if it has one. If the server has never
+        // persisted a preference for this user, keep whatever localStorage
+        // holds so we don't clobber a client-only choice.
+        let localPref = ""
+        try { localPref = localStorage.getItem("gowiki-theme") || "" } catch { /* ignore */ }
+        currentUserThemePref = serverPref || localPref
+        if (serverPref) {
+          try { localStorage.setItem("gowiki-theme", serverPref) } catch { /* ignore */ }
+        } else if (localPref) {
+          // Backfill the server with the client-only pref so future loads
+          // are consistent across devices.
+          try {
+            await fetch("/api/auth/me/preferences", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ theme_preference: localPref }),
+            })
+          } catch { /* best effort */ }
+        }
+        const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+        applyTheme(resolveTheme(currentUserThemePref, adminDefault))
+      }
+    } catch { /* best effort */ }
+  }
+
   renderBannerUser()
 }
 
@@ -8492,6 +8586,51 @@ function renderBannerUser() {
       showSigningKeyModal()
     })
     dropdown.appendChild(signingLink)
+
+    // Appearance (light / dark / auto) — hidden when admin has disabled override.
+    if (themeAllowUserOverride !== false) {
+      const appearanceWrap = document.createElement("div")
+      appearanceWrap.className = "banner-user-appearance"
+      const label = document.createElement("div")
+      label.className = "banner-user-appearance-label"
+      label.textContent = "Appearance"
+      appearanceWrap.appendChild(label)
+
+      const options = [
+        { value: "light", label: "Light" },
+        { value: "dark",  label: "Dark"  },
+        { value: "auto",  label: "Auto"  },
+      ]
+      // Resolve the "current" highlight from the strongest source available:
+      // server-stored pref → localStorage (last client choice) → auto.
+      // This covers the case where the server hasn't persisted the user's
+      // click yet (e.g. earlier deploy or silent PUT failure) but localStorage
+      // reflects what theme is actually active.
+      let current = currentUserThemePref
+      if (!current) {
+        try { current = localStorage.getItem("gowiki-theme") || "" } catch { /* ignore */ }
+      }
+      if (!current) current = "auto"
+      const seg = document.createElement("div")
+      seg.className = "banner-user-appearance-seg"
+      for (const opt of options) {
+        const btn = document.createElement("button")
+        btn.type = "button"
+        btn.className = "banner-user-appearance-btn" + (opt.value === current ? " is-active" : "")
+        btn.textContent = opt.label
+        btn.addEventListener("click", async (e) => {
+          e.preventDefault()
+          await setThemePreference(opt.value)
+          for (const b of seg.querySelectorAll(".banner-user-appearance-btn")) {
+            b.classList.toggle("is-active", b.textContent === opt.label)
+          }
+        })
+        seg.appendChild(btn)
+      }
+      appearanceWrap.appendChild(seg)
+      dropdown.appendChild(appearanceWrap)
+    }
+
     const logout = document.createElement("a")
     logout.textContent = "Logout"
     logout.addEventListener("click", async (e) => {
@@ -11449,6 +11588,41 @@ async function renderAdminConfigTab(container) {
     sigNote.textContent = "When enabled, users with a signing key see \"Sign & Confirm\". When required, users without a key cannot confirm at all."
     form.appendChild(sigNote)
 
+    // Themes section
+    const themesHeading = document.createElement("h3")
+    themesHeading.textContent = "Themes"
+    form.appendChild(themesHeading)
+
+    const themesConfig = config.themes || {}
+
+    const themeDefaultSelect = adminFormSelect(form, "Default theme (when user has no preference)", [
+      { value: "auto",  label: "Follow system" },
+      { value: "light", label: "Light" },
+      { value: "dark",  label: "Dark" },
+    ], themesConfig.default || "auto")
+
+    const themeAllowOverrideCb = document.createElement("input")
+    themeAllowOverrideCb.type = "checkbox"
+    themeAllowOverrideCb.checked = themesConfig.allow_user_override !== false
+    const themeAllowOverrideLabel = document.createElement("label")
+    themeAllowOverrideLabel.style.cssText = "display:flex;align-items:center;gap:8px;margin:8px 0"
+    themeAllowOverrideLabel.appendChild(themeAllowOverrideCb)
+    themeAllowOverrideLabel.appendChild(document.createTextNode("Allow users to override the theme (show Appearance switcher in their profile menu)"))
+    form.appendChild(themeAllowOverrideLabel)
+
+    const themeOverridesNote = document.createElement("div")
+    themeOverridesNote.style.cssText = "font-size:0.85em;color:#666;margin:8px 0 4px 0"
+    themeOverridesNote.innerHTML = "Palette overrides applied to the light theme. One <code>key = #hex</code> per line (e.g. <code>primary = #2d5a47</code>). Keys: primary, primary_fg, link, accent, success, warning, error."
+    form.appendChild(themeOverridesNote)
+    const themeOverridesSerialized = Object.entries(themesConfig.palette_overrides || {})
+      .map(([k, v]) => `${k} = ${v}`).join("\n")
+    const themeOverridesInput = document.createElement("textarea")
+    themeOverridesInput.rows = 5
+    themeOverridesInput.style.cssText = "width:100%;font-family:monospace;font-size:13px;padding:6px;box-sizing:border-box"
+    themeOverridesInput.placeholder = "primary = #2d5a47\nlink = #1e7a5e"
+    themeOverridesInput.value = themeOverridesSerialized
+    form.appendChild(themeOverridesInput)
+
     // Save button
     const actions = document.createElement("div")
     actions.className = "gowiki-admin-config-actions"
@@ -11562,6 +11736,22 @@ async function renderAdminConfigTab(container) {
             },
             webhook: savedWebhooks,
           },
+        },
+        bibliography: config.bibliography || {},
+        themes: {
+          default: themeDefaultSelect.value || "auto",
+          allow_user_override: themeAllowOverrideCb.checked,
+          palette_overrides: (() => {
+            const out = {}
+            themeOverridesInput.value.split("\n").forEach(line => {
+              const eq = line.indexOf("=")
+              if (eq <= 0) return
+              const k = line.slice(0, eq).trim()
+              const v = line.slice(eq + 1).trim()
+              if (k && v) out[k] = v
+            })
+            return out
+          })(),
         },
       }
       try {
@@ -12541,6 +12731,8 @@ async function bootstrap() {
   // Export mode: render page cleanly for PDF generation.
   const isExportMode = new URLSearchParams(window.location.search).get("export") === "pdf"
   if (isExportMode) {
+    // Force light theme for PDF export — printed paper is light-on-white.
+    document.documentElement.dataset.theme = "light"
     // Hide chrome, render page in view mode.
     document.getElementById("banner")?.remove()
     document.getElementById("left")?.remove()

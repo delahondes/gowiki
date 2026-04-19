@@ -249,10 +249,10 @@ const gate = {
 // --- Priority colors ---
 
 const PRIORITY_COLORS: Record<string, { bg: string; fg: string }> = {
-  low:    { bg: "#e8f5e9", fg: "#2e7d32" },
-  normal: { bg: "#e3f2fd", fg: "#1565c0" },
-  high:   { bg: "#fff8e1", fg: "#f57f17" },
-  urgent: { bg: "#ffebee", fg: "#c62828" },
+  low:    { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
+  normal: { bg: "var(--gw-color-info-bg)", fg: "var(--gw-color-info)" },
+  high:   { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
+  urgent: { bg: "var(--gw-color-error-bg)", fg: "var(--gw-color-error)" },
 }
 
 // --- NodeView ---
@@ -755,9 +755,9 @@ const STATUS_ICONS: Record<string, string> = {
   cancelled: "✕",
 }
 const STATUS_COLORS: Record<string, string> = {
-  open: "#1565c0",
-  in_progress: "#f57f17",
-  done: "#2e7d32",
+  open: "var(--gw-color-info)",
+  in_progress: "var(--gw-color-warning)",
+  done: "var(--gw-color-success)",
   cancelled: "#9e9e9e",
 }
 
@@ -950,7 +950,7 @@ class TodoCalendarNodeView {
             if (t.status === "done") chip.classList.add("gowiki-todo-cal-chip-done")
             const icon = document.createElement("span")
             icon.textContent = STATUS_ICONS[t.status] || "○"
-            icon.style.color = overdue ? "#c62828" : (STATUS_COLORS[t.status] || "#666")
+            icon.style.color = overdue ? "var(--gw-color-error)" : (STATUS_COLORS[t.status] || "#666")
             chip.appendChild(icon)
             const label = document.createElement("span")
             label.className = "gowiki-todo-cal-chip-label"
@@ -1056,9 +1056,9 @@ const todoStyles = `
   align-items: center;
   gap: 8px;
   padding: 4px 12px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--gw-color-border);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--gw-color-surface);
   font-size: 14px;
   line-height: 1.4;
 }
@@ -1081,8 +1081,8 @@ const todoStyles = `
 }
 
 .gowiki-todo-assignee {
-  background: #e8f0fe;
-  color: #1a56db;
+  background: var(--gw-color-accent);
+  color: var(--gw-color-link);
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
@@ -1090,7 +1090,7 @@ const todoStyles = `
 }
 
 .gowiki-todo-due {
-  background: #f0f0f0;
+  background: var(--gw-color-border-soft);
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
@@ -1098,8 +1098,8 @@ const todoStyles = `
 }
 
 .gowiki-todo-due.gowiki-todo-overdue {
-  background: #ffebee;
-  color: #c62828;
+  background: var(--gw-color-error-bg);
+  color: var(--gw-color-error);
   font-weight: 600;
 }
 
@@ -1184,7 +1184,7 @@ const todoStyles = `
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
 }
 
 .gowiki-todo-panel-item:last-child {
@@ -1218,18 +1218,19 @@ const todoStyles = `
   text-align: left;
   font-weight: 600;
   font-size: 12px;
-  color: #666;
-  padding: 4px 8px;
-  border-bottom: 2px solid #e0e0e0;
+  color: var(--gw-color-table-head-fg);
+  background: var(--gw-color-table-head-bg);
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--gw-color-border);
 }
 
 .gowiki-todo-list-table td {
   padding: 4px 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
 }
 
 .gowiki-todo-list-table a {
-  color: #1a56db;
+  color: var(--gw-color-link);
   text-decoration: none;
 }
 
@@ -1238,7 +1239,7 @@ const todoStyles = `
 }
 
 .gowiki-todo-list-overdue {
-  color: #c62828;
+  color: var(--gw-color-error);
   font-weight: 600;
 }
 
@@ -1290,7 +1291,7 @@ const todoStyles = `
 }
 
 .gowiki-todo-cal-nav button:hover {
-  background: #f0f0f0;
+  background: var(--gw-color-border-soft);
 }
 
 .gowiki-todo-cal-year {
@@ -1317,7 +1318,7 @@ const todoStyles = `
   text-align: left;
   font-weight: 600;
   padding: 4px 8px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid var(--gw-color-border);
 }
 
 .gowiki-todo-cal-month-col {
@@ -1326,19 +1327,19 @@ const todoStyles = `
   font-size: 11px;
   color: #666;
   padding: 4px 2px;
-  border-bottom: 2px solid #e0e0e0;
+  border-bottom: 2px solid var(--gw-color-border);
 }
 
 .gowiki-todo-cal-page-cell {
   padding: 4px 8px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .gowiki-todo-cal-page-cell a {
-  color: #1a56db;
+  color: var(--gw-color-link);
   text-decoration: none;
 }
 
@@ -1348,7 +1349,7 @@ const todoStyles = `
 
 .gowiki-todo-cal-cell {
   padding: 2px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--gw-color-border-soft);
   vertical-align: top;
 }
 
@@ -1369,7 +1370,7 @@ const todoStyles = `
 }
 
 .gowiki-todo-cal-chip-overdue .gowiki-todo-cal-chip-label {
-  color: #c62828;
+  color: var(--gw-color-error);
   font-weight: 600;
 }
 
@@ -1387,8 +1388,8 @@ const todoStyles = `
   font-size: 12px;
   color: #444;
   padding: 6px 8px 2px;
-  border-bottom: 1px solid #e0e0e0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--gw-color-border);
+  background: var(--gw-color-surface);
 }
 
 #app.gowiki-editing .gowiki-todo-calendar.ProseMirror-selectednode {

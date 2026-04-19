@@ -1,0 +1,163 @@
+/* ══════════════════════════════════════════════════════════════════════
+   Gowiki theme system — CSS custom properties.
+
+   Every themeable value lives here. Core CSS and plugin CSS must read from
+   these vars via `var(--gw-*)` rather than using raw hex colors.
+
+   Specification: specs/themes.md
+   ══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Palette (light) ─────────────────────────────────────────────── */
+  --gw-color-bg:           #ffffff;   /* page background */
+  --gw-color-surface:      #fafafa;   /* cards, modals, admin panels */
+  --gw-color-surface-alt:  #f5f8ff;   /* subtle alternative surface (hover states, chips) */
+  --gw-color-text:         #222222;   /* body text */
+  --gw-color-text-soft:    #555555;   /* soft body text (references, footnotes) */
+  --gw-color-muted:        #666666;   /* secondary text */
+  --gw-color-subtle:       #999999;   /* placeholder, timestamps */
+  --gw-color-border:       #e0e0e0;   /* dividers, card outlines */
+  --gw-color-border-soft:  #f0f0f0;   /* very light separators */
+
+  --gw-color-primary:      #1e3f72;   /* brand color — used by banner (light mode), accent fills */
+  --gw-color-primary-fg:   #ffffff;   /* text on --gw-color-primary */
+  --gw-color-primary-hover:#2a507f;
+  --gw-color-accent:       #e8f0fe;   /* chip backgrounds, highlight panels */
+
+  /* Banner — defaults to the brand primary on light; dark mode overrides
+     this to a near-black slate so the banner feels part of the dark page
+     instead of a bright colored strip pasted on top. */
+  --gw-color-banner-bg:    var(--gw-color-primary);
+  --gw-color-banner-fg:    var(--gw-color-primary-fg);
+
+  --gw-color-link:         #1a56db;   /* inline hyperlinks */
+  --gw-color-link-hover:   #134fc0;
+  --gw-color-link-missing: #c62828;   /* links to non-existent pages */
+
+  --gw-color-success:      #2e7d32;   /* done-state indicators */
+  --gw-color-success-bg:   #e8f5e9;   /* done-state backgrounds */
+  --gw-color-warning:      #f57f17;   /* high-priority chips, overdue */
+  --gw-color-warning-bg:   #fff8e1;
+  --gw-color-error:        #c62828;   /* error text, cancelled items */
+  --gw-color-error-bg:     #ffebee;
+  --gw-color-info:         #1565c0;
+  --gw-color-info-bg:      #e3f2fd;
+
+  --gw-color-code-bg:      #f6f8fa;   /* code block backgrounds */
+  --gw-color-code-text:    #24292e;
+  --gw-color-code-inline-bg:#eff1f3;
+
+  --gw-color-highlight:    #fff3bf;   /* search match, ==highlight== */
+  --gw-color-selection:    #b5d7ff;   /* editor text selection */
+
+  --gw-color-invalid-bg:   #fff5f5;   /* tint for pages with unvalidated reviewflow */
+
+  /* Table header — muted bg on light, punchier slate on dark for contrast */
+  --gw-color-table-head-bg: #f2f2f2;
+  --gw-color-table-head-fg: #222222;
+
+  /* ── Typography ───────────────────────────────────────────────────── */
+  --gw-font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --gw-font-serif: Georgia, "Times New Roman", serif;
+  --gw-font-mono:
+    "JetBrains Mono", "Fira Code", "SF Mono", Menlo, Consolas, monospace;
+  --gw-font-size-base: 14px;
+  --gw-line-height-base: 1.55;
+
+  /* ── Spacing ──────────────────────────────────────────────────────── */
+  --gw-space-xs: 4px;
+  --gw-space-sm: 8px;
+  --gw-space-md: 16px;
+  --gw-space-lg: 24px;
+  --gw-space-xl: 32px;
+  --gw-radius:   6px;
+  --gw-radius-sm: 4px;
+
+  /* ── Shadows ──────────────────────────────────────────────────────── */
+  --gw-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --gw-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.25);
+  --gw-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.30);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Dark theme — applied via html[data-theme="dark"].
+   Brand color (primary) is kept close to the light-mode brand by default
+   so the banner looks familiar; admins can override with palette_overrides.
+   ══════════════════════════════════════════════════════════════════════ */
+
+html[data-theme="dark"] {
+  /* Palette */
+  --gw-color-bg:           #1a1a1a;
+  --gw-color-surface:      #242424;
+  --gw-color-surface-alt:  #2c2c2c;
+  --gw-color-text:         #e6e6e6;
+  --gw-color-text-soft:    #c4c4c4;
+  --gw-color-muted:        #a0a0a0;
+  --gw-color-subtle:       #777777;
+  --gw-color-border:       #3a3a3a;
+  --gw-color-border-soft:  #2e2e2e;
+
+  --gw-color-primary:      #2e5ba8;
+  --gw-color-primary-fg:   #ffffff;
+  --gw-color-primary-hover:#3e6bb8;
+  --gw-color-accent:       #2a3a55;
+
+  /* Dark-mode banner — a deep slate that blends with the page, rather than
+     the brand color which would jump out as a bright strip. */
+  --gw-color-banner-bg:    #20252e;
+  --gw-color-banner-fg:    #e6e6e6;
+
+  --gw-color-link:         #80b3ff;
+  --gw-color-link-hover:   #a2c7ff;
+  --gw-color-link-missing: #ff7373;
+
+  --gw-color-success:      #7fcf88;
+  --gw-color-success-bg:   #1f3a22;
+  --gw-color-warning:      #ffb74d;
+  --gw-color-warning-bg:   #3a2c10;
+  --gw-color-error:        #ff6b6b;
+  --gw-color-error-bg:     #3a1f1f;
+  --gw-color-info:         #64b5f6;
+  --gw-color-info-bg:      #1e2f42;
+
+  --gw-color-code-bg:      #2d2d2d;
+  --gw-color-code-text:    #e6e6e6;
+  --gw-color-code-inline-bg:#333333;
+
+  --gw-color-highlight:    #5b4e1c;
+  --gw-color-selection:    #264f78;
+
+  --gw-color-invalid-bg:   #3a2020;   /* dark-mode tint for unvalidated pages */
+
+  /* Dark-mode table header — a slate tinted toward the brand primary for
+     distinct contrast against both the page bg and the cell bodies. */
+  --gw-color-table-head-bg: #3a476a;
+  --gw-color-table-head-fg: #ffffff;
+
+  /* Shadows — stronger on dark to preserve depth cues */
+  --gw-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.40);
+  --gw-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.50);
+  --gw-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.60);
+}
+
+/* Invert black-stroke SVG icons (toolbar, actions panel, banner logo area)
+   so they read as white in dark mode. Applied via CSS filter because the
+   icons are loaded as <img> tags — currentColor doesn't propagate through
+   <img src>. */
+html[data-theme="dark"] .gowiki-menu-icon,
+html[data-theme="dark"] .gowiki-raw-menuitem img,
+html[data-theme="dark"] #actions img {
+  filter: invert(1) brightness(1) hue-rotate(180deg);
+}
+
+/* Honour the browser's color-scheme hint so native scrollbars, form
+   controls, and default text selection match the active theme. */
+html[data-theme="light"] { color-scheme: light; }
+html[data-theme="dark"]  { color-scheme: dark; }
+
+/* Print always uses light — paper is white. */
+@media print {
+  html { color-scheme: light; }
+}
