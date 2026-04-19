@@ -854,6 +854,7 @@ function registerMarkdownPrinters(reg: Registry) {
     const wrap = image.attrs.wrap ?? null
     const caption = image.attrs.caption ?? null
     const label = image.attrs.label ?? null
+    const bg = image.attrs.bg ?? null
     const dirParts: string[] = []
     if (size) dirParts.push(size.includes(";") ? `size="${size}"` : `size=${size}`)
     if (version) dirParts.push(`version=${version}`)
@@ -861,6 +862,7 @@ function registerMarkdownPrinters(reg: Registry) {
     if (wrap) dirParts.push(`wrap=${wrap}`)
     if (caption) dirParts.push(`caption="${String(caption).replace(/"/g, '\\"')}"`)
     if (label) dirParts.push(`label=${label}`)
+    if (bg) dirParts.push(`bg=${bg}`)
     if (dirParts.length > 0) {
       return `{image ${dirParts.join(" ")}}`
     }

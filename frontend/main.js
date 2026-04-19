@@ -803,6 +803,129 @@ function encodePagePath(path) {
     .join("/")
 }
 
+// ── Dark-mode image auto-frame (specs/themes.md §11.6) ─────────────────
+//
+// On dark pages, images with near-white backgrounds look like bright
+// blocks. This heuristic samples the 4 corners of each <img> and wraps
+// the ones with ≥3 near-white corners in a subtle cream frame (via
+// a .gowiki-img-auto-invert class). Images with an explicit data-bg attribute
+// bypass the heuristic — the author has already chosen.
+//
+// Runs only when html[data-theme="dark"] AND the admin hasn't disabled
+// it (themes.image_auto_frame). Results are cached per URL so each image
+// is sampled at most once per page load.
+
+// Cache: src → "invert" | "skip". "invert" means the heuristic decided to
+// apply the auto-invert class; "skip" means either the image isn't
+// near-white or the canvas sampling was blocked (CORS).
+const imageBgCache = new Map()
+
+function applyImageAutoFrame(img) {
+  // Skip if the admin disabled the heuristic.
+  const info = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme) || null
+  if (info && info.image_auto_frame === false) return
+  // Skip if the author has an explicit choice.
+  if (img.dataset.bg) return
+  // Skip if an ancestor blockquote has set a cascade.
+  if (img.closest && img.closest("blockquote[data-image-bg]")) return
+  // Skip if we've already decided for this URL.
+  const cached = imageBgCache.get(img.src)
+  if (cached === "invert") { img.classList.add("gowiki-img-auto-invert"); return }
+  if (cached === "skip") return
+  // Need the image loaded and same-origin for canvas sampling.
+  if (!img.complete || img.naturalWidth === 0) {
+    img.addEventListener("load", () => applyImageAutoFrame(img), { once: true })
+    return
+  }
+  try {
+    const canvas = document.createElement("canvas")
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext("2d", { willReadFrequently: false })
+    if (!ctx) return
+    ctx.drawImage(img, 0, 0)
+    const corners = [
+      [0, 0],
+      [canvas.width - 1, 0],
+      [0, canvas.height - 1],
+      [canvas.width - 1, canvas.height - 1],
+    ]
+    let nearWhite = 0
+    for (const [x, y] of corners) {
+      const d = ctx.getImageData(x, y, 1, 1).data
+      // R+G+B ≥ 720 means average channel ≥ 240 — visibly near-white.
+      // Require alpha > 200 so we don't count transparent corners as "white".
+      if (d[3] > 200 && d[0] + d[1] + d[2] >= 720) nearWhite++
+    }
+    if (nearWhite >= 3) {
+      img.classList.add("gowiki-img-auto-invert")
+      imageBgCache.set(img.src, "invert")
+    } else {
+      imageBgCache.set(img.src, "skip")
+    }
+  } catch {
+    // Canvas tainted (cross-origin image, CORS) — silently skip.
+    imageBgCache.set(img.src, "skip")
+  }
+}
+
+function scanImagesForAutoFrame(root) {
+  if (document.documentElement.dataset.theme !== "dark") return
+  const imgs = (root || document).querySelectorAll("img")
+  for (const img of imgs) applyImageAutoFrame(img)
+}
+
+// Expose to plugins so they can re-trigger the heuristic when an image's
+// attributes change (e.g. user toggles bg from "light" back to "auto"
+// via the property panel).
+if (typeof window !== "undefined") {
+  window.__gowikiAutoFrameImage = applyImageAutoFrame
+}
+
+// Re-scan after theme change (light → dark activates framing).
+if (typeof window !== "undefined") {
+  window.addEventListener("gowiki:theme-changed", (e) => {
+    if (e && e.detail && e.detail.theme === "dark") {
+      scanImagesForAutoFrame(document)
+    } else {
+      // Going back to light mode — drop all frame classes so re-entering
+      // dark from a subsequent toggle re-runs the heuristic with a clean slate.
+      for (const img of document.querySelectorAll("img.gowiki-img-auto-invert")) {
+        img.classList.remove("gowiki-img-auto-invert")
+      }
+    }
+  })
+  // Watch the whole body for images added after initial render (includes,
+  // async-rendered blocks, ProseMirror NodeView insertions, etc.). Wider
+  // than just #content to catch sidebars and any wrappers.
+  const imgObserver = new MutationObserver((mutations) => {
+    if (document.documentElement.dataset.theme !== "dark") return
+    for (const m of mutations) {
+      for (const n of m.addedNodes) {
+        if (n.nodeType !== 1) continue
+        if (n.tagName === "IMG") applyImageAutoFrame(n)
+        else if (n.querySelectorAll) {
+          for (const img of n.querySelectorAll("img")) applyImageAutoFrame(img)
+        }
+      }
+    }
+  })
+  // Module scripts execute after DOMContentLoaded, so our handler on that
+  // event would never fire. Start the observer as soon as <body> exists,
+  // and run an initial scan. Both are re-entrant so double-invocation is
+  // harmless.
+  function initImageAutoFrame() {
+    if (document.body) {
+      scanImagesForAutoFrame(document)
+      imgObserver.observe(document.body, { childList: true, subtree: true })
+    } else {
+      // <body> not parsed yet — retry on next microtask.
+      setTimeout(initImageAutoFrame, 10)
+    }
+  }
+  initImageAutoFrame()
+}
+
 // resolveTheme translates a stored preference ("light"/"dark"/"auto"/"") into
 // an effective theme, consulting the OS for "auto" and falling back to the
 // admin default.
@@ -8809,7 +8932,7 @@ async function showSigningKeyModal() {
 
     // Status
     const statusDiv = document.createElement("div")
-    statusDiv.style.cssText = "margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:6px;font-size:13px"
+    statusDiv.style.cssText = "margin-bottom:12px;padding:8px;background:var(--gw-color-surface);border:1px solid var(--gw-color-border);border-radius:6px;font-size:13px;color:var(--gw-color-text)"
     if (!has) {
       statusDiv.innerHTML = "<b>No signing key.</b> Generate one to enable cryptographic confirmations."
     } else if (!certPEM) {
@@ -10766,8 +10889,14 @@ async function renderAdminLocksTab(container) {
         title.textContent = "Draft: " + draft.page + " (by " + draft.owner + ")"
         dialog.appendChild(title)
         const pre = document.createElement("pre")
-        pre.style.cssText = "background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:12px;max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"
-        pre.textContent = d.markdown
+        pre.style.cssText = "background:var(--gw-color-code-bg);color:var(--gw-color-code-text);border:1px solid var(--gw-color-border);border-radius:var(--gw-radius-sm);padding:12px;max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"
+        if (d.markdown && d.markdown.length > 0) {
+          pre.textContent = d.markdown
+        } else {
+          pre.style.fontStyle = "italic"
+          pre.style.color = "var(--gw-color-muted)"
+          pre.textContent = "(empty draft)"
+        }
         dialog.appendChild(pre)
         const closeBtn = document.createElement("button")
         closeBtn.className = "gowiki-admin-btn"
@@ -10782,8 +10911,7 @@ async function renderAdminLocksTab(container) {
 
       // Reclaim button
       const reclaimBtn = document.createElement("button")
-      reclaimBtn.className = "gowiki-admin-btn-small"
-      reclaimBtn.style.cssText = "background:#1565c0;color:#fff;border:none"
+      reclaimBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-primary"
       reclaimBtn.textContent = "Reclaim"
       reclaimBtn.addEventListener("click", async () => {
         if (!confirm("Reclaim draft for \"" + draft.page + "\" from " + draft.owner + "?\n\nThe draft will become yours and you can edit/publish it.")) return
@@ -10934,7 +11062,7 @@ async function renderAdminCertsTab(container) {
 
     if (caData.has_ca) {
       const status = document.createElement("div")
-      status.style.cssText = "padding:8px 12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px;color:#2e7d32;font-size:13px;margin-bottom:12px"
+      status.style.cssText = "padding:8px 12px;background:var(--gw-color-success-bg);border:1px solid var(--gw-color-success);border-radius:6px;color:var(--gw-color-success);font-size:13px;margin-bottom:12px"
       status.textContent = "Company CA is configured."
       container.appendChild(status)
 
@@ -10952,7 +11080,7 @@ async function renderAdminCertsTab(container) {
       container.appendChild(dlBtn)
     } else {
       const status = document.createElement("div")
-      status.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#b45309;font-size:13px;margin-bottom:12px"
+      status.style.cssText = "padding:8px 12px;background:var(--gw-color-warning-bg);border:1px solid var(--gw-color-warning);border-radius:6px;color:var(--gw-color-warning);font-size:13px;margin-bottom:12px"
       status.textContent = "No company CA. Generate one to enable Level 2 (admin-signed) certificates."
       container.appendChild(status)
 
@@ -11102,7 +11230,7 @@ async function renderAdminCertsTab(container) {
 
         if (cert.revoked) {
           const badge = document.createElement("span")
-          badge.style.cssText = "color:#c62828;font-size:12px;font-weight:600"
+          badge.style.cssText = "color:var(--gw-color-error);font-size:12px;font-weight:600"
           badge.textContent = "Revoked" + (cert.revoked_at ? " (" + new Date(cert.revoked_at).toLocaleDateString() + ")" : "")
           tdActions.appendChild(badge)
         } else {
@@ -12648,8 +12776,15 @@ async function renderAdminTodoTab(container) {
         const statusBadge = document.createElement("span")
         statusBadge.textContent = (task.status || "open").replace("_", " ")
         statusBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
-        const statusColors = { open: "#dbeafe", in_progress: "#fef3c7", done: "#d1fae5", cancelled: "#f3f4f6" }
-        statusBadge.style.background = statusColors[task.status] || "#f3f4f6"
+        const statusStyles = {
+          open:        { bg: "var(--gw-color-info-bg)",    fg: "var(--gw-color-info)" },
+          in_progress: { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
+          done:        { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
+          cancelled:   { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
+        }
+        const s = statusStyles[task.status] || statusStyles.cancelled
+        statusBadge.style.background = s.bg
+        statusBadge.style.color = s.fg
         tdStatus.appendChild(statusBadge)
         tr.appendChild(tdStatus)
 
@@ -12659,8 +12794,14 @@ async function renderAdminTodoTab(container) {
           const priBadge = document.createElement("span")
           priBadge.textContent = task.priority
           priBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
-          const priColors = { urgent: "#fecaca", high: "#fed7aa", low: "#e5e7eb" }
-          priBadge.style.background = priColors[task.priority] || ""
+          const priStyles = {
+            urgent: { bg: "var(--gw-color-error-bg)",   fg: "var(--gw-color-error)" },
+            high:   { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
+            low:    { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
+          }
+          const p = priStyles[task.priority] || { bg: "transparent", fg: "inherit" }
+          priBadge.style.background = p.bg
+          priBadge.style.color = p.fg
           tdPriority.appendChild(priBadge)
         } else {
           tdPriority.textContent = task.priority || ""

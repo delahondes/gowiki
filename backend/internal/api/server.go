@@ -989,6 +989,7 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 		"theme": map[string]any{
 			"default":             themeDefault,
 			"allow_user_override": cfg.Themes.AllowUserOverride,
+			"image_auto_frame":    cfg.Themes.ImageAutoFrameEnabled(),
 		},
 	})
 }

@@ -952,6 +952,16 @@ const tableStyles = `
   text-align: left;
 }
 
+/* Cells with an explicit user-chosen background color were designed
+   assuming dark text on a light background. In dark mode the cell
+   text would inherit white, which is often unreadable against bright
+   greens/yellows/cyans. Force dark text for those cells unless the
+   author has also set an explicit text color. */
+html[data-theme="dark"] .ProseMirror td[data-cell-color]:not([data-cell-text-color]),
+html[data-theme="dark"] .ProseMirror th[data-cell-color]:not([data-cell-text-color]) {
+  color: #222 !important;
+}
+
 .ProseMirror td > p,
 .ProseMirror th > p {
   margin: 0;

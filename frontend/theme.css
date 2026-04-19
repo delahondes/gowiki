@@ -30,9 +30,11 @@
   --gw-color-banner-bg:    var(--gw-color-primary);
   --gw-color-banner-fg:    var(--gw-color-primary-fg);
 
-  --gw-color-link:         #1a56db;   /* inline hyperlinks */
+  --gw-color-link:         #1a56db;   /* inline hyperlinks (generic) */
   --gw-color-link-hover:   #134fc0;
   --gw-color-link-missing: #c62828;   /* links to non-existent pages */
+  --gw-color-link-external: #0b57d0;  /* external (off-wiki) hyperlinks */
+  --gw-color-link-internal: #388e3c;  /* internal wiki links (existing pages) */
 
   --gw-color-success:      #2e7d32;   /* done-state indicators */
   --gw-color-success-bg:   #e8f5e9;   /* done-state backgrounds */
@@ -112,6 +114,8 @@ html[data-theme="dark"] {
   --gw-color-link:         #80b3ff;
   --gw-color-link-hover:   #a2c7ff;
   --gw-color-link-missing: #ff7373;
+  --gw-color-link-external: #9fb8ff;   /* tinted slightly toward purple to stay distinct from generic blue links */
+  --gw-color-link-internal: #81c784;   /* internal wiki links — lighter green for dark bg */
 
   --gw-color-success:      #7fcf88;
   --gw-color-success-bg:   #1f3a22;
@@ -150,6 +154,41 @@ html[data-theme="dark"] .gowiki-menu-icon,
 html[data-theme="dark"] .gowiki-raw-menuitem img,
 html[data-theme="dark"] #actions img {
   filter: invert(1) brightness(1) hue-rotate(180deg);
+}
+
+/* ── Dark-mode image handling (specs/themes.md §11.6) ─────────────────
+   Three layers:
+   1. Per-image directive: {image bg=light|invert|none} → data-bg="..."
+   2. Auto-detect heuristic: main.js samples 4 corners; if near-white,
+      adds .gowiki-img-auto-invert so the image is inverted (useful for
+      line-art diagrams with white backgrounds — the common wiki case).
+   3. Admin opt-out: themes.image_auto_frame toggles the heuristic.
+   4. Blockquote cascade: blockquote[data-image-bg="invert"] img inverts
+      every descendant image without its own bg attribute.
+   All CSS here is a no-op in light mode. */
+
+/* Explicit `bg=light`: a soft cream frame. Rarely useful in practice —
+   kept for users who prefer it over inverting. */
+html[data-theme="dark"] img[data-bg="light"] {
+  background: #f8f8f2;
+  padding: 4px;
+  border-radius: var(--gw-radius-sm);
+}
+
+/* Explicit `bg=invert`: flip colors for line art. Also applied by the
+   auto-detect heuristic (.gowiki-img-auto-invert) and the blockquote
+   cascade (blockquote[data-image-bg="invert"] img). */
+html[data-theme="dark"] img[data-bg="invert"],
+html[data-theme="dark"] img.gowiki-img-auto-invert,
+html[data-theme="dark"] blockquote[data-image-bg="invert"] img:not([data-bg]) {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Explicit opt-out — author said `none`, skip every treatment. */
+html[data-theme="dark"] img[data-bg="none"] {
+  background: transparent !important;
+  padding: 0 !important;
+  filter: none !important;
 }
 
 /* Honour the browser's color-scheme hint so native scrollbars, form

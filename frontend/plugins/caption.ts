@@ -240,7 +240,7 @@ const captionStyles = `
 
 .gowiki-caption {
   font-size: 0.9em;
-  color: #333;
+  color: var(--gw-color-text-soft);
   padding: 6px 0 4px 0;
   margin-top: 4px;
   line-height: 1.4;
@@ -255,12 +255,13 @@ const captionStyles = `
 .gowiki-caption-number {
   font-weight: bold;
   margin-right: 0.3em;
+  color: var(--gw-color-text);
 }
 
 .gowiki-ref {
   color: inherit;
   text-decoration: none;
-  border-bottom: 1px dotted #666;
+  border-bottom: 1px dotted var(--gw-color-muted);
   cursor: pointer;
 }
 
@@ -269,8 +270,8 @@ const captionStyles = `
 }
 
 .gowiki-ref--broken {
-  color: #c00;
-  border-bottom-color: #c00;
+  color: var(--gw-color-error);
+  border-bottom-color: var(--gw-color-error);
 }
 `
 

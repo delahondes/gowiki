@@ -94,6 +94,24 @@ const imageProperties = [
     serialize: (val: string | null) => String(val ?? ""),
     visible: (attrs: Record<string, any>) => !!attrs.caption || !!attrs.label,
   },
+  {
+    name: "bg",
+    label: "Dark-mode background",
+    default: null,
+    parse: (raw: string) => {
+      const v = String(raw ?? "").trim().toLowerCase()
+      if (!v || v === "auto") return null
+      if (v === "light" || v === "invert" || v === "none") return v
+      throw new Error(`Invalid bg "${raw}". Expected "auto", "light", "invert", or "none".`)
+    },
+    serialize: (val: string | null) => String(val ?? ""),
+    options: () => [
+      { value: "",       label: "Auto (detect white)" },
+      { value: "light",  label: "Light — frame in cream" },
+      { value: "invert", label: "Invert — flip colours (line art)" },
+      { value: "none",   label: "None — render as-is" },
+    ],
+  },
 ]
 
 const imageStyles = `
@@ -290,6 +308,24 @@ class ImageNodeView {
     this.dom.classList.remove("gowiki-image-wrap-left", "gowiki-image-wrap-right")
     if (wrap === "left") this.dom.classList.add("gowiki-image-wrap-left")
     else if (wrap === "right") this.dom.classList.add("gowiki-image-wrap-right")
+
+    // Dark-mode background directive (specs/themes.md §11.6). Setting
+    // data-bg on the <img> lets the global CSS pick up the author's
+    // choice; its presence also tells the auto-frame heuristic to skip
+    // this image (explicit choice wins over detection).
+    const bg = this.node.attrs.bg ?? null
+    // Clear any previous framed class so we re-evaluate from scratch.
+    this.imgEl.classList.remove("gowiki-img-auto-invert")
+    if (bg) {
+      this.imgEl.dataset.bg = bg
+    } else {
+      delete this.imgEl.dataset.bg
+      // Returning to auto — re-run the heuristic on this image.
+      const runner = (window as any).__gowikiAutoFrameImage
+      if (typeof runner === "function") {
+        try { runner(this.imgEl) } catch { /* ignore */ }
+      }
+    }
   }
 
   private applyCaptionDisplay() {
@@ -470,11 +506,20 @@ export const imagePlugin: WikiPlugin = {
           wrap: { default: null },
           caption: { default: null },
           label: { default: null },
+          bg: { default: null },
         },
         toDOM(node: any) {
           const domSpec = baseToDOM(node)
           const style = styleFromImageSize(node.attrs.size ?? null)
-          return addStyleToDOMSpec(domSpec, style)
+          let result = addStyleToDOMSpec(domSpec, style)
+          // Propagate the bg choice onto the <img> so the heuristic skips
+          // images with an explicit author preference.
+          if (node.attrs.bg) {
+            if (Array.isArray(result) && typeof result[1] === "object" && result[1] !== null) {
+              result = [result[0], { ...result[1], "data-bg": node.attrs.bg }, ...(result.slice(2))]
+            }
+          }
+          return result
         },
       }
     })
@@ -515,8 +560,10 @@ export const imagePlugin: WikiPlugin = {
 
         const caption = directive?.caption ? String(directive.caption).trim() || null : null
         const label = directive?.label ? String(directive.label).trim() || null : null
+        const directiveBg = directive?.bg ?? null
+        const bg = directiveBg ? String(directiveBg).trim().toLowerCase() || null : null
 
-        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version, align, wrap, caption, label }))
+        ctx.push(ctx.schema.nodes.image.create({ src, title, alt, size, version, align, wrap, caption, label, bg }))
       },
     })
 

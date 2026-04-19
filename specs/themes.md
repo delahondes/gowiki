@@ -40,6 +40,271 @@ All themeable values are exposed as CSS custom properties (variables) at `:root`
 
 ---
 
+## 11. v2 roadmap — richer theming without package bloat
+
+### 11.1 Design stance
+
+A "theme" in many wiki systems is a package of HTML templates, CSS, and
+assets that the admin drops into a themes directory. That model has two
+chronic problems: plugin compatibility breaks on every new plugin, and the
+theme package rots on every Gowiki upgrade because internal class names
+change.
+
+Gowiki chooses a different shape: **every theme is a set of values for the
+same CSS custom properties**. There's no separate code path, no alternate
+template, no plugin-specific overrides layer. A theme is just data.
+
+The three tiers below grow the expressiveness of that data without
+breaking the invariant.
+
+### 11.2 Tier 1 — Extended `overrides` block
+
+Today `themes.palette_overrides` only covers the palette. v2 extends the
+config schema to cover every documented CSS var:
+
+```yaml
+themes:
+  default: auto
+  allow_user_override: true
+  overrides:
+    palette:
+      primary:    "#2d5a47"
+      primary_fg: "#ffffff"
+      link:       "#1e7a5e"
+    typography:
+      sans:       "Inter, system-ui, sans-serif"
+      serif:      "Source Serif Pro, Georgia, serif"
+      mono:       "JetBrains Mono, monospace"
+      base_size:  "15px"
+      line_height:"1.6"
+      h1_mult:    "1.9"
+    spacing:
+      xs: "4px"
+      sm: "8px"
+      md: "20px"
+      lg: "28px"
+    radii:
+      default: "8px"
+      small:   "5px"
+    shadows:
+      sm: "0 1px 3px rgba(0,0,0,0.1)"
+      md: "0 4px 20px rgba(0,0,0,0.15)"
+```
+
+The backend generates a single `/api/theme/overrides.css` that emits all
+the vars the admin set, scoped to the light theme (same policy as v1 —
+brand overrides rarely work unchanged in dark).
+
+**Backward compatible**: the old `palette_overrides` key is kept as an
+alias for `overrides.palette` indefinitely.
+
+**Cost**: ~one evening. Config struct extension, generator update, admin
+UI tab gets three additional sections (Typography / Spacing / Radii).
+
+**Risk**: near zero. Any plugin that already reads from vars picks up the
+change automatically.
+
+### 11.3 Tier 2 — Named presets
+
+A preset is a curated bundle of Tier-1 overrides shipped with Gowiki. The
+admin picks one by name; individual `overrides:` entries still merge on
+top so admins can tune without losing the preset's flavour.
+
+```yaml
+themes:
+  preset: "compact"
+  overrides:
+    palette:
+      primary: "#2d5a47"   # still applied on top of the "compact" preset
+```
+
+Three or four built-in presets are enough:
+
+| Preset | What changes |
+|---|---|
+| `default` | Current values — the baseline. |
+| `compact` | Smaller base font, tighter line-height, reduced spacing, smaller radii. For information-dense QMS pages. |
+| `serious` | Serif body, classic radii, conservative shadows. For formal documents. |
+| `playful` | Larger radii, softer shadows, slightly brighter palette. For team/playground wikis. |
+
+Implementation: a preset is just a `map[string]any` living in
+`internal/config/themes/presets.go`, merged with `overrides` before
+emitting the stylesheet. No new runtime behaviour.
+
+**Cost**: Tier 1 + ~half a day per preset.
+
+**Risk**: low. A preset is data.
+
+### 11.4 Tier 3 — Custom CSS escape hatch
+
+A single file at `data/meta/_custom.css` (or similar), editable via the
+admin UI, served at `/api/theme/custom.css` after all other stylesheets.
+Gives full CSS power for cases the var system can't express: layout
+tweaks, plugin-specific polish, experimental ideas.
+
+```
+<link rel="stylesheet" href="/theme.css" />
+<link rel="stylesheet" href="/api/theme/overrides.css" />
+<link rel="stylesheet" href="/style.css" />
+<link rel="stylesheet" href="/pm.css" />
+<link rel="stylesheet" href="/menu.css" />
+<link rel="stylesheet" href="/api/theme/custom.css" />   <!-- Tier 3, last -->
+```
+
+**Constraints (for safety):**
+- Single file, not a directory.
+- Editable only by admins.
+- No external URL fetches allowed — the endpoint strips `@import` rules
+  and external `url(...)` references to avoid information-leak attacks
+  via background images.
+- Content-Security-Policy headers prevent the served CSS from loading
+  fonts/images from third-party hosts.
+
+**Cost**: ~half a day.
+
+**Risk**: moderate — the admin can break their own wiki, but the file is
+trivially revertable by deleting or emptying it. Because we strip
+external URLs at serve time, there's no exfiltration vector.
+
+### 11.5 Explicit non-goals (still, in v2)
+
+- **Full theme packages** with their own HTML templates / assets — too
+  much maintenance burden for too little additional value over Tier 3.
+- **Per-namespace themes** — high complexity, low demand.
+- **User-uploadable themes or CSS** — CSS can exfiltrate data through
+  `background-image: url(...)` calls even with CSP; admin-only editing
+  keeps the risk acceptable.
+- **Layout restructuring** (banner side, sidebar position, column count)
+  — would require template changes + plugin coordination, reopens the
+  whole compatibility problem.
+- **Plugin-specific "theme hooks" API** — nice in theory, but each
+  plugin's internals would need a deliberate public CSS contract; the
+  var system already provides ~80% of that with zero extra API surface.
+
+### 11.6 Image handling in dark mode
+
+One of the most visible remaining issues in dark mode is images with
+white backgrounds. They appear as bright rectangular blocks against a
+dark page — ugly and distracting. This is a well-known problem (GitHub,
+Notion, Confluence all struggle with it); there is no magic fix, only a
+combination of heuristics and author controls that together get to a
+"good enough" default.
+
+#### 11.6.1 What doesn't work
+
+- **Invert every image** — breaks photos, screenshots, and logos with
+  specific brand hues. Safe only on line art.
+- **Strip white pixels to transparent at upload** — destructive; wrong
+  for any image where white is content (snow, light UI screenshots,
+  logos with white elements); not retroactive.
+- **Always wrap every image in a light frame** — creates a bright
+  rectangle per image, effectively the same problem moved inward.
+
+#### 11.6.2 What ships in v2
+
+**Three layers combined.**
+
+##### Layer 1 — Author directive attribute
+
+Extend the `{image}` directive with a `bg` attribute:
+
+| Value | Dark-mode treatment |
+|---|---|
+| `auto` (default) | Apply the heuristic in Layer 2 below |
+| `light` | Always wrap in a subtle light frame |
+| `invert` | Apply `filter: invert(1) hue-rotate(180deg)` — for line art |
+| `none` | No treatment, image renders as-is |
+
+Example:
+```markdown
+{image src=/media/diagram.png bg=light}
+{image src=/media/linechart.svg bg=invert}
+{image src=/media/dark-ok-screenshot.png bg=none}
+```
+
+Authors who know a given image's needs can lock in the right treatment
+once and be done with it.
+
+##### Layer 2 — Corner-sampling heuristic
+
+On every `<img>` inside a `.gowiki-view` content area, when the page
+theme resolves to dark, the frontend:
+
+1. Waits for the image to load (`img.complete === true` or `load` event).
+2. Draws it to an offscreen canvas.
+3. Samples the pixel at each of the 4 corners.
+4. Counts corners where `R + G + B ≥ 720` (near-white).
+5. If ≥ 3 of 4 corners are near-white, adds the `gowiki-img-framed`
+   class to the `<img>`.
+
+The class applies a soft frame: a cream backdrop (`#f8f8f2`), `4px`
+padding, and the theme's small radius. Result: images with white
+canvases stop looking like bright holes and start looking like
+intentional inserts.
+
+Results are cached per image URL so each image is sampled at most once
+per page load. Sampling is skipped when the image has an explicit
+`data-bg` attribute (Layer 1 takes precedence).
+
+**Limitations:**
+- Requires same-origin images. External hotlinked images can't be
+  sampled because canvas taints block pixel reads. They're left
+  untreated.
+- SVG with an internal `<style>` block won't be affected by the
+  heuristic's class (which only changes the `<img>` wrapper). Authors
+  who want perfectly dark-mode-safe SVGs should export with
+  `currentColor` strokes.
+- Photos with lots of sky or bright backgrounds will occasionally trip
+  the heuristic. Authors can override with `bg=none` per image.
+
+##### Layer 3 — Admin opt-out
+
+`config.yaml`:
+
+```yaml
+themes:
+  image_auto_frame: true   # default; set false to disable the heuristic
+```
+
+When off, only Layer 1 (explicit `bg=...` on the directive) applies.
+Useful for wikis where admins find the heuristic misfires too often and
+prefer per-image author control.
+
+#### 11.6.3 Default policy
+
+- **Auto-frame: ON by default.** Most existing wikis benefit; authors
+  can opt out per image.
+- **Frame color: cream `#f8f8f2`** rather than pure white — softer,
+  distinguishes the frame visually from paper-white content.
+- **No change in light mode.** Everything in §11.6 activates only when
+  the effective theme is `dark`. Light mode renders images as-is.
+
+#### 11.6.4 Documentation surface
+
+`backend/internal/manual/images.md` (or the existing images manual) gets
+a section on dark-mode behaviour:
+
+- How the heuristic decides
+- The four `bg=` values with visual examples
+- When to explicitly set `bg=invert` (SVG diagrams, line drawings)
+- Why the heuristic can't be perfect
+
+---
+
+### 11.7 Prerequisites before Tier 1 ships
+
+v1 plugin migration is partial. Before extending the overrides system,
+every plugin's CSS string must be audited for hardcoded hex values and
+migrated to theme vars. A preset that promises "compact typography" is
+only convincing if no plugin renders a hardcoded `#555` in the middle of
+it.
+
+Audit lives in `specs/themes-plugin-audit.md` (to be created as part of
+the prereq work). Each plugin's row: name, audit status
+(pending / clean / intentionally-exempt), last checked date.
+
+---
+
 ## 2. CSS custom property contract
 
 Every themeable value is a CSS custom property declared at `:root`. Naming convention: `--gw-<category>-<role>`. Using variables is mandatory in core CSS and all plugin CSS strings. Hardcoded colors outside `/styles/theme/*.css` are treated as a bug.

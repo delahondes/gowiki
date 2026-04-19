@@ -12,25 +12,27 @@ const spoilerProperties: NodePropertySpec[] = [
 
 const spoilerStyles = `
 .ProseMirror details.gowiki-spoiler {
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid var(--gw-color-border);
+  border-radius: var(--gw-radius-sm);
   margin: 0.5em 0;
   padding: 0;
 }
 .ProseMirror details.gowiki-spoiler > summary {
   cursor: pointer;
   padding: 0.4em 0.8em;
-  background: #f5f5f5;
+  background: var(--gw-color-surface);
+  color: var(--gw-color-text);
   font-weight: 600;
   font-size: 0.95em;
   user-select: none;
   list-style: revert;
 }
 .ProseMirror details.gowiki-spoiler > summary:hover {
-  background: #eee;
+  background: var(--gw-color-surface-alt);
 }
 .ProseMirror details.gowiki-spoiler > .gowiki-spoiler-body {
   padding: 0.5em 0.8em;
+  color: var(--gw-color-text);
 }
 /* In view mode, start folded (JS removes the open attribute) */
 .gowiki-view details.gowiki-spoiler > summary {

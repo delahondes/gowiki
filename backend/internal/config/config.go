@@ -39,6 +39,21 @@ type ThemeConfig struct {
 	// prefix) to CSS color values. Applied to the light theme only.
 	// Example: {"primary": "#2d5a47", "link": "#1e7a5e"}.
 	PaletteOverrides map[string]string `yaml:"palette_overrides" json:"palette_overrides"`
+	// ImageAutoFrame controls the dark-mode image-frame heuristic. When
+	// true (default), images with near-white backgrounds are wrapped in a
+	// subtle cream frame so they don't appear as bright blocks against a
+	// dark page. See specs/themes.md §11.6 for the full mechanism.
+	// Authors can override per image via `{image bg=...}`.
+	ImageAutoFrame *bool `yaml:"image_auto_frame" json:"image_auto_frame"`
+}
+
+// ImageAutoFrameEnabled returns the effective auto-frame setting, defaulting
+// to true when the admin hasn't explicitly set the field.
+func (t ThemeConfig) ImageAutoFrameEnabled() bool {
+	if t.ImageAutoFrame == nil {
+		return true
+	}
+	return *t.ImageAutoFrame
 }
 
 // BibliographyConfig controls the bibliography (PubMed/DOI citation) plugin.

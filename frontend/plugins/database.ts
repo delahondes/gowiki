@@ -230,8 +230,9 @@ const databaseStyles = `
   background: #fff3cd;
 }
 
-.gowiki-database-page-link {
-  color: #228be6;
+.gowiki-database-page-link,
+.ProseMirror a.gowiki-database-page-link {
+  color: var(--gw-color-link-internal);
   text-decoration: none;
   cursor: pointer;
 }

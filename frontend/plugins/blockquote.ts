@@ -123,6 +123,24 @@ const blockquoteProperties: NodePropertySpec[] = [
     serialize: (value: string | null) => String(value ?? ""),
   },
   {
+    name: "image-bg",
+    label: "Image bg (dark mode)",
+    default: null,
+    parse: (raw: string) => {
+      const v = String(raw ?? "").trim().toLowerCase()
+      if (!v || v === "auto") return null
+      if (v === "light" || v === "invert" || v === "none") return v
+      throw new Error(`Invalid image-bg "${raw}". Expected "auto", "light", "invert", or "none".`)
+    },
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "",       label: "Auto (per-image or detect)" },
+      { value: "invert", label: "Invert — flip all images" },
+      { value: "light",  label: "Light — frame all in cream" },
+      { value: "none",   label: "None — render all as-is" },
+    ],
+  },
+  {
     name: "wrap",
     label: "Wrap",
     default: null,
@@ -315,6 +333,7 @@ export const blockquotePlugin: WikiPlugin = {
         width: { default: null },
         align: { default: null },
         "image-width": { default: null },
+        "image-bg": { default: null },
         wrap: { default: null },
       },
       toDOM(node: any) {
@@ -341,6 +360,13 @@ export const blockquotePlugin: WikiPlugin = {
         if (imgWidth) {
           classes.push("gowiki-bq-img-width")
           styles.push(`--gowiki-bq-img-width: ${imgWidth}`)
+        }
+
+        // image-bg cascades to every <img> inside the blockquote (dark mode
+        // CSS picks up blockquote[data-image-bg="..."]).
+        const imgBg = node.attrs["image-bg"]
+        if (imgBg) {
+          domAttrs["data-image-bg"] = imgBg
         }
 
         // wrap: float the blockquote left or right (inline style ensures it works
@@ -388,6 +414,12 @@ export const blockquotePlugin: WikiPlugin = {
               if (imgWidth) {
                 result["image-width"] = imgWidth
               }
+            }
+
+            // image-bg from data attribute
+            const imgBg = dom.getAttribute("data-image-bg")
+            if (imgBg) {
+              result["image-bg"] = imgBg
             }
 
             return result
