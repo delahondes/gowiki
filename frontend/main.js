@@ -24,8 +24,16 @@ const HLJS_THEMES = [
   "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
 ]
 
-function loadHighlightTheme(theme) {
-  if (!HLJS_THEMES.includes(theme)) theme = "github"
+// Separate light/dark picks. The one applied at any moment depends on the
+// active site theme (html[data-theme]). Admins can set both; users can't
+// override the code theme (it follows the site theme).
+let hljsThemeLight = "github"
+let hljsThemeDark = "github-dark"
+
+function applyHighlightTheme() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark"
+  let theme = isDark ? hljsThemeDark : hljsThemeLight
+  if (!HLJS_THEMES.includes(theme)) theme = isDark ? "github-dark" : "github"
   let link = document.getElementById("gowiki-hljs-theme")
   if (!link) {
     link = document.createElement("link")
@@ -33,10 +41,19 @@ function loadHighlightTheme(theme) {
     link.rel = "stylesheet"
     document.head.appendChild(link)
   }
-  link.href = `/hljs/${theme}.css`
+  const desired = `/hljs/${theme}.css`
+  if (link.getAttribute("href") !== desired) link.href = desired
 }
 
-loadHighlightTheme("github")
+function setHighlightThemes(light, dark) {
+  if (light && HLJS_THEMES.includes(light)) hljsThemeLight = light
+  if (dark && HLJS_THEMES.includes(dark)) hljsThemeDark = dark
+  applyHighlightTheme()
+}
+
+window.addEventListener("gowiki:theme-changed", applyHighlightTheme)
+
+applyHighlightTheme()
 
 const registry = buildRegistry(basicSchema)
 const schema = registry.buildSchema()
@@ -7827,7 +7844,7 @@ function renderHistoryPage(versions, draft) {
   if (versions.length === 0 && !(draft && draft.is_own)) {
     const empty = document.createElement("p")
     empty.textContent = "No version history available."
-    empty.style.color = "#666"
+    empty.style.color = "var(--gw-color-muted)"
     container.appendChild(empty)
   } else {
     const table = document.createElement("table")
@@ -8176,7 +8193,7 @@ function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRef
 
       if (diffContent.children.length === 0) {
         const noChanges = document.createElement("div")
-        noChanges.style.cssText = "color:#666;font-style:italic;padding:1em"
+        noChanges.style.cssText = "color:var(--gw-color-muted);font-style:italic;padding:1em"
         noChanges.textContent = "No text changes."
         diffContent.appendChild(noChanges)
       }
@@ -8418,8 +8435,8 @@ async function resolveSiteInfo() {
       if (typeof data.toc_max_level === "number") {
         tocMaxLevel = data.toc_max_level
       }
-      if (data.code_theme) {
-        loadHighlightTheme(data.code_theme)
+      if (data.code_theme || data.code_theme_dark) {
+        setHighlightThemes(data.code_theme, data.code_theme_dark)
       }
       if (data.ai_assistant_enabled) {
         aiAssistantEnabled = true
@@ -11307,7 +11324,7 @@ async function renderAdminConfigTab(container) {
       { value: "email", label: "Email" },
     ], (config.site && config.site.user_display) || "")
 
-    const codeThemeSelect = adminFormSelect(form, "Code theme", [
+    const codeThemeOptions = [
       { value: "github", label: "GitHub (light)" },
       { value: "atom-one-light", label: "Atom One Light" },
       { value: "vs", label: "Visual Studio (light)" },
@@ -11319,10 +11336,15 @@ async function renderAdminConfigTab(container) {
       { value: "nord", label: "Nord (dark)" },
       { value: "vs2015", label: "VS 2015 (dark)" },
       { value: "tokyo-night-dark", label: "Tokyo Night (dark)" },
-    ], (config.site && config.site.code_theme) || "github")
+    ]
+    const codeThemeSelect = adminFormSelect(form, "Code theme (light mode)", codeThemeOptions, (config.site && config.site.code_theme) || "github")
+    const codeThemeDarkSelect = adminFormSelect(form, "Code theme (dark mode)", codeThemeOptions, (config.site && config.site.code_theme_dark) || "github-dark")
 
     codeThemeSelect.addEventListener("change", () => {
-      loadHighlightTheme(codeThemeSelect.value)
+      setHighlightThemes(codeThemeSelect.value, codeThemeDarkSelect.value)
+    })
+    codeThemeDarkSelect.addEventListener("change", () => {
+      setHighlightThemes(codeThemeSelect.value, codeThemeDarkSelect.value)
     })
 
     // Auth section
@@ -11788,6 +11810,7 @@ async function renderAdminConfigTab(container) {
           toc_max_level: parseInt(tocMaxLevelInput.value, 10) || 3,
           user_display: userDisplaySelect.value || "",
           code_theme: codeThemeSelect.value,
+          code_theme_dark: codeThemeDarkSelect.value,
         },
         auth: {
           session_ttl: sessionTtlInput.value.trim(),

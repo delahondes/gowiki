@@ -47,13 +47,13 @@ const changesStyles = `
 
 .gowiki-changes-loading,
 .gowiki-changes-empty {
-  color: #636e72;
+  color: var(--gw-color-muted);
   font-style: italic;
   padding: 2px 0;
 }
 
 .gowiki-changes-error {
-  color: #d63031;
+  color: var(--gw-color-error);
   font-style: italic;
   padding: 2px 0;
 }
@@ -82,7 +82,7 @@ const changesStyles = `
 }
 
 .gowiki-changes-meta {
-  color: #999;
+  color: var(--gw-color-subtle);
   font-size: 11px;
   margin-left: 4px;
 }
@@ -98,27 +98,27 @@ const changesStyles = `
 }
 
 .gowiki-changes-badge--create {
-  background: #d4edda;
-  color: #155724;
+  background: var(--gw-color-success-bg);
+  color: var(--gw-color-success);
 }
 
 .gowiki-changes-badge--delete {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--gw-color-error-bg);
+  color: var(--gw-color-error);
 }
 
 .gowiki-changes-badge--migrate {
-  background: #e2e3e5;
-  color: #383d41;
+  background: var(--gw-color-surface-alt);
+  color: var(--gw-color-muted);
 }
 
 .gowiki-changes-badge--admin {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--gw-color-warning-bg);
+  color: var(--gw-color-warning);
 }
 
 #app.gowiki-editing .gowiki-changes {
-  background: #f8f9fa;
+  background: var(--gw-color-surface);
   padding: 6px;
 }
 

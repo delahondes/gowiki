@@ -387,8 +387,8 @@ const slidesStyles = `
   gap: 0.8em;
   margin: 0 0 0.5em 0;
   padding: 0.4em 0.8em;
-  background: #eef3f8;
-  border: 1px solid #c5d5e8;
+  background: var(--gw-color-accent);
+  border: 1px solid var(--gw-color-border);
   border-radius: 4px;
   font-size: 0.85em;
 }
@@ -400,7 +400,7 @@ const slidesStyles = `
   font-weight: 600;
 }
 .gowiki-slides-marker-info {
-  color: #666;
+  color: var(--gw-color-muted);
   font-size: 0.9em;
 }
 .gowiki-slides-present-btn {
@@ -408,14 +408,14 @@ const slidesStyles = `
   padding: 0.25em 0.8em;
   border: none;
   border-radius: 3px;
-  background: #4e79a7;
-  color: #fff;
+  background: var(--gw-color-link);
+  color: var(--gw-color-primary-fg);
   font-size: 0.85em;
   cursor: pointer;
   white-space: nowrap;
 }
 .gowiki-slides-present-btn:hover {
-  background: #3d6a96;
+  background: var(--gw-color-link-hover);
 }
 
 /* --- Fullscreen overlay --- */

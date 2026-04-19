@@ -91,8 +91,8 @@ const databaseStyles = `
 #app.gowiki-editing .gowiki-database-query,
 #app.gowiki-editing .gowiki-database-newrow,
 #app.gowiki-editing .gowiki-database-row {
-  background: #f8f9fa;
-  border: 1px solid #dee2e6;
+  background: var(--gw-color-surface);
+  border: 1px solid var(--gw-color-border);
   border-radius: 4px;
   padding: 8px;
 }
@@ -108,19 +108,19 @@ const databaseStyles = `
 .gowiki-database-newrow-label,
 .gowiki-database-row-label {
   font-size: 11px;
-  color: #636e72;
+  color: var(--gw-color-muted);
   margin-bottom: 4px;
   font-family: monospace;
 }
 
 .gowiki-database-loading {
-  color: #636e72;
+  color: var(--gw-color-muted);
   font-style: italic;
   padding: 8px;
 }
 
 .gowiki-database-error {
-  color: #d63031;
+  color: var(--gw-color-error);
   font-style: italic;
   padding: 8px;
 }
@@ -163,7 +163,7 @@ const databaseStyles = `
   align-items: center;
   margin-top: 4px;
   font-size: 12px;
-  color: #636e72;
+  color: var(--gw-color-muted);
 }
 
 .gowiki-database-pagination button {
@@ -197,8 +197,10 @@ const databaseStyles = `
   flex: 1;
   padding: 4px 6px;
   font-size: 13px;
-  border: 1px solid #ced4da;
+  border: 1px solid var(--gw-color-border);
   border-radius: 3px;
+  background: var(--gw-color-bg);
+  color: var(--gw-color-text);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -211,14 +213,14 @@ const databaseStyles = `
   padding: 4px 12px;
   font-size: 13px;
   cursor: pointer;
-  background: #228be6;
-  color: white;
-  border: 1px solid #1971c2;
+  background: var(--gw-color-link);
+  color: var(--gw-color-primary-fg);
+  border: 1px solid var(--gw-color-link);
   border-radius: 3px;
 }
 
 .gowiki-database-form-actions button:hover {
-  background: #1c7ed6;
+  background: var(--gw-color-link-hover);
 }
 
 /* Inline editable values */
@@ -227,7 +229,7 @@ const databaseStyles = `
 }
 
 .gowiki-database-editable-value:hover {
-  background: #fff3cd;
+  background: var(--gw-color-highlight);
 }
 
 .gowiki-database-page-link,
@@ -276,7 +278,7 @@ const databaseStyles = `
   width: 20px;
   height: 20px;
   border-radius: 3px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--gw-color-border);
   vertical-align: middle;
 }
 
@@ -300,7 +302,7 @@ const databaseStyles = `
 
 /* Template variables — resolved styled in edit mode only */
 #app.gowiki-editing .gowiki-template-var {
-  background: #f0f4ff;
+  background: var(--gw-color-accent);
   border-radius: 3px;
   padding: 0 3px;
   font-style: normal;
@@ -308,8 +310,8 @@ const databaseStyles = `
 
 /* Error state: unknown variable */
 .gowiki-template-var-error {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--gw-color-warning-bg);
+  color: var(--gw-color-warning);
   border-radius: 3px;
   padding: 0 3px;
   font-weight: 600;
@@ -480,11 +482,11 @@ function createOverlaySelectKeyed(
   sel.style.height = rect.height + "px"
   sel.style.boxSizing = "border-box"
   sel.style.fontSize = "13px"
-  sel.style.border = "2px solid #228be6"
+  sel.style.border = "2px solid var(--gw-color-link)"
   sel.style.borderRadius = "2px"
   sel.style.outline = "none"
   sel.style.zIndex = "10000"
-  sel.style.background = "#fff"
+  sel.style.background = "var(--gw-color-bg)"
 
   const emptyOpt = document.createElement("option")
   emptyOpt.value = ""
@@ -557,8 +559,8 @@ function createOverlayColorPicker(
   wrap.style.left = rect.left + "px"
   wrap.style.top = (rect.bottom + 2) + "px"
   wrap.style.zIndex = "10000"
-  wrap.style.background = "#fff"
-  wrap.style.border = "2px solid #228be6"
+  wrap.style.background = "var(--gw-color-bg)"
+  wrap.style.border = "2px solid var(--gw-color-link)"
   wrap.style.borderRadius = "4px"
   wrap.style.padding = "8px"
   wrap.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)"
@@ -580,7 +582,7 @@ function createOverlayColorPicker(
     swatch.style.height = "22px"
     swatch.style.borderRadius = "3px"
     swatch.style.backgroundColor = c
-    swatch.style.border = c === opts.value ? "2px solid #228be6" : "1px solid #ccc"
+    swatch.style.border = c === opts.value ? "2px solid var(--gw-color-link)" : "1px solid var(--gw-color-border)"
     swatch.style.cursor = "pointer"
     swatch.style.boxSizing = "border-box"
     swatch.addEventListener("click", () => {
@@ -604,7 +606,7 @@ function createOverlayColorPicker(
   colorInput.style.width = "30px"
   colorInput.style.height = "24px"
   colorInput.style.padding = "0"
-  colorInput.style.border = "1px solid #ccc"
+  colorInput.style.border = "1px solid var(--gw-color-border)"
   colorInput.style.cursor = "pointer"
   customRow.appendChild(colorInput)
 
@@ -615,7 +617,7 @@ function createOverlayColorPicker(
   textInput.style.flex = "1"
   textInput.style.fontSize = "12px"
   textInput.style.padding = "2px 4px"
-  textInput.style.border = "1px solid #ccc"
+  textInput.style.border = "1px solid var(--gw-color-border)"
   textInput.style.borderRadius = "2px"
   textInput.style.minWidth = "0"
   customRow.appendChild(textInput)
@@ -686,11 +688,11 @@ function createOverlayInput(
   input.style.boxSizing = "border-box"
   input.style.padding = "2px 4px"
   input.style.fontSize = "13px"
-  input.style.border = "2px solid #228be6"
+  input.style.border = "2px solid var(--gw-color-link)"
   input.style.borderRadius = "2px"
   input.style.outline = "none"
   input.style.zIndex = "10000"
-  input.style.background = "#fff"
+  input.style.background = "var(--gw-color-bg)"
 
   let saved = false
   const cleanup = () => { if (input.parentNode) input.remove() }
@@ -729,11 +731,11 @@ function createOverlaySelect(
   sel.style.height = rect.height + "px"
   sel.style.boxSizing = "border-box"
   sel.style.fontSize = "13px"
-  sel.style.border = "2px solid #228be6"
+  sel.style.border = "2px solid var(--gw-color-link)"
   sel.style.borderRadius = "2px"
   sel.style.outline = "none"
   sel.style.zIndex = "10000"
-  sel.style.background = "#fff"
+  sel.style.background = "var(--gw-color-bg)"
 
   const emptyOpt = document.createElement("option")
   emptyOpt.value = ""
@@ -784,8 +786,8 @@ function createOverlayImageInput(
   wrap.style.gap = "4px"
   wrap.style.alignItems = "center"
   wrap.style.zIndex = "10000"
-  wrap.style.background = "#fff"
-  wrap.style.border = "2px solid #228be6"
+  wrap.style.background = "var(--gw-color-bg)"
+  wrap.style.border = "2px solid var(--gw-color-link)"
   wrap.style.borderRadius = "2px"
   wrap.style.padding = "0 4px"
 
@@ -1241,7 +1243,7 @@ class DatabaseQueryNodeView {
           const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
           if (!ok) {
             td.textContent = displayValue
-            td.style.color = "#c33"
+            td.style.color = "var(--gw-color-error)"
             setTimeout(() => { td.style.color = "" }, 2000)
           }
         },
@@ -1496,7 +1498,7 @@ class DatabaseNewRowNodeView {
         })
         if (resp.ok) {
           statusEl.textContent = "Created!"
-          statusEl.style.color = "#155724"
+          statusEl.style.color = "var(--gw-color-success)"
           // Clear form.
           for (const el of inputs.values()) el.value = ""
           setTimeout(() => { statusEl.textContent = "" }, 3000)
@@ -1507,11 +1509,11 @@ class DatabaseNewRowNodeView {
         } else {
           const err = await resp.json().catch(() => ({}))
           statusEl.textContent = err.error || "Failed"
-          statusEl.style.color = "#c33"
+          statusEl.style.color = "var(--gw-color-error)"
         }
       } catch {
         statusEl.textContent = "Network error"
-        statusEl.style.color = "#c33"
+        statusEl.style.color = "var(--gw-color-error)"
       }
     })
 
@@ -1713,7 +1715,7 @@ class DatabaseRowNodeView {
       inp.style.width = "50px"
       inp.style.height = "30px"
       inp.style.padding = "0"
-      inp.style.border = "1px solid #ccc"
+      inp.style.border = "1px solid var(--gw-color-border)"
       inp.style.cursor = "pointer"
       isolateInput(inp)
       return inp
@@ -1949,14 +1951,14 @@ class DatabaseRowNodeView {
           }
         }
         if (!resp.ok) {
-          td.style.color = "#c33"
+          td.style.color = "var(--gw-color-error)"
           setTimeout(() => { td.style.color = "" }, 2000)
           return false
         }
         this.syncFieldToState(fieldName, newValue)
         return true
       } catch {
-        td.style.color = "#c33"
+        td.style.color = "var(--gw-color-error)"
         setTimeout(() => { td.style.color = "" }, 2000)
         return false
       }

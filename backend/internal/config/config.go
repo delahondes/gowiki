@@ -162,7 +162,8 @@ type SiteConfig struct {
 	SidebarPage    string `yaml:"sidebar_page" json:"sidebar_page"`
 	TOCMaxLevel    int    `yaml:"toc_max_level" json:"toc_max_level"`     // 0 = disabled, 1-6 = show headings up to this level
 	UserDisplay    string `yaml:"user_display" json:"user_display"`       // "login" (default), "fullname", "email"
-	CodeTheme      string `yaml:"code_theme" json:"code_theme"`           // highlight.js theme name
+	CodeTheme      string `yaml:"code_theme" json:"code_theme"`           // highlight.js theme name (light mode)
+	CodeThemeDark  string `yaml:"code_theme_dark" json:"code_theme_dark"` // highlight.js theme name (dark mode)
 }
 
 // AuthConfig holds authentication settings.
@@ -232,11 +233,12 @@ func DefaultConfig() Config {
 			Addr: ":8080",
 		},
 		Site: SiteConfig{
-			Title:       "Gowiki",
-			FooterPage:  "footer",
-			SidebarPage: "sidebar",
-			TOCMaxLevel: 3,
-			CodeTheme:   "github",
+			Title:         "Gowiki",
+			FooterPage:    "footer",
+			SidebarPage:   "sidebar",
+			TOCMaxLevel:   3,
+			CodeTheme:     "github",
+			CodeThemeDark: "github-dark",
 		},
 		Auth: AuthConfig{
 			SessionTTL: "24h",

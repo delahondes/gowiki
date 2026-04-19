@@ -985,6 +985,7 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 		"toc_max_level":       cfg.Site.TOCMaxLevel,
 		"user_display":        cfg.Site.UserDisplay,
 		"code_theme":          cfg.Site.CodeTheme,
+		"code_theme_dark":     cfg.Site.CodeThemeDark,
 		"ai_assistant_enabled": cfg.AIAssistant.Enabled,
 		"theme": map[string]any{
 			"default":             themeDefault,
