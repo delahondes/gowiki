@@ -35,12 +35,44 @@ Optional parameters:
 | --- | --- |
 | table | Table name (required) |
 | fields | Comma-separated list of fields to display (default: all) |
-| filter | Filter expression (e.g. `status=active`) |
+| filter | Filter expression (e.g. `status=active`) — see below |
 | sort | Sort field |
 | order | `asc` or `desc` |
 | limit | Maximum rows to display |
 
 Field names prefixed with `%` are displayed as page links: `fields="%title%, description"` makes the title column a clickable link to the row's bound page.
+
+### Filter syntax
+
+A filter is one or more conditions joined by `&` (logical AND). Each
+condition has the form `field<op>value`.
+
+Operators: `=`, `!=`, `<>` (alias for `!=`), `<`, `>`, `<=`, `>=`, and `~`
+(case-insensitive pattern match; `%` is the wildcard, and a value without
+any `%` is wrapped as `%value%` for substring match).
+
+```markdown
+filter="status=active"
+filter="priority>=2&archived!=true"
+filter="name~alice"
+```
+
+#### Joining through a lookup or tag field
+
+A filter may reach into a related table via dotted notation
+`parent_field.child_field<op>value`. The parent must be a `lookup` or `tag`
+field pointing at another table; the child is resolved in that table by
+name or label.
+
+```markdown
+filter="assignee.email~@gmt.bio"
+filter="category.color=#ff0000"
+filter="owner.page_path=/team/alice"
+```
+
+One level of indirection is supported (no chained `a.b.c`). `multi_enum`
+children are not joinable. Unresolvable filters (typos, wrong types) are
+silently dropped rather than raising an error.
 
 ## 1. Inserting rows
 

@@ -344,6 +344,36 @@ filter="code~PRJ%"                  (prefix: matches "PRJ001", "PRJ-alpha", etc.
 
 Multiple conditions are combined with AND. All filters apply to the SQL query — no client-side filtering.
 
+#### Lookup-join filters (dotted notation)
+
+A filter field may reference a column in a related table via a dotted
+expression `parent_field.child_field<op>value`. This is supported when
+`parent_field` is a `lookup` or `tag` field type with a `foreign_key` set —
+the filter is translated into an `EXISTS (…)` subquery on the referenced
+table. One level of indirection only; nested dots (`a.b.c`) are not
+supported.
+
+`child_field` is resolved in the referenced table by name, then by label
+(case-insensitive). Built-in columns `id` and `page_path` are also
+accepted. A `multi_enum` child is rejected.
+
+All the scalar operators apply, including `~`:
+
+```
+filter="assignee.email~@gmt.bio"        (rows whose `assignee` lookup points
+                                         to a user whose email contains the
+                                         substring)
+filter="category.color=#ff0000"          (rows tagged in `category` with a
+                                         specific color)
+filter="owner.page_path=/team/alice"     (rows whose `owner` lookup row has
+                                         that page_path)
+filter="status.active=true&priority>2"   (combined with a regular filter)
+```
+
+Filters targeting fields that cannot be resolved (typo, wrong type,
+multi_enum child, etc.) are silently dropped rather than raising an error —
+this matches the behaviour of single-field filters.
+
 #### Field selection (`fields`)
 
 When `fields` is set, only the listed fields are displayed, in the specified order. Fields are matched by name or label (case-insensitive). The special token `%title%` refers to the row's `id`; for tables with a `page_folder`, it renders as a clickable link to the associated page.

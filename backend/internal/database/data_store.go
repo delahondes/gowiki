@@ -300,6 +300,85 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 
 	for _, f := range params.Filters {
 		fieldName := f.Field
+		op := f.Operator
+
+		// Lookup-join filter: `parent_field.child_field<op>value`.
+		// The parent must be a lookup or tag (BIGINT FK) with a ForeignKey
+		// to another table; the child is resolved in that target table.
+		if dotIdx := strings.Index(fieldName, "."); dotIdx > 0 {
+			parentName := fieldName[:dotIdx]
+			childName := fieldName[dotIdx+1:]
+
+			parentFD, pok := active[parentName]
+			if !pok {
+				if name, found := labelToName[strings.ToLower(parentName)]; found {
+					parentName = name
+					parentFD = active[name]
+					pok = true
+				}
+			}
+			if !pok || parentFD.ForeignKey == "" {
+				continue
+			}
+			if parentFD.Type != FieldTypeLookup && parentFD.Type != FieldTypeTag {
+				continue
+			}
+
+			targetTable, err := ds.schemaStore.GetTableByName(ctx, parentFD.ForeignKey)
+			if err != nil {
+				continue
+			}
+			targetActive := activeFieldMap(targetTable.Fields)
+			targetFD, cok := targetActive[childName]
+			if !cok {
+				for _, tfd := range targetTable.Fields {
+					if tfd.ArchivedAt == nil && strings.EqualFold(tfd.Label, childName) {
+						childName = tfd.Name
+						targetFD = tfd
+						cok = true
+						break
+					}
+				}
+			}
+			if !cok {
+				if childName != "page_path" && childName != "id" {
+					continue
+				}
+				targetFD = FieldDef{Type: FieldTypeText}
+			}
+			if targetFD.Type == FieldTypeMultiEnum {
+				// Joining through junction→junction is out of scope.
+				continue
+			}
+
+			targetDT := dataTableName(parentFD.ForeignKey)
+			var subExpr string
+			switch op {
+			case "=", "!=", "<", ">", "<=", ">=":
+				subExpr = fmt.Sprintf("%s.%s %s $%d", quoteIdent(targetDT), quoteIdent(childName), op, argIdx)
+				args = append(args, convertValue(targetFD.Type, f.Value))
+			case "~":
+				v := f.Value
+				if !strings.Contains(v, "%") {
+					v = "%" + v + "%"
+				}
+				subExpr = fmt.Sprintf("%s.%s ILIKE $%d", quoteIdent(targetDT), quoteIdent(childName), argIdx)
+				args = append(args, v)
+			default:
+				continue
+			}
+			argIdx++
+			whereClauses = append(whereClauses, fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM %s WHERE %s.id = %s.%s AND %s)",
+				quoteIdent(targetDT),
+				quoteIdent(targetDT),
+				quoteIdent(dtName),
+				quoteIdent(parentName),
+				subExpr,
+			))
+			continue
+		}
+
 		fd, ok := active[fieldName]
 		if !ok {
 			// Try matching by label (case-insensitive).
@@ -316,8 +395,6 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 			}
 			fd = FieldDef{Name: fieldName, Type: FieldTypeText}
 		}
-
-		op := f.Operator
 
 		// Multi-enum fields live in a junction table — use EXISTS subquery.
 		if fd.Type == FieldTypeMultiEnum {
