@@ -701,6 +701,19 @@ func convertValue(fieldType string, val any) any {
 	if val == nil {
 		return nil
 	}
+	// An empty string from the client means "no value" for any typed field
+	// (date, datetime, integer, float, FK, etc.) — convert to SQL NULL
+	// rather than letting Postgres reject the empty literal. Text-like
+	// types keep "" (falls through to the default branch below).
+	if s, ok := val.(string); ok && s == "" {
+		switch fieldType {
+		case FieldTypeDate, FieldTypeDatetime,
+			FieldTypeInteger, FieldTypeAutoIncrement,
+			FieldTypeFloat, FieldTypeBoolean,
+			FieldTypeTag, FieldTypeLookup:
+			return nil
+		}
+	}
 	switch fieldType {
 	case FieldTypeInteger, FieldTypeAutoIncrement, FieldTypeTag, FieldTypeLookup:
 		switch v := val.(type) {

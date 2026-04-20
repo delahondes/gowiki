@@ -1063,8 +1063,9 @@ class DatabaseQueryNodeView {
         // Double-click inline editing — forbidden for auto_increment and %title% synthetic fields.
         if (f.type !== "auto_increment" && !f._isTitle) {
           td.className = "gowiki-database-editable-value"
+          ;(td as any).__gwVal = val
           td.addEventListener("dblclick", () => {
-            this.inlineEditCell(td, tableName, row.id, f, val)
+            this.inlineEditCell(td, tableName, row.id, f, (td as any).__gwVal)
           })
         }
 
@@ -1114,6 +1115,15 @@ class DatabaseQueryNodeView {
     return resp.ok
   }
 
+  // Saves an inline edit and, on success, updates the cached value stashed on
+  // the cell so the next dblclick opens with the fresh data instead of the
+  // original render-time closure value.
+  private async saveInlineEditAndCache(td: HTMLElement, tableName: string, rowId: number, fieldName: string, newVal: any): Promise<boolean> {
+    const ok = await this.saveInlineEdit(tableName, rowId, fieldName, typeof newVal === "string" ? newVal : String(newVal))
+    if (ok) (td as any).__gwVal = newVal
+    return ok
+  }
+
   private inlineEditCell(td: HTMLElement, tableName: string, rowId: number, field: any, currentValue: any) {
     const displayValue = Array.isArray(currentValue) ? currentValue.join(", ") : (currentValue != null ? String(currentValue) : "")
 
@@ -1123,7 +1133,7 @@ class DatabaseQueryNodeView {
         value: displayValue,
         onSave: async (newVal) => {
           td.textContent = newVal
-          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
           if (!ok) { td.textContent = displayValue }
         },
         onCancel: () => {},
@@ -1131,7 +1141,7 @@ class DatabaseQueryNodeView {
     } else if (field.type === "boolean") {
       const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
       td.textContent = newVal
-      this.saveInlineEdit(tableName, rowId, field.name, newVal).then(ok => {
+      this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal).then(ok => {
         if (!ok) td.textContent = displayValue
       })
     } else if (field.type === "color") {
@@ -1141,7 +1151,7 @@ class DatabaseQueryNodeView {
           td.textContent = ""
           td.appendChild(renderColorSwatch(newVal))
           td.className = "gowiki-database-editable-value"
-          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
           if (!ok) {
             td.textContent = ""
             td.appendChild(renderColorSwatch(displayValue))
@@ -1162,7 +1172,7 @@ class DatabaseQueryNodeView {
             if (tag) td.appendChild(renderTagBadge(tag))
             else td.textContent = newVal
             td.className = "gowiki-database-editable-value"
-            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
             if (!ok) {
               td.textContent = ""
               const oldTag = tags.get(Number(displayValue))
@@ -1183,7 +1193,7 @@ class DatabaseQueryNodeView {
           onSave: async (newVal) => {
             td.textContent = opts.get(Number(newVal)) || newVal
             td.className = "gowiki-database-editable-value"
-            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
             if (!ok) td.textContent = opts.get(Number(displayValue)) || displayValue
           },
           onCancel: () => {},
@@ -1199,7 +1209,7 @@ class DatabaseQueryNodeView {
             const u = users.find(u => u.username === newVal)
             td.textContent = u?.display_name || newVal
             td.className = "gowiki-database-editable-value"
-            const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+            const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
             if (!ok) {
               const old = users.find(u => u.username === displayValue)
               td.textContent = old?.display_name || displayValue
@@ -1220,7 +1230,7 @@ class DatabaseQueryNodeView {
             td.appendChild(img)
           }
           td.className = "gowiki-database-editable-value"
-          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
           if (!ok) {
             td.textContent = ""
             if (displayValue) {
@@ -1240,7 +1250,7 @@ class DatabaseQueryNodeView {
         onSave: async (newVal) => {
           td.textContent = newVal
           td.className = "gowiki-database-editable-value"
-          const ok = await this.saveInlineEdit(tableName, rowId, field.name, newVal)
+          const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
           if (!ok) {
             td.textContent = displayValue
             td.style.color = "var(--gw-color-error)"
