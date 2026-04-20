@@ -2611,6 +2611,7 @@ export const databasePlugin: WikiPlugin = {
         ctx.push(
           ctx.schema.nodes.database_query.create({
             table: attrs.table ?? "",
+            fields: attrs.fields ?? "",
             filter: attrs.filter ?? "",
             sort: attrs.sort ?? "",
             order: attrs.order ?? "asc",
