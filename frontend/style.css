@@ -963,12 +963,16 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   background: var(--gw-color-border);
 }
 
+.gowiki-raw-menuitem svg {
+  fill: currentColor;
+}
+
 .gowiki-raw-menusep {
   display: inline-block;
   width: 1px;
   height: 1.2em;
   margin: 2px 4px;
-  background: #ccc;
+  background: var(--gw-color-border);
 }
 
 .gowiki-raw-menu-dropdown-wrap {

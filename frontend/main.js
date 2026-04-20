@@ -5943,7 +5943,7 @@ function buildMenubar() {
   uBtn.style.textDecoration = "underline"
 
   // Strikethrough
-  const sBtn = addButton("S", shortcutHint("Strikethrough", "Shift-S"), () => {
+  const sBtn = addButton("S", shortcutHint("Strikethrough", "Shift-X"), () => {
     if (editMode === "visual" && editorView) {
       toggleMark(schema.marks.strikethrough)(editorView.state, editorView.dispatch)
       editorView.focus()
@@ -6852,10 +6852,13 @@ function renderEdit(nextEditMode) {
   })
 
   const shortcutKeymap = keymap({
+    "Mod-z": undo,
+    "Shift-Mod-z": redo,
+    "Mod-y": redo,
     "Mod-b": toggleMark(schema.marks.strong),
     "Mod-i": toggleMark(schema.marks.em),
     "Mod-u": toggleMark(schema.marks.underline),
-    "Mod-Shift-s": toggleMark(schema.marks.strikethrough),
+    "Mod-Shift-x": toggleMark(schema.marks.strikethrough),
     "Mod-e": toggleMark(schema.marks.code),
     "Mod-k": (state, dispatch, view) => {
       setExternalLinkCommand()(state, dispatch, view)
