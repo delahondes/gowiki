@@ -880,17 +880,56 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   border: 3px solid var(--gw-color-primary);
 }
 
+.gowiki-raw-editor-holder {
+  position: relative;
+  width: 100%;
+}
+
 .gowiki-raw-editor {
   box-sizing: border-box;
   width: 100%;
   min-height: 360px;
   padding: 10px;
   border: none;
+  background: transparent;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 14px;
   line-height: 1.45;
   overflow: hidden;
   resize: none;
+  position: relative;
+  z-index: 1;
+}
+
+.gowiki-raw-editor-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+
+.gowiki-raw-invisible {
+  background: rgba(255, 180, 0, 0.35);
+  border-radius: 2px;
+  outline: 1px solid rgba(200, 130, 0, 0.5);
+}
+
+.gowiki-raw-invisible-nbsp {
+  background: rgba(255, 180, 0, 0.35);
 }
 
 /* "You are here" beacon after mode switch */

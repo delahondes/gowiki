@@ -3406,6 +3406,37 @@ function autoResizeRawEditor(editorEl) {
 
 // --- Raw mode menubar helpers ---
 
+// Characters that render (nearly) invisibly but aren't a plain space/tab/newline.
+// Editing source is misleading when they're present, so we paint a highlight
+// layer behind the textarea to surface them.
+const RAW_INVISIBLE_RE = /[\u00A0\u1680\u2000-\u200F\u2028\u2029\u202F\u205F\u2060\u3000\uFEFF]/g
+
+function updateRawOverlay(overlay, text) {
+  // Escape HTML, then wrap invisible runs. Trailing newline keeps the last
+  // line's height in sync with the textarea.
+  let out = ""
+  let last = 0
+  const src = text + "\n"
+  RAW_INVISIBLE_RE.lastIndex = 0
+  let m
+  while ((m = RAW_INVISIBLE_RE.exec(src)) !== null) {
+    out += escapeOverlay(src.slice(last, m.index))
+    const ch = m[0]
+    const code = ch.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()
+    const cls = ch.charCodeAt(0) === 0x00A0 || ch.charCodeAt(0) === 0x202F
+      ? "gowiki-raw-invisible gowiki-raw-invisible-nbsp"
+      : "gowiki-raw-invisible"
+    out += `<span class="${cls}" title="U+${code}">${escapeOverlay(ch)}</span>`
+    last = m.index + ch.length
+  }
+  out += escapeOverlay(src.slice(last))
+  overlay.innerHTML = out
+}
+
+function escapeOverlay(s) {
+  return s.replace(/[&<>]/g, c => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;")
+}
+
 function rawInsertText(textarea, text) {
   textarea.focus()
   document.execCommand("insertText", false, text)
@@ -4704,6 +4735,7 @@ const symbolCatalogue = [
 let symbolPanelEl = null
 let symbolPanelAnchor = null // "toolbar" or "cursor"
 let symbolToolbarAnchor = null // DOM element of the toolbar button
+let symbolPanelOutsideHandler = null
 
 function insertSymbolChar(char) {
   if (editMode === "visual" && editorView) {
@@ -4712,7 +4744,14 @@ function insertSymbolChar(char) {
     editorView.focus()
   } else if (editMode === "raw" && rawEditor) {
     rawEditor.focus()
-    rawInsertText(rawEditor, char)
+    const start = rawEditor.selectionStart
+    const end = rawEditor.selectionEnd
+    const before = rawEditor.value.slice(0, start)
+    const after = rawEditor.value.slice(end)
+    rawEditor.value = before + char + after
+    const pos = start + char.length
+    rawEditor.setSelectionRange(pos, pos)
+    rawEditor.dispatchEvent(new Event("input", { bubbles: true }))
   }
 }
 
@@ -4862,25 +4901,32 @@ function openSymbolPanel(anchor) {
   symbolPanelEl = panel
   symbolPanelAnchor = anchor
 
+  document.body.appendChild(panel)
+  let rect
   if (anchor === "toolbar" && symbolToolbarAnchor) {
-    symbolToolbarAnchor.appendChild(panel)
+    const r = symbolToolbarAnchor.getBoundingClientRect()
+    rect = { left: r.left, top: r.bottom }
+  } else if (editMode === "visual" && editorView) {
+    const coords = editorView.coordsAtPos(editorView.state.selection.from)
+    rect = { left: coords.left, top: coords.bottom }
+  } else if (editMode === "raw" && rawEditor) {
+    const r = rawEditor.getBoundingClientRect()
+    rect = { left: r.left + 20, top: r.top + 20 }
   } else {
-    // Position near cursor in the editor
-    document.body.appendChild(panel)
-    let rect
-    if (editMode === "visual" && editorView) {
-      const coords = editorView.coordsAtPos(editorView.state.selection.from)
-      rect = { left: coords.left, top: coords.bottom }
-    } else if (editMode === "raw" && rawEditor) {
-      const r = rawEditor.getBoundingClientRect()
-      rect = { left: r.left + 20, top: r.top + 20 }
-    } else {
-      rect = { left: window.innerWidth / 2 - 150, top: window.innerHeight / 3 }
-    }
-    panel.style.position = "fixed"
-    panel.style.left = Math.min(rect.left, window.innerWidth - 320) + "px"
-    panel.style.top = Math.min(rect.top + 4, window.innerHeight - 400) + "px"
+    rect = { left: window.innerWidth / 2 - 150, top: window.innerHeight / 3 }
   }
+  panel.style.position = "fixed"
+  panel.style.left = Math.min(rect.left, window.innerWidth - 320) + "px"
+  panel.style.top = Math.min(rect.top + 4, window.innerHeight - 400) + "px"
+
+  // Dismiss on click outside. Capture phase so we fire before focus steal.
+  symbolPanelOutsideHandler = e => {
+    if (!symbolPanelEl) return
+    if (symbolPanelEl.contains(e.target)) return
+    if (symbolToolbarAnchor && symbolToolbarAnchor.contains(e.target)) return
+    closeSymbolPanel()
+  }
+  document.addEventListener("mousedown", symbolPanelOutsideHandler, true)
 
   // Focus the search field after a microtask so it doesn't lose focus immediately
   requestAnimationFrame(() => search.focus())
@@ -4891,6 +4937,10 @@ function closeSymbolPanel() {
   symbolPanelEl.remove()
   symbolPanelEl = null
   symbolPanelAnchor = null
+  if (symbolPanelOutsideHandler) {
+    document.removeEventListener("mousedown", symbolPanelOutsideHandler, true)
+    symbolPanelOutsideHandler = null
+  }
 }
 
 // ── AI Assistant Panel ──────────────────────────────
@@ -6101,10 +6151,11 @@ function buildMenubar() {
       const mod = isMac ? "\u2318" : "Ctrl+"
       symWrap.title = `Insert symbol (${mod}:)`
     }
-    symWrap.textContent = "\u263A"
+    symWrap.textContent = "\u03A9"
     symbolToolbarAnchor = symWrap
     symWrap.addEventListener("mousedown", e => {
       e.preventDefault()
+      e.stopPropagation()
       if (symbolPanelEl && symbolPanelAnchor === "toolbar") {
         closeSymbolPanel()
       } else {
@@ -6112,11 +6163,6 @@ function buildMenubar() {
       }
     })
     bar.appendChild(symWrap)
-    document.addEventListener("mousedown", e => {
-      if (symbolPanelEl && !symbolPanelEl.contains(e.target) && !symWrap.contains(e.target)) {
-        closeSymbolPanel()
-      }
-    })
   }
 
   addSeparator()
@@ -6685,10 +6731,17 @@ function renderEdit(nextEditMode) {
   wrapper.appendChild(menubarDom)
 
   if (nextEditMode === "raw") {
+    const holder = document.createElement("div")
+    holder.className = "gowiki-raw-editor-holder"
+    const overlay = document.createElement("div")
+    overlay.className = "gowiki-raw-editor-overlay"
+    overlay.setAttribute("aria-hidden", "true")
+    holder.appendChild(overlay)
     const editorEl = document.createElement("textarea")
     editorEl.id = "gowiki-raw-editor"
     editorEl.className = "gowiki-raw-editor"
     editorEl.value = currentMarkdown
+    updateRawOverlay(overlay, editorEl.value)
 
     editorEl.addEventListener("keydown", e => {
       const isMod = e.metaKey || e.ctrlKey
@@ -6767,6 +6820,7 @@ function renderEdit(nextEditMode) {
 
     editorEl.addEventListener("input", () => {
       autoResizeRawEditor(editorEl)
+      updateRawOverlay(overlay, editorEl.value)
     })
 
     editorEl.addEventListener("paste", e => {
@@ -6823,7 +6877,8 @@ function renderEdit(nextEditMode) {
       if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") updateEditOffset()
     })
 
-    wrapper.appendChild(editorEl)
+    holder.appendChild(editorEl)
+    wrapper.appendChild(holder)
     contentRoot.appendChild(wrapper)
     autoResizeRawEditor(editorEl)
     rawEditor = editorEl
