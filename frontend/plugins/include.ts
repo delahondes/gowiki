@@ -325,6 +325,7 @@ class IncludeNodeView {
         editable: () => false,
       })
       highlightCodeBlocks(this.bodyEl)
+      document.dispatchEvent(new CustomEvent("gowiki:include-loaded"))
 
       // Report heading counts back to the parent so its numbering accounts for include content.
       const includePos = this.getPos()

@@ -3160,8 +3160,28 @@ async function fetchAndMountZone(path, container, className) {
   }
 }
 
+let tocIncludeListener = null
+let tocIncludeDebounce = null
+
+function setupTOCIncludeRebuild(container) {
+  if (tocIncludeListener) {
+    document.removeEventListener("gowiki:include-loaded", tocIncludeListener)
+  }
+  tocIncludeListener = () => {
+    if (tocIncludeDebounce) clearTimeout(tocIncludeDebounce)
+    tocIncludeDebounce = setTimeout(() => {
+      if (document.body.contains(container)) buildTOC(container)
+    }, 80)
+  }
+  document.addEventListener("gowiki:include-loaded", tocIncludeListener)
+}
+
 function buildTOC(container) {
   if (tocMaxLevel <= 0) return
+
+  // Remove prior TOC if rebuilding (e.g. after async includes load).
+  const prior = container.querySelector(":scope > .gowiki-toc")
+  if (prior) prior.remove()
 
   const selector = Array.from({ length: tocMaxLevel }, (_, i) => `h${i + 1}`).join(", ")
   const headings = container.querySelectorAll(selector)
@@ -3221,8 +3241,10 @@ function renderView() {
     highlightTermsInView(contentRoot, highlight)
   }
 
-  // Build table of contents for view mode.
+  // Build table of contents for view mode. Rebuild after includes load so
+  // their headings are picked up too.
   buildTOC(contentRoot)
+  setupTOCIncludeRebuild(contentRoot)
 
   // Check for pending read acknowledgements.
   if (currentUser && !isNewPage) {
