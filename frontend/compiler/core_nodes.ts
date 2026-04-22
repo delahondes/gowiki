@@ -830,7 +830,7 @@ function registerMarkdownPrinters(reg: Registry) {
     itemNode: any,
     recurse: (node: any) => string
   ): string {
-    const parts: string[] = []
+    const parts: { text: string; type: string }[] = []
 
     itemNode.content.forEach((child: any) => {
       let rendered = recurse(child).trimEnd()
@@ -841,10 +841,24 @@ function registerMarkdownPrinters(reg: Registry) {
         rendered = rendered.replace(/\\n/g, "\n")
       }
 
-      parts.push(rendered)
+      parts.push({ text: rendered, type: child.type?.name ?? "" })
     })
 
-    return parts.join("\n")
+    if (parts.length === 0) return ""
+
+    // Join siblings inside a list item. A bare "\n" only round-trips for
+    // paragraph → list (tight nested sub-list); every other combination
+    // needs a blank line to prevent merge/lazy-continuation on reparse.
+    const isList = (t: string) => t === "bullet_list" || t === "ordered_list"
+    let out = parts[0].text
+    for (let i = 1; i < parts.length; i++) {
+      const prev = parts[i - 1].type
+      const cur = parts[i].type
+      const tight = prev === "paragraph" && isList(cur)
+      out += tight ? "\n" : "\n\n"
+      out += parts[i].text
+    }
+    return out
   }
 
   function imageDirectiveStr(image: PMNode): string {
@@ -1017,7 +1031,7 @@ function registerMarkdownPrinters(reg: Registry) {
         const continuationIndent = " ".repeat(marker.length)
         const item = renderListItemText(child, recurse)
         if (!item) return // skip empty list items (no content to serialize)
-        const formatted = item.replace(/\n/g, "\n" + continuationIndent)
+        const formatted = item.replace(/\n(?!\n)/g, "\n" + continuationIndent)
         out += marker + formatted + "\n"
       })
       // If all items were empty, return empty string to avoid orphan list markers.
@@ -1035,7 +1049,7 @@ function registerMarkdownPrinters(reg: Registry) {
         const continuationIndent = " ".repeat(marker.length)
         const item = renderListItemText(child, recurse)
         if (!item) return // skip empty list items
-        const formatted = item.replace(/\n/g, "\n" + continuationIndent)
+        const formatted = item.replace(/\n(?!\n)/g, "\n" + continuationIndent)
         out += marker + formatted + "\n"
       })
       if (!out) return ""

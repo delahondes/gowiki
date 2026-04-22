@@ -79,10 +79,13 @@ const panelStyles = `
 .gowiki-props-panel textarea {
   font-family: monospace;
   font-size: 0.9em;
-  width: 25em;
-  min-height: 4em;
+  width: 40em;
+  min-height: 6em;
+  max-height: 30em;
   resize: vertical;
   padding: 2px 4px;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .gowiki-props-label {
@@ -227,6 +230,13 @@ function buildPropGroup(
     } else if (prop.multiline) {
       const textarea = document.createElement("textarea")
       textarea.value = displayValue
+
+      const autosize = () => {
+        textarea.style.height = "auto"
+        textarea.style.height = (textarea.scrollHeight + 2) + "px"
+      }
+      requestAnimationFrame(autosize)
+      textarea.addEventListener("input", autosize)
 
       if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
         const focus = pendingInputRefocus

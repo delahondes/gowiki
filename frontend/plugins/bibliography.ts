@@ -368,9 +368,12 @@ class ReferencesNodeView {
           li.textContent = `Unresolved ${pub.type}: ${pub.id}`
         }
         list.appendChild(li)
-        const key = cacheKey(pub.type, pub.id)
-        const off = subscribe(key, () => this.render())
-        this.disposers.push(off)
+        // Only subscribe while still loading — see AutoReferencesController.render.
+        if (state.status === "loading") {
+          const key = cacheKey(pub.type, pub.id)
+          const off = subscribe(key, () => this.render())
+          this.disposers.push(off)
+        }
       }
     }
 
@@ -506,9 +509,15 @@ class AutoReferencesController {
         else if (state.status === "invalid") li.textContent = `Invalid ${pub.type}: ${pub.id}`
         else li.textContent = `Unresolved ${pub.type}: ${pub.id}`
         list.appendChild(li)
-        const key = cacheKey(pub.type, pub.id)
-        const off = subscribe(key, () => this.render())
-        this.disposers.push(off)
+        // Only subscribe while the fetch is in flight. Re-subscribing for
+        // terminal states (unresolved/invalid) creates an infinite loop:
+        // notify() iterates the subscriber Set, render() unsubs+resubs the
+        // same key, and JS Set iteration picks up the freshly-added callback.
+        if (state.status === "loading") {
+          const key = cacheKey(pub.type, pub.id)
+          const off = subscribe(key, () => this.render())
+          this.disposers.push(off)
+        }
       }
     }
 
