@@ -90,12 +90,20 @@ function emitErrorTokens(out: any[], message: string) {
   out.push({ type: "paragraph_close", tag: "p", nesting: -1, block: true, level: 0 })
 }
 
+function lineRef(map: any): string {
+  if (Array.isArray(map) && typeof map[0] === "number") {
+    return ` (line ${map[0] + 1})`
+  }
+  return ""
+}
+
 function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   const out: any[] = []
   let pending: {
     name: string
     attrs: Record<string, string>
     lineCount: number
+    map: any
   } | null = null
   let pendingSpec: ReturnType<Registry["getDirective"]> | null = null
 
@@ -103,12 +111,12 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
     if (token.type === "directive") {
       const meta = token.meta as DirectiveToken | undefined
       if (!meta) {
-        throw new Error("Invalid directive token")
+        throw new Error(`Invalid directive token${lineRef(token.map)}`)
       }
       if (pending) {
         if (strict) {
           throw new Error(
-            `Directive "${pending.name}" must apply to the next block`
+            `Directive "${pending.name}"${lineRef(pending.map)} must apply to the next block (got another directive at line ${(token.map?.[0] ?? -1) + 1})`
           )
         }
         emitErrorTokens(out, `Directive "{${pending.name}}" must be followed by its target block`)
@@ -135,7 +143,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
             }
             if (strict) {
               throw new Error(
-                `Unknown property "${key}" for directive "${meta.name}"`
+                `Unknown property "${key}" for directive "${meta.name}"${lineRef(token.map)}`
               )
             }
             continue
@@ -175,14 +183,14 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
 
       const spec = registry.getDirective(meta.name)
       if (!spec) {
-        if (strict) throw new Error(`Unknown directive: ${meta.name}`)
+        if (strict) throw new Error(`Unknown directive "${meta.name}"${lineRef(token.map)}`)
         emitErrorTokens(out, `Unknown directive "{${meta.name}}"`)
         continue
       }
       const directiveLineCount = Array.isArray(token.map)
         ? Math.max(1, token.map[1] - token.map[0])
         : 1
-      pending = { ...meta, lineCount: directiveLineCount }
+      pending = { ...meta, lineCount: directiveLineCount, map: token.map }
       pendingSpec = spec
       continue
     }
@@ -191,7 +199,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
       if (!pendingSpec || !pendingSpec.appliesTo.includes(token.type)) {
         if (strict) {
           throw new Error(
-            `Directive "${pending.name}" cannot apply to "${token.type}"`
+            `Directive "${pending.name}"${lineRef(pending.map)} cannot apply to "${token.type}"`
           )
         }
         emitErrorTokens(out, `Directive "{${pending.name}}" cannot apply to the following block`)
@@ -211,7 +219,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
             }
             if (strict) {
               throw new Error(
-                `Unknown property "${key}" for directive "${pending.name}"`
+                `Unknown property "${key}" for directive "${pending.name}"${lineRef(pending.map)}`
               )
             }
             continue
@@ -233,7 +241,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
   if (pending) {
     if (strict) {
       throw new Error(
-        `Directive "${pending.name}" must be followed by a block`
+        `Directive "${pending.name}"${lineRef(pending.map)} must be followed by a block`
       )
     }
     emitErrorTokens(out, `Directive "{${pending.name}}" at end of document has no target block`)

@@ -603,6 +603,60 @@ a:hover {
   white-space: normal;
 }
 
+.gowiki-action-toast.gowiki-toast-with-details {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 640px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.gowiki-toast-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gowiki-toast-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  margin-left: auto;
+  padding: 0 4px;
+  opacity: 0.8;
+}
+
+.gowiki-toast-dismiss:hover {
+  opacity: 1;
+}
+
+.gowiki-toast-details {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.gowiki-toast-details > summary {
+  cursor: pointer;
+  opacity: 0.85;
+  user-select: none;
+}
+
+.gowiki-toast-details > pre {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+  font-family: var(--gw-font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 50vh;
+  overflow: auto;
+}
+
 .gowiki-status {
   min-height: 1.2em;
   color: var(--gw-color-muted);

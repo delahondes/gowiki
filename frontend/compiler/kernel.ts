@@ -164,6 +164,13 @@ export function run(tokens: MarkdownToken[], registry: Registry, ctx: CompileCon
   }
 }
 
+function lineRefFromToken(tok: any): string {
+  if (tok && Array.isArray(tok.map) && typeof tok.map[0] === "number") {
+    return ` (line ${tok.map[0] + 1})`
+  }
+  return ""
+}
+
 function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext, strict: boolean) {
   if (!tok || typeof tok.type !== "string") {
     if (strict) throw new Error(`Invalid token: ${String(tok)}`)
@@ -209,7 +216,7 @@ function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext
       return
     }
 
-    if (strict) throw new Error(`No handler for token: ${type}`)
+    if (strict) throw new Error(`No handler for token: ${type}${lineRefFromToken(tok)}`)
     return
   }
 
@@ -231,10 +238,10 @@ function handleToken(tok: MarkdownToken, registry: Registry, ctx: CompileContext
       return
     }
 
-    if (strict) throw new Error(`No handler for token: ${type}`)
+    if (strict) throw new Error(`No handler for token: ${type}${lineRefFromToken(tok)}`)
     return
   }
 
   // Any other tokens must be explicitly registered as text-like or container-like.
-  if (strict) throw new Error(`Unhandled token: ${type}`)
+  if (strict) throw new Error(`Unhandled token: ${type}${lineRefFromToken(tok)}`)
 }

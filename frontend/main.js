@@ -1711,7 +1711,7 @@ let statusToastTimer = null
 
 window.__gowikiSetStatus = function(text, isError) { setStatus(text, isError) }
 
-function setStatus(text, isError) {
+function setStatus(text, isError, details) {
   statusText = text
   if (!text) return
   // Auto-detect errors if not explicitly specified.
@@ -1726,14 +1726,29 @@ function setStatus(text, isError) {
   statusToastEl.textContent = ""
   if (isError) {
     statusToastEl.classList.add("visible", "gowiki-toast-error")
+    statusToastEl.classList.toggle("gowiki-toast-with-details", !!details)
+    const row = document.createElement("div")
+    row.className = "gowiki-toast-row"
     const msg = document.createElement("span")
     msg.textContent = text
-    statusToastEl.appendChild(msg)
+    row.appendChild(msg)
     const dismissBtn = document.createElement("button")
     dismissBtn.textContent = "\u2715"
-    dismissBtn.style.cssText = "background:none;border:none;color:inherit;font-size:16px;cursor:pointer;margin-left:12px;padding:0 4px;opacity:0.8"
-    dismissBtn.addEventListener("click", () => statusToastEl.classList.remove("visible", "gowiki-toast-error"))
-    statusToastEl.appendChild(dismissBtn)
+    dismissBtn.className = "gowiki-toast-dismiss"
+    dismissBtn.addEventListener("click", () => statusToastEl.classList.remove("visible", "gowiki-toast-error", "gowiki-toast-with-details"))
+    row.appendChild(dismissBtn)
+    statusToastEl.appendChild(row)
+    if (details) {
+      const det = document.createElement("details")
+      det.className = "gowiki-toast-details"
+      const sum = document.createElement("summary")
+      sum.textContent = "Details"
+      det.appendChild(sum)
+      const pre = document.createElement("pre")
+      pre.textContent = details
+      det.appendChild(pre)
+      statusToastEl.appendChild(det)
+    }
     clearTimeout(statusToastTimer)
     // No auto-dismiss for errors.
   } else {
@@ -2718,7 +2733,7 @@ async function setEditMode(nextEditMode) {
     currentDoc = normalized.doc
   } catch (err) {
     console.error("Switch mode failed", err)
-    setStatus("Invalid Markdown")
+    setStatus("Invalid Markdown — " + (err.message || err), true, err.stack || String(err))
     return
   }
 
@@ -9766,7 +9781,7 @@ async function publishDraft() {
   try {
     normalized = normalizeMarkdownForStorage(markdown)
   } catch (err) {
-    setStatus("Invalid Markdown — cannot publish: " + (err.message || err))
+    setStatus("Invalid Markdown — cannot publish: " + (err.message || err), true, err.stack || String(err))
     return
   }
   if (normalized.roundTripError) {
@@ -10009,7 +10024,7 @@ async function saveDraftAndExit() {
       currentDoc = markdownToPM(currentMarkdown, registry)
     } catch (err) {
       console.error("saveDraftAndExit: markdown parse failed", err)
-      setStatus("Invalid Markdown in draft — " + (err.message || err))
+      setStatus("Invalid Markdown in draft — " + (err.message || err), true, err.stack || String(err))
       return
     }
   }
