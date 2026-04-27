@@ -980,15 +980,16 @@ html[data-theme="dark"] .ProseMirror th[data-cell-color]:not([data-cell-text-col
 
 /* In edit mode, show a subtle indicator on formula display text */
 #app.gowiki-editing .ProseMirror .formula-display {
-  background: #f0f4ff;
+  background: var(--gw-color-info-bg);
+  color: var(--gw-color-text);
   border-radius: 3px;
   padding: 0 3px;
 }
 
 /* Error values styled like unresolved template variables */
 .ProseMirror .formula-display-error {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--gw-color-warning-bg);
+  color: var(--gw-color-warning);
   border-radius: 3px;
   padding: 0 3px;
 }
