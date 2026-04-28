@@ -25,14 +25,19 @@ import { formulaSyncPlugin, formulaColorPlugin } from "./table_formulas"
 import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // ─── Named color presets ─────────────────────────────────
+//
+// These resolve to saturated mid-tone hex values. The cell decoration
+// passes the value through to a CSS color-mix() that blends it with the
+// current page background at low alpha, so a single saturated source
+// renders as a pastel in light mode and as a dark tint in dark mode.
 
 const NAMED_COLORS: Record<string, string> = {
-  red: "#fee2e2",
-  green: "#dcfce7",
-  yellow: "#fef9c3",
-  orange: "#ffedd5",
-  grey: "#f3f4f6",
-  blue: "#dbeafe",
+  red: "#ef4444",
+  green: "#22c55e",
+  yellow: "#eab308",
+  orange: "#f97316",
+  grey: "#737373",
+  blue: "#3b82f6",
   none: "",
 }
 
@@ -956,10 +961,21 @@ const tableStyles = `
    assuming dark text on a light background. In dark mode the cell
    text would inherit white, which is often unreadable against bright
    greens/yellows/cyans. Force dark text for those cells unless the
-   author has also set an explicit text color. */
-html[data-theme="dark"] .ProseMirror td[data-cell-color]:not([data-cell-text-color]),
-html[data-theme="dark"] .ProseMirror th[data-cell-color]:not([data-cell-text-color]) {
+   author has also set an explicit text color. Rule-colored cells
+   (data-cell-color="rule") are handled below — they blend with the
+   page background. */
+html[data-theme="dark"] .ProseMirror td[data-cell-color]:not([data-cell-color="rule"]):not([data-cell-text-color]),
+html[data-theme="dark"] .ProseMirror th[data-cell-color]:not([data-cell-color="rule"]):not([data-cell-text-color]) {
   color: #222 !important;
+}
+
+/* Column-rule colored cells: render the saturated rule color at low
+   alpha over the page background, in both light and dark modes. The
+   page bg dilutes the saturated source — pastel on white, dark tint
+   on a dark page — so the same source color works in both themes. */
+.ProseMirror td[data-cell-color="rule"],
+.ProseMirror th[data-cell-color="rule"] {
+  background: color-mix(in srgb, var(--gw-cell-rule-bg, transparent) 30%, var(--gw-color-bg)) !important;
 }
 
 .ProseMirror td > p,
@@ -1235,6 +1251,7 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
 
               if (props) {
                 let style = ""
+                let ruleColored = false
                 if (props.align) style += `text-align: ${props.align}; `
                 if (props.width) style += `width: ${props.width}; `
 
@@ -1243,14 +1260,21 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                   const rules = parseColorRules(props.color)
                   const text = getCellText(cell)
                   const bg = evaluateColorRules(rules, text)
-                  if (bg) style += `background: ${bg}; `
+                  if (bg) {
+                    // Expose the rule color as a CSS variable so dark-mode
+                    // CSS can reuse it with reduced alpha (the dark page bg
+                    // shows through, naturally darkening the pastel while
+                    // preserving its hue).
+                    style += `--gw-cell-rule-bg: ${bg}; background: var(--gw-cell-rule-bg); `
+                    ruleColored = true
+                  }
                 }
 
                 if (style) {
+                  const attrs: Record<string, string> = { style }
+                  if (ruleColored) attrs["data-cell-color"] = "rule"
                   decos.push(
-                    Decoration.node(cellPos, cellPos + cell.nodeSize, {
-                      style,
-                    })
+                    Decoration.node(cellPos, cellPos + cell.nodeSize, attrs)
                   )
                 }
               }

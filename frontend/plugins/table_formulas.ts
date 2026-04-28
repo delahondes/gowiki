@@ -873,7 +873,8 @@ export function formulaColorPlugin(schema: Schema): PMPlugin {
                       if (bg) {
                         decos.push(
                           Decoration.node(cellPos, cellPos + cell.nodeSize, {
-                            style: `background: ${bg}; `,
+                            style: `--gw-cell-rule-bg: ${bg}; background: var(--gw-cell-rule-bg); `,
+                            "data-cell-color": "rule",
                           })
                         )
                       }
