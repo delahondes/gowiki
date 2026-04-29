@@ -656,21 +656,29 @@ function registerEmphasis(reg: Registry) {
  * -------------------------------------------------- */
 
 function registerHeading(reg: Registry) {
-  // markdown-it core rule: detect `1. ` prefix in heading inline content
-  // and transfer it to the heading_open token as meta.numbered.
+  // markdown-it core rule: detect a `<digits>. ` prefix in heading inline
+  // content and transfer it to the heading_open token as meta.numbered.
+  // Any digit value is accepted (1, 3, 18, …); the actual numbering is
+  // recomputed from position by the heading-number decoration. The
+  // serializer always emits `1. `, so a round-trip on mode switch / save
+  // normalizes whatever the author typed back to the canonical form.
+  const NUMBERED_HEADING_RE = /^(\d+)\. /
   reg.registerMarkdownItPlugin((md: any) => {
     md.core.ruler.push("gowiki_numbered_heading", (state: any) => {
       for (let i = 0; i < state.tokens.length; i++) {
         if (state.tokens[i].type === "heading_open" && i + 1 < state.tokens.length) {
           const inline = state.tokens[i + 1]
-          if (inline.type === "inline" && inline.content.startsWith("1. ")) {
-            state.tokens[i].meta = { ...(state.tokens[i].meta || {}), numbered: true }
-            inline.content = inline.content.slice(3)
-            if (inline.children?.length > 0 && inline.children[0].type === "text") {
-              const t = inline.children[0]
-              if (t.content.startsWith("1. ")) {
-                t.content = t.content.slice(3)
-              }
+          if (inline.type !== "inline") continue
+          const m = NUMBERED_HEADING_RE.exec(inline.content)
+          if (!m) continue
+          const prefixLen = m[0].length
+          state.tokens[i].meta = { ...(state.tokens[i].meta || {}), numbered: true }
+          inline.content = inline.content.slice(prefixLen)
+          if (inline.children?.length > 0 && inline.children[0].type === "text") {
+            const t = inline.children[0]
+            const cm = NUMBERED_HEADING_RE.exec(t.content)
+            if (cm) {
+              t.content = t.content.slice(cm[0].length)
             }
           }
         }
