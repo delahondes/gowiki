@@ -1083,7 +1083,8 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   left: 0;
   z-index: 50;
   background: var(--gw-color-bg);
-  border: 1px solid #ccc;
+  color: var(--gw-color-text);
+  border: 1px solid var(--gw-color-border);
   border-radius: 3px;
   padding: 2px 0;
   min-width: 60px;
@@ -1094,25 +1095,26 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   cursor: pointer;
   font-size: 14px;
   font-weight: normal;
+  color: var(--gw-color-text);
 }
 
 .gowiki-raw-dropdown-item:hover {
-  background: #eee;
+  background: var(--gw-color-surface-alt);
 }
 
 .gowiki-raw-dropdown-item--disabled {
-  color: #aaa;
+  color: var(--gw-color-subtle);
   cursor: default;
   pointer-events: none;
 }
 
 .gowiki-raw-dropdown-item--hint {
-  color: #888;
+  color: var(--gw-color-muted);
   font-style: italic;
   font-size: 12px;
   cursor: default;
   pointer-events: none;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--gw-color-border-soft);
   padding-top: 5px;
   margin-top: 2px;
 }
