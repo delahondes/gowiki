@@ -1538,12 +1538,14 @@ function normalizeMarkdownForStorage(markdown) {
 
   // Second round-trip: verify stability
   let roundTripError = false
+  let roundTripFirstDiffLine = -1
+  let roundTripDiagnostics = ""
   try {
     const doc2 = markdownToPM(normalizedMarkdown, registry)
     const md3 = pmToMarkdown(doc2, registry)
     if (md3 !== normalizedMarkdown) {
-      console.error("Round-trip validation failed: serialize→parse→serialize not stable")
-      // Log the diff to help diagnose which construct is unstable.
+      const out = []
+      out.push("Round-trip validation failed: serialize→parse→serialize not stable")
       const lines1 = normalizedMarkdown.split("\n")
       const lines2 = md3.split("\n")
       const maxLines = Math.max(lines1.length, lines2.length)
@@ -1554,24 +1556,27 @@ function normalizeMarkdownForStorage(markdown) {
         if (a !== b) {
           if (firstDiff === -1) {
             firstDiff = i
-            // Show context: 5 lines before the first difference
-            console.error("  --- context before first diff ---")
+            out.push("  --- context before first diff ---")
             for (let j = Math.max(0, i - 5); j < i; j++) {
-              console.error(`  line ${j + 1}: ${JSON.stringify(lines1[j])}`)
+              out.push(`  line ${j + 1}: ${JSON.stringify(lines1[j])}`)
             }
-            console.error("  --- differences ---")
+            out.push("  --- differences ---")
           }
-          console.error(`  line ${i + 1} differs:`)
-          console.error(`    pass1: ${JSON.stringify(a)}`)
-          console.error(`    pass2: ${JSON.stringify(b)}`)
+          out.push(`  line ${i + 1} differs:`)
+          out.push(`    pass1: ${JSON.stringify(a)}`)
+          out.push(`    pass2: ${JSON.stringify(b)}`)
         }
       }
       if (lines1.length !== lines2.length) {
-        console.error(`  line count: pass1=${lines1.length}, pass2=${lines2.length}`)
+        out.push(`  line count: pass1=${lines1.length}, pass2=${lines2.length}`)
       }
+      roundTripDiagnostics = out.join("\n")
+      roundTripFirstDiffLine = firstDiff >= 0 ? firstDiff + 1 : -1
+      console.error(roundTripDiagnostics)
       roundTripError = true
     }
   } catch (err) {
+    roundTripDiagnostics = "Round-trip validation threw: " + (err.stack || err.message || String(err))
     console.error("Round-trip validation threw:", err)
     roundTripError = true
   }
@@ -1581,6 +1586,8 @@ function normalizeMarkdownForStorage(markdown) {
     doc,
     changed: normalizedMarkdown !== markdown,
     roundTripError,
+    roundTripFirstDiffLine,
+    roundTripDiagnostics,
   }
 }
 
@@ -9785,7 +9792,14 @@ async function publishDraft() {
     return
   }
   if (normalized.roundTripError) {
-    setStatus("Document failed round-trip validation — cannot publish.")
+    const lineRef = normalized.roundTripFirstDiffLine > 0
+      ? ` (first diff at line ${normalized.roundTripFirstDiffLine})`
+      : ""
+    setStatus(
+      "Document failed round-trip validation — cannot publish" + lineRef + ".",
+      true,
+      normalized.roundTripDiagnostics || "(no diagnostic captured)",
+    )
     return
   }
   const dbValidation = await validateDatabaseRows(normalized.markdown)
