@@ -282,6 +282,28 @@ const databaseStyles = `
   vertical-align: middle;
 }
 
+.db-multi-enum-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.db-multi-enum-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: inherit;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.db-multi-enum-option input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 .db-tag-badge {
   display: inline-flex;
   align-items: center;
@@ -327,6 +349,51 @@ function isolateInput(el: HTMLElement) {
   for (const evt of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"] as const) {
     el.addEventListener(evt, (e) => e.stopPropagation())
   }
+}
+
+// Parse a multi_enum stored value into a Set of selected tokens.
+// Tolerates legacy corrupted forms with surrounding brackets, e.g. "[France]".
+function parseMultiEnumValue(raw: string): Set<string> {
+  const cleaned = String(raw ?? "").replace(/^\s*\[(.*)\]\s*$/, "$1")
+  return new Set(
+    cleaned.split(",").map(s => s.trim()).filter(Boolean),
+  )
+}
+
+// Build a checkbox-based multi-enum widget. The wrapper exposes a `value`
+// property whose getter returns the canonical comma-joined CSV form and whose
+// setter accepts the same form (used for programmatic resets). The widget
+// dispatches a bubbling `change` event whenever any checkbox toggles, so the
+// host can listen on the wrapper itself.
+function createMultiEnumWidget(enumValues: string[], initial: string): HTMLDivElement {
+  const wrap = document.createElement("div")
+  wrap.className = "db-multi-enum-input"
+  const selected = parseMultiEnumValue(initial)
+  const checkboxes: HTMLInputElement[] = []
+  for (const v of enumValues || []) {
+    const lbl = document.createElement("label")
+    lbl.className = "db-multi-enum-option"
+    const cb = document.createElement("input")
+    cb.type = "checkbox"
+    cb.value = v
+    cb.checked = selected.has(v)
+    isolateInput(cb)
+    cb.addEventListener("change", () => {
+      wrap.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    checkboxes.push(cb)
+    lbl.appendChild(cb)
+    lbl.appendChild(document.createTextNode(" " + v))
+    wrap.appendChild(lbl)
+  }
+  Object.defineProperty(wrap, "value", {
+    get: () => checkboxes.filter(c => c.checked).map(c => c.value).join(", "),
+    set: (val: string) => {
+      const set = parseMultiEnumValue(val)
+      for (const cb of checkboxes) cb.checked = set.has(cb.value)
+    },
+  })
+  return wrap
 }
 
 // ── Tag helpers ──
@@ -765,6 +832,69 @@ function createOverlaySelect(
   return sel
 }
 
+// Creates a popover multi-enum picker anchored to a table cell. Saves on
+// blur outside the popover (commit-on-close), cancels on Escape.
+function createOverlayMultiEnum(
+  anchor: HTMLElement,
+  opts: {
+    options: string[]
+    value: string
+    onSave: (newValue: string) => void
+    onCancel: () => void
+  },
+) {
+  const rect = anchor.getBoundingClientRect()
+  const pop = document.createElement("div")
+  pop.tabIndex = -1
+  pop.style.position = "fixed"
+  pop.style.left = rect.left + "px"
+  pop.style.top = (rect.bottom + 2) + "px"
+  pop.style.minWidth = rect.width + "px"
+  pop.style.maxWidth = "560px"
+  pop.style.padding = "8px 10px"
+  pop.style.border = "2px solid var(--gw-color-link)"
+  pop.style.borderRadius = "4px"
+  pop.style.zIndex = "10000"
+  pop.style.background = "var(--gw-color-bg)"
+  pop.style.color = "var(--gw-color-text)"
+  pop.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)"
+  pop.style.outline = "none"
+
+  const widget = createMultiEnumWidget(opts.options, opts.value)
+  pop.appendChild(widget)
+
+  let saved = false
+  const cleanup = () => { if (pop.parentNode) pop.remove() }
+
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault()
+      saved = true // mark as handled so blur doesn't double-fire onSave
+      cleanup()
+      opts.onCancel()
+    } else if (e.key === "Enter") {
+      e.preventDefault()
+      if (saved) return
+      saved = true
+      opts.onSave((widget as any).value)
+      cleanup()
+    }
+  })
+
+  pop.addEventListener("focusout", (e) => {
+    const next = (e as FocusEvent).relatedTarget as Node | null
+    if (next && pop.contains(next)) return
+    if (saved) return
+    saved = true
+    opts.onSave((widget as any).value)
+    cleanup()
+  })
+
+  document.body.appendChild(pop)
+  pop.focus()
+  return pop
+}
+
 // Creates an inline edit overlay with text input + browse button for image fields.
 function createOverlayImageInput(
   anchor: HTMLElement,
@@ -1138,6 +1268,17 @@ class DatabaseQueryNodeView {
         },
         onCancel: () => {},
       })
+    } else if (field.type === "multi_enum") {
+      createOverlayMultiEnum(td, {
+        options: field.enum_values || [],
+        value: displayValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
+          const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
+          if (!ok) { td.textContent = displayValue }
+        },
+        onCancel: () => {},
+      })
     } else if (field.type === "boolean") {
       const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
       td.textContent = newVal
@@ -1403,6 +1544,10 @@ class DatabaseNewRowNodeView {
         }
         inputs.set(f.name, sel)
         row.appendChild(sel)
+      } else if (f.type === "multi_enum") {
+        const wrap = createMultiEnumWidget(f.enum_values || [], f.default_value || "")
+        inputs.set(f.name, wrap)
+        row.appendChild(wrap)
       } else if (f.type === "color") {
         const inp = document.createElement("input")
         inp.type = "color"
@@ -1644,10 +1789,12 @@ class DatabaseRowNodeView {
           this.updateField(key, newVal)
         }
         if (input instanceof HTMLDivElement) {
-          // Image wrapper: listen on the inner input.
+          // Wrapper widget (image, multi-enum): the wrapper itself bubbles
+          // a `change` event when any inner control toggles. Also listen on
+          // the inner text input's blur so image-path edits commit on tab-out.
+          input.addEventListener("change", commitChange)
           const innerInput = input.querySelector("input")
-          if (innerInput) {
-            innerInput.addEventListener("change", commitChange)
+          if (innerInput && innerInput.type !== "checkbox") {
             innerInput.addEventListener("blur", commitChange)
           }
         } else {
@@ -1791,7 +1938,10 @@ class DatabaseRowNodeView {
       })
       return sel
     }
-    if (f && (f.type === "enum" || f.type === "multi_enum")) {
+    if (f && f.type === "multi_enum") {
+      return createMultiEnumWidget(f.enum_values || [], value)
+    }
+    if (f && f.type === "enum") {
       const sel = document.createElement("select")
       sel.style.width = "100%"
       sel.style.fontSize = "inherit"
@@ -1976,6 +2126,17 @@ class DatabaseRowNodeView {
 
     if (fieldDef && fieldDef.type === "enum") {
       createOverlaySelect(td, {
+        options: fieldDef.enum_values || [],
+        value: currentValue,
+        onSave: async (newVal) => {
+          td.textContent = newVal
+          td.className = "gowiki-database-editable-value"
+          await saveToApi(newVal)
+        },
+        onCancel: () => {},
+      })
+    } else if (fieldDef && fieldDef.type === "multi_enum") {
+      createOverlayMultiEnum(td, {
         options: fieldDef.enum_values || [],
         value: currentValue,
         onSave: async (newVal) => {

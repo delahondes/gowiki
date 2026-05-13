@@ -210,8 +210,22 @@ func (ds *DataStore) GetRow(ctx context.Context, tableName string, rowID int) (*
 	return result, nil
 }
 
+// normalizeStoredPagePath ensures the page_path used in the DB always carries
+// a leading slash. We don't touch trailing slashes — those are meaningful
+// (namespace index pages keep them).
+func normalizeStoredPagePath(p string) string {
+	if p == "" {
+		return p
+	}
+	if !strings.HasPrefix(p, "/") {
+		return "/" + p
+	}
+	return p
+}
+
 // GetRowByPagePath returns a row by page_path.
 func (ds *DataStore) GetRowByPagePath(ctx context.Context, tableName, pagePath string) (*Row, error) {
+	pagePath = normalizeStoredPagePath(pagePath)
 	table, err := ds.schemaStore.GetTableByName(ctx, tableName)
 	if err != nil {
 		return nil, fmt.Errorf("get table schema: %w", err)
@@ -244,6 +258,7 @@ func (ds *DataStore) GetRowByPagePath(ctx context.Context, tableName, pagePath s
 // UpsertPageRow inserts or updates a row based on page_path.
 // If fields is nil, an existing row is left unchanged; a new row is created with defaults.
 func (ds *DataStore) UpsertPageRow(ctx context.Context, tableName, pagePath string, fields map[string]any) (*Row, error) {
+	pagePath = normalizeStoredPagePath(pagePath)
 	existing, err := ds.GetRowByPagePath(ctx, tableName, pagePath)
 	if err == nil && existing != nil {
 		if len(fields) == 0 {
@@ -680,18 +695,36 @@ func (ds *DataStore) loadMultiEnumValues(ctx context.Context, dtName string, fie
 func toStringSlice(val any) []string {
 	switch v := val.(type) {
 	case []string:
-		return v
-	case []any:
-		var result []string
+		out := make([]string, 0, len(v))
 		for _, item := range v {
-			result = append(result, fmt.Sprintf("%v", item))
+			s := strings.TrimSpace(item)
+			if s != "" {
+				out = append(out, s)
+			}
 		}
-		return result
+		return out
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
 	case string:
 		if v == "" {
 			return nil
 		}
-		return strings.Split(v, ",")
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			s := strings.TrimSpace(p)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
 	default:
 		return nil
 	}

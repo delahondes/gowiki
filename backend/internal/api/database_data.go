@@ -173,6 +173,19 @@ func formatFieldValue(v any, fieldType string) string {
 			return t.Format("2006-01-02T15:04:05Z")
 		}
 		return fmt.Sprintf("%v", v)
+	case database.FieldTypeMultiEnum:
+		switch arr := v.(type) {
+		case []string:
+			return strings.Join(arr, ", ")
+		case []any:
+			parts := make([]string, 0, len(arr))
+			for _, item := range arr {
+				parts = append(parts, fmt.Sprintf("%v", item))
+			}
+			return strings.Join(parts, ", ")
+		default:
+			return fmt.Sprintf("%v", v)
+		}
 	default:
 		return fmt.Sprintf("%v", v)
 	}
@@ -354,6 +367,9 @@ func (s *Server) handleDatabaseGetRowByPage(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "missing page path")
 		return
 	}
+	if !strings.HasPrefix(pagePath, "/") {
+		pagePath = "/" + pagePath
+	}
 	row, err := s.dataStore.GetRowByPagePath(r.Context(), tableName, pagePath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -376,6 +392,9 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 	if pagePath == "" {
 		writeError(w, http.StatusBadRequest, "missing page path")
 		return
+	}
+	if !strings.HasPrefix(pagePath, "/") {
+		pagePath = "/" + pagePath
 	}
 
 	var body struct {

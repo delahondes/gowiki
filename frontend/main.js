@@ -1676,8 +1676,12 @@ async function validateDatabaseRows(markdown) {
           errors.push(`Invalid value '${value}' for enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
         }
       } else if (field.type === "multi_enum" && field.enum_values) {
-        if (value !== "") {
-          const tokens = value.split(",").map(t => t.trim()).filter(Boolean)
+        // Strip legacy bracket wrapping (e.g. "[France]" from older buggy
+        // serializations) before splitting, so the validator points at the
+        // real culprits rather than the brackets.
+        const cleaned = String(value).replace(/^\s*\[(.*)\]\s*$/, "$1")
+        if (cleaned !== "") {
+          const tokens = cleaned.split(",").map(t => t.trim()).filter(Boolean)
           for (const token of tokens) {
             if (!field.enum_values.includes(token)) {
               errors.push(`Invalid value '${token}' in multi-enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
