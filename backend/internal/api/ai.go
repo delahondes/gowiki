@@ -71,7 +71,7 @@ func (s *Server) handleAINamespace(w http.ResponseWriter, r *http.Request) {
 		if s.aclStore != nil && !s.aclStore.CheckPermission(username, s.effectiveGroups(username), aclPath, "view") {
 			continue
 		}
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, aclPath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckAIPermission(aclPath, "view") {
 			continue
 		}
 
@@ -156,7 +156,7 @@ func (s *Server) handleAIBatchRead(w http.ResponseWriter, r *http.Request) {
 			results[i].Error = "access denied"
 			continue
 		}
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, aclPath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckAIPermission(aclPath, "view") {
 			results[i].Error = "AI access denied for this page"
 			continue
 		}
@@ -187,7 +187,7 @@ func (s *Server) handleAIPreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "access denied")
 		return
 	}
-	if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+	if s.aclStore != nil && !s.aclStore.CheckAIPermission(pagePath, "view") {
 		writeError(w, http.StatusForbidden, "AI access denied for this page")
 		return
 	}
@@ -245,7 +245,7 @@ func (s *Server) handleAIMeta(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "access denied")
 		return
 	}
-	if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+	if s.aclStore != nil && !s.aclStore.CheckAIPermission(pagePath, "view") {
 		writeError(w, http.StatusForbidden, "AI access denied for this page")
 		return
 	}

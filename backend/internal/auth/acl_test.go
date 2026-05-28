@@ -48,6 +48,70 @@ func TestNewACLStore_LoadExisting(t *testing.T) {
 	}
 }
 
+func TestNewACLStore_TolerantOfDuplicatesOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	// A duplicate (pattern, subject) on disk must not brick startup: it is
+	// deduped, keeping the first occurrence. (Replace rejects it; load forgives.)
+	content := `[
+		{"pattern":"/dataset/.*","subject_type":"group","subject":"bioit","permissions":["view","edit","delete"]},
+		{"pattern":"/dataset/.*","subject_type":"group","subject":"bioit","permissions":["view","edit","delete"]}
+	]`
+	if err := os.WriteFile(filepath.Join(dir, "acl.json"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore should tolerate a duplicate on disk, got: %v", err)
+	}
+	if rules := store.List(); len(rules) != 1 {
+		t.Fatalf("expected 1 rule after dedupe, got %d", len(rules))
+	}
+}
+
+func TestCheckAIPermission_IgnoresAllBaseline(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Mirrors the production shape that broke AI access to /regulatory:
+	// a broad @ai grant, plus an @all deny on a more specific namespace.
+	err = store.Replace([]ACLRule{
+		{Pattern: "/.*", SubjectType: "special", Subject: "@ai", Permissions: []string{"view", "edit"}},
+		{Pattern: "/regulatory/.*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+		{Pattern: "/bioit/.*", SubjectType: "special", Subject: "@ai", Permissions: []string{}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	// The @all deny on /regulatory must NOT touch the AI axis, even though it is
+	// a longer (more specific) pattern than the /.* @ai grant.
+	if !store.CheckAIPermission("/regulatory/qms/soft/sop01/tpl02", "view") {
+		t.Error("@all deny must not strip AI view on /regulatory")
+	}
+	// Sibling pages under the same namespace must evaluate identically.
+	if !store.CheckAIPermission("/regulatory/qms/soft/sop01/tpl04", "view") {
+		t.Error("sibling page must evaluate the same as its neighbor")
+	}
+
+	// An @ai-specific deny still restricts the AI — that's the supported way.
+	if store.CheckAIPermission("/bioit/pipeline", "view") {
+		t.Error("@ai deny on /bioit must still block the AI")
+	}
+
+	// No @ai delete grant anywhere → AI cannot delete (deny by default).
+	if store.CheckAIPermission("/regulatory/qms/soft/sop01/tpl02", "delete") {
+		t.Error("AI should have no delete without an @ai delete grant")
+	}
+
+	// Regular CheckPermission for @all is unchanged: anonymous denied on /regulatory.
+	if store.CheckPermission("", nil, "/regulatory/qms/soft/sop01/tpl02", "view") {
+		t.Error("@all deny should still block anonymous human view")
+	}
+}
+
 func TestNewACLStore_InvalidFile(t *testing.T) {
 	dir := t.TempDir()
 	// Write invalid JSON.
@@ -571,5 +635,78 @@ func TestList_ReturnsCopy(t *testing.T) {
 	original := store.List()
 	if original[0].Pattern == "modified" {
 		t.Error("List should return a copy, not a reference to internal state")
+	}
+}
+
+func TestValidateRules_RejectsDuplicateSubjectPattern(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Two rules with the same pattern and the same subject but contradictory
+	// permissions — the exact shape that silently granted anonymous view on
+	// regulatory pages. Replace must reject it.
+	err = store.Replace([]ACLRule{
+		{Pattern: "regulatory/.*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+		{Pattern: "regulatory/.*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+	})
+	if err == nil {
+		t.Fatal("expected Replace to reject duplicate (pattern, subject)")
+	}
+
+	// Same pattern but different subjects is fine — that's intended layering.
+	err = store.Replace([]ACLRule{
+		{Pattern: "regulatory/.*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+		{Pattern: "regulatory/.*", SubjectType: "group", Subject: "editors", Permissions: []string{"view", "edit"}},
+	})
+	if err != nil {
+		t.Fatalf("same pattern with distinct subjects should be allowed: %v", err)
+	}
+}
+
+func TestReplace_SortsRulesForReadability(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewACLStore(dir)
+	if err != nil {
+		t.Fatalf("NewACLStore: %v", err)
+	}
+
+	// Deliberately interleaved namespaces with the catch-all in the middle.
+	err = store.Replace([]ACLRule{
+		{Pattern: "regulatory/qms/.*", SubjectType: "group", Subject: "editors", Permissions: []string{"view"}},
+		{Pattern: "bioit/.*", SubjectType: "special", Subject: "@all", Permissions: []string{"view"}},
+		{Pattern: ".*", SubjectType: "group", Subject: "admin", Permissions: []string{"view", "edit", "delete"}},
+		{Pattern: "regulatory/.*", SubjectType: "special", Subject: "@all", Permissions: []string{}},
+	})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	got := store.List()
+	want := []string{"bioit/.*", "regulatory/.*", "regulatory/qms/.*", ".*"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rules, want %d", len(got), len(want))
+	}
+	for i, p := range want {
+		if got[i].Pattern != p {
+			t.Errorf("rule %d: got pattern %q, want %q", i, got[i].Pattern, p)
+		}
+	}
+}
+
+func TestLiteralPrefix(t *testing.T) {
+	cases := map[string]string{
+		"regulatory/.*":        "regulatory/",
+		"regulatory/qms/sop01": "regulatory/qms/sop01",
+		".*":                   "",
+		"":                     "",
+		"a|b":                  "a",
+	}
+	for pattern, want := range cases {
+		if got := literalPrefix(pattern); got != want {
+			t.Errorf("literalPrefix(%q) = %q, want %q", pattern, got, want)
+		}
 	}
 }

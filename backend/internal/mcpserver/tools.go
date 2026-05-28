@@ -46,7 +46,7 @@ func (d Deps) canView(ctx context.Context, pagePath string) bool {
 	if !d.ACL.CheckPermission(username, d.effectiveGroups(username), aclPath, "view") {
 		return false
 	}
-	return d.ACL.CheckPermission("@ai", nil, aclPath, "view")
+	return d.ACL.CheckAIPermission(aclPath, "view")
 }
 
 // canEdit mirrors canView but for edit permission.
@@ -59,7 +59,7 @@ func (d Deps) canEdit(ctx context.Context, pagePath string) bool {
 	if !d.ACL.CheckPermission(username, d.effectiveGroups(username), aclPath, "edit") {
 		return false
 	}
-	return d.ACL.CheckPermission("@ai", nil, aclPath, "edit")
+	return d.ACL.CheckAIPermission(aclPath, "edit")
 }
 
 func (d Deps) effectiveGroups(username string) []string {

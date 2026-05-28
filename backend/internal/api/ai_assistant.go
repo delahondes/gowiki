@@ -136,7 +136,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var pageContent string
 	if req.PagePath != "" {
 		// Check @ai ACL permission.
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, req.PagePath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckAIPermission(req.PagePath, "view") {
 			writeError(w, http.StatusForbidden, "AI is not allowed to access this page")
 			return
 		}
@@ -170,7 +170,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 				if allPages, err := lister.ListAllPages(); err == nil {
 					var sb strings.Builder
 					for _, p := range allPages {
-						if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, p.Path, "view") {
+						if s.aclStore != nil && !s.aclStore.CheckAIPermission(p.Path, "view") {
 							continue
 						}
 						sb.WriteString(fmt.Sprintf("- [%s](%s)\n", p.Title, p.Path))
@@ -370,7 +370,7 @@ func (s *Server) executeAITool(name string, input map[string]any, username strin
 		}
 		pagePath = strings.TrimSpace(pagePath)
 		// Check @ai ACL.
-		if s.aclStore != nil && !s.aclStore.CheckPermission("@ai", nil, pagePath, "view") {
+		if s.aclStore != nil && !s.aclStore.CheckAIPermission(pagePath, "view") {
 			return "Error: AI access denied for this page"
 		}
 		// Check user ACL.
