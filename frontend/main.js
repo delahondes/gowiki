@@ -5024,12 +5024,12 @@ function openAIPanel() {
       <button class="ai-panel-width-toggle" title="Toggle panel width">Wide</button>
       <button class="ai-panel-close" title="Close">\u2715</button>
     </div>
-    <div class="ai-panel-messages"></div>
     <div class="ai-panel-input-row">
       <textarea class="ai-panel-input" placeholder="${placeholder}" rows="2"></textarea>
       <button class="ai-panel-send" title="Send (Ctrl+Enter)">&#9654;</button>
       ${isEditing ? '<button class="ai-panel-review" title="Review mode — AI analyzes and proposes changes">Review</button>' : ""}
     </div>
+    <div class="ai-panel-messages"></div>
   `
   appRoot.appendChild(aiPanelEl)
   appRoot.classList.add("ai-panel-visible")
@@ -5082,17 +5082,18 @@ function aiAddMessage(role, text) {
   const msg = document.createElement("div")
   msg.className = `ai-msg ai-msg-${role}`
   msg.textContent = text
-  messagesEl.appendChild(msg)
+  // Newest message goes to the top, directly under the input field.
+  messagesEl.prepend(msg)
   aiScrollIfNeeded(messagesEl)
   return msg
 }
 
 function aiScrollIfNeeded(messagesEl) {
-  // Only auto-scroll if content overflows and user is near the bottom.
+  // Newest messages are prepended (top), so keep the top in view unless the user
+  // has scrolled down to read older history — don't yank them back up.
   if (messagesEl.scrollHeight <= messagesEl.clientHeight) return // no overflow
-  const distFromBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight
-  if (distFromBottom < 100) {
-    messagesEl.scrollTop = messagesEl.scrollHeight
+  if (messagesEl.scrollTop < 100) {
+    messagesEl.scrollTop = 0
   }
 }
 

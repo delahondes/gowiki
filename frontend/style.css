@@ -2797,7 +2797,7 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   display: flex;
   gap: 6px;
   padding: 8px;
-  border-top: 1px solid var(--gw-color-border);
+  border-bottom: 1px solid var(--gw-color-border);
   background: var(--gw-color-surface-alt);
 }
 
