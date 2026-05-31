@@ -1,4 +1,14 @@
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
+import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
+import { Decoration, DecorationSet } from "prosemirror-view"
+import type { EditorView } from "prosemirror-view"
+import type { Node as PMNode } from "prosemirror-model"
+import {
+  type AnchorRange,
+  rangeFromPm,
+  resolveRangeInPm,
+  domSelectionToPmRange,
+} from "../compiler/anchor"
 
 const API_BASE = "/api/plugin/comment/v1"
 
@@ -6,10 +16,16 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
+// ── Data shapes ─────────────────────────────────────────────────────────────
+
 interface CommentAnchor {
   selected: string
   before: string
   after: string
+  // Structural anchor over the document model — added in v0.95.
+  // Legacy comments only carry {selected, before, after} and fall back to
+  // text-quote search.
+  address?: AnchorRange
 }
 
 interface CommentEntry {
@@ -21,171 +37,156 @@ interface CommentEntry {
   updated_at: string
   resolved: boolean
   ai?: boolean
+  // When set, this entry is a reply to the referenced top-level comment.
+  // Replies inherit the parent's anchor and have no Resolved/highlight of their own.
+  parent_id?: string
 }
 
-// --- Anchoring ---
+// ── PM decoration plugin ────────────────────────────────────────────────────
+// Highlights are rendered as ProseMirror inline decorations, not DOM mutations.
+// This keeps comments anchored against the document model (mermaid-proof) and
+// satisfies the "decorations only, never direct DOM" invariant from CLAUDE.md.
 
-function findAnchorRange(root: HTMLElement, anchor: CommentAnchor): Range | null {
-  const fullText = root.textContent || ""
-  const selected = anchor.selected
+const COMMENT_KEY = new PluginKey<DecorationState>("comments")
+const REFRESH = "refresh"
+const TEMP_COMMENT_ID = "__comment_new__"
 
-  const positions: number[] = []
-  let searchFrom = 0
-  while (true) {
-    const idx = fullText.indexOf(selected, searchFrom)
-    if (idx === -1) break
-    positions.push(idx)
-    searchFrom = idx + 1
+interface DecorationState {
+  decos: DecorationSet
+  orphanedIds: Set<string>
+}
+
+let currentComments: CommentEntry[] = []
+let pendingTempRange: { from: number; to: number } | null = null
+let activeView: EditorView | null = null
+
+function resolveCommentToRange(doc: PMNode, c: CommentEntry): { from: number; to: number } | null {
+  // 1. Try the structural address (modern comments).
+  if (c.anchor.address) {
+    const r = resolveRangeInPm(doc, c.anchor.address)
+    if (r.confidence !== "lost") return { from: r.from, to: r.to }
   }
-
-  if (positions.length === 0) {
-    const normalizedFull = fullText.replace(/\s+/g, " ")
-    const normalizedSelected = selected.replace(/\s+/g, " ")
-    const idx = normalizedFull.indexOf(normalizedSelected)
-    if (idx === -1) return null
-    positions.push(idx)
+  // 2. Fall back to text-quote search against the document plain text.
+  if (c.anchor.selected) {
+    const synthetic: AnchorRange = {
+      start: { nodeIndex: -1, plainOffset: 0 },
+      end: { nodeIndex: -1, plainOffset: 0 },
+      textQuote: {
+        prefix: c.anchor.before || "",
+        suffix: c.anchor.after || "",
+        exact: c.anchor.selected,
+      },
+    }
+    const r = resolveRangeInPm(doc, synthetic)
+    if (r.confidence !== "lost") return { from: r.from, to: r.to }
   }
+  return null
+}
 
-  let bestPos = positions[0]
-  if (positions.length > 1 && (anchor.before || anchor.after)) {
-    let bestScore = -1
-    for (const pos of positions) {
-      let score = 0
-      if (anchor.before) {
-        const preceding = fullText.slice(Math.max(0, pos - anchor.before.length), pos)
-        if (preceding.endsWith(anchor.before)) score += 2
-        else if (preceding.includes(anchor.before)) score += 1
-      }
-      if (anchor.after) {
-        const following = fullText.slice(pos + selected.length, pos + selected.length + anchor.after.length)
-        if (following.startsWith(anchor.after)) score += 2
-        else if (following.includes(anchor.after)) score += 1
-      }
-      if (score > bestScore) { bestScore = score; bestPos = pos }
+function buildDecorationState(doc: PMNode, comments: CommentEntry[], temp: { from: number; to: number } | null): DecorationState {
+  const decos: Decoration[] = []
+  const orphanedIds = new Set<string>()
+  for (const c of comments) {
+    if (c.resolved || c.parent_id) continue // replies don't get their own highlight
+    const range = resolveCommentToRange(doc, c)
+    if (range && range.to > range.from) {
+      decos.push(Decoration.inline(range.from, range.to, {
+        class: "comment-highlight",
+        "data-comment-id": c.id,
+      }))
+    } else {
+      orphanedIds.add(c.id)
     }
   }
-
-  return textOffsetToRange(root, bestPos, bestPos + selected.length)
-}
-
-function textOffsetToRange(root: HTMLElement, start: number, end: number): Range | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let offset = 0
-  let startNode: Text | null = null, startOffset = 0
-  let endNode: Text | null = null, endOffset = 0
-
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text
-    const len = node.length
-    if (!startNode && offset + len > start) { startNode = node; startOffset = start - offset }
-    if (offset + len >= end) { endNode = node; endOffset = end - offset; break }
-    offset += len
+  if (temp && temp.to > temp.from) {
+    decos.push(Decoration.inline(temp.from, temp.to, {
+      class: "comment-highlight",
+      "data-comment-id": TEMP_COMMENT_ID,
+    }))
   }
-
-  if (!startNode || !endNode) return null
-  const range = document.createRange()
-  range.setStart(startNode, startOffset)
-  range.setEnd(endNode, endOffset)
-  return range
+  return { decos: DecorationSet.create(doc, decos), orphanedIds }
 }
 
-// --- Highlight injection ---
+export const commentPmPlugin: PMPlugin = new PMPlugin({
+  key: COMMENT_KEY,
+  state: {
+    init(_, state) {
+      return buildDecorationState(state.doc, currentComments, pendingTempRange)
+    },
+    apply(tr, old, _oldState, newState) {
+      if (tr.getMeta(COMMENT_KEY) === REFRESH) {
+        return buildDecorationState(newState.doc, currentComments, pendingTempRange)
+      }
+      if (tr.docChanged) {
+        return { decos: old.decos.map(tr.mapping, tr.doc), orphanedIds: old.orphanedIds }
+      }
+      return old
+    },
+  },
+  props: {
+    decorations(state) {
+      return COMMENT_KEY.getState(state)?.decos
+    },
+  },
+})
 
-function injectHighlight(range: Range, commentId: string): HTMLSpanElement[] {
-  const spans: HTMLSpanElement[] = []
-  const textNodes: Text[] = []
-
-  const walker = document.createTreeWalker(
-    range.commonAncestorContainer.nodeType === Node.TEXT_NODE
-      ? range.commonAncestorContainer.parentNode!
-      : range.commonAncestorContainer,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: (node) =>
-        range.intersectsNode(node) && node.nodeValue?.trim()
-          ? NodeFilter.FILTER_ACCEPT
-          : NodeFilter.FILTER_REJECT,
-    }
-  )
-  while (walker.nextNode()) textNodes.push(walker.currentNode as Text)
-
-  let count = 0
-  for (const textNode of textNodes) {
-    const subrange = document.createRange()
-    subrange.selectNodeContents(textNode)
-    if (subrange.compareBoundaryPoints(Range.START_TO_START, range) < 0)
-      subrange.setStart(range.startContainer, range.startOffset)
-    if (subrange.compareBoundaryPoints(Range.END_TO_END, range) > 0)
-      subrange.setEnd(range.endContainer, range.endOffset)
-
-    const selectedText = subrange.toString()
-    if (!selectedText) continue
-
-    const span = document.createElement("span")
-    span.className = "comment-highlight"
-    span.dataset.commentId = commentId
-    span.id = count === 0 ? commentId : `${commentId}_${count}`
-    subrange.surroundContents(span)
-    spans.push(span)
-    count++
-  }
-  return spans
+function refreshDecorations(): Set<string> {
+  if (!activeView) return new Set()
+  activeView.dispatch(activeView.state.tr.setMeta(COMMENT_KEY, REFRESH))
+  return COMMENT_KEY.getState(activeView.state)?.orphanedIds || new Set()
 }
 
-function removeHighlights(commentId: string) {
-  const spans = document.querySelectorAll(`[data-comment-id="${commentId}"]`)
-  spans.forEach((span) => {
-    const parent = span.parentNode
-    if (!parent) return
-    while (span.firstChild) parent.insertBefore(span.firstChild, span)
-    parent.removeChild(span)
-    parent.normalize()
-  })
+function getOrphanedIds(): Set<string> {
+  if (!activeView) return new Set(currentComments.map(c => c.id))
+  return COMMENT_KEY.getState(activeView.state)?.orphanedIds || new Set()
 }
 
-// --- Context extraction ---
+function findHighlightSpan(commentId: string): HTMLElement | null {
+  return document.querySelector(`[data-comment-id="${cssEscape(commentId)}"]`)
+}
 
-function extractAnchor(root: HTMLElement): CommentAnchor | null {
+function findAllHighlightSpans(commentId: string): NodeListOf<HTMLElement> {
+  return document.querySelectorAll(`[data-comment-id="${cssEscape(commentId)}"]`)
+}
+
+function cssEscape(s: string): string {
+  if (typeof (window as any).CSS?.escape === "function") return (window as any).CSS.escape(s)
+  return s.replace(/[^\w-]/g, (c) => `\\${c}`)
+}
+
+// ── Anchor extraction from the live PM selection ────────────────────────────
+
+function extractAnchorFromView(): { anchor: CommentAnchor; range: { from: number; to: number } } | null {
+  if (!activeView) return null
   const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return null
+  const pmRange = domSelectionToPmRange(activeView, sel)
+  if (!pmRange) return null
 
-  const range = sel.getRangeAt(0)
-  if (!root.contains(range.startContainer) && !root.contains(range.endContainer)) return null
+  const range = rangeFromPm(activeView.state.doc, pmRange.from, pmRange.to, { withTextQuote: true })
+  const tq = range.textQuote
+  const exact = tq?.exact || ""
+  if (!exact.trim()) return null
 
-  const selected = range.toString().trim()
-  if (!selected) return null
-
-  const fullText = root.textContent || ""
-  const idx = fullText.indexOf(selected)
-  let before = "", after = ""
-  if (idx !== -1) {
-    before = fullText.slice(Math.max(0, idx - 20), idx)
-    after = fullText.slice(idx + selected.length, idx + selected.length + 20)
+  const anchor: CommentAnchor = {
+    selected: exact.length > 200 ? exact.slice(0, 200) : exact,
+    before: tq?.prefix || "",
+    after: tq?.suffix || "",
+    address: range,
   }
-
-  return {
-    selected: selected.length > 200 ? selected.slice(0, 200) : selected,
-    before,
-    after,
-  }
+  return { anchor, range: pmRange }
 }
 
-// --- State ---
+// ── Sidebar state ───────────────────────────────────────────────────────────
 
 let sidebarEl: HTMLDivElement | null = null
 let collapsedToggle: HTMLDivElement | null = null
-let currentComments: CommentEntry[] = []
 let currentPagePath = ""
-let currentContentRoot: HTMLElement | null = null
 let currentAuthFetch: ((url: string, init?: RequestInit) => Promise<Response>) | null = null
 let currentUser: string | null = null
 let currentIsAdmin = false
 let sidebarHidden = false
 
-// Temp state for the create form: a temporary highlight ID and the anchor data.
-const TEMP_COMMENT_ID = "__comment_new__"
-
-// --- Sidebar lifecycle ---
+// ── Sidebar lifecycle ───────────────────────────────────────────────────────
 
 function ensureSidebar(): HTMLDivElement {
   if (sidebarEl && document.body.contains(sidebarEl)) return sidebarEl
@@ -211,7 +212,7 @@ function removeSidebar() {
   if (main) main.classList.remove("has-comments")
 }
 
-// --- Collapsed toggle (floating, no layout impact) ---
+// ── Collapsed toggle ────────────────────────────────────────────────────────
 
 function showCollapsedToggle() {
   removeCollapsedToggle()
@@ -225,16 +226,14 @@ function showCollapsedToggle() {
   const n = currentComments.filter(c => !c.resolved).length
   const arrow = document.createElement("span")
   arrow.className = "comment-header-arrow"
-  arrow.textContent = "\u25B6"
+  arrow.textContent = "▶"
   collapsedToggle.appendChild(arrow)
   collapsedToggle.appendChild(document.createTextNode(` ${n}`))
 
   collapsedToggle.addEventListener("click", () => {
     sidebarHidden = false
     removeCollapsedToggle()
-    if (currentContentRoot && currentComments.length > 0) {
-      applyComments(currentContentRoot, currentComments)
-    }
+    if (currentComments.length > 0) renderAll()
   })
 
   main.appendChild(collapsedToggle)
@@ -247,25 +246,38 @@ function removeCollapsedToggle() {
   }
 }
 
-// --- Sidebar rendering ---
+// ── Sidebar rendering ───────────────────────────────────────────────────────
+
+function groupReplies(comments: CommentEntry[]): Map<string, CommentEntry[]> {
+  const groups = new Map<string, CommentEntry[]>()
+  for (const c of comments) {
+    if (!c.parent_id) continue
+    if (!groups.has(c.parent_id)) groups.set(c.parent_id, [])
+    groups.get(c.parent_id)!.push(c)
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.created_at.localeCompare(b.created_at))
+  }
+  return groups
+}
 
 function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
   const sidebar = ensureSidebar()
   sidebar.innerHTML = ""
   removeCollapsedToggle()
 
-  // Header doubles as fold toggle.
   const header = document.createElement("div")
   header.className = "comment-sidebar-header"
   header.title = "Click to hide comments"
 
   const arrow = document.createElement("span")
   arrow.className = "comment-header-arrow"
-  arrow.textContent = "\u25BC"
+  arrow.textContent = "▼"
   header.appendChild(arrow)
 
   const title = document.createElement("span")
-  const unresolvedCount = comments.filter(c => !c.resolved).length
+  // Header count tracks unresolved top-level threads (replies don't count separately).
+  const unresolvedCount = comments.filter(c => !c.resolved && !c.parent_id).length
   title.textContent = ` Comments (${unresolvedCount})`
   header.appendChild(title)
 
@@ -276,26 +288,23 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
   })
   sidebar.appendChild(header)
 
-  // Split unresolved into anchored vs orphaned.
-  const anchored = comments.filter(c => !c.resolved && !orphanedIds.has(c.id)).slice()
-  const orphaned = comments.filter(c => !c.resolved && orphanedIds.has(c.id))
-  const resolved = comments.filter(c => c.resolved)
+  const replies = groupReplies(comments)
+  const tops = comments.filter(c => !c.parent_id)
+  const anchored = tops.filter(c => !c.resolved && !orphanedIds.has(c.id)).slice()
+  const orphaned = tops.filter(c => !c.resolved && orphanedIds.has(c.id))
+  const resolved = tops.filter(c => c.resolved)
 
-  // Sort anchored by position in the document (top to bottom).
   anchored.sort((a, b) => {
-    const spanA = document.getElementById(a.id)
-    const spanB = document.getElementById(b.id)
+    const spanA = findHighlightSpan(a.id)
+    const spanB = findHighlightSpan(b.id)
     if (!spanA && !spanB) return 0
     if (!spanA) return 1
     if (!spanB) return -1
     return spanA.getBoundingClientRect().top - spanB.getBoundingClientRect().top
   })
 
-  for (const c of anchored) {
-    sidebar.appendChild(renderCommentBox(c, false))
-  }
+  for (const c of anchored) sidebar.appendChild(renderCommentBox(c, false, replies.get(c.id) || []))
 
-  // Orphaned comments: visible but pushed to the very bottom with a spacer.
   if (orphaned.length > 0) {
     const spacer = document.createElement("div")
     spacer.className = "comment-orphaned-spacer"
@@ -306,12 +315,9 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
     label.textContent = `Orphaned (${orphaned.length})`
     sidebar.appendChild(label)
 
-    for (const c of orphaned) {
-      sidebar.appendChild(renderCommentBox(c, true))
-    }
+    for (const c of orphaned) sidebar.appendChild(renderCommentBox(c, true, replies.get(c.id) || []))
   }
 
-  // Resolved comments: collapsed section at the very bottom.
   if (resolved.length > 0) {
     const toggle = document.createElement("div")
     toggle.className = "comment-resolved-toggle"
@@ -319,9 +325,7 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
     let expanded = false
     const resolvedContainer = document.createElement("div")
     resolvedContainer.style.display = "none"
-    for (const c of resolved) {
-      resolvedContainer.appendChild(renderCommentBox(c, orphanedIds.has(c.id)))
-    }
+    for (const c of resolved) resolvedContainer.appendChild(renderCommentBox(c, orphanedIds.has(c.id), replies.get(c.id) || []))
     toggle.addEventListener("click", () => {
       expanded = !expanded
       resolvedContainer.style.display = expanded ? "block" : "none"
@@ -334,21 +338,20 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
   requestAnimationFrame(() => positionComments())
 }
 
-function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
+function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEntry[] = []): HTMLDivElement {
   const box = document.createElement("div")
   box.className = "comment-box" + (c.resolved ? " comment-resolved" : "") + (orphaned ? " comment-orphaned" : "") + (c.ai ? " comment-ai" : "")
 
-  // Tooltip showing the anchored text.
   const tooltip = document.createElement("div")
   tooltip.className = "comment-tooltip"
   const sel = c.anchor.selected
-  const truncated = sel.length > 120 ? sel.slice(0, 120) + "\u2026" : sel
-  tooltip.innerHTML = `Comment on \u201C<i>${escapeHtml(truncated)}</i>\u201D`
+  const truncated = sel.length > 120 ? sel.slice(0, 120) + "…" : sel
+  tooltip.innerHTML = `Comment on “<i>${escapeHtml(truncated)}</i>”`
   box.appendChild(tooltip)
   box.dataset.commentId = c.id
 
   box.addEventListener("click", () => {
-    const span = document.getElementById(c.id)
+    const span = findHighlightSpan(c.id)
     if (span) {
       const main = document.getElementById("main")
       if (main) {
@@ -362,38 +365,25 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
   })
 
   box.addEventListener("mouseenter", () => {
-    document.querySelectorAll(`[data-comment-id="${c.id}"]`).forEach(el => el.classList.add("comment-highlight-active"))
+    findAllHighlightSpans(c.id).forEach(el => el.classList.add("comment-highlight-active"))
     box.classList.add("comment-box-active")
   })
   box.addEventListener("mouseleave", () => {
-    document.querySelectorAll(`[data-comment-id="${c.id}"]`).forEach(el => el.classList.remove("comment-highlight-active"))
+    findAllHighlightSpans(c.id).forEach(el => el.classList.remove("comment-highlight-active"))
     box.classList.remove("comment-box-active")
   })
 
-  const authorEl = document.createElement("div")
-  authorEl.className = "comment-author"
-  if (c.ai) {
-    const aiBadge = document.createElement("span")
-    aiBadge.className = "comment-ai-badge"
-    aiBadge.textContent = "AI"
-    authorEl.appendChild(aiBadge)
-    authorEl.appendChild(document.createTextNode(` ${c.author} \u00B7 ${new Date(c.created_at).toLocaleDateString()}`))
-  } else {
-    authorEl.textContent = `${c.author} \u00B7 ${new Date(c.created_at).toLocaleDateString()}`
-  }
-  box.appendChild(authorEl)
+  appendEntryBody(box, c, orphaned)
 
-  if (orphaned) {
-    const lbl = document.createElement("span")
-    lbl.className = "comment-orphan-label"
-    lbl.textContent = " (text not found)"
-    authorEl.appendChild(lbl)
+  // Replies, oldest first, rendered as nested mini-entries.
+  if (replies.length > 0) {
+    const repliesEl = document.createElement("div")
+    repliesEl.className = "comment-replies"
+    for (const r of replies) {
+      repliesEl.appendChild(renderReplyEntry(r))
+    }
+    box.appendChild(repliesEl)
   }
-
-  const textEl = document.createElement("div")
-  textEl.className = "comment-text"
-  textEl.textContent = c.text
-  box.appendChild(textEl)
 
   const actions = document.createElement("div")
   actions.className = "comment-actions"
@@ -405,7 +395,14 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
     resolveBtn.addEventListener("click", async (e) => { e.stopPropagation(); await resolveComment(c.id) })
     actions.appendChild(resolveBtn)
 
-    // AI toggle: lets user convert AI comment to regular (survives publish) or vice versa.
+    if (!c.resolved) {
+      const replyBtn = document.createElement("button")
+      replyBtn.className = "comment-action-btn"
+      replyBtn.textContent = "Reply"
+      replyBtn.addEventListener("click", (e) => { e.stopPropagation(); startReplyForm(box, c.id) })
+      actions.appendChild(replyBtn)
+    }
+
     const toggleAIBtn = document.createElement("button")
     toggleAIBtn.className = "comment-action-btn"
     toggleAIBtn.textContent = c.ai ? "Keep on publish" : "Mark as AI"
@@ -426,13 +423,115 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean): HTMLDivElement {
     deleteBtn.textContent = "Delete"
     deleteBtn.addEventListener("click", async (e) => {
       e.stopPropagation()
-      if (confirm("Delete this comment?")) await deleteComment(c.id)
+      const msg = replies.length > 0
+        ? `Delete this comment and its ${replies.length} repl${replies.length === 1 ? "y" : "ies"}?`
+        : "Delete this comment?"
+      if (confirm(msg)) await deleteComment(c.id)
     })
     actions.appendChild(deleteBtn)
   }
 
   box.appendChild(actions)
   return box
+}
+
+function appendEntryBody(parent: HTMLElement, c: CommentEntry, orphaned: boolean) {
+  const authorEl = document.createElement("div")
+  authorEl.className = "comment-author"
+  if (c.ai) {
+    const aiBadge = document.createElement("span")
+    aiBadge.className = "comment-ai-badge"
+    aiBadge.textContent = "AI"
+    authorEl.appendChild(aiBadge)
+    authorEl.appendChild(document.createTextNode(` ${c.author} · ${new Date(c.created_at).toLocaleDateString()}`))
+  } else {
+    authorEl.textContent = `${c.author} · ${new Date(c.created_at).toLocaleDateString()}`
+  }
+  parent.appendChild(authorEl)
+
+  if (orphaned) {
+    const lbl = document.createElement("span")
+    lbl.className = "comment-orphan-label"
+    lbl.textContent = " (text not found)"
+    authorEl.appendChild(lbl)
+  }
+
+  const textEl = document.createElement("div")
+  textEl.className = "comment-text"
+  textEl.textContent = c.text
+  parent.appendChild(textEl)
+}
+
+function renderReplyEntry(r: CommentEntry): HTMLDivElement {
+  const entry = document.createElement("div")
+  entry.className = "comment-reply" + (r.ai ? " comment-ai" : "")
+  entry.dataset.commentId = r.id
+  appendEntryBody(entry, r, false)
+
+  if (currentUser === r.author || currentIsAdmin) {
+    const actions = document.createElement("div")
+    actions.className = "comment-actions"
+    const editBtn = document.createElement("button")
+    editBtn.className = "comment-action-btn"
+    editBtn.textContent = "Edit"
+    editBtn.addEventListener("click", (e) => { e.stopPropagation(); startEditComment(entry, r) })
+    actions.appendChild(editBtn)
+    const deleteBtn = document.createElement("button")
+    deleteBtn.className = "comment-action-btn comment-action-delete"
+    deleteBtn.textContent = "Delete"
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation()
+      if (confirm("Delete this reply?")) await deleteComment(r.id)
+    })
+    actions.appendChild(deleteBtn)
+    entry.appendChild(actions)
+  }
+  return entry
+}
+
+function startReplyForm(box: HTMLDivElement, parentId: string) {
+  // Don't open two reply forms on the same box.
+  if (box.querySelector(".comment-reply-form")) return
+
+  const form = document.createElement("div")
+  form.className = "comment-reply-form"
+
+  const textarea = document.createElement("textarea")
+  textarea.className = "comment-edit-textarea"
+  textarea.placeholder = "Reply…"
+  textarea.rows = 2
+  form.appendChild(textarea)
+
+  const btnRow = document.createElement("div")
+  btnRow.className = "comment-create-buttons"
+
+  const submitBtn = document.createElement("button")
+  submitBtn.className = "comment-action-btn comment-action-submit"
+  submitBtn.textContent = "Reply"
+  submitBtn.addEventListener("click", async () => {
+    const text = textarea.value.trim()
+    if (!text) return
+    submitBtn.disabled = true
+    await createReply(parentId, text)
+  })
+  btnRow.appendChild(submitBtn)
+
+  const cancelBtn = document.createElement("button")
+  cancelBtn.className = "comment-action-btn"
+  cancelBtn.textContent = "Cancel"
+  cancelBtn.addEventListener("click", () => form.remove())
+  btnRow.appendChild(cancelBtn)
+
+  form.appendChild(btnRow)
+
+  const actions = box.querySelector(".comment-actions")
+  if (actions) box.insertBefore(form, actions)
+  else box.appendChild(form)
+
+  requestAnimationFrame(() => {
+    textarea.focus()
+    requestAnimationFrame(() => positionComments())
+  })
 }
 
 function startEditComment(box: HTMLDivElement, c: CommentEntry) {
@@ -464,47 +563,46 @@ function startEditComment(box: HTMLDivElement, c: CommentEntry) {
   cancelBtn.addEventListener("click", () => void refreshComments())
 }
 
-// --- Vertical positioning ---
+// ── Vertical positioning ────────────────────────────────────────────────────
 
 let scrollListener: (() => void) | null = null
+let nodeRenderedListener: (() => void) | null = null
+let viewResizeObserver: ResizeObserver | null = null
+let repositionTimer: number | null = null
+
+function schedulePositionComments() {
+  if (repositionTimer !== null) return
+  repositionTimer = window.setTimeout(() => {
+    repositionTimer = null
+    if (sidebarEl && !sidebarHidden) positionComments()
+  }, 50)
+}
 
 function positionComments() {
-  if (!sidebarEl || !currentContentRoot) return
+  if (!sidebarEl) return
 
   const boxes = Array.from(sidebarEl.querySelectorAll<HTMLDivElement>(".comment-box"))
   if (boxes.length === 0) return
 
-  // Reset all positioning.
   boxes.forEach(b => { b.style.marginTop = "" })
 
   const header = sidebarEl.querySelector(".comment-sidebar-header")
   const MIN_GAP = 4
 
-  // For each box, compute its desired Y (= its anchor highlight's Y).
-  // Then resolve collisions: if a box would overlap the previous one,
-  // push it just below. This keeps each box as close to its anchor as
-  // possible while preventing overlap.
   let lastBottom = header ? header.getBoundingClientRect().bottom : sidebarEl.getBoundingClientRect().top
 
   for (const box of boxes) {
     const commentId = box.dataset.commentId
     if (!commentId) continue
-    const anchorEl = document.getElementById(commentId)
+    const anchorEl = findHighlightSpan(commentId)
     if (!anchorEl) { lastBottom = box.getBoundingClientRect().bottom + MIN_GAP; continue }
 
-    // Where we want the box: aligned with the anchor highlight.
     const desiredTop = anchorEl.getBoundingClientRect().top
-    // Where the box currently sits (with default margin only).
     const currentTop = box.getBoundingClientRect().top
-    // The earliest we can place it (just below the previous element).
     const earliestTop = lastBottom + MIN_GAP
-
-    // Target = max(desired position, earliest non-overlapping position).
     const targetTop = Math.max(desiredTop, earliestTop)
     const offset = targetTop - currentTop
-    if (Math.abs(offset) > 1) {
-      box.style.marginTop = `${offset}px`
-    }
+    if (Math.abs(offset) > 1) box.style.marginTop = `${offset}px`
 
     lastBottom = box.getBoundingClientRect().top + box.offsetHeight
   }
@@ -526,96 +624,75 @@ function removeScrollListener() {
   scrollListener = null
 }
 
-// --- Create form in sidebar (positioned like a real comment) ---
-
-function cleanupTempHighlight() {
-  removeHighlights(TEMP_COMMENT_ID)
+// Async content (mermaid, queries, includes, images) re-flows the page after
+// initial render. Re-position whenever a node finishes rendering or the view
+// changes size.
+function setupReflowListeners() {
+  if (!nodeRenderedListener) {
+    nodeRenderedListener = () => schedulePositionComments()
+    document.addEventListener("gowiki:node-rendered", nodeRenderedListener)
+  }
+  if (!viewResizeObserver && activeView) {
+    viewResizeObserver = new ResizeObserver(() => schedulePositionComments())
+    viewResizeObserver.observe(activeView.dom)
+  }
 }
 
-function showCreateForm(root: HTMLElement) {
-  const anchor = extractAnchor(root)
-  if (!anchor) {
+function removeReflowListeners() {
+  if (nodeRenderedListener) {
+    document.removeEventListener("gowiki:node-rendered", nodeRenderedListener)
+    nodeRenderedListener = null
+  }
+  if (viewResizeObserver) {
+    viewResizeObserver.disconnect()
+    viewResizeObserver = null
+  }
+  if (repositionTimer !== null) {
+    clearTimeout(repositionTimer)
+    repositionTimer = null
+  }
+}
+
+// ── Create form ─────────────────────────────────────────────────────────────
+
+function cleanupTempHighlight() {
+  if (!pendingTempRange) return
+  pendingTempRange = null
+  refreshDecorations()
+}
+
+function showCreateForm() {
+  const result = extractAnchorFromView()
+  if (!result) {
     alert("Please select some text first.")
     return
   }
-
-  const sel = window.getSelection()
-  let selRange: Range | null = null
-  if (sel && sel.rangeCount > 0) selRange = sel.getRangeAt(0).cloneRange()
+  const { anchor, range } = result
 
   // Clear the browser selection.
+  const sel = window.getSelection()
   if (sel) sel.removeAllRanges()
 
-  // If sidebar is hidden, un-hide it.
+  // Make sure the sidebar is visible and contains the existing comments.
   if (sidebarHidden) {
     sidebarHidden = false
     removeCollapsedToggle()
-    // Re-inject highlights and build sidebar from existing comments.
-    currentComments.forEach(c => removeHighlights(c.id))
-    if (currentComments.length > 0) {
-      const orphanedIds = new Set<string>()
-      for (const c of currentComments) {
-        const range = findAnchorRange(root, c.anchor)
-        if (range) injectHighlight(range, c.id)
-        else orphanedIds.add(c.id)
-      }
-      renderSidebar(currentComments, orphanedIds)
-      setupScrollListener()
-    } else {
-      // No comments yet — create a minimal sidebar.
-      const sidebar = ensureSidebar()
-      sidebar.innerHTML = ""
-      const header = document.createElement("div")
-      header.className = "comment-sidebar-header"
-      header.title = "Click to hide comments"
-      const arrowSpan = document.createElement("span")
-      arrowSpan.className = "comment-header-arrow"
-      arrowSpan.textContent = "\u25BC"
-      header.appendChild(arrowSpan)
-      const titleSpan = document.createElement("span")
-      titleSpan.textContent = " Comments (0)"
-      header.appendChild(titleSpan)
-      header.addEventListener("click", () => {
-        sidebarHidden = true
-        removeSidebar()
-        if (currentComments.length > 0) showCollapsedToggle()
-      })
-      sidebar.appendChild(header)
-    }
-  } else if (currentComments.length === 0) {
-    // Sidebar isn't hidden but no comments — make sure sidebar exists with header.
-    const sidebar = ensureSidebar()
-    if (!sidebar.querySelector(".comment-sidebar-header")) {
-      const header = document.createElement("div")
-      header.className = "comment-sidebar-header"
-      const arrowSpan = document.createElement("span")
-      arrowSpan.className = "comment-header-arrow"
-      arrowSpan.textContent = "\u25BC"
-      header.appendChild(arrowSpan)
-      const titleSpan = document.createElement("span")
-      titleSpan.textContent = " Comments (0)"
-      header.appendChild(titleSpan)
-      header.addEventListener("click", () => {
-        sidebarHidden = true
-        removeSidebar()
-      })
-      sidebar.appendChild(header)
-    }
+  }
+  if (currentComments.length > 0) {
+    renderSidebar(currentComments, getOrphanedIds())
+  } else {
+    ensureMinimalSidebar()
   }
 
   const sidebar = ensureSidebar()
 
-  // Remove any previous create form and temp highlight.
   const existing = sidebar.querySelector(".comment-create-form")
   if (existing) existing.remove()
-  cleanupTempHighlight()
 
-  // Inject a temporary highlight at the selection so positionComments() can align the form.
-  if (selRange) {
-    injectHighlight(selRange, TEMP_COMMENT_ID)
-  }
+  // Show a temporary highlight at the selection.
+  pendingTempRange = range
+  refreshDecorations()
 
-  // Build the form element (styled as a comment box).
   const form = document.createElement("div")
   form.className = "comment-box comment-create-form"
   form.dataset.commentId = TEMP_COMMENT_ID
@@ -623,12 +700,12 @@ function showCreateForm(root: HTMLElement) {
   const selectedText = anchor.selected
   const label = document.createElement("div")
   label.className = "comment-create-label"
-  label.textContent = `\u201C${selectedText.length > 60 ? selectedText.slice(0, 60) + "\u2026" : selectedText}\u201D`
+  label.textContent = `“${selectedText.length > 60 ? selectedText.slice(0, 60) + "…" : selectedText}”`
   form.appendChild(label)
 
   const textarea = document.createElement("textarea")
   textarea.className = "comment-create-textarea"
-  textarea.placeholder = "Write your comment\u2026"
+  textarea.placeholder = "Write your comment…"
   textarea.rows = 2
   form.appendChild(textarea)
 
@@ -653,7 +730,6 @@ function showCreateForm(root: HTMLElement) {
   cancelBtn.addEventListener("click", () => {
     cleanupTempHighlight()
     form.remove()
-    // If no real comments, remove sidebar entirely.
     if (currentComments.length === 0) removeSidebar()
     else requestAnimationFrame(() => positionComments())
   })
@@ -661,10 +737,8 @@ function showCreateForm(root: HTMLElement) {
 
   form.appendChild(btnRow)
 
-  // Insert the form among existing comment boxes at the correct vertical
-  // position (based on the temp highlight's position in the document).
-  // positionComments() will then align it precisely.
-  const tempAnchor = document.getElementById(TEMP_COMMENT_ID)
+  // Insert the form at the right vertical position based on the temp highlight.
+  const tempAnchor = findHighlightSpan(TEMP_COMMENT_ID)
   if (tempAnchor) {
     const anchorTop = tempAnchor.getBoundingClientRect().top
     const boxes = sidebar.querySelectorAll<HTMLDivElement>(".comment-box")
@@ -672,16 +746,11 @@ function showCreateForm(root: HTMLElement) {
     for (const box of boxes) {
       const cid = box.dataset.commentId
       if (!cid || cid === TEMP_COMMENT_ID) continue
-      const cAnchor = document.getElementById(cid)
-      if (cAnchor && cAnchor.getBoundingClientRect().top > anchorTop) {
-        insertBefore = box
-        break
-      }
+      const cAnchor = findHighlightSpan(cid)
+      if (cAnchor && cAnchor.getBoundingClientRect().top > anchorTop) { insertBefore = box; break }
     }
-    if (insertBefore) {
-      sidebar.insertBefore(form, insertBefore)
-    } else {
-      // Append before the resolved toggle if present, else at end.
+    if (insertBefore) sidebar.insertBefore(form, insertBefore)
+    else {
       const resolvedToggle = sidebar.querySelector(".comment-resolved-toggle")
       if (resolvedToggle) sidebar.insertBefore(form, resolvedToggle)
       else sidebar.appendChild(form)
@@ -690,16 +759,35 @@ function showCreateForm(root: HTMLElement) {
     sidebar.appendChild(form)
   }
 
-  // Run positioning so the form aligns with its temp highlight.
   requestAnimationFrame(() => {
     positionComments()
-    // Focus textarea and scroll it into view.
     textarea.focus()
     form.scrollIntoView({ block: "nearest", behavior: "smooth" })
   })
 }
 
-// --- API calls ---
+function ensureMinimalSidebar() {
+  const sidebar = ensureSidebar()
+  if (sidebar.querySelector(".comment-sidebar-header")) return
+  const header = document.createElement("div")
+  header.className = "comment-sidebar-header"
+  header.title = "Click to hide comments"
+  const arrowSpan = document.createElement("span")
+  arrowSpan.className = "comment-header-arrow"
+  arrowSpan.textContent = "▼"
+  header.appendChild(arrowSpan)
+  const titleSpan = document.createElement("span")
+  titleSpan.textContent = " Comments (0)"
+  header.appendChild(titleSpan)
+  header.addEventListener("click", () => {
+    sidebarHidden = true
+    removeSidebar()
+    if (currentComments.length > 0) showCollapsedToggle()
+  })
+  sidebar.appendChild(header)
+}
+
+// ── API calls ───────────────────────────────────────────────────────────────
 
 async function fetchComments(pagePath: string): Promise<CommentEntry[]> {
   const resp = await fetch(`${API_BASE}/${encodePagePath(pagePath)}`)
@@ -718,6 +806,21 @@ async function createComment(anchor: CommentAnchor, text: string) {
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}))
     alert((err as any).error || "Failed to create comment")
+    return
+  }
+  await refreshComments()
+}
+
+async function createReply(parentId: string, text: string) {
+  if (!currentAuthFetch) return
+  const resp = await currentAuthFetch(`${API_BASE}/${encodePagePath(currentPagePath)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ anchor: { selected: "", before: "", after: "" }, text, parent_id: parentId }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to post reply")
     return
   }
   await refreshComments()
@@ -778,76 +881,64 @@ function encodePagePath(p: string): string {
 }
 
 async function refreshComments() {
-  if (!currentContentRoot) return
-  currentComments.forEach((c) => removeHighlights(c.id))
-  cleanupTempHighlight()
-
   currentComments = await fetchComments(currentPagePath)
+  cleanupTempHighlight() // also triggers refreshDecorations
+  renderAll()
+}
 
-  if (currentComments.length > 0) {
-    applyComments(currentContentRoot, currentComments)
-  } else {
+function renderAll() {
+  if (currentComments.length === 0) {
+    refreshDecorations()
     removeSidebar()
     removeCollapsedToggle()
+    return
   }
-}
-
-function applyComments(root: HTMLElement, comments: CommentEntry[]) {
-  const orphanedIds = new Set<string>()
-  for (const c of comments) {
-    const range = findAnchorRange(root, c.anchor)
-    if (range) injectHighlight(range, c.id)
-    else orphanedIds.add(c.id)
-  }
-  renderSidebar(comments, orphanedIds)
+  const orphanedIds = refreshDecorations()
+  renderSidebar(currentComments, orphanedIds)
   setupScrollListener()
+  setupReflowListeners()
 }
 
-// --- Public API ---
+// ── Public API ──────────────────────────────────────────────────────────────
 
 export async function initComments(opts: {
   pagePath: string
-  contentRoot: HTMLElement
+  view: EditorView
   authFetch: (url: string, init?: RequestInit) => Promise<Response>
   username: string | null
   isAdmin: boolean
 }) {
   currentPagePath = opts.pagePath
-  currentContentRoot = opts.contentRoot
+  activeView = opts.view
   currentAuthFetch = opts.authFetch
   currentUser = opts.username
   currentIsAdmin = opts.isAdmin
   sidebarHidden = false
 
   currentComments = await fetchComments(opts.pagePath)
-
-  if (currentComments.length > 0) {
-    applyComments(opts.contentRoot, currentComments)
-  }
+  renderAll()
 }
 
 export function destroyComments() {
-  currentComments.forEach((c) => removeHighlights(c.id))
-  cleanupTempHighlight()
+  currentComments = []
+  pendingTempRange = null
+  if (activeView) {
+    try { refreshDecorations() } catch {}
+  }
+  activeView = null
   removeSidebar()
   removeCollapsedToggle()
   removeScrollListener()
-  currentComments = []
-  currentContentRoot = null
+  removeReflowListeners()
 }
 
 export function reapplyComments() {
-  if (!currentContentRoot || currentComments.length === 0) return
-  // Re-try anchoring for all unresolved comments: remove existing highlights, re-anchor.
-  currentComments.forEach((c) => removeHighlights(c.id))
-  removeSidebar()
-  removeCollapsedToggle()
-  applyComments(currentContentRoot, currentComments)
+  if (currentComments.length === 0) return
+  renderAll()
 }
 
 export function addComment() {
-  if (!currentContentRoot) return
-  showCreateForm(currentContentRoot)
+  showCreateForm()
 }
 
 export function getCommentCount(): number {
@@ -858,6 +949,7 @@ export { clearAIComments }
 
 export async function createAIComment(selectedText: string, beforeContext: string, afterContext: string, commentText: string): Promise<boolean> {
   if (!currentAuthFetch || !currentPagePath) return false
+  // AI-created comments use text-quote only (the AI doesn't have a structural address).
   const resp = await currentAuthFetch(`${API_BASE}${encodePagePath(currentPagePath)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -867,14 +959,11 @@ export async function createAIComment(selectedText: string, beforeContext: strin
       ai: true,
     }),
   })
-  if (resp.ok) {
-    await refreshComments()
-    return true
-  }
+  if (resp.ok) { await refreshComments(); return true }
   return false
 }
 
-// --- Plugin registration ---
+// ── Plugin registration ─────────────────────────────────────────────────────
 
 const commentStyles = `
 /* --- Highlights --- */
@@ -1055,6 +1144,34 @@ const commentStyles = `
   font-size: 0.85em; color: var(--gw-color-muted); cursor: pointer; padding: 4px 8px; margin: 4px 0; border-radius: 3px;
 }
 .comment-resolved-toggle:hover { background: var(--gw-color-surface-alt); color: var(--gw-color-text); }
+
+/* --- Replies (stacked inside a parent comment box) --- */
+.comment-replies {
+  margin: 4px 0 6px 0;
+  border-left: 2px solid #d4c878;
+  padding-left: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.comment-reply {
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  font-size: 0.95em;
+}
+.comment-reply .comment-author { font-size: 0.8em; margin-bottom: 2px; }
+.comment-reply .comment-text { margin-bottom: 2px; }
+.comment-reply.comment-ai { background: rgba(92, 107, 192, 0.08); }
+html[data-theme="dark"] .comment-replies { border-left-color: #7a6c40; }
+html[data-theme="dark"] .comment-reply { background: rgba(0, 0, 0, 0.20); }
+html[data-theme="dark"] .comment-reply.comment-ai { background: rgba(92, 107, 192, 0.18); }
+
+.comment-reply-form {
+  margin: 4px 0 6px 0;
+  padding-left: 6px;
+  border-left: 2px solid var(--gw-color-success);
+}
 
 /* --- Create form in sidebar --- */
 .comment-create-form {

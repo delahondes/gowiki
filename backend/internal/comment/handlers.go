@@ -40,9 +40,10 @@ func handleList(svc *Service) http.HandlerFunc {
 }
 
 type createRequest struct {
-	Anchor Anchor `json:"anchor"`
-	Text   string `json:"text"`
-	AI     bool   `json:"ai,omitempty"`
+	Anchor   Anchor `json:"anchor"`
+	Text     string `json:"text"`
+	AI       bool   `json:"ai,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
 }
 
 func handleCreate(svc *Service, extractUsername func(*http.Request) string) http.HandlerFunc {
@@ -60,7 +61,7 @@ func handleCreate(svc *Service, extractUsername func(*http.Request) string) http
 			return
 		}
 
-		comment, err := svc.Create(pagePath, req.Anchor, req.Text, username, req.AI)
+		comment, err := svc.Create(pagePath, req.Anchor, req.Text, username, req.ParentID, req.AI)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

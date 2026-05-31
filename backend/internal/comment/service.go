@@ -34,32 +34,53 @@ func (svc *Service) List(pagePath string) ([]Comment, error) {
 	return comments, nil
 }
 
-// Create adds a new comment to a page.
-func (svc *Service) Create(pagePath string, anchor Anchor, text, author string, ai bool) (Comment, error) {
+// Create adds a new comment to a page. When parentID is non-empty, the new
+// comment is a reply: it inherits the parent's anchor and skips anchor
+// validation. Replies to replies are rejected (single-level threads only).
+func (svc *Service) Create(pagePath string, anchor Anchor, text, author, parentID string, ai bool) (Comment, error) {
 	if strings.TrimSpace(text) == "" {
 		return Comment{}, fmt.Errorf("comment text is required")
 	}
-	if strings.TrimSpace(anchor.Selected) == "" {
-		return Comment{}, fmt.Errorf("anchor selection is required")
+
+	comments, err := svc.store.Load(pagePath)
+	if err != nil {
+		return Comment{}, err
 	}
 
-	// Truncate anchor.Selected to 200 chars for storage.
-	selected := anchor.Selected
-	if len(selected) > 200 {
-		selected = selected[:200]
-	}
-	anchor.Selected = selected
-
-	// Truncate context to 40 chars each.
-	if len(anchor.Before) > 40 {
-		anchor.Before = anchor.Before[:40]
-	}
-	if len(anchor.After) > 40 {
-		anchor.After = anchor.After[:40]
+	if parentID != "" {
+		// Reply: locate parent, copy its anchor, reject nested replies.
+		var parent *Comment
+		for i := range comments {
+			if comments[i].ID == parentID {
+				parent = &comments[i]
+				break
+			}
+		}
+		if parent == nil {
+			return Comment{}, fmt.Errorf("parent comment %s not found", parentID)
+		}
+		if parent.ParentID != "" {
+			return Comment{}, fmt.Errorf("cannot reply to a reply (threads are single-level)")
+		}
+		anchor = parent.Anchor
+	} else {
+		// Top-level comment: anchor selection is required.
+		if strings.TrimSpace(anchor.Selected) == "" {
+			return Comment{}, fmt.Errorf("anchor selection is required")
+		}
+		if len(anchor.Selected) > 200 {
+			anchor.Selected = anchor.Selected[:200]
+		}
+		if len(anchor.Before) > 40 {
+			anchor.Before = anchor.Before[:40]
+		}
+		if len(anchor.After) > 40 {
+			anchor.After = anchor.After[:40]
+		}
 	}
 
 	now := time.Now().UTC()
-	id := generateID(anchor.Selected, text, now)
+	id := generateID(anchor.Selected+parentID, text, now)
 
 	c := Comment{
 		ID:        id,
@@ -69,12 +90,9 @@ func (svc *Service) Create(pagePath string, anchor Anchor, text, author string, 
 		CreatedAt: now,
 		UpdatedAt: now,
 		AI:        ai,
+		ParentID:  parentID,
 	}
 
-	comments, err := svc.store.Load(pagePath)
-	if err != nil {
-		return Comment{}, err
-	}
 	comments = append(comments, c)
 	if err := svc.store.Save(pagePath, comments); err != nil {
 		return Comment{}, err
@@ -121,22 +139,37 @@ func (svc *Service) Resolve(pagePath, commentID, user string) error {
 	return fmt.Errorf("comment %s not found", commentID)
 }
 
-// Delete removes a comment.
+// Delete removes a comment. Deleting a top-level comment cascades to its
+// replies (which would otherwise become orphaned).
 func (svc *Service) Delete(pagePath, commentID, user string, isAdmin bool) error {
 	comments, err := svc.store.Load(pagePath)
 	if err != nil {
 		return err
 	}
+	var target *Comment
 	for i := range comments {
 		if comments[i].ID == commentID {
-			if comments[i].Author != user && !isAdmin {
-				return fmt.Errorf("only the author or an admin can delete this comment")
-			}
-			comments = append(comments[:i], comments[i+1:]...)
-			return svc.store.Save(pagePath, comments)
+			target = &comments[i]
+			break
 		}
 	}
-	return fmt.Errorf("comment %s not found", commentID)
+	if target == nil {
+		return fmt.Errorf("comment %s not found", commentID)
+	}
+	if target.Author != user && !isAdmin {
+		return fmt.Errorf("only the author or an admin can delete this comment")
+	}
+	kept := comments[:0]
+	for _, c := range comments {
+		if c.ID == commentID {
+			continue
+		}
+		if target.ParentID == "" && c.ParentID == commentID {
+			continue // cascade: drop replies of the deleted top-level comment
+		}
+		kept = append(kept, c)
+	}
+	return svc.store.Save(pagePath, kept)
 }
 
 // ToggleAI flips the AI flag on a comment.

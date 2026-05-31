@@ -14,10 +14,11 @@ import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { slugify } from "./compiler/slugify.ts"
+import { computeContentAddress, computePmContentAddress, resolveContentAddress, resolveRawContentAddress, pointFromPm, pointFromRaw, resolvePointInPm, resolvePointInRaw } from "./compiler/anchor.ts"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
-import { initComments, destroyComments, addComment, getCommentCount, reapplyComments, createAIComment, clearAIComments } from "./plugins/comment.ts"
+import { initComments, destroyComments, addComment, getCommentCount, createAIComment, clearAIComments, commentPmPlugin } from "./plugins/comment.ts"
 import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI } from "./signing/keystore.ts"
 const HLJS_THEMES = [
   "github", "atom-one-light", "vs", "xcode", "idea",
@@ -142,12 +143,6 @@ let sidebarView = null
 let footerView = null
 let isFullscreen = false
 let aiAssistantEnabled = false
-
-let reapplyTimer = null
-const debouncedReapplyComments = () => {
-  if (reapplyTimer) clearTimeout(reapplyTimer)
-  reapplyTimer = setTimeout(reapplyComments, 100)
-}
 
 const tableCommands = new Map()
 const extraCommands = []
@@ -1835,21 +1830,18 @@ function getTextareaCursorOffset(textarea, pos) {
   return { x, y }
 }
 
-/** Save cursor context to localStorage for draft resume. */
+/** Save cursor anchor to localStorage for draft resume. */
 function saveCursorToLocalStorage() {
   if (mode !== "edit" || !pagePath) return
   try {
-    let ctx = null
+    let anchor = null
     if (editMode === "visual" && editorView) {
-      const { fullText, textOffset } = pmPosToTextOffset(editorView.state.doc, editorView.state.selection.from)
-      ctx = extractCursorContext(fullText, textOffset, false)
-      ctx.editMode = "visual"
+      anchor = pointFromPm(editorView.state.doc, editorView.state.selection.from, { withTextQuote: true })
     } else if (editMode === "raw" && rawEditor) {
-      ctx = extractCursorContext(rawEditor.value, rawEditor.selectionStart, true)
-      ctx.editMode = "raw"
+      anchor = pointFromRaw(rawEditor.value, rawEditor.selectionStart, { withTextQuote: true })
     }
-    if (ctx) {
-      localStorage.setItem("gowiki:cursor:" + pagePath, JSON.stringify(ctx))
+    if (anchor) {
+      localStorage.setItem("gowiki:cursor:" + pagePath, JSON.stringify(anchor))
     }
   } catch {}
 }
@@ -1860,44 +1852,43 @@ function restoreCursorFromLocalStorage() {
   try {
     const stored = localStorage.getItem("gowiki:cursor:" + pagePath)
     if (!stored) return
-    const ctx = JSON.parse(stored)
-    // Delay to let editor render.
+    const anchor = JSON.parse(stored)
+    if (!anchor || typeof anchor.nodeIndex !== "number") {
+      // Legacy CursorContext shape — drop it.
+      localStorage.removeItem("gowiki:cursor:" + pagePath)
+      return
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const scroller = document.querySelector("#app")
         if (editMode === "visual" && editorView) {
-          const { fullText } = pmDocTextWithPositions(editorView.state.doc)
-          const textPos = findContextPosition(fullText, ctx, false)
-          if (textPos >= 0) {
-            const pmPos = textOffsetToPmPos(editorView.state.doc, textPos)
-            const clampedPos = Math.min(pmPos, editorView.state.doc.content.size)
-            try {
-              const $pos = editorView.state.doc.resolve(clampedPos)
-              const sel = TextSelection.near($pos)
-              editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
-              const scrollToCursor = (showBeacon) => {
-                try {
-                  const coords = editorView.coordsAtPos(clampedPos)
-                  if (scroller) scroller.scrollTop += coords.top - window.innerHeight / 2
-                  if (showBeacon) {
-                    const fc = editorView.coordsAtPos(clampedPos)
-                    showCursorBeacon(fc.left, fc.top)
-                  }
-                } catch {}
-              }
-              requestAnimationFrame(() => {
-                scrollToCursor(false)
-                setTimeout(() => scrollToCursor(true), 150)
-                // Re-scroll when async content loads (queries, includes, images).
-                const obs = new MutationObserver(() => scrollToCursor(false))
-                obs.observe(editorView.dom, { childList: true, subtree: true, attributes: true })
-                setTimeout(() => obs.disconnect(), 5000)
-              })
-            } catch {}
-          }
+          const { pos } = resolvePointInPm(editorView.state.doc, anchor)
+          const clampedPos = Math.max(0, Math.min(pos, editorView.state.doc.content.size))
+          try {
+            const $pos = editorView.state.doc.resolve(clampedPos)
+            const sel = TextSelection.near($pos)
+            editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
+            const scrollToCursor = (showBeacon) => {
+              try {
+                const coords = editorView.coordsAtPos(clampedPos)
+                if (scroller) scroller.scrollTop += coords.top - window.innerHeight / 2
+                if (showBeacon) {
+                  const fc = editorView.coordsAtPos(clampedPos)
+                  showCursorBeacon(fc.left, fc.top)
+                }
+              } catch {}
+            }
+            requestAnimationFrame(() => {
+              scrollToCursor(false)
+              setTimeout(() => scrollToCursor(true), 150)
+              const obs = new MutationObserver(() => scrollToCursor(false))
+              obs.observe(editorView.dom, { childList: true, subtree: true, attributes: true })
+              setTimeout(() => obs.disconnect(), 5000)
+            })
+          } catch {}
           editorView.focus()
         } else if (editMode === "raw" && rawEditor) {
-          const pos = findContextPosition(rawEditor.value, ctx, true)
+          const { pos } = resolvePointInRaw(rawEditor.value, anchor)
           if (pos >= 0) {
             rawEditor.setSelectionRange(pos, pos)
             rawEditor.focus()
@@ -1964,183 +1955,6 @@ function stripMarkdownForContext(text) {
     .replace(/^\{[^}]+\}\s*$/gm, "")
 }
 
-/**
- * Extract a text snippet around the cursor position for landmark-based
- * cursor restoration when switching between raw and visual modes.
- * Returns { before, after, rawBefore, rawAfter }.
- * The plain versions have markdown stripped for cross-mode matching.
- */
-function extractCursorContext(text, cursorPos, isRaw) {
-  let pos = cursorPos
-  if (isRaw) {
-    // If cursor is inside the (url) part of a [text](url) link,
-    // move it to just after the link text — the URL has no equivalent in visual mode.
-    pos = adjustRawCursorOutOfLinkSyntax(text, pos)
-  }
-  const before = text.substring(Math.max(0, pos - 80), pos)
-  const after = text.substring(pos, pos + 50)
-  const fraction = text.length > 0 ? pos / text.length : 0
-  if (isRaw) {
-    return {
-      before, after, fraction,
-      plainBefore: stripMarkdownForContext(before),
-      plainAfter: stripMarkdownForContext(after),
-    }
-  }
-  return { before, after, fraction, plainBefore: before, plainAfter: after }
-}
-
-/**
- * If `pos` is inside markdown link syntax [text](url), move it to just
- * after the link text (end of the visible content). Handles cursor in
- * both the [text] and (url) parts.
- */
-function adjustRawCursorOutOfLinkSyntax(text, pos) {
-  // Check if inside (url) part: search backward for unmatched '(' preceded by ']'
-  let parenDepth = 0
-  let i = pos - 1
-  while (i >= 0) {
-    if (text[i] === ")") parenDepth++
-    else if (text[i] === "(") {
-      if (parenDepth > 0) { parenDepth--; i--; continue }
-      if (i > 0 && text[i - 1] === "]") {
-        // Inside (url). Move to just before '](' — end of link text.
-        return i - 1
-      }
-      break
-    }
-    i--
-  }
-
-  // Check if inside [text] part: search backward for '[' and forward for ']()'
-  let bracketDepth = 0
-  i = pos - 1
-  while (i >= 0) {
-    if (text[i] === "]") bracketDepth++
-    else if (text[i] === "[") {
-      if (bracketDepth > 0) { bracketDepth--; i--; continue }
-      // Found opening '['. Check if this is a link by looking for '](' after.
-      const closeIdx = text.indexOf("](", i)
-      if (closeIdx >= 0 && closeIdx >= pos - 1) {
-        // Cursor is between [ and ](. Stay at pos but within the text portion —
-        // the context will be valid link text content.
-        return pos
-      }
-      break
-    }
-    i--
-  }
-
-  // Cursor at or near '](' boundary between [text](url).
-  // We want context to end with the link text, not include ] or (.
-  // pos-1=']', pos='(' → move to pos-1 (before ']', inside link text)
-  if (pos > 1 && text[pos - 1] === "]" && pos < text.length && text[pos] === "(") {
-    return pos - 1
-  }
-  // pos=']', pos+1='(' → same, move before ']'
-  if (text[pos] === "]" && pos + 1 < text.length && text[pos + 1] === "(") {
-    return pos
-  }
-
-  return pos
-}
-
-/**
- * Find the best matching position in `text` for the given context.
- * Tries exact match first, then falls back to plain (markdown-stripped) match.
- * When using plain match against raw markdown, we search the stripped version
- * but return the position in the original text.
- */
-function findContextPosition(text, ctx, isRawTarget) {
-  const targetFraction = ctx.fraction ?? 0.5
-
-  if (isRawTarget) {
-    // When targeting raw markdown, always use stripped matching —
-    // PM text won't match inside [link](url) or **bold** syntax.
-    const stripped = stripMarkdownForContext(text)
-    const plainPos = _findInText(stripped, ctx.plainBefore, ctx.plainAfter, targetFraction)
-    if (plainPos >= 0) {
-      return mapStrippedPosToOriginal(text, stripped, plainPos)
-    }
-    // Fallback: try exact match (works for plain text regions).
-    const exactPos = _findInText(text, ctx.before, ctx.after, targetFraction)
-    if (exactPos >= 0) return exactPos
-  } else {
-    // When targeting PM text, try plain context (handles markdown→plain transition).
-    const plainPos = _findInText(text, ctx.plainBefore, ctx.plainAfter, targetFraction)
-    if (plainPos >= 0) return plainPos
-    // Fallback: exact match.
-    const exactPos = _findInText(text, ctx.before, ctx.after, targetFraction)
-    if (exactPos >= 0) return exactPos
-  }
-  return -1
-}
-
-/** Find all occurrences of `needle` in `text`. */
-function _findAll(text, needle) {
-  const positions = []
-  let start = 0
-  while (start < text.length) {
-    const idx = text.indexOf(needle, start)
-    if (idx === -1) break
-    positions.push(idx)
-    start = idx + 1
-  }
-  return positions
-}
-
-/** Pick the occurrence closest to the expected proportional position. */
-function _pickClosest(positions, textLen, targetFraction) {
-  if (positions.length === 1) return positions[0]
-  const targetPos = targetFraction * textLen
-  let best = positions[0]
-  let bestDist = Math.abs(positions[0] - targetPos)
-  for (let i = 1; i < positions.length; i++) {
-    const dist = Math.abs(positions[i] - targetPos)
-    if (dist < bestDist) {
-      best = positions[i]
-      bestDist = dist
-    }
-  }
-  return best
-}
-
-function _findInText(text, before, after, targetFraction) {
-  for (let len = before.length; len >= 6; len--) {
-    const suffix = before.substring(before.length - len)
-    const hits = _findAll(text, suffix)
-    if (hits.length > 0) {
-      const idx = _pickClosest(hits, text.length, targetFraction)
-      return idx + suffix.length
-    }
-  }
-  for (let len = Math.min(after.length, 30); len >= 6; len--) {
-    const prefix = after.substring(0, len)
-    const hits = _findAll(text, prefix)
-    if (hits.length > 0) {
-      return _pickClosest(hits, text.length, targetFraction)
-    }
-  }
-  return -1
-}
-
-/**
- * Map a position in the stripped text back to the corresponding position
- * in the original markdown text.
- */
-function mapStrippedPosToOriginal(original, stripped, strippedPos) {
-  // Walk both strings in parallel, tracking how positions correspond.
-  let oi = 0, si = 0
-  while (si < strippedPos && oi < original.length) {
-    if (original[oi] === stripped[si]) {
-      oi++
-      si++
-    } else {
-      oi++ // skip markdown syntax character
-    }
-  }
-  return oi
-}
 
 /**
  * Extract the full text content from a PM doc with position mapping,
@@ -2163,22 +1977,6 @@ function pmDocTextWithPositions(doc) {
   return { fullText, chunks }
 }
 
-/** Convert a PM selection position to a text offset in the serialized text. */
-function pmPosToTextOffset(doc, pmPos) {
-  const { fullText, chunks } = pmDocTextWithPositions(doc)
-  // Find the chunk that contains or is just before pmPos
-  let textOffset = 0
-  for (const chunk of chunks) {
-    if (chunk.pmPos >= pmPos) break
-    if (chunk.pmPos + (chunk.text || "").length > pmPos) {
-      textOffset = chunk.textOffset + (pmPos - chunk.pmPos)
-      break
-    }
-    textOffset = chunk.textOffset + chunk.text.length
-  }
-  return { fullText, textOffset }
-}
-
 /** Find a PM position from a text offset in the doc's text content. */
 function textOffsetToPmPos(doc, targetOffset) {
   const { chunks } = pmDocTextWithPositions(doc)
@@ -2191,527 +1989,7 @@ function textOffsetToPmPos(doc, targetOffset) {
   return doc.content.size > 0 ? doc.content.size - 1 : 0
 }
 
-// ── Structural content address for raw↔visual cursor mapping ──
-// Both raw markdown and PM doc share the same block structure in the same order.
-// A content address is { nodeIndex, plainOffset } identifying:
-//   - Which content node (paragraph, heading, table cell, list item) by sequential index
-//   - Plain-text character offset within that node (markdown syntax stripped)
-
-// Enumerate content nodes from raw markdown. Returns array of
-// { rawStart, rawEnd, type } for each content node.
-function scanMarkdownContentNodes(markdown) {
-  const nodes = []
-  const lines = markdown.split("\n")
-  let i = 0
-  let inCodeFence = false, fenceMarker = ""
-
-  while (i < lines.length) {
-    const line = lines[i]
-    const lineStart = lines.slice(0, i).reduce((s, l) => s + l.length + 1, 0)
-
-    // Code fence toggle
-    const fenceMatch = line.match(/^(`{3,}|~{3,})/)
-    if (fenceMatch) {
-      if (!inCodeFence) {
-        inCodeFence = true
-        fenceMarker = fenceMatch[1][0]
-        // Collect code block content (everything between fences)
-        const startLine = i + 1
-        i++
-        while (i < lines.length) {
-          const cl = lines[i]
-          if (cl.startsWith(fenceMarker.repeat(fenceMatch[1].length))) break
-          i++
-        }
-        // The code block body is one content node
-        if (startLine < i) {
-          const codeStart = lines.slice(0, startLine).reduce((s, l) => s + l.length + 1, 0)
-          const codeEnd = lines.slice(0, i).reduce((s, l) => s + l.length + 1, 0) - 1
-          nodes.push({ rawStart: codeStart, rawEnd: codeEnd, type: "code_block" })
-        }
-        inCodeFence = false
-        i++
-        continue
-      }
-    }
-
-    // Blank line — skip
-    if (line.trim() === "") { i++; continue }
-
-    // Directive on its own line: {name ...}
-    if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(line)) { i++; continue }
-
-    // Table separator row: | --- | --- |
-    if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) { i++; continue }
-
-    // Horizontal rule: --- or *** or ___
-    if (/^([-*_])\1{2,}\s*$/.test(line)) { i++; continue }
-
-    // Table row: | cell | cell |
-    if (line.includes("|") && /^\|/.test(line.trim())) {
-      // Split into cells, each cell is a content node
-      const stripped = line.replace(/^\|/, "").replace(/\|\s*$/, "")
-      let cellOffset = line.indexOf(stripped.charAt(0) || "|")
-      // Find cell boundaries by scanning for unescaped |
-      const cellTexts = []
-      let cur = "", depth = 0, ci = 0
-      for (ci = 0; ci < stripped.length; ci++) {
-        const ch = stripped[ci]
-        if (ch === "\\" && ci + 1 < stripped.length) { cur += ch + stripped[ci + 1]; ci++; continue }
-        if (ch === "`") depth = depth ? 0 : 1
-        if (ch === "|" && !depth) {
-          cellTexts.push(cur)
-          cur = ""
-          continue
-        }
-        cur += ch
-      }
-      cellTexts.push(cur)
-
-      let scanPos = lineStart
-      for (const cellRaw of cellTexts) {
-        const trimmed = cellRaw.trim()
-        if (trimmed === "") {
-          // Find position of this empty cell
-          scanPos = markdown.indexOf("|", scanPos) + 1
-          nodes.push({ rawStart: scanPos, rawEnd: scanPos, type: "table_cell" })
-          continue
-        }
-        // Find the cell content in the line
-        const cellStart = markdown.indexOf(trimmed, scanPos)
-        if (cellStart >= 0) {
-          nodes.push({ rawStart: cellStart, rawEnd: cellStart + trimmed.length, type: "table_cell" })
-          scanPos = cellStart + trimmed.length
-        }
-      }
-      i++
-      continue
-    }
-
-    // Heading: ## text
-    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/)
-    if (headingMatch) {
-      const prefix = headingMatch[1].length + 1 // # + space
-      const contentStart = lineStart + prefix
-      nodes.push({ rawStart: contentStart, rawEnd: lineStart + line.length, type: "heading" })
-      i++
-      continue
-    }
-
-    // List item: - text or 1. text
-    const listMatch = line.match(/^(\s*(?:[-*]|\d+\.)\s+)(.*)$/)
-    if (listMatch) {
-      const prefix = listMatch[1].length
-      const contentStart = lineStart + prefix
-      // Collect continuation lines (indented, not new list item, not blank)
-      let endLine = i
-      while (endLine + 1 < lines.length) {
-        const next = lines[endLine + 1]
-        if (next.trim() === "") break
-        if (/^\s*(?:[-*]|\d+\.)\s/.test(next)) break
-        if (/^#{1,6}\s/.test(next)) break
-        if (/^\|/.test(next.trim())) break
-        endLine++
-      }
-      const endPos = lines.slice(0, endLine).reduce((s, l) => s + l.length + 1, 0) + lines[endLine].length
-      nodes.push({ rawStart: contentStart, rawEnd: endPos, type: "list_item" })
-      i = endLine + 1
-      continue
-    }
-
-    // Blockquote: > text
-    if (line.startsWith("> ") || line === ">") {
-      const prefix = line.startsWith("> ") ? 2 : 1
-      const contentStart = lineStart + prefix
-      nodes.push({ rawStart: contentStart, rawEnd: lineStart + line.length, type: "paragraph" })
-      i++
-      continue
-    }
-
-    // Paragraph: consecutive non-blank, non-special lines
-    {
-      const paraStart = lineStart
-      let endLine = i
-      while (endLine + 1 < lines.length) {
-        const next = lines[endLine + 1]
-        if (next.trim() === "") break
-        if (/^#{1,6}\s/.test(next)) break
-        if (/^\s*(?:[-*]|\d+\.)\s/.test(next)) break
-        if (/^\|/.test(next.trim())) break
-        if (/^(`{3,}|~{3,})/.test(next)) break
-        if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(next)) break
-        if (/^([-*_])\1{2,}\s*$/.test(next)) break
-        if (next.startsWith("> ")) break
-        endLine++
-      }
-      const endPos = lines.slice(0, endLine).reduce((s, l) => s + l.length + 1, 0) + lines[endLine].length
-      nodes.push({ rawStart: paraStart, rawEnd: endPos, type: "paragraph" })
-      i = endLine + 1
-    }
-  }
-  return nodes
-}
-
-// Compute plain-text offset from a raw offset within a content node's text.
-// Strips markdown inline syntax (delimiters, link URLs, etc.) and counts
-// only the characters that appear as visible text in PM.
-function rawToPlainOffset(rawText, rawOffset) {
-  let plain = 0
-  let i = 0
-  const len = rawText.length
-  const target = Math.min(rawOffset, len)
-
-  while (i < target) {
-    // Escape: \X → X
-    if (rawText[i] === "\\" && i + 1 < len) {
-      i += 2; plain++; continue
-    }
-    // Footnote: ^[...] → atom (0 plain chars)
-    if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
-      let depth = 1, j = i + 2
-      while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
-        if (rawText[j] === "[") depth++
-        if (rawText[j] === "]") depth--
-        j++
-      }
-      if (depth === 0) {
-        if (target <= j) return plain // cursor inside → clamp
-        i = j; continue
-      }
-    }
-    // Flow marker: {#...} → atom (0 plain chars)
-    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
-      const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) {
-        if (target <= j + 1) return plain
-        i = j + 1; continue
-      }
-    }
-    // Caption ref: {ref ...} → atom (0 plain chars)
-    if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
-      const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) {
-        if (target <= j + 1) return plain
-        i = j + 1; continue
-      }
-    }
-    // Template var: {{...}} → atom (0 plain chars)
-    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
-      const j = rawText.indexOf("}}", i + 2)
-      if (j >= 0) {
-        if (target <= j + 2) return plain
-        i = j + 2; continue
-      }
-    }
-    // Highlight: == or =={color=X} → delimiter (0 plain chars)
-    if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
-      i += 2
-      if (i < len && rawText[i] === "{") {
-        const j = rawText.indexOf("}", i)
-        if (j >= 0) i = j + 1 // skip {color=X}
-      }
-      continue
-    }
-    // Link: [text](url) → "text"
-    if (rawText[i] === "[") {
-      let depth = 1, j = i + 1
-      while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
-        if (rawText[j] === "[") depth++
-        if (rawText[j] === "]") depth--
-        j++
-      }
-      if (depth === 0 && j < len && rawText[j] === "(") {
-        // Found [text](, now find )
-        let pd = 1, k = j + 1
-        while (k < len && pd > 0) {
-          if (rawText[k] === "\\") { k += 2; continue }
-          if (rawText[k] === "(") pd++
-          if (rawText[k] === ")") pd--
-          k++
-        }
-        if (pd === 0) {
-          // [text](url): [ is at i, ] is at j-1, ( is at j, ) is at k-1
-          const textStart = i + 1, textEnd = j - 1
-          if (target <= textStart) { i = textStart; continue } // cursor on [ → skip to text
-          if (target <= textEnd) {
-            // Cursor is inside link text — recurse for nested inline
-            i++ // skip [
-            continue // process text content normally
-          }
-          if (target < k) return plain + rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
-          // Past ): skip entire link, add text length
-          const innerPlain = rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
-          plain += innerPlain
-          i = k
-          continue
-        }
-      }
-    }
-    // Bold: ** delimiter
-    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") {
-      i += 2; continue
-    }
-    // Italic: * delimiter (single)
-    if (rawText[i] === "*") { i++; continue }
-    // Strikethrough: ~~
-    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") {
-      i += 2; continue
-    }
-    // Subscript: ~ (single, not ~~)
-    if (rawText[i] === "~") { i++; continue }
-    // Superscript: ^ (single, not ^[)
-    if (rawText[i] === "^") { i++; continue }
-    // Underline: _
-    if (rawText[i] === "_") { i++; continue }
-    // Code: ` or @`
-    if (rawText[i] === "`") { i++; continue }
-    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
-    // Regular character
-    i++; plain++
-  }
-  return plain
-}
-
-// Compute a structural content address from a raw markdown cursor position.
-function computeContentAddress(markdown, cursorPos) {
-  const nodes = scanMarkdownContentNodes(markdown)
-  // Find which content node contains the cursor
-  for (let idx = 0; idx < nodes.length; idx++) {
-    const n = nodes[idx]
-    if (cursorPos >= n.rawStart && cursorPos <= n.rawEnd) {
-      const rawText = markdown.slice(n.rawStart, n.rawEnd)
-      const rawOffsetInNode = cursorPos - n.rawStart
-      const plainOffset = n.type === "code_block"
-        ? rawOffsetInNode
-        : rawToPlainOffset(rawText, rawOffsetInNode)
-      return { nodeIndex: idx, plainOffset }
-    }
-  }
-  // Cursor is between nodes — snap to nearest
-  for (let idx = 0; idx < nodes.length; idx++) {
-    if (nodes[idx].rawStart > cursorPos) {
-      return { nodeIndex: idx, plainOffset: 0 }
-    }
-  }
-  return nodes.length > 0
-    ? { nodeIndex: nodes.length - 1, plainOffset: 0 }
-    : { nodeIndex: 0, plainOffset: 0 }
-}
-
-// Content node types in PM that directly contain inline text.
-const PM_CONTENT_TYPES = new Set([
-  "paragraph", "heading", "code_block",
-])
-
-// Container types to descend into when counting content nodes.
-// Only structural containers that correspond to raw markdown structure.
-// Excludes includes, queries, and other expanded content not in raw markdown.
-// table_cell/table_header contain paragraphs, so they are containers.
-const PM_CONTAINER_TYPES = new Set([
-  "doc", "table", "table_row", "table_cell", "table_header",
-  "bullet_list", "ordered_list", "list_item", "blockquote", "spoiler",
-])
-
-// Compute a structural content address from a PM cursor position.
-function computePmContentAddress(doc, pmPos) {
-  let idx = 0
-  let result = null
-  doc.descendants((node, pos) => {
-    if (result) return false
-    if (PM_CONTENT_TYPES.has(node.type.name)) {
-      const nodeEnd = pos + node.nodeSize
-      if (pmPos >= pos && pmPos <= nodeEnd) {
-        // Cursor is inside this content node. Count plain-text chars to pmPos.
-        let charCount = 0
-        if (node.type.name === "code_block") {
-          charCount = Math.max(0, pmPos - pos - 1)
-        } else {
-          node.forEach((child, offset) => {
-            if (result) return
-            const childPos = pos + 1 + offset
-            const childEnd = childPos + child.nodeSize
-            if (pmPos <= childPos) { result = { nodeIndex: idx, plainOffset: charCount }; return }
-            if (child.isText) {
-              if (pmPos < childEnd) {
-                charCount += pmPos - childPos
-                result = { nodeIndex: idx, plainOffset: charCount }
-                return
-              }
-              charCount += child.text.length
-            } else if (child.type.name === "hard_break") {
-              charCount += 1
-            }
-            // Atom nodes: 0 plain chars
-          })
-        }
-        if (!result) result = { nodeIndex: idx, plainOffset: charCount }
-        return false
-      }
-      idx++
-      return false // don't descend into content nodes
-    }
-    // Only descend into structural containers, skip includes/queries/etc.
-    return PM_CONTAINER_TYPES.has(node.type.name)
-  })
-  return result || { nodeIndex: Math.max(0, idx - 1), plainOffset: 0 }
-}
-
-// Reverse of rawToPlainOffset: given a plain-text target offset,
-// find the corresponding raw character position in the markdown text.
-function plainToRawOffset(rawText, plainTarget) {
-  let plain = 0
-  let i = 0
-  const len = rawText.length
-
-  while (i < len && plain < plainTarget) {
-    // Escape: \X → X
-    if (rawText[i] === "\\" && i + 1 < len) {
-      i += 2; plain++; continue
-    }
-    // Footnote: ^[...] → atom (0 plain chars)
-    if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
-      let depth = 1, j = i + 2
-      while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
-        if (rawText[j] === "[") depth++
-        if (rawText[j] === "]") depth--
-        j++
-      }
-      if (depth === 0) { i = j; continue }
-    }
-    // Flow marker: {#...} → atom (0 plain chars)
-    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
-      const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) { i = j + 1; continue }
-    }
-    // Caption ref: {ref ...} → atom (0 plain chars)
-    if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
-      const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) { i = j + 1; continue }
-    }
-    // Template var: {{...}} → atom (0 plain chars)
-    if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
-      const j = rawText.indexOf("}}", i + 2)
-      if (j >= 0) { i = j + 2; continue }
-    }
-    // Highlight: == or =={color=X} → delimiter (0 plain chars)
-    if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
-      i += 2
-      if (i < len && rawText[i] === "{") {
-        const j = rawText.indexOf("}", i)
-        if (j >= 0) i = j + 1
-      }
-      continue
-    }
-    // Link: [text](url) → "text"
-    if (rawText[i] === "[") {
-      let depth = 1, j = i + 1
-      while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
-        if (rawText[j] === "[") depth++
-        if (rawText[j] === "]") depth--
-        j++
-      }
-      if (depth === 0 && j < len && rawText[j] === "(") {
-        let pd = 1, k = j + 1
-        while (k < len && pd > 0) {
-          if (rawText[k] === "\\") { k += 2; continue }
-          if (rawText[k] === "(") pd++
-          if (rawText[k] === ")") pd--
-          k++
-        }
-        if (pd === 0) {
-          i++ // skip [, process text content normally
-          continue
-        }
-      }
-    }
-    // Bold: ** delimiter
-    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") { i += 2; continue }
-    // Italic: * delimiter
-    if (rawText[i] === "*") { i++; continue }
-    // Strikethrough: ~~
-    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") { i += 2; continue }
-    // Subscript: ~
-    if (rawText[i] === "~") { i++; continue }
-    // Superscript: ^
-    if (rawText[i] === "^") { i++; continue }
-    // Underline: _
-    if (rawText[i] === "_") { i++; continue }
-    // Code: ` or @`
-    if (rawText[i] === "`") { i++; continue }
-    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
-    // Regular character
-    i++; plain++
-  }
-  return i
-}
-
-// Resolve a structural content address to a raw markdown cursor position.
-function resolveRawContentAddress(markdown, nodeIndex, plainOffset) {
-  const nodes = scanMarkdownContentNodes(markdown)
-  if (nodeIndex >= nodes.length) {
-    return nodes.length > 0 ? nodes[nodes.length - 1].rawEnd : 0
-  }
-  const n = nodes[nodeIndex]
-  if (n.type === "code_block") {
-    return Math.min(n.rawStart + plainOffset, n.rawEnd)
-  }
-  const rawText = markdown.slice(n.rawStart, n.rawEnd)
-  return n.rawStart + plainToRawOffset(rawText, plainOffset)
-}
-
-// Resolve a structural content address to a PM position.
-function resolveContentAddress(doc, nodeIndex, plainOffset) {
-  let idx = 0
-  let result = 1 // fallback: start of doc content
-  let done = false
-  doc.descendants((node, pos) => {
-    if (done) return false
-    if (PM_CONTENT_TYPES.has(node.type.name)) {
-      if (idx === nodeIndex) {
-        // Found the target node. Resolve plainOffset within it.
-        if (node.type.name === "code_block") {
-          result = Math.min(pos + 1 + plainOffset, pos + node.nodeSize - 1)
-        } else {
-          let charCount = 0
-          let found = false
-          node.forEach((child, offset) => {
-            if (found) return
-            const childPos = pos + 1 + offset
-            if (child.isText) {
-              const textLen = child.text.length
-              if (charCount + textLen >= plainOffset) {
-                result = childPos + (plainOffset - charCount)
-                found = true
-                return
-              }
-              charCount += textLen
-            } else if (child.type.name === "hard_break") {
-              if (charCount + 1 >= plainOffset) {
-                result = childPos
-                found = true
-                return
-              }
-              charCount += 1
-            }
-            // Atom nodes (footnote, flow_marker, etc.): 0 plain chars, skip
-          })
-          if (!found) result = pos + node.nodeSize - 1 // end of node
-        }
-        done = true
-        return false
-      }
-      idx++
-      return false // don't descend into content nodes
-    }
-    // Only descend into structural containers, skip includes/queries/etc.
-    return PM_CONTAINER_TYPES.has(node.type.name)
-  })
-  return result
-}
+// Structural content address for raw↔visual cursor mapping lives in ./compiler/anchor.ts
 
 async function setEditMode(nextEditMode) {
   if (mode !== "edit") return
@@ -2827,8 +2105,6 @@ function clearContent() {
   }
   rawEditor = null
   destroyComments()
-  document.removeEventListener("gowiki:node-rendered", debouncedReapplyComments)
-  if (reapplyTimer) { clearTimeout(reapplyTimer); reapplyTimer = null }
   if (CSS.highlights) CSS.highlights.delete("search-highlight")
   contentRoot.innerHTML = ""
 }
@@ -3120,7 +2396,7 @@ function addCodeCopyButtons(container) {
   })
 }
 
-function mountReadOnlyView(container, markdown, className) {
+function mountReadOnlyView(container, markdown, className, extraPlugins = []) {
   let doc
   try {
     doc = markdownToPM(markdown, registry)
@@ -3142,7 +2418,7 @@ function mountReadOnlyView(container, markdown, className) {
   const state = EditorState.create({
     doc,
     schema,
-    plugins: registry.getEditorPlugins(),
+    plugins: [...registry.getEditorPlugins(), ...extraPlugins],
   })
   const view = new EditorView(wrapper, {
     state,
@@ -3259,7 +2535,7 @@ function renderView() {
     return
   }
 
-  viewView = mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view")
+  viewView = mountReadOnlyView(contentRoot, currentMarkdown, "gowiki-view", [commentPmPlugin])
 
   // Highlight searched terms if navigating from search.
   const highlight = new URLSearchParams(window.location.search).get("highlight")
@@ -3289,18 +2565,18 @@ function renderView() {
   updatePageTitle()
 
   // Initialize comments overlay.
-  if (!isNewPage) {
+  if (!isNewPage && viewView) {
     initComments({
       pagePath: `/${pagePath}`,
-      contentRoot,
+      view: viewView,
       authFetch,
       username: currentUser?.username || null,
       isAdmin: currentUser?.groups?.includes("admin") || false,
     })
   }
 
-  // Re-anchor comments and re-apply highlights when async nodes finish rendering.
-  document.addEventListener("gowiki:node-rendered", debouncedReapplyComments)
+  // Comments are decorations on the PM doc — no DOM reapply needed. Search
+  // highlights still need re-application when async nodes finish rendering.
   if (highlight) {
     document.addEventListener("gowiki:node-rendered", () => highlightTermsInView(contentRoot, highlight))
   }
@@ -7090,6 +6366,7 @@ function renderEdit(nextEditMode) {
     menubarStatePlugin,
     collabNotifyPlugin,
     remoteBlockPlugin,
+    commentPmPlugin,
   ]
 
   // Restore stashed state (preserves undo history) or create fresh.
@@ -7309,6 +6586,17 @@ function renderEdit(nextEditMode) {
   } else if (nextEditMode === "raw") {
     const ta = document.querySelector(".gowiki-raw-editor")
     if (ta) ta.focus()
+  }
+
+  // Initialize comments overlay in visual edit mode (raw mode has no PM view).
+  if (nextEditMode === "visual" && editorView && !isNewPage) {
+    initComments({
+      pagePath: `/${pagePath}`,
+      view: editorView,
+      authFetch,
+      username: currentUser?.username || null,
+      isAdmin: currentUser?.groups?.includes("admin") || false,
+    })
   }
 }
 
