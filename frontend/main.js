@@ -101,7 +101,7 @@ This is editable text.
 
 const appRoot = document.querySelector("#app")
 const contentRoot = document.querySelector("#content")
-const actionsRoot = document.querySelector("#actions")
+const actionsRoot = document.querySelector("#gowiki-action-bar")
 const sidebarRoot = document.querySelector("#left")
 const footerRoot = document.querySelector("#footer")
 
@@ -10052,6 +10052,18 @@ async function renderAdminACLTab(container) {
       collectRulesFromDOM()
       rules.push({ pattern: ".*", subject_type: "special", subject: "@all", permissions: ["view"] })
       renderRules()
+      // Scroll the new row into view and focus its pattern field so the
+      // admin can start typing the regex immediately.
+      requestAnimationFrame(() => {
+        const lastRow = tableContainer.querySelector(`tr[data-rule-index="${rules.length - 1}"]`)
+        if (!lastRow) return
+        lastRow.scrollIntoView({ behavior: "smooth", block: "center" })
+        const patternInput = lastRow.querySelector('[data-field="pattern"]')
+        if (patternInput) {
+          patternInput.focus()
+          patternInput.select()
+        }
+      })
     })
     toolbar.appendChild(addBtn)
 

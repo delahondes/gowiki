@@ -439,7 +439,7 @@ a:hover {
   cursor: not-allowed;
 }
 
-#actions {
+#gowiki-action-bar {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -691,7 +691,7 @@ a:hover {
 body.gowiki-fullscreen #banner { display: none !important; }
 body.gowiki-fullscreen #left { display: none !important; }
 body.gowiki-fullscreen #footer { display: none !important; }
-body.gowiki-fullscreen #actions { display: none !important; }
+body.gowiki-fullscreen #gowiki-action-bar { display: none !important; }
 
 body.gowiki-fullscreen #app {
   grid-template-columns: 1fr !important;
@@ -1342,6 +1342,14 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
     overflow: visible;
   }
 
+  /* On narrow viewports the desktop "body locked, #app scrolls" model breaks:
+     #app is overflow:visible (so the inner scroll is gone) but body has
+     overflow:hidden globally — content past the fold is unreachable. Hand
+     the scroll back to body here. */
+  body {
+    overflow-y: auto;
+  }
+
   #content {
     padding: 0;
   }
@@ -1350,7 +1358,7 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
     margin-top: 12px;
   }
 
-  #actions {
+  #gowiki-action-bar {
     position: static;
     width: auto;
     flex-direction: row;
@@ -3003,7 +3011,7 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
 }
 
 @media print {
-  #banner, #left, #footer, #actions, #ai-panel { display: none !important; }
+  #banner, #left, #footer, #gowiki-action-bar, #ai-panel { display: none !important; }
   .gowiki-toc { display: none !important; }
   h1, h2, h3 { page-break-after: avoid; }
   table, img { page-break-inside: avoid; }
