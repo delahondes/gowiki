@@ -2173,10 +2173,36 @@ export const tablePlugin: GowikiPlugin = {
       return true
     }
 
+    // Enter inside a table cell inserts a hard break (\n in markdown). The
+    // dialect's pipe-table syntax keeps each cell on a single source line, so
+    // splitting into a second paragraph cannot be serialized — it would be
+    // silently dropped on publish. Falling through to baseKeymap is what
+    // produces that bug; intercepting here makes Enter equivalent to
+    // Alt-Enter when the selection sits in a cell.
+    const enterInCell: Command = (state, dispatch) => {
+      const { $from } = state.selection
+      let inCell = false
+      for (let d = $from.depth; d > 0; d--) {
+        const name = $from.node(d).type.name
+        if (name === "table_cell" || name === "table_header") {
+          inCell = true
+          break
+        }
+      }
+      if (!inCell) return false
+      const hardBreak = state.schema.nodes.hard_break
+      if (!hardBreak) return false
+      if (dispatch) {
+        dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
+      }
+      return true
+    }
+
     reg.registerEditorPlugin(() =>
       keymap({
         Tab: tabInTable,
         "Shift-Tab": goToNextCell(-1),
+        Enter: enterInCell,
       })
     )
 

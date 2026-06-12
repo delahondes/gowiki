@@ -6361,8 +6361,11 @@ function renderEdit(nextEditMode) {
     shortcutKeymap,
     listKeymap,
     history(),
-    keymap(baseKeymap),
+    // Plugin keymaps run before baseKeymap so a plugin can intercept keys
+    // (e.g. Enter inside a table cell) before the generic split-paragraph
+    // default consumes the event.
     ...registry.getEditorPlugins(),
+    keymap(baseKeymap),
     menubarStatePlugin,
     collabNotifyPlugin,
     remoteBlockPlugin,
