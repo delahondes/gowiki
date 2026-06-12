@@ -34,6 +34,7 @@ type DraftManager interface {
 	DiscardDraft(pagePath, username, editToken string) error
 	Publish(pagePath, username, editToken string) (string, error)
 	GetLock(pagePath string) storage.DraftLock
+	FindAnyDraft(pagePath string) (storage.DraftInfo, bool)
 	ListLocks() []storage.LockInfo
 	ListDrafts() []storage.DraftInfo
 	AdminDiscardDraft(pagePath, draftOwner string) error

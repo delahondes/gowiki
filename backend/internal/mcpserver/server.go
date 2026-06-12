@@ -46,6 +46,17 @@ type BacklinkProvider interface {
 	GetBacklinks(pagePath string) []string
 }
 
+// DraftStateProvider exposes draft and lock state. The MCP layer uses it to
+// surface pending edits in get_page_meta and to refuse external writes that
+// would race against an in-progress edit or clobber unpublished work. The
+// lock and the draft file are independent: a lock without a draft is
+// transient (cleaned up), and a draft without a lock is an orphan (admin
+// cleared the lock or a session crashed).
+type DraftStateProvider interface {
+	GetLock(pagePath string) storage.DraftLock
+	FindAnyDraft(pagePath string) (storage.DraftInfo, bool)
+}
+
 // UsernameExtractor pulls the authenticated username from a request context.
 // The MCP handler is mounted behind the existing auth middleware, so the
 // caller wires this to the same helper the HTTP API uses.
@@ -63,6 +74,7 @@ type Deps struct {
 	Backlinks         BacklinkProvider
 	TagIndex          *storage.TagIndex
 	Reviewflow        *reviewflow.Service
+	DraftState        DraftStateProvider
 	Todo              *todo.TodoService
 	SchemaStore       *database.SchemaStore
 	DataStore         *database.DataStore

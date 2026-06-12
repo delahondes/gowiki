@@ -399,6 +399,44 @@ type DraftInfo struct {
 	Since string `json:"since"` // from lock if available, else file mtime
 }
 
+// FindAnyDraft returns info about the first draft found for the given page,
+// regardless of owner. Useful for checking whether any unpublished work
+// would be clobbered by an external write. Returns ok=false if no draft file
+// exists across any user. This is distinct from GetLock: a draft file can
+// linger after the lock is cleared (admin discard, session crash).
+func (d *DraftStore) FindAnyDraft(pagePath string) (DraftInfo, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	draftsDir := filepath.Join(d.dataDir, "drafts")
+	entries, err := os.ReadDir(draftsDir)
+	if err != nil {
+		return DraftInfo{}, false
+	}
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		owner := ent.Name()
+		draftFile := d.draftPath(owner, pagePath)
+		info, statErr := os.Stat(draftFile)
+		if statErr != nil || info.IsDir() {
+			continue
+		}
+		lock, _ := d.readLock(pagePath)
+		since := info.ModTime().UTC().Format(time.RFC3339)
+		if lock.Owner == owner && lock.Since != "" {
+			since = lock.Since
+		}
+		return DraftInfo{
+			Page:  pagePath,
+			Owner: owner,
+			Since: since,
+		}, true
+	}
+	return DraftInfo{}, false
+}
+
 // ListDrafts returns all drafts across all users, including orphaned ones (no lock).
 func (d *DraftStore) ListDrafts() []DraftInfo {
 	d.mu.RLock()

@@ -647,6 +647,33 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject external writes that would race against an in-progress edit or
+	// clobber unpublished work. The editor publishes via /api/publish/* (which
+	// clears the lock first), so reaching this endpoint with either a lock
+	// or a draft file present means an API-token caller is about to lose
+	// someone else's work. Lock and draft are independent — a draft file can
+	// outlive its lock (admin discard, session crash).
+	if s.draftManager != nil {
+		if lock := s.draftManager.GetLock(pagePath); lock.Owner != "" {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":      "page_locked",
+				"lock_owner": lock.Owner,
+				"lock_since": lock.Since,
+				"message":    "page is locked by " + lock.Owner + " — wait for them to finish editing before writing",
+			})
+			return
+		}
+		if draft, ok := s.draftManager.FindAnyDraft(pagePath); ok {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":       "draft_exists",
+				"draft_owner": draft.Owner,
+				"draft_since": draft.Since,
+				"message":     "page has an unpublished draft by " + draft.Owner + " — wait for it to be published or discarded before writing",
+			})
+			return
+		}
+	}
+
 	author := UsernameFromContext(r.Context())
 	result, err := s.store.Put(pagePath, req.Markdown, author)
 	if errors.Is(err, storage.ErrNamespaceConflict) {

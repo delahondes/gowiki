@@ -254,7 +254,10 @@ func registerReadPagesBatchTool(srv *mcpsrv.MCPServer, deps Deps) {
 func registerGetPageMetaTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("get_page_meta",
 		mcpgo.WithDescription(
-			"Return structured metadata for a page: title, version, last_modified, author, tags, backlinks, and reviewflow status.",
+			"Return structured metadata for a page: title, version, last_modified, author, tags, backlinks, reviewflow status, "+
+				"and edit state. If a `lock` field is present, a user is actively editing the page; if a `draft` field is "+
+				"present, unpublished work exists (lock and draft are independent — drafts can outlive their lock). "+
+				"write_page will refuse while either is present.",
 		),
 		mcpgo.WithString("path",
 			mcpgo.Required(),
@@ -294,6 +297,20 @@ func registerGetPageMetaTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if deps.Reviewflow != nil {
 			if status, err := deps.Reviewflow.GetStatus(pagePath); err == nil && status != nil {
 				resp["reviewflow"] = status
+			}
+		}
+		if deps.DraftState != nil {
+			if lock := deps.DraftState.GetLock(pagePath); lock.Owner != "" {
+				resp["lock"] = map[string]any{
+					"owner": lock.Owner,
+					"since": lock.Since,
+				}
+			}
+			if draft, ok := deps.DraftState.FindAnyDraft(pagePath); ok {
+				resp["draft"] = map[string]any{
+					"owner": draft.Owner,
+					"since": draft.Since,
+				}
 			}
 		}
 		return jsonResult(resp), nil
@@ -474,6 +491,21 @@ func registerWritePageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 		if !deps.canEdit(ctx, pagePath) {
 			return errorResult("edit permission denied"), nil
+		}
+
+		if deps.DraftState != nil {
+			if lock := deps.DraftState.GetLock(pagePath); lock.Owner != "" {
+				return errorResult(fmt.Sprintf(
+					"page is locked by %s (since %s) — wait for them to finish editing before writing",
+					lock.Owner, lock.Since,
+				)), nil
+			}
+			if draft, ok := deps.DraftState.FindAnyDraft(pagePath); ok {
+				return errorResult(fmt.Sprintf(
+					"page has an unpublished draft by %s (since %s) — wait for it to be published or discarded before writing",
+					draft.Owner, draft.Since,
+				)), nil
+			}
 		}
 
 		if expectedVersion > 0 {
