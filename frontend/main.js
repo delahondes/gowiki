@@ -6534,6 +6534,10 @@ function renderEdit(nextEditMode) {
         ctxMenu.style.top = event.clientY + "px"
         ctxMenu.style.display = "block"
         ctxMenu.style.zIndex = "9999"
+        // Safety net: if the menu ends up taller than the viewport, allow
+        // internal scrolling rather than being silently clipped.
+        ctxMenu.style.maxHeight = "calc(100vh - 8px)"
+        ctxMenu.style.overflowY = "auto"
 
         const ctxActions = [
           { name: "row.addBefore", label: "Add row above" },
@@ -6570,6 +6574,25 @@ function renderEdit(nextEditMode) {
         }
 
         document.body.appendChild(ctxMenu)
+
+        // After layout, flip the menu up/left if it would overflow the
+        // viewport. event.clientX/Y is the anchor — by default the menu
+        // hangs down-right; we reposition if there isn't room.
+        const menuRect = ctxMenu.getBoundingClientRect()
+        const vw = window.innerWidth
+        const vh = window.innerHeight
+        const margin = 4
+        let left = event.clientX
+        let top = event.clientY
+        if (left + menuRect.width + margin > vw) {
+          left = Math.max(margin, vw - menuRect.width - margin)
+        }
+        if (top + menuRect.height + margin > vh) {
+          top = Math.max(margin, vh - menuRect.height - margin)
+        }
+        ctxMenu.style.left = left + "px"
+        ctxMenu.style.top = top + "px"
+
         // Close on any outside click.
         const closeCtx = (e) => {
           if (!ctxMenu.contains(e.target)) {
