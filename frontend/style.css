@@ -1373,6 +1373,13 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
     height: 24px;
     margin: 0 2px;
   }
+
+  /* Body now scrolls (see body rule above), so the editor toolbar's sticky
+     ancestor is the viewport. Park it below the 48px banner so the banner
+     (z-index: 100) does not cover the first toolbar row. */
+  .gowiki-raw-menubar {
+    top: 48px;
+  }
 }
 
 .gowiki-media-modal-overlay {
