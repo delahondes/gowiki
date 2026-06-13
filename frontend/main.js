@@ -2532,6 +2532,33 @@ function renderView() {
     banner.className = "gowiki-new-page-banner"
     banner.textContent = "This page does not exist. Switch to Edit mode to create it."
     contentRoot.appendChild(banner)
+
+    // If the attic has versions for this path, the page was deleted (not
+    // never-created). Surface a link so the previous content is discoverable
+    // without having to know the history button still works on missing pages.
+    void (async () => {
+      try {
+        const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
+        if (!resp.ok) return
+        const data = await resp.json()
+        const versions = Array.isArray(data?.versions) ? data.versions : []
+        if (versions.length === 0 || !banner.isConnected) return
+        const note = document.createElement("div")
+        note.style.marginTop = "6px"
+        note.append("This page has been deleted, you can consult older versions if needed by clicking on ")
+        const link = document.createElement("a")
+        link.href = "#"
+        link.textContent = "history"
+        link.addEventListener("click", (e) => {
+          e.preventDefault()
+          void showHistory()
+        })
+        note.append(link, ".")
+        banner.appendChild(note)
+      } catch {
+        // Keep the default banner on error.
+      }
+    })()
     return
   }
 
