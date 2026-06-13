@@ -7985,10 +7985,17 @@ function initSearch() {
 
   async function runSearch(query) {
     try {
-      const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
-      if (!resp.ok) return
-      const data = await resp.json()
-      currentResults = data.results || []
+      const parsed = parseTagQuery(query)
+      let results
+      if (parsed) {
+        results = await fetchTagResults(parsed.tag, parsed.rest, 8)
+      } else {
+        const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
+        if (!resp.ok) return
+        const data = await resp.json()
+        results = data.results || []
+      }
+      currentResults = results
       activeIndex = -1
       renderSearchResults(currentResults)
     } catch { /* ignore */ }
@@ -8038,8 +8045,11 @@ function initSearch() {
 async function renderSearchResultsPage(query) {
   clearContent()
 
+  const parsed = parseTagQuery(query)
   const heading = document.createElement("h1")
-  heading.textContent = `Search results for "${query}"`
+  heading.textContent = parsed
+    ? `Pages tagged "${parsed.tag}"${parsed.rest ? ` matching "${parsed.rest}"` : ""}`
+    : `Search results for "${query}"`
   heading.className = "search-page-heading"
   contentRoot.appendChild(heading)
 
@@ -8048,13 +8058,18 @@ async function renderSearchResultsPage(query) {
   contentRoot.appendChild(container)
 
   try {
-    const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`)
-    if (!resp.ok) {
-      container.textContent = "Search failed."
-      return
+    let results
+    if (parsed) {
+      results = await fetchTagResults(parsed.tag, parsed.rest, 50)
+    } else {
+      const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`)
+      if (!resp.ok) {
+        container.textContent = "Search failed."
+        return
+      }
+      const data = await resp.json()
+      results = data.results || []
     }
-    const data = await resp.json()
-    const results = data.results || []
 
     if (results.length === 0) {
       container.innerHTML = '<div class="search-page-empty">No results found.</div>'
@@ -8064,7 +8079,7 @@ async function renderSearchResultsPage(query) {
     for (const r of results) {
       const item = document.createElement("a")
       const displayPath = r.path.startsWith("/") ? r.path : "/" + r.path
-      const qs = query ? "?highlight=" + encodeURIComponent(query) : ""
+      const qs = !parsed && query ? "?highlight=" + encodeURIComponent(query) : ""
       item.href = displayPath + qs
       item.className = "search-page-item gowiki-link-exists"
       item.innerHTML =
@@ -8076,6 +8091,33 @@ async function renderSearchResultsPage(query) {
   } catch {
     container.textContent = "Search failed."
   }
+}
+
+// Recognize "tag:NAME [rest]" in the search box. `rest`, if present, is a
+// case-insensitive substring filter applied to the tagged pages' title/path.
+function parseTagQuery(query) {
+  const m = (query || "").match(/^tag:(\S+)\s*(.*)$/i)
+  if (!m) return null
+  return { tag: m[1], rest: m[2].trim() }
+}
+
+async function fetchTagResults(tag, rest, limit) {
+  const resp = await fetch(`/api/tags?tag=${encodeURIComponent(tag)}`)
+  if (!resp.ok) return []
+  const data = await resp.json()
+  let pages = Array.isArray(data?.pages) ? data.pages : []
+  if (rest) {
+    const needle = rest.toLowerCase()
+    pages = pages.filter(p =>
+      (p.title || "").toLowerCase().includes(needle) ||
+      (p.path || "").toLowerCase().includes(needle)
+    )
+  }
+  return pages.slice(0, limit).map(p => ({
+    path: p.path,
+    title: p.title,
+    snippet: "",
+  }))
 }
 
 // ── Auth ─────────────────────────────────────────────

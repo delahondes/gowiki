@@ -114,9 +114,10 @@ func main() {
 		log.Fatalf("init page storage: %v", err)
 	}
 
-	// Bootstrap embedded user manual (only writes missing files).
-	if n := manual.Bootstrap(contentRoot); n > 0 {
-		log.Printf("manual: bootstrapped %d pages to wiki/manual/", n)
+	// Bootstrap embedded user manual. Wipes and regenerates wiki/manual/ on
+	// every binary upgrade (detected by embed content hash); no-op otherwise.
+	if n := manual.Bootstrap(contentRoot, metaRoot); n > 0 {
+		log.Printf("manual: regenerated %d files under wiki/manual/ from embed", n)
 	}
 
 	// Open search index.

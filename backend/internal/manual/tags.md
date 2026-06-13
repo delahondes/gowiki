@@ -34,3 +34,7 @@ Optional parameters:
 ## 1. Reviewflow integration
 
 For pages with reviewflow, the tag query table shows the latest validated version tag as a clickable link that navigates to the archived validated version.
+
+## 1. Searching by tag
+
+Type `tag:NAME` in the search bar to list every page bearing a tag — for example `tag:sop` shows all SOPs. See [Search](/wiki/manual/search) for the full syntax.

@@ -322,23 +322,26 @@ func registerGetPageMetaTool(srv *mcpsrv.MCPServer, deps Deps) {
 func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("search_pages",
 		mcpgo.WithDescription(
-			"Full-text search across all wiki pages. Returns ranked results (path, title, snippet) respecting the caller's ACL.",
+			"Search wiki pages. Use `query` for full-text search (typo-tolerant, ranked, returns snippets) "+
+				"or `tag` to list every page bearing a given tag. The two can be combined: when both are set, "+
+				"the tag-tagged pages are narrowed to those whose path or title contains `query` (case-insensitive). "+
+				"At least one of `query` or `tag` is required. All results respect the caller's ACL.",
 		),
 		mcpgo.WithString("query",
-			mcpgo.Required(),
-			mcpgo.Description("Query string. Typo-tolerant."),
+			mcpgo.Description("Full-text query string. Typo-tolerant. Required unless `tag` is set."),
+		),
+		mcpgo.WithString("tag",
+			mcpgo.Description("Tag name to filter by. When set, results come from the tag index (no snippets)."),
 		),
 		mcpgo.WithNumber("limit",
 			mcpgo.Description("Maximum results to return (default 20, max 100)."),
 		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-		if deps.Search == nil {
-			return errorResult("search not available"), nil
-		}
 		query := strings.TrimSpace(req.GetString("query", ""))
-		if query == "" {
-			return errorResult("query is required"), nil
+		tag := strings.TrimSpace(req.GetString("tag", ""))
+		if query == "" && tag == "" {
+			return errorResult("either 'query' or 'tag' must be provided"), nil
 		}
 		limit := req.GetInt("limit", 20)
 		if limit < 1 {
@@ -346,6 +349,40 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 		if limit > 100 {
 			limit = 100
+		}
+
+		// Tag branch: take pages from the tag index, narrow by query if both are set.
+		if tag != "" {
+			if deps.TagIndex == nil {
+				return errorResult("tag index not available"), nil
+			}
+			entries := deps.TagIndex.GetPagesForTag(tag, "", nil)
+			needle := strings.ToLower(query)
+			out := make([]map[string]any, 0, len(entries))
+			for _, e := range entries {
+				if !deps.canView(ctx, e.Path) {
+					continue
+				}
+				if needle != "" {
+					if !strings.Contains(strings.ToLower(e.Path), needle) &&
+						!strings.Contains(strings.ToLower(e.Title), needle) {
+						continue
+					}
+				}
+				out = append(out, map[string]any{
+					"path":  e.Path,
+					"title": e.Title,
+				})
+				if len(out) >= limit {
+					break
+				}
+			}
+			return jsonResult(map[string]any{"results": out, "tag": tag}), nil
+		}
+
+		// Full-text branch.
+		if deps.Search == nil {
+			return errorResult("search not available"), nil
 		}
 		results, err := deps.Search.Search(query, limit)
 		if err != nil {

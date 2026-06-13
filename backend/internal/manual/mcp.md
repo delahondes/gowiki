@@ -46,7 +46,7 @@ npx @modelcontextprotocol/inspector \
 | `list_namespace` | Enumerate pages and sub-namespaces under a path |
 | `read_pages_batch` | Read up to 20 pages in one call |
 | `get_page_meta` | Page title, version, tags, backlinks, reviewflow status |
-| `search_pages` | Full-text, typo-tolerant search |
+| `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page — requires a summary |
@@ -54,6 +54,25 @@ npx @modelcontextprotocol/inspector \
 | `complete_todo` | Mark a todo as done |
 | `list_database_tables` | Structured-data tables with field definitions |
 | `query_database_rows` | Query rows from a structured-data table |
+
+## Searching by tag
+
+`search_pages` accepts an optional `tag` parameter alongside `query`. At least one of the two must be set:
+
+- `query` alone — full-text, typo-tolerant FTS over page bodies. Returns snippets.
+- `tag` alone — list every page bearing that tag (no snippets, no ranking).
+- `tag` + `query` — pages bearing the tag, narrowed to those whose path or title contains `query` (case-insensitive substring).
+
+All results are filtered by the caller's ACL.
+
+Examples:
+
+```json
+{ "tag": "sop" }
+{ "tag": "sop", "query": "biomscope" }
+```
+
+This is the same syntax the wiki search bar exposes as `tag:NAME [substring]`. See [Tags](/wiki/manual/tags) and [Search](/wiki/manual/search) for the user-facing equivalent.
 
 ## Resources
 
