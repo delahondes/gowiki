@@ -154,6 +154,19 @@ export function getCellText(cell: Node): string {
   return text
 }
 
+// Mirrors the check at the top of processCellFeatures: cells whose first
+// inline child is wrapped in `code` / `code_expand` opt out of every in-cell
+// transformation, including column-rule formatting like `decimals`.
+function cellIsCodeMarked(cell: Node): boolean {
+  if (cell.childCount === 0) return false
+  const firstBlock = cell.child(0)
+  if (firstBlock.type.name !== "paragraph") return false
+  if (firstBlock.childCount === 0) return false
+  const firstChild = firstBlock.child(0)
+  if (!firstChild.isText) return false
+  return firstChild.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+}
+
 // ─── Header variants ────────────────────────────────────
 
 // NrMc syntax: "1r" (default), "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none"
@@ -460,6 +473,8 @@ export type ColumnPropEntry = {
   align?: string
   width?: string
   color?: string
+  decimals?: string
+  valign?: string
 }
 export type ColumnProps = Record<string, ColumnPropEntry>
 
@@ -480,6 +495,8 @@ export function resolveColumnProps(
     if (star.align) merged.align = star.align
     if (star.width) merged.width = star.width
     if (star.color) merged.color = star.color
+    if (star.decimals) merged.decimals = star.decimals
+    if (star.valign) merged.valign = star.valign
     found = true
   }
 
@@ -491,6 +508,8 @@ export function resolveColumnProps(
       if (props.align) merged.align = props.align
       if (props.width) merged.width = props.width
       if (props.color) merged.color = props.color
+      if (props.decimals) merged.decimals = props.decimals
+      if (props.valign) merged.valign = props.valign
       found = true
     }
   }
@@ -503,6 +522,8 @@ export function resolveColumnProps(
       if (props.align) merged.align = props.align
       if (props.width) merged.width = props.width
       if (props.color) merged.color = props.color
+      if (props.decimals) merged.decimals = props.decimals
+      if (props.valign) merged.valign = props.valign
       found = true
     }
   }
@@ -513,6 +534,8 @@ export function resolveColumnProps(
     if (exact.align) merged.align = exact.align
     if (exact.width) merged.width = exact.width
     if (exact.color) merged.color = exact.color
+    if (exact.decimals) merged.decimals = exact.decimals
+    if (exact.valign) merged.valign = exact.valign
     found = true
   }
 
@@ -623,7 +646,7 @@ function parseColumnRulesText(raw: string): ColumnProps | null {
     if (!line) continue
 
     // Match: col[spec].[prop]=[value]
-    const m = line.match(/^col(\d+(?:-\d+)?|\d+[+-]|)\.(align|width|color)=(.+)$/)
+    const m = line.match(/^col(\d+(?:-\d+)?|\d+[+-]|)\.(align|width|color|decimals|valign)=(.+)$/)
     if (!m) {
       throw new Error(`Line ${i + 1}: invalid syntax`)
     }
@@ -646,6 +669,12 @@ function parseColumnRulesText(raw: string): ColumnProps | null {
     }
     if (prop === "color" && !value) {
       throw new Error(`Line ${i + 1}: color must be non-empty`)
+    }
+    if (prop === "decimals" && !/^\d+$/.test(value)) {
+      throw new Error(`Line ${i + 1}: decimals must be a non-negative integer`)
+    }
+    if (prop === "valign" && !["top", "centered", "bottom"].includes(value)) {
+      throw new Error(`Line ${i + 1}: valign must be top, centered, or bottom`)
     }
 
     // Convert to internal flat attr keys
@@ -707,7 +736,7 @@ const tableProperties: NodePropertySpec[] = [
     label: "Column rules",
     default: null,
     multiline: true,
-    helpText: "col2.align=center  col2-5.width=100px  col2+.color=\"rule\"  col.align=left",
+    helpText: "col2.align=center  col2-5.width=100px  col2+.color=\"rule\"  col3.decimals=2  col.valign=centered",
     parse: (raw: string) => parseColumnRulesText(raw) as any,
     serialize: (value: any) => serializeColumnRulesText(value as ColumnProps | null),
   },
@@ -753,7 +782,7 @@ function serializeColumnSpecs(columns: ColumnProps): string[] {
   const parts: string[] = []
 
   // Serialize special keys first
-  for (const prop of ["align", "width", "color"] as const) {
+  for (const prop of ["align", "width", "color", "decimals", "valign"] as const) {
     // "*" → col.prop
     if (columns["*"]?.[prop]) {
       const formatted = prop === "color" ? `"${columns["*"][prop]}"` : columns["*"][prop]
@@ -788,7 +817,7 @@ function serializeColumnSpecs(columns: ColumnProps): string[] {
 
   for (const col of sortedKeys) {
     const props = columns[String(col)]
-    for (const prop of ["align", "width", "color"] as const) {
+    for (const prop of ["align", "width", "color", "decimals", "valign"] as const) {
       const value = props[prop]
       if (value) {
         const key = prop
@@ -799,7 +828,7 @@ function serializeColumnSpecs(columns: ColumnProps): string[] {
   }
 
   // For each property type, group consecutive columns with identical values into ranges
-  for (const prop of ["align", "width", "color"]) {
+  for (const prop of ["align", "width", "color", "decimals", "valign"]) {
     const entries = propGroups[prop]
     if (!entries) continue
 
@@ -1252,8 +1281,17 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
               if (props) {
                 let style = ""
                 let ruleColored = false
+                let formatted: string | null = null
                 if (props.align) style += `text-align: ${props.align}; `
                 if (props.width) style += `width: ${props.width}; `
+
+                // Column vertical align: only apply when the cell doesn't
+                // already carry its own — cell-level overrides column-level,
+                // mirroring how color precedence works.
+                if (props.valign && !cell.attrs.cellValign) {
+                  const cssValue = props.valign === "centered" ? "middle" : props.valign
+                  style += `vertical-align: ${cssValue}; `
+                }
 
                 // Column color (only if cell doesn't have its own color)
                 if (props.color && !cell.attrs.cellColor) {
@@ -1270,9 +1308,36 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                   }
                 }
 
+                // Column decimals: format numeric content. The raw text
+                // stays in the doc (round-trip safe); CSS swaps the visual
+                // via a ::before pseudo reading --gw-format-num. We omit the
+                // data-format flag on the cell that currently holds the
+                // selection so the user sees and edits the raw value while
+                // they are working in it — spreadsheet-style.
+                if (props.decimals && !cellIsCodeMarked(cell)) {
+                  const n = parseFloat(getCellText(cell).trim())
+                  if (Number.isFinite(n)) {
+                    const digits = Math.max(0, parseInt(props.decimals, 10) || 0)
+                    formatted = n.toFixed(digits)
+                    // Escape single quotes — extremely unlikely for a number
+                    // but cheap insurance.
+                    const safe = formatted.replace(/'/g, "\\'")
+                    style += `--gw-format-num: '${safe}'; `
+                  }
+                }
+
+                const cellFrom = cellPos
+                const cellTo = cellPos + cell.nodeSize
+                const selOverlapsCell =
+                  state.selection.from < cellTo &&
+                  state.selection.to > cellFrom
+
                 if (style) {
                   const attrs: Record<string, string> = { style }
                   if (ruleColored) attrs["data-cell-color"] = "rule"
+                  if (formatted !== null && !selOverlapsCell) {
+                    attrs["data-format"] = "num"
+                  }
                   decos.push(
                     Decoration.node(cellPos, cellPos + cell.nodeSize, attrs)
                   )
@@ -1497,12 +1562,12 @@ export function adjustColumnSpecs(
     const right = result[rightKey]
     if (left && right) {
       const fill: ColumnPropEntry = {}
-      for (const prop of ["align", "width", "color"] as const) {
+      for (const prop of ["align", "width", "color", "decimals", "valign"] as const) {
         if (left[prop] && left[prop] === right[prop]) {
           fill[prop] = left[prop]
         }
       }
-      if (fill.align || fill.width || fill.color) {
+      if (fill.align || fill.width || fill.color || fill.decimals || fill.valign) {
         result[String(oneBasedIdx)] = fill
       }
     }
@@ -1968,19 +2033,19 @@ export const tablePlugin: GowikiPlugin = {
       properties: tableProperties,
       parseUnknownAttr(key, value) {
         // Open-ended: col2+.align (>= N)
-        const mge = key.match(/^col(\d+)\+\.(align|width|color)$/)
+        const mge = key.match(/^col(\d+)\+\.(align|width|color|decimals|valign)$/)
         if (mge) return [`_colge.${mge[1]}.${mge[2]}`, value]
         // Open-ended: col2-.align (<= N) — note: `-\.` distinguishes from range `col2-5.`
-        const mle = key.match(/^col(\d+)-\.(align|width|color)$/)
+        const mle = key.match(/^col(\d+)-\.(align|width|color|decimals|valign)$/)
         if (mle) return [`_colle.${mle[1]}.${mle[2]}`, value]
         // All columns: col.align
-        const mall = key.match(/^col\.(align|width|color)$/)
+        const mall = key.match(/^col\.(align|width|color|decimals|valign)$/)
         if (mall) return [`_colall.${mall[1]}`, value]
         // Single column: col3.align
-        const m = key.match(/^col(\d+)\.(align|width|color)$/)
+        const m = key.match(/^col(\d+)\.(align|width|color|decimals|valign)$/)
         if (m) return [`_col.${m[1]}.${m[2]}`, value]
         // Range: col2-10.align
-        const mr = key.match(/^col(\d+)-(\d+)\.(align|width|color)$/)
+        const mr = key.match(/^col(\d+)-(\d+)\.(align|width|color|decimals|valign)$/)
         if (mr) return [`_colrange.${mr[1]}.${mr[2]}.${mr[3]}`, value]
         return null
       },

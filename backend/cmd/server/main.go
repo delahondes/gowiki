@@ -283,11 +283,26 @@ func main() {
 		log.Printf("ai api: enabled (token auth active)")
 	}
 
+	// OAuth 2.0 authorization server for MCP clients that discover via the
+	// standard well-known metadata (Claude.ai, Claude Desktop "Add connector"
+	// UI, etc). Backed by the same TokenStore for issued access tokens.
+	oauthServer, err := auth.NewOAuthServer(metaRoot)
+	if err != nil {
+		log.Fatalf("init oauth server: %v", err)
+	}
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			oauthServer.GCCodes()
+		}
+	}()
+
 	// Initialize headless Chrome for PDF export.
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore, bibliographyService)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore, bibliographyService, oauthServer)
 	if serveWebEnabled {
 		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}

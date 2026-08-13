@@ -3017,6 +3017,42 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
   #ai-panel { position: fixed; top: 48px; right: 0; bottom: 0; width: 320px; z-index: 100; box-shadow: -2px 0 8px rgba(0,0,0,0.15); }
 }
 
+/* ── Column-rule numeric formatting ────────────────────
+   columnDecoPlugin writes --gw-format-num + data-format="num" on numeric
+   cells that should display the formatted value. The raw text (or formula
+   result) stays in flow but is rendered transparent, so PM still resolves
+   clicks to a caret/node position underneath. A ::before pseudo paints the
+   formatted value on top; pointer-events: none lets clicks pass through.
+   When the selection enters the cell, the plugin drops data-format → CSS
+   no longer applies → the cell reverts to its raw editable view in place.
+   The source markdown is never altered. */
+td[data-format="num"] > p,
+th[data-format="num"] > p {
+  position: relative;
+  color: transparent;
+}
+td[data-format="num"] > p::before,
+th[data-format="num"] > p::before {
+  content: var(--gw-format-num);
+  position: absolute;
+  inset: 0;
+  text-align: inherit;
+  pointer-events: none;
+  color: var(--gw-color-text);
+}
+/* The formula_display badge sets its own color/background; neutralise both
+   while the formatted overlay is active so we don't see the raw result
+   bleeding through. !important is needed because the edit-mode rule
+   (#app.gowiki-editing .ProseMirror .formula-display) has higher
+   specificity than any sane attribute-selector chain. */
+td[data-format="num"] > p .formula-display,
+th[data-format="num"] > p .formula-display,
+td[data-format="num"] > p .formula-display-error,
+th[data-format="num"] > p .formula-display-error {
+  color: transparent !important;
+  background: transparent !important;
+}
+
 @media print {
   #banner, #left, #footer, #gowiki-action-bar, #ai-panel { display: none !important; }
   .gowiki-toc { display: none !important; }

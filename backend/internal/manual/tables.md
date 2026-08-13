@@ -53,9 +53,23 @@ Column selectors:
 - `col2+` — column 2 and all following
 
 Properties:
-- `align` — text alignment: `left`, `center`, `right`
+- `align` — horizontal text alignment: `left`, `center`, `right`
+- `valign` — vertical alignment: `top`, `centered`, `bottom` (a cell-level `valign` overrides the column value)
 - `width` — column width: `100px`, `20%`
 - `color` — conditional background coloring rules (see below)
+- `decimals` — display numeric cells with a fixed number of decimal places (see below)
+
+## 1. Numeric formatting
+
+The `decimals` rule controls how many digits appear after the decimal point for cells whose content parses as a number. The source markdown is unchanged — only the rendered view is reformatted, so round-trip stays lossless.
+
+```
+col3.decimals=2
+```
+
+With `decimals=2`, cell content `3` renders as `3.00`, `3.14159` renders as `3.14`, and `1234` renders as `1234.00`. Non-numeric cells (labels, blanks, headers, anything wrapped in backticks) are left alone.
+
+The formatting is applied live in both view and visual edit mode. When the selection (caret) enters a formatted cell, that single cell reverts to its raw value so you can read and edit the actual digits — spreadsheet-style. Move the selection elsewhere and the formatted view returns.
 
 ## 1. Conditional coloring
 

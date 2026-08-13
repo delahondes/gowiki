@@ -141,6 +141,36 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// mcpAuthChallenge wraps the MCP endpoint so 401 responses carry a
+// WWW-Authenticate header pointing at the RFC 9728 protected-resource
+// metadata document. Claude.ai and other MCP clients use this to discover
+// the OAuth authorization server automatically — without it, the "Add
+// connector" UI has no way to know how to authenticate.
+func (s *Server) mcpAuthChallenge(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := requestOrigin(r)
+		challenge := `Bearer resource_metadata="` + origin + `/.well-known/oauth-protected-resource"`
+		next.ServeHTTP(&wwwAuthResponseWriter{ResponseWriter: w, challenge: challenge}, r)
+	})
+}
+
+// wwwAuthResponseWriter injects WWW-Authenticate on any 401 that flows
+// through the underlying handler. Set once, before WriteHeader is called
+// downstream — that's the last chance to add response headers.
+type wwwAuthResponseWriter struct {
+	http.ResponseWriter
+	challenge string
+	set       bool
+}
+
+func (w *wwwAuthResponseWriter) WriteHeader(code int) {
+	if code == http.StatusUnauthorized && !w.set {
+		w.Header().Set("WWW-Authenticate", w.challenge)
+		w.set = true
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
 // requireAuth is middleware that protects endpoints requiring authentication.
 // It checks Bearer token first, then falls back to session cookie.
 func (s *Server) requireAuth(next http.Handler) http.Handler {

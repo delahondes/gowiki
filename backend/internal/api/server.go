@@ -125,6 +125,7 @@ type Server struct {
 	tokenStore          *auth.TokenStore
 	rateLimiter         *RateLimiter
 	oauthClient         *auth.OAuthClient
+	oauthServer         *auth.OAuthServer
 	todoService         *todo.TodoService
 	reviewflowService   *reviewflow.Service
 	commentService      *comment.Service
@@ -137,7 +138,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service, oauthServer *auth.OAuthServer) http.Handler {
 	s := &Server{
 		store:             store,
 		mediaStore:        mediaStore,
@@ -164,6 +165,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		commentService:    commentService,
 		bibliographyService: bibliographyService,
 		tokenStore:        tokenStore,
+		oauthServer:       oauthServer,
 		caStore:           caStore,
 		certStore:         certStore,
 		presenceHub:       collab.NewHub(),
@@ -407,11 +409,18 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/meta/*", s.handleAIMeta)
 	})
 
+	// OAuth 2.0 authorization-server endpoints for MCP client onboarding.
+	// Registered before /api/mcp/v1 so the discovery metadata is reachable.
+	s.registerOAuthServerRoutes(r)
+
 	// MCP (Model Context Protocol) server — the AI API re-exposed as tools,
 	// resources, and prompts over Streamable HTTP. Auth reuses the same
-	// bearer token middleware as the AI Content API.
+	// bearer token middleware as the AI Content API; 401 responses carry a
+	// WWW-Authenticate header pointing MCP clients at the OAuth discovery
+	// metadata (RFC 9728 § 5.1).
 	mcpHandler := s.buildMCPHandler()
 	r.Route("/api/mcp/v1", func(r chi.Router) {
+		r.Use(s.mcpAuthChallenge)
 		r.Use(s.requireAuth)
 		r.Use(s.rateLimitToken)
 		r.Handle("/*", http.StripPrefix("/api/mcp/v1", mcpHandler))

@@ -6,35 +6,91 @@ The MCP server is a thin wrapper around the existing AI Content API (`/api/ai/v1
 
 ## Connection
 
-- **URL:** `https://{{SERVER}}/api/mcp/v1`
+- **URL:** @`https://{{SERVER}}/api/mcp/v1`
 - **Transport:** Streamable HTTP (MCP 2025-03-26 spec)
-- **Auth:** `Authorization: Bearer gwk_<your_token>` — the same API tokens you use with `/api/ai/v1/…`
+- **Auth:** OAuth 2.0 with browser-based login and consent (no token to copy-paste)
 
-Create a token under **Admin → Tokens** (per-user) and paste the URL + bearer header into your MCP client.
+Discovery is handled by the client — the server publishes:
 
-### Example — Claude Desktop
+- `/.well-known/oauth-protected-resource` (RFC 9728)
+- `/.well-known/oauth-authorization-server` (RFC 8414)
+- Dynamic client registration at `/oauth/register` (RFC 7591)
 
-`~/Library/Application Support/Claude/claude_desktop_config.json`:
+On first use the client is redirected to a wiki login page, then to a consent screen, and finally receives an access token bound to your identity. Revoke it any time under **Admin → Tokens**. Only S256 PKCE is accepted.
 
-```json
-{
-  "mcpServers": {
-    "gowiki": {
-      "url": "https://wiki.example.com/api/mcp/v1",
-      "headers": {
-        "Authorization": "Bearer gwk_your_token_here"
-      }
-    }
-  }
-}
-```
+### Claude Desktop
 
-### Example — mcp-inspector
+Claude Desktop's stable config schema does not yet accept remote HTTP MCP servers directly, so the recommended path is to run Anthropic's `mcp-remote` proxy locally — it speaks stdio to Claude Desktop and forwards to the wiki over HTTP, handling the OAuth dance in your browser on first launch. Requires Node.js on the machine (any recent LTS).
+
+1. Open Claude Desktop → **Settings**. In the sidebar, under **Application bureau**, click **Développeur** (Developer). Click **Modifier la config** (Edit config).
+
+   ![Claude Desktop → Developer → Modifier la config](./screenshots/42.png)
+
+2. The `claude_desktop_config.json` file opens in your text editor. Add the `gowiki` entry inside `mcpServers` — for this wiki the URL is @`https://{{SERVER}}/api/mcp/v1`:
+
+   ![Editing claude_desktop_config.json with the mcp-remote proxy entry](./screenshots/43.png)
+
+   ```json
+   {
+     "mcpServers": {
+       "gowiki": {
+         "command": "npx",
+         "args": ["-y", "mcp-remote", "https://YOUR-WIKI-HOST/api/mcp/v1"]
+       }
+     }
+   }
+   ```
+
+3. Save the file and **fully quit** Claude Desktop (Cmd-Q on macOS, right-click → Quit on Windows — closing the window is not enough).
+
+4. Relaunch. On the first tool call, a browser tab opens on the wiki asking you to sign in and approve. Once approved the tab closes and `mcp-remote` caches the token in `~/.mcp-auth/` for future runs.
+
+If nothing happens on the first call, check `~/Library/Logs/Claude/mcp*.log` (macOS) or `%APPDATA%\Claude\logs\` (Windows) for the `mcp-remote` subprocess output.
+
+### Claude.ai (web, paid plans)
+
+On Pro / Team / Enterprise plans, Claude.ai has an **Add custom connector** button in **Settings → Connectors**. Paste the URL — no token, no configuration. The server discovery + OAuth flow described above kicks in the first time.
+
+### Claude Code (CLI)
+
+Claude Code supports remote HTTP MCP servers natively. Two paths:
+
+**With a bearer token (simplest, no browser step):**
+
+1. Create an API token: **Admin → Tokens → New token** on the wiki. Copy the `gwk_...` value shown once.
+2. Register the connector — pick a scope:
+
+   ```bash
+   claude mcp add gowiki --transport http https://YOUR-WIKI-HOST/api/mcp/v1 \
+     --header "Authorization: Bearer gwk_YOUR_TOKEN" -s local
+   ```
+
+   For this wiki the URL is @`https://{{SERVER}}/api/mcp/v1`.
+
+   Scope choices (`-s` flag):
+
+   - `local` (default) — this project only, private to you (stored in `.claude/settings.local.json`)
+   - `user` — every project on this machine, private to you
+   - `project` — this project, shared with teammates (stored in `.mcp.json`, commit to git)
+
+3. Verify with `claude mcp list` or `claude mcp get gowiki`. In a fresh `claude` session the `mcp__gowiki__*` tools appear directly.
+
+**With OAuth (browser consent flow):**
+
+Omit the `--header` flag and Claude Code will fall back to OAuth on first use — it prints an authorization URL you open in a browser, log in on the wiki, click Approve, and Claude Code receives the token via a `http://localhost:PORT/callback` handoff. Same experience as Claude.ai's UI, just driven from the CLI.
+
+**Troubleshooting — connector stuck on auth stubs:**
+
+If `mcp__gowiki__authenticate` shows up instead of the real tool list, Claude Code has cached a failed handshake. In the running session type `/mcp` to open the MCP panel and pick **Reconnect** on `gowiki` — it clears the state and re-does the handshake with the current stored auth. Faster than restarting the whole CLI. Only fall back to `claude mcp remove gowiki && claude mcp add ...` when `/mcp` reconnect doesn't recover.
+
+### mcp-inspector or any raw MCP client
+
+If your client cannot do OAuth (older mcp-inspector, custom scripts, CI), fall back to a personal API token. Create one under **Admin → Tokens** and pass it in the Authorization header. For this wiki the URL is @`https://{{SERVER}}/api/mcp/v1`:
 
 ```
 npx @modelcontextprotocol/inspector \
   --transport streamable-http \
-  --url https://wiki.example.com/api/mcp/v1 \
+  --url https://YOUR-WIKI-HOST/api/mcp/v1 \
   --header "Authorization=Bearer gwk_..."
 ```
 
