@@ -112,6 +112,15 @@ type DatabaseSyncer interface {
 	RemovePageRows(pagePath string)
 }
 
+// PageRenamer is an optional capability a DatabaseSyncer may also implement.
+// When present, Move() calls RenamePageRows in place of RemovePageRows so
+// row ids stay stable through a rename. Currently implemented by the
+// database sync; the todo sync does not need it (todo rows are naturally
+// re-derived from content).
+type PageRenamer interface {
+	RenamePageRows(oldPath, newPath string)
+}
+
 // ReviewflowSyncer is an optional hook for syncing reviewflow state on page save.
 type ReviewflowSyncer interface {
 	SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error
@@ -1147,8 +1156,16 @@ func (s *FileStore) Move(oldPath, newPath string, moveMedia, updateLinks bool, a
 
 	// Sync database/todo/reviewflow.
 	if s.DatabaseSync != nil {
-		s.DatabaseSync.RemovePageRows(oldNorm)
-		s.DatabaseSync.SyncPageRows(newNorm, rebasedContent)
+		// Prefer in-place rename so DB row ids stay stable (URLs like
+		// /server/24 keep pointing at row 24). Fall back to remove+sync for
+		// syncers that don't implement PageRenamer.
+		if renamer, ok := s.DatabaseSync.(PageRenamer); ok {
+			renamer.RenamePageRows(oldNorm, newNorm)
+			s.DatabaseSync.SyncPageRows(newNorm, rebasedContent)
+		} else {
+			s.DatabaseSync.RemovePageRows(oldNorm)
+			s.DatabaseSync.SyncPageRows(newNorm, rebasedContent)
+		}
 	}
 	if s.TodoSync != nil {
 		s.TodoSync.RemovePageRows(oldNorm)

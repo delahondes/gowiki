@@ -359,6 +359,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/admin/database/tables/{id}", s.handleGetDatabaseTable)
 		r.Put("/api/admin/database/tables/{id}", s.handleUpdateDatabaseTable)
 		r.Delete("/api/admin/database/tables/{id}", s.handleDeleteDatabaseTable)
+		r.Post("/api/admin/database/tables/{id}/migrate-page-paths", s.handleMigratePagePaths)
 		r.Post("/api/admin/database/tables/{id}/fields", s.handleCreateDatabaseField)
 		r.Put("/api/admin/database/tables/{id}/fields/{fid}", s.handleUpdateDatabaseField)
 		r.Delete("/api/admin/database/tables/{id}/fields/{fid}", s.handleArchiveDatabaseField)

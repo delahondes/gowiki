@@ -19,7 +19,22 @@ import (
 // resolvePageFolder computes a page path from a page_folder pattern and row data.
 // If the folder contains @tokens, they are replaced: @id → row id, @field → field value.
 // If the folder has no @tokens, the page name is the row id: {folder}/{id}.
+//
+// @field values are slugified for URL safety (lowercased, non-[a-z0-9_-] runs
+// collapsed to a single '-', leading/trailing '-' trimmed). When a field is
+// missing, nil, or slugifies to the empty string, the token falls back to the
+// row id — this guarantees the path never contains an empty segment or an
+// unsubstituted "@token".
 var pageFolderTokenRe = regexp.MustCompile(`@([a-z][a-z0-9_]*)`)
+
+var pageSlugSanitizeRe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+func slugifyPathSegment(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = pageSlugSanitizeRe.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	return s
+}
 
 func resolvePageFolder(pageFolder string, rowID int, fields map[string]any) string {
 	folder := strings.TrimSuffix(pageFolder, "/")
@@ -39,9 +54,13 @@ func resolvePageFolder(pageFolder string, rowID int, fields map[string]any) stri
 			return strconv.Itoa(rowID)
 		}
 		if v, ok := fields[token]; ok && v != nil {
-			return strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", v)))
+			if slug := slugifyPathSegment(fmt.Sprintf("%v", v)); slug != "" {
+				return slug
+			}
 		}
-		return match // leave unresolved tokens as-is
+		// Missing key, nil value, or slug collapses to empty → fall back to the
+		// row id so the path is always well-formed.
+		return strconv.Itoa(rowID)
 	})
 	return result
 }

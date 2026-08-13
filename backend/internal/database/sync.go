@@ -148,6 +148,39 @@ func (ds *DatabaseSync) RemovePageRows(pagePath string) {
 	}
 }
 
+// RenamePageRows updates the page_path column across all tables that currently
+// reference oldPath, setting them to newPath. Preserves each row's id — use
+// this on page rename in place of RemovePageRows + SyncPageRows so that stable
+// references to the row (numeric id, foreign keys) remain valid.
+//
+// SyncPageRows should still be called after this to apply any field-level
+// content changes carried by the rebased markdown.
+func (ds *DatabaseSync) RenamePageRows(oldPath, newPath string) {
+	if ds.schemaStore == nil || ds.dataStore == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tables, err := ds.schemaStore.ListTables(ctx)
+	if err != nil {
+		log.Printf("database sync: list tables failed: %v", err)
+		return
+	}
+
+	for _, t := range tables {
+		n, err := ds.dataStore.RenameRowsByPagePath(ctx, t.Name, oldPath, newPath)
+		if err != nil {
+			log.Printf("database sync: rename rows failed for %s → %s in table %s: %v", oldPath, newPath, t.Name, err)
+			continue
+		}
+		if n > 0 {
+			log.Printf("database sync: renamed %d row(s) in table %s: %s → %s", n, t.Name, oldPath, newPath)
+		}
+	}
+}
+
 // pageIsInFolder checks if a page path is inside a folder.
 // e.g. pagePath="deviations/dev001", folder="deviations" → true
 // e.g. pagePath="deviations/sub/page", folder="deviations" → true

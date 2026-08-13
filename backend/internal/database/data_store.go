@@ -561,6 +561,27 @@ func (ds *DataStore) DeleteRowsByPagePath(ctx context.Context, tableName, pagePa
 	return nil
 }
 
+// RenameRowsByPagePath updates page_path for rows in a table matching an old
+// path, setting them to newPath. Returns the number of rows renamed.
+// Preserves the row's numeric id — use this on page rename instead of
+// delete+re-insert so references to the id (URLs, foreign keys) remain valid.
+func (ds *DataStore) RenameRowsByPagePath(ctx context.Context, tableName, oldPagePath, newPagePath string) (int64, error) {
+	p := ds.pool.GetPool()
+	if p == nil {
+		return 0, fmt.Errorf("database not connected")
+	}
+	oldPagePath = normalizeStoredPagePath(oldPagePath)
+	newPagePath = normalizeStoredPagePath(newPagePath)
+	dtName := dataTableName(tableName)
+	tag, err := p.Exec(ctx,
+		fmt.Sprintf("UPDATE %s SET page_path = $1, updated_at = NOW() WHERE page_path = $2", quoteIdent(dtName)),
+		newPagePath, oldPagePath)
+	if err != nil {
+		return 0, fmt.Errorf("rename rows by page path: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // --- helpers ---
 
 func activeFieldMap(fields []FieldDef) map[string]FieldDef {

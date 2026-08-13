@@ -201,6 +201,135 @@ func (s *Server) handleUpdateDatabaseTable(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, t)
 }
 
+// handleMigratePagePaths recomputes every row's expected page path from the
+// table's current page_folder template and renames the wiki page for each row
+// whose current page_path no longer matches. Use this after changing the
+// page_folder pattern (e.g. adding "@server_name" to a table that previously
+// used numeric ids), or to normalize rows created before a slug rule tightened.
+//
+// The rename uses the standard page-move plumbing so incoming links can be
+// rewritten and row ids are preserved (see storage.PageRenamer).
+//
+// POST /api/admin/database/tables/{id}/migrate-page-paths
+// Body: { "dry_run": bool, "update_links": bool }
+func (s *Server) handleMigratePagePaths(w http.ResponseWriter, r *http.Request) {
+	if s.schemaStore == nil || s.dataStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not connected")
+		return
+	}
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid table id")
+		return
+	}
+	table, err := s.schemaStore.GetTable(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if table.PageFolder == "" {
+		writeError(w, http.StatusBadRequest, "table has no page_folder — nothing to migrate")
+		return
+	}
+
+	// Body is optional. Default: dry_run=true, update_links=true.
+	req := struct {
+		DryRun      *bool `json:"dry_run"`
+		UpdateLinks *bool `json:"update_links"`
+	}{}
+	if r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	dryRun := true
+	if req.DryRun != nil {
+		dryRun = *req.DryRun
+	}
+	updateLinks := true
+	if req.UpdateLinks != nil {
+		updateLinks = *req.UpdateLinks
+	}
+
+	mover, canMove := s.store.(PageMover)
+	if !canMove && !dryRun {
+		writeError(w, http.StatusNotImplemented, "store does not support moves")
+		return
+	}
+
+	// Iterate every row in the table (no filters, high limit).
+	ctx := r.Context()
+	rows, _, err := s.dataStore.QueryRows(ctx, table.Name, database.QueryParams{Limit: 10000})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	type action struct {
+		ID     int    `json:"id"`
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Status string `json:"status"` // "moved" | "would_move" | "skipped_same_path" | "skipped_conflict" | "error"
+		Error  string `json:"error,omitempty"`
+	}
+	actions := make([]action, 0, len(rows))
+	author := UsernameFromContext(ctx)
+
+	moved, skipped, errors := 0, 0, 0
+	for _, row := range rows {
+		expected := resolvePageFolder(table.PageFolder, row.ID, row.Fields)
+		a := action{ID: row.ID, From: row.PagePath, To: expected}
+
+		if row.PagePath == expected {
+			a.Status = "skipped_same_path"
+			skipped++
+			actions = append(actions, a)
+			continue
+		}
+
+		if dryRun {
+			a.Status = "would_move"
+			actions = append(actions, a)
+			continue
+		}
+
+		if _, err := mover.Move(row.PagePath, expected, false, updateLinks, author); err != nil {
+			a.Status = "error"
+			a.Error = err.Error()
+			errors++
+			actions = append(actions, a)
+			continue
+		}
+		a.Status = "moved"
+		moved++
+		actions = append(actions, a)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"table":        table.Name,
+		"page_folder":  table.PageFolder,
+		"dry_run":      dryRun,
+		"update_links": updateLinks,
+		"total_rows":   len(rows),
+		"summary": map[string]int{
+			"moved":    moved,
+			"skipped":  skipped,
+			"errors":   errors,
+			"would_move": func() int {
+				if !dryRun {
+					return 0
+				}
+				n := 0
+				for _, a := range actions {
+					if a.Status == "would_move" {
+						n++
+					}
+				}
+				return n
+			}(),
+		},
+		"actions": actions,
+	})
+}
+
 // handleDeleteDatabaseTable deletes a table definition and its data.
 // DELETE /api/admin/database/tables/{id}
 func (s *Server) handleDeleteDatabaseTable(w http.ResponseWriter, r *http.Request) {
