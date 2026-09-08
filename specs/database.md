@@ -344,6 +344,19 @@ filter="code~PRJ%"                  (prefix: matches "PRJ001", "PRJ-alpha", etc.
 
 Multiple conditions are combined with AND. All filters apply to the SQL query — no client-side filtering.
 
+##### The `@null` sentinel value
+
+The literal value `@null` is reserved and translates to SQL `IS NULL` / `IS NOT NULL`. It's the only way to reach rows whose column is `NULL` — every other operator returns `UNKNOWN` when compared against `NULL`, which the WHERE clause treats as false.
+
+| Filter | SQL | Matches |
+|---|---|---|
+| `field=@null` | `field IS NULL` | Rows where the value was never set or was cleared. |
+| `field!=@null` | `field IS NOT NULL` | Rows where the value is explicitly set (any value). |
+
+Semantics for `multi_enum` fields: `=@null` means "no values selected" (empty junction table); `!=@null` means "at least one value selected".
+
+Comparison operators other than `=` / `!=` combined with `@null` (e.g. `field>@null`) are silently dropped rather than emitting always-false SQL.
+
 #### Lookup-join filters (dotted notation)
 
 A filter field may reference a column in a related table via a dotted

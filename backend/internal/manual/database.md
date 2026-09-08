@@ -57,6 +57,22 @@ filter="priority>=2&archived!=true"
 filter="name~alice"
 ```
 
+**Testing for missing values (`@null`).** The literal value `@null` is a
+reserved sentinel that translates to SQL `IS NULL` / `IS NOT NULL`. Use it
+to reach rows whose column was never set or was cleared — comparison
+filters like `field=true` or `field!=false` never match `NULL` rows in
+SQL, so a sentinel is required.
+
+```markdown
+filter="authority_notified=@null"     # never notified (empty/void)
+filter="authority_notified!=@null"    # explicitly set (true or false)
+filter="authority_notified=true"      # explicit yes (excludes @null and false)
+```
+
+For a `multi_enum` field, `=@null` means "no values selected" and
+`!=@null` means "at least one value selected". Comparison operators other
+than `=` / `!=` combined with `@null` are ignored.
+
 #### Joining through a lookup or tag field
 
 A filter may reach into a related table via dotted notation

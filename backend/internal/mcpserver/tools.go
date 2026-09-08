@@ -31,6 +31,20 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerCompleteTodoTool(srv, deps)
 	registerListDatabaseTablesTool(srv, deps)
 	registerQueryDatabaseRowsTool(srv, deps)
+	registerListPageHistoryTool(srv, deps)
+	registerReadPageVersionTool(srv, deps)
+	registerListRecentChangesTool(srv, deps)
+	registerDiffPageVersionsTool(srv, deps)
+	registerCreateDatabaseTableTool(srv, deps)
+	registerCreateDatabaseFieldTool(srv, deps)
+	registerUpdateDatabaseTableTool(srv, deps)
+	registerUpdateDatabaseFieldTool(srv, deps)
+	registerMovePageTool(srv, deps)
+	registerConvertToNamespaceIndexTool(srv, deps)
+	registerConvertToRegularPageTool(srv, deps)
+	registerInsertDatabaseRowTool(srv, deps)
+	registerDeleteDatabaseRowTool(srv, deps)
+	registerDeletePageTool(srv, deps)
 }
 
 // ── ACL helpers ─────────────────────────────────────────────────────────
@@ -724,10 +738,16 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("query_database_rows",
 		mcpgo.WithDescription(
 			"Query rows from a structured-data table. Supports field filters, sorting, and pagination. "+
-				"First call list_database_tables to discover table names and field definitions.",
+				"First call list_database_tables to discover table names and field definitions. "+
+				"Filter syntax: each item is 'field<op>value' where <op> is one of =, !=, <>, <, >, <=, >=, ~ (ILIKE substring; % is wildcard). "+
+				"The reserved value @null tests for SQL NULL: 'field=@null' matches rows where the column is unset/void, 'field!=@null' matches rows where it is set. "+
+				"Lookup/tag joins: use 'parent.child<op>value' (one level only).",
 		),
 		mcpgo.WithString("table", mcpgo.Required(),
 			mcpgo.Description("Table name."),
+		),
+		mcpgo.WithArray("filter",
+			mcpgo.Description("Optional array of filter expressions, ANDed together. Examples: [\"status=active\", \"priority>=2\", \"authority_notified=@null\"]."),
 		),
 		mcpgo.WithString("sort",
 			mcpgo.Description("Field name to sort by."),
@@ -767,6 +787,11 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 			Limit:  limit,
 			Offset: req.GetInt("offset", 0),
 		}
+		for _, raw := range req.GetStringSlice("filter", nil) {
+			if f := parseFilterExpression(raw); f != nil {
+				params.Filters = append(params.Filters, *f)
+			}
+		}
 		rows, total, err := deps.DataStore.QueryRows(context.Background(), tableName, params)
 		if err != nil {
 			return errorResult("query: " + err.Error()), nil
@@ -776,4 +801,35 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 			"total": total,
 		}), nil
 	})
+}
+
+// parseFilterExpression parses a single filter string of the form
+// "field<op>value" — mirrors api.parseFilter, kept here to avoid dragging the
+// api package into mcpserver just for one helper.
+func parseFilterExpression(raw string) *database.Filter {
+	for _, op := range []string{"!=", "<>", "<=", ">="} {
+		idx := strings.Index(raw, op)
+		if idx > 0 {
+			normalizedOp := op
+			if op == "<>" {
+				normalizedOp = "!="
+			}
+			return &database.Filter{
+				Field:    strings.TrimSpace(raw[:idx]),
+				Operator: normalizedOp,
+				Value:    strings.TrimSpace(raw[idx+len(op):]),
+			}
+		}
+	}
+	for _, op := range []string{"~", "<", ">", "="} {
+		idx := strings.Index(raw, op)
+		if idx > 0 {
+			return &database.Filter{
+				Field:    strings.TrimSpace(raw[:idx]),
+				Operator: op,
+				Value:    strings.TrimSpace(raw[idx+len(op):]),
+			}
+		}
+	}
+	return nil
 }

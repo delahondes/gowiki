@@ -63,10 +63,21 @@ type ReadOptions struct {
 	ExcludePaths []string
 	Types        []string
 	Users        []string
+	// Since and Until bound the timestamp range (inclusive). Zero-valued
+	// times mean "no bound on that side".
+	Since time.Time
+	Until time.Time
+	// Dedupe controls whether only the most recent change per page is
+	// returned. Default false: return every matching entry. Callers that
+	// want the "latest change per page" summary (e.g. the recent-changes
+	// sidebar) pass Dedupe: true.
+	Dedupe bool
+	// MaxCount caps Count above the default ceiling. When zero the
+	// standard 100-entry cap applies.
+	MaxCount int
 }
 
-// Read returns the most recent changes from the log, filtered by opts.
-// Only the most recent change per page is returned (deduplication).
+// Read returns changes from the log filtered by opts, most recent first.
 func (c *Changelog) Read(opts ReadOptions) ([]ChangeEntry, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -75,8 +86,12 @@ func (c *Changelog) Read(opts ReadOptions) ([]ChangeEntry, error) {
 	if count <= 0 {
 		count = 10
 	}
-	if count > 100 {
-		count = 100
+	cap := 100
+	if opts.MaxCount > cap {
+		cap = opts.MaxCount
+	}
+	if count > cap {
+		count = cap
 	}
 
 	data, err := os.ReadFile(c.path)
@@ -124,14 +139,22 @@ func (c *Changelog) Read(opts ReadOptions) ([]ChangeEntry, error) {
 		userSet[u] = true
 	}
 
-	// Iterate in reverse (most recent first), deduplicate, filter.
+	// Iterate in reverse (most recent first), optionally deduplicate, filter.
 	seen := make(map[string]bool)
 	var result []ChangeEntry
 	for i := len(allEntries) - 1; i >= 0 && len(result) < count; i-- {
 		e := allEntries[i]
 
+		// Since/Until window (inclusive at both ends).
+		if !opts.Since.IsZero() && e.Timestamp.Before(opts.Since) {
+			continue
+		}
+		if !opts.Until.IsZero() && e.Timestamp.After(opts.Until) {
+			continue
+		}
+
 		// Deduplicate: only most recent change per page.
-		if seen[e.PagePath] {
+		if opts.Dedupe && seen[e.PagePath] {
 			continue
 		}
 
@@ -150,7 +173,9 @@ func (c *Changelog) Read(opts ReadOptions) ([]ChangeEntry, error) {
 			continue
 		}
 
-		seen[e.PagePath] = true
+		if opts.Dedupe {
+			seen[e.PagePath] = true
+		}
 		result = append(result, e)
 	}
 

@@ -28,6 +28,7 @@ const (
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
+	Delete(pagePath, author string) (storage.DeleteResult, error)
 	Exists(pagePath string) bool
 }
 
@@ -44,6 +45,60 @@ type SearchStore interface {
 // BacklinkProvider returns backlinks for a page.
 type BacklinkProvider interface {
 	GetBacklinks(pagePath string) []string
+}
+
+// AtticStore exposes the archived-version log for a page. Backed by the
+// filesystem attic; used by list_page_history, read_page_version and
+// diff_page_versions.
+type AtticStore interface {
+	ListVersions(pagePath string) ([]storage.AtticEntry, error)
+	ReadVersion(pagePath string, version int64) ([]byte, error)
+}
+
+// PageMover is the rename/convert surface used by the move_page family. The
+// concrete FileStore implements it; api.PageMover is the parallel interface
+// on the API side. Both mirror the same underlying operations.
+type PageMover interface {
+	Move(oldPath, newPath string, moveMedia, updateLinks bool, author string) (storage.MoveResult, error)
+	ConvertToNamespaceIndex(pagePath, author string) (storage.MoveResult, error)
+	ConvertToRegularPage(pagePath, author string) (storage.MoveResult, error)
+	PreviewMove(oldPath, newPath string, moveMedia bool) (storage.MovePreview, error)
+}
+
+// RowInsertResult is what InsertRowWithPage returns.
+type RowInsertResult struct {
+	Row      *database.Row `json:"row"`
+	PagePath string        `json:"page_path,omitempty"`
+	PageCreated bool       `json:"page_created"`
+}
+
+// RowDeleteResult is what DeleteRowWithPage returns.
+type RowDeleteResult struct {
+	TableName   string `json:"table"`
+	RowID       int    `json:"row_id"`
+	PagePath    string `json:"page_path,omitempty"`
+	PageDeleted bool   `json:"page_deleted"`
+}
+
+// RowWriter exposes symmetric row insert/delete operations that also
+// create / archive the row's bound page when the table has a page_folder.
+// Implemented in api/mcp.go over Server internals (resolvePageFolder,
+// buildPageContent, store.Put, store.Delete) so both the MCP tools and
+// the existing HTTP handlers share one code path.
+type RowWriter interface {
+	// InsertRowWithPage inserts a row and, for page-bound tables, creates
+	// the associated wiki page.
+	InsertRowWithPage(ctx context.Context, tableName string, fields map[string]any, author string) (*RowInsertResult, error)
+	// DeleteRowWithPage deletes a row and, if the row had a bound page,
+	// deletes that page too (archiving it to the attic so the audit trail
+	// remains intact).
+	DeleteRowWithPage(ctx context.Context, tableName string, rowID int, author string) (*RowDeleteResult, error)
+}
+
+// ChangelogReader exposes the append-only global change log. Used by
+// list_recent_changes for cross-page audit queries.
+type ChangelogReader interface {
+	Read(opts storage.ReadOptions) ([]storage.ChangeEntry, error)
 }
 
 // DraftStateProvider exposes draft and lock state. The MCP layer uses it to
@@ -78,6 +133,10 @@ type Deps struct {
 	Todo              *todo.TodoService
 	SchemaStore       *database.SchemaStore
 	DataStore         *database.DataStore
+	Attic             AtticStore
+	Changelog         ChangelogReader
+	Mover             PageMover
+	RowWriter         RowWriter
 	ExtractUsername   UsernameExtractor
 	RequireSummary    bool // when true, write_page rejects calls without a summary
 }

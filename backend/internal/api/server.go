@@ -970,7 +970,10 @@ func (s *Server) handleRecentChanges(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	opts := storage.ReadOptions{Count: count}
+	// The public "recent changes" page shows one entry per page (most
+	// recent). MCP consumers who want the un-deduped stream use the
+	// list_recent_changes tool instead, which passes Dedupe: false.
+	opts := storage.ReadOptions{Count: count, Dedupe: true}
 
 	// Parse path filter: comma-separated prefixes, "-" prefix for exclusion.
 	if raw := r.URL.Query().Get("path"); raw != "" {

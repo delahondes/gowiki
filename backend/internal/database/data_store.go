@@ -35,6 +35,26 @@ func (ds *DataStore) InsertRow(ctx context.Context, tableName string, row *Row) 
 	dtName := dataTableName(tableName)
 	activeFields := activeFieldMap(table.Fields)
 
+	// Apply schema-level default_value for fields the caller didn't supply.
+	// The frontend `{database-newrow}` form pre-fills these already, but API
+	// callers (HTTP + MCP) previously fell through to the SQL column default
+	// (empty string / 0 / false). Doing it here keeps the two paths consistent.
+	if row.Fields == nil {
+		row.Fields = make(map[string]any)
+	}
+	for name, fd := range activeFields {
+		if fd.Type == FieldTypeAutoIncrement || fd.Type == FieldTypeMultiEnum {
+			continue
+		}
+		if fd.DefaultValue == "" {
+			continue
+		}
+		if _, ok := row.Fields[name]; ok {
+			continue
+		}
+		row.Fields[name] = fd.DefaultValue
+	}
+
 	// Build column list and values.
 	cols := []string{"page_path"}
 	args := []any{row.PagePath}
@@ -414,6 +434,22 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 		// Multi-enum fields live in a junction table — use EXISTS subquery.
 		if fd.Type == FieldTypeMultiEnum {
 			jt := fmt.Sprintf("%s__%s", dtName, fd.Name)
+			// @null sentinel: "no values in the junction table" (= empty set).
+			if f.Value == "@null" {
+				switch op {
+				case "=":
+					whereClauses = append(whereClauses,
+						fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %s WHERE row_id = %s.id)",
+							quoteIdent(jt), quoteIdent(dtName)))
+				case "!=":
+					whereClauses = append(whereClauses,
+						fmt.Sprintf("EXISTS (SELECT 1 FROM %s WHERE row_id = %s.id)",
+							quoteIdent(jt), quoteIdent(dtName)))
+				default:
+					continue
+				}
+				continue
+			}
 			switch op {
 			case "=":
 				whereClauses = append(whereClauses,
@@ -437,6 +473,22 @@ func (ds *DataStore) QueryRows(ctx context.Context, tableName string, params Que
 						quoteIdent(jt), quoteIdent(dtName), argIdx))
 				args = append(args, v)
 				argIdx++
+			default:
+				continue
+			}
+			continue
+		}
+
+		// @null sentinel for scalar columns: translate to IS NULL / IS NOT NULL.
+		// Any other value flows through the standard binding path below.
+		// Comparison operators other than = / != don't combine meaningfully
+		// with NULL — silently skipped rather than emitting always-false SQL.
+		if f.Value == "@null" {
+			switch op {
+			case "=":
+				whereClauses = append(whereClauses, fmt.Sprintf("%s IS NULL", quoteIdent(fieldName)))
+			case "!=":
+				whereClauses = append(whereClauses, fmt.Sprintf("%s IS NOT NULL", quoteIdent(fieldName)))
 			default:
 				continue
 			}
@@ -544,6 +596,72 @@ func (ds *DataStore) UpdatePagePath(ctx context.Context, tableName string, rowID
 		return fmt.Errorf("update page path: %w", err)
 	}
 	return nil
+}
+
+// Reference is a single incoming reference from another row's lookup/tag
+// field to some target row. Returned by FindReferencesTo.
+type Reference struct {
+	TableName string `json:"table"`
+	FieldName string `json:"field"`
+	RowID     int    `json:"row_id"`
+	PagePath  string `json:"page_path,omitempty"`
+}
+
+// FindReferencesTo returns the rows whose lookup or tag field points at
+// (targetTable, targetRowID). Used to block row deletions that would leave
+// dangling foreign-key references.
+//
+// Only scalar lookup/tag columns are inspected. Multi-enum columns do not
+// carry foreign-key references in Gowiki today, so they are skipped.
+// Errors from any single scanned table are logged and the scan continues —
+// a broken table shouldn't hide references living in other, healthy tables.
+func (ds *DataStore) FindReferencesTo(ctx context.Context, targetTable string, targetRowID int) ([]Reference, error) {
+	p := ds.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+
+	// Bulk lookup of every active lookup/tag field whose foreign_key points
+	// at the target table. Doing this in one SQL statement avoids the trap
+	// of relying on ListTables (which does NOT populate TableDef.Fields).
+	fieldRows, err := p.Query(ctx, `
+		SELECT t.name, f.name
+		FROM database_fields f
+		JOIN database_tables t ON t.id = f.table_id
+		WHERE f.type IN ('lookup', 'tag')
+		  AND f.foreign_key = $1
+		  AND f.archived_at IS NULL`, targetTable)
+	if err != nil {
+		return nil, fmt.Errorf("scan fk fields: %w", err)
+	}
+	type fkTarget struct{ tableName, fieldName string }
+	var targets []fkTarget
+	for fieldRows.Next() {
+		var t fkTarget
+		if err := fieldRows.Scan(&t.tableName, &t.fieldName); err == nil {
+			targets = append(targets, t)
+		}
+	}
+	fieldRows.Close()
+
+	var refs []Reference
+	for _, t := range targets {
+		dtName := dataTableName(t.tableName)
+		sqlQ := fmt.Sprintf(`SELECT id, page_path FROM %s WHERE %s = $1 ORDER BY id LIMIT 200`,
+			quoteIdent(dtName), quoteIdent(t.fieldName))
+		rows, err := p.Query(ctx, sqlQ, targetRowID)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			r := Reference{TableName: t.tableName, FieldName: t.fieldName}
+			if err := rows.Scan(&r.RowID, &r.PagePath); err == nil {
+				refs = append(refs, r)
+			}
+		}
+		rows.Close()
+	}
+	return refs, nil
 }
 
 // DeleteRowsByPagePath deletes all rows for a given page path.
