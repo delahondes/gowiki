@@ -462,6 +462,9 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 }
 
 // syncRowToPage updates the {database-row} block in the page bound to this row.
+// Writes a human-readable per-field diff into the page's changelog summary so
+// history entries for row-driven writes read like "row: update 2026-08-10 →
+// 2026-08-27, monitoring 1 → 0" instead of an empty line.
 func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, author string) {
 	if row.PagePath == "" {
 		return
@@ -494,9 +497,64 @@ func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, auth
 		return // no change
 	}
 
-	if _, err := s.store.Put(row.PagePath, updated, author); err != nil {
+	summary := buildRowChangeSummary(page.Markdown, table.Name, fieldNames, values)
+	if _, err := s.store.PutWithSummary(row.PagePath, updated, author, summary); err != nil {
 		log.Printf("database sync→page: cannot save page %s: %v", row.PagePath, err)
 	}
+}
+
+// buildRowChangeSummary produces a compact one-line description of which fields
+// changed in the {database-row} block. Skips system columns and truncates long
+// values so the changelog entry stays readable.
+func buildRowChangeSummary(oldMarkdown, tableName string, fieldNames []string, newValues map[string]string) string {
+	blocks := markdown.ExtractDatabaseRows(oldMarkdown)
+	var oldValues map[string]string
+	for _, b := range blocks {
+		if b.TableName == tableName {
+			oldValues = b.Fields
+			break
+		}
+	}
+
+	type change struct{ field, from, to string }
+	var changes []change
+	for _, name := range fieldNames {
+		if name == "id" {
+			continue
+		}
+		newV := newValues[name]
+		oldV := ""
+		if oldValues != nil {
+			oldV = oldValues[name]
+		}
+		if oldV == newV {
+			continue
+		}
+		changes = append(changes, change{name, oldV, newV})
+	}
+	if len(changes) == 0 {
+		return "row edit"
+	}
+
+	trunc := func(s string) string {
+		s = strings.ReplaceAll(s, "\n", " ")
+		if len(s) > 40 {
+			return s[:37] + "…"
+		}
+		if s == "" {
+			return "∅"
+		}
+		return s
+	}
+	parts := make([]string, 0, len(changes))
+	for i, c := range changes {
+		if i >= 4 { // keep summaries short
+			parts = append(parts, fmt.Sprintf("+%d more", len(changes)-i))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s: %s → %s", c.field, trunc(c.from), trunc(c.to)))
+	}
+	return "row edit — " + strings.Join(parts, ", ")
 }
 
 // handleDatabaseExportCSV exports all rows as CSV.

@@ -7172,6 +7172,17 @@ window.addEventListener("popstate", (e) => {
   }
 })
 
+// When a row-bound page is updated via an inline edit anywhere on this tab
+// (query view or admin management), and the history for that page is currently
+// showing, refresh it so the new version appears without needing a manual
+// close/reopen.
+document.addEventListener("gowiki-database-row-updated", (e) => {
+  if (!inHistoryView) return
+  const rowPath = (e.detail?.pagePath || "").replace(/^\/+/, "")
+  const currentPath = (pagePath || "").replace(/^\/+/, "")
+  if (rowPath && rowPath === currentPath) void showHistory()
+})
+
 async function showHistory() {
   try {
     const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
@@ -12086,11 +12097,18 @@ async function showDatabaseDataBrowser(tableName) {
               td.contentEditable = "true"
               td.addEventListener("blur", async () => {
                 const newVal = td.textContent.trim()
-                await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows/${row.id}`, {
+                const resp = await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows/${row.id}`, {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ fields: { [f.name]: newVal } }),
                 })
+                if (resp && resp.ok) {
+                  let pagePath = ""
+                  try { pagePath = (await resp.clone().json())?.page_path || "" } catch {}
+                  document.dispatchEvent(new CustomEvent("gowiki-database-row-updated", {
+                    detail: { table: tableName, rowId: row.id, fieldName: f.name, pagePath },
+                  }))
+                }
               })
               tr.appendChild(td)
             }

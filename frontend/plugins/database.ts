@@ -974,6 +974,13 @@ function createOverlayImageInput(
 
 // Custom event name for cross-NodeView communication.
 const DATABASE_ROW_CREATED = "gowiki-database-row-created"
+const DATABASE_ROW_UPDATED = "gowiki-database-row-updated"
+
+// Module-wide guard against concurrent PUTs targeting the same field. A stuck
+// row-bound page version-state bug in production was traced to two PUTs racing
+// for the same field (widget double-fire on native date inputs). Serialize here
+// so the backend never sees interleaved writes for the same key.
+const inflightSaveKeys = new Set<string>()
 
 // ── NodeViews ──
 
@@ -1228,21 +1235,42 @@ class DatabaseQueryNodeView {
   }
 
   private async saveInlineEdit(tableName: string, rowId: number, fieldName: string, newVal: string, force = false): Promise<boolean> {
-    const url = `/api/database/${encodeURIComponent(tableName)}/rows/${rowId}${force ? "?force=true" : ""}`
-    const resp = await fetch(url, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields: { [fieldName]: newVal } }),
-    })
-    if (resp.status === 409) {
-      const body = await resp.json().catch(() => ({}))
-      if (body.error === "page_draft_conflict") {
-        const ok = confirm(`A draft by "${body.draft_owner}" exists for this row's page. Force the edit?`)
-        if (ok) return this.saveInlineEdit(tableName, rowId, fieldName, newVal, true)
-        return false
+    const key = `${tableName}:${rowId}:${fieldName}`
+    if (inflightSaveKeys.has(key)) return false // another PUT for this key is already in flight
+    inflightSaveKeys.add(key)
+    try {
+      const url = `/api/database/${encodeURIComponent(tableName)}/rows/${rowId}${force ? "?force=true" : ""}`
+      const resp = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: { [fieldName]: newVal } }),
+      })
+      if (resp.status === 409) {
+        const body = await resp.json().catch(() => ({}))
+        if (body.error === "page_draft_conflict") {
+          const ok = confirm(`A draft by "${body.draft_owner}" exists for this row's page. Force the edit?`)
+          // Release the guard before recursing so the retry can acquire it.
+          inflightSaveKeys.delete(key)
+          if (ok) return this.saveInlineEdit(tableName, rowId, fieldName, newVal, true)
+          return false
+        }
       }
+      if (resp.ok) {
+        // Notify listeners (e.g. the history modal) that a row was updated so
+        // they can invalidate any cached read of the row-bound page.
+        let pagePath = ""
+        try {
+          const body = await resp.clone().json().catch(() => ({}))
+          pagePath = (body as any)?.page_path || ""
+        } catch {}
+        document.dispatchEvent(new CustomEvent(DATABASE_ROW_UPDATED, {
+          detail: { table: tableName, rowId, fieldName, pagePath },
+        }))
+      }
+      return resp.ok
+    } finally {
+      inflightSaveKeys.delete(key)
     }
-    return resp.ok
   }
 
   // Saves an inline edit and, on success, updates the cached value stashed on

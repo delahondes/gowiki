@@ -42,6 +42,7 @@ const Version = "0.4.0"
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
+	PutWithSummary(pagePath, markdown, author, summary string) (storage.PutResult, error)
 	Delete(pagePath, author string) (storage.DeleteResult, error)
 	CheckNamespaceConflict(pagePath string) error
 	Exists(pagePath string) bool
@@ -576,6 +577,10 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing page path")
 		return
 	}
+
+	// Page content and meta.Version change on every save (including row-driven
+	// writes). Prevent browsers from serving a stale copy from HTTP cache.
+	w.Header().Set("Cache-Control", "no-store")
 
 	page, err := s.store.Get(pagePath)
 	if errors.Is(err, storage.ErrPageNotFound) {

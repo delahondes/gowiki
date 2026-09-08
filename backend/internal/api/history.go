@@ -17,6 +17,10 @@ func (s *Server) handlePageHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// History changes on every page save (including row-driven writes).
+	// Prevent browsers from serving a stale list from HTTP cache.
+	w.Header().Set("Cache-Control", "no-store")
+
 	entries, err := s.atticStore.ListVersions(pagePath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gowiki/backend/internal/markdown"
@@ -148,6 +149,20 @@ type FileStore struct {
 	TodoSync          DatabaseSyncer
 	ReviewflowSync    ReviewflowSyncer
 	CommentStore      CommentRenamer
+
+	// Per-page write mutex. Serializes concurrent Put/Move on the same path
+	// so we can't observe a state where content is written but meta.Version
+	// isn't bumped (or vice-versa). Keyed by normalized page path.
+	pageLocks sync.Map // pagePath (string) → *sync.Mutex
+}
+
+// lockPage acquires the write lock for a page and returns the unlock function.
+// Use with defer.
+func (s *FileStore) lockPage(pagePath string) func() {
+	v, _ := s.pageLocks.LoadOrStore(pagePath, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 func NewFileStore(contentRoot string) (*FileStore, error) {
@@ -305,10 +320,23 @@ func (s *FileStore) checkNamespaceConstraints(contentPath string) error {
 }
 
 func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, error) {
+	return s.putWithSummary(pagePath, markdownContent, author, "")
+}
+
+// PutWithSummary is Put with an explicit changelog summary. Row-driven writes
+// pass a per-field diff here so history entries are readable.
+func (s *FileStore) PutWithSummary(pagePath, markdownContent, author, summary string) (PutResult, error) {
+	return s.putWithSummary(pagePath, markdownContent, author, summary)
+}
+
+func (s *FileStore) putWithSummary(pagePath, markdownContent, author, summary string) (PutResult, error) {
 	normalized, err := normalizePagePath(pagePath)
 	if err != nil {
 		return PutResult{}, err
 	}
+
+	unlock := s.lockPage(normalized)
+	defer unlock()
 
 	contentPath, isIndex, err := s.resolveWritableContentPath(normalized)
 	if err != nil {
@@ -372,7 +400,9 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 		// Use the media_refs frozen in the old metadata (not the version store),
 		// so the archive reflects media as they were when this version was published.
 		if len(oldContent) > 0 && s.Attic != nil {
-			_ = s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "", meta.MediaRefs)
+			if err := s.Attic.Archive(normalized, meta.Version, oldContent, meta.Author, "", meta.MediaRefs); err != nil {
+				return PutResult{}, fmt.Errorf("archive prior version: %w", err)
+			}
 		}
 		meta.UpdatedAt = now
 		meta.Version++
@@ -408,12 +438,14 @@ func (s *FileStore) Put(pagePath, markdownContent, author string) (PutResult, er
 
 	// Archive the new version (media versions are in the markdown URLs now).
 	if s.Attic != nil {
-		_ = s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, "", nil)
+		if err := s.Attic.Archive(normalized, meta.Version, []byte(markdownContent), author, summary, nil); err != nil {
+			return PutResult{}, fmt.Errorf("archive new version: %w", err)
+		}
 	}
 
 	// Append to global changelog.
 	if s.Changelog != nil {
-		s.Changelog.Append(normalized, meta.Version, author, "", "edit")
+		s.Changelog.Append(normalized, meta.Version, author, summary, "edit")
 	}
 
 	// Canonicalize path for namespace indices before updating indexes.
