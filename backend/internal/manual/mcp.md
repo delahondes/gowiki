@@ -144,7 +144,8 @@ npx @modelcontextprotocol/inspector \
 | `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
-| `write_page` | Create/update a page — requires a summary |
+| `write_page` | Create/update a page (full rewrite) — requires a summary |
+| `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption) |
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
 | `complete_todo` | Mark a todo as done |
 | `list_database_tables` | Structured-data tables with field definitions |
@@ -182,6 +183,32 @@ Examples:
 ```
 
 This is the same syntax the wiki search bar exposes as `tag:NAME [substring]`. See [Tags](/wiki/manual/tags) and [Search](/wiki/manual/search) for the user-facing equivalent.
+
+## Editing pages — prefer `edit_page` over `write_page`
+
+`write_page` replaces the entire markdown of a page. Cost aside, that means **every edit's risk is proportional to page size, not to the change** — retyping 300 lines to fix one word gives you 300 lines of opportunity to introduce truncations, forbidden HTML entities, or shifted heading levels. On a regulatory document, that turns a cosmetic tweak into a corruption vector.
+
+**`edit_page(path, edits[], summary, expected_version?, dry_run?)`** is the safer default for anything short of a full rewrite. Each edit is `{old, new, replace_all?}`, and the tool enforces one strict rule:
+
+- **`old` must occur exactly once in the current buffer.**
+  - Zero occurrences → refused (the anchor is wrong, or the change is already applied).
+  - Two or more without `replace_all: true` → refused (ambiguous).
+  - With `replace_all: true` → every occurrence is replaced.
+
+This uniqueness constraint is what makes the tool safe without line numbers: the anchor self-locates and self-validates. There's no line-number drift the way a unified diff would give you.
+
+**Atomicity.** Edits apply in array order — edit *n+1* sees the buffer produced by edit *n*, letting you chain rewrites. If any single edit fails validation, the whole call is refused and no version is written. Never partial.
+
+**Same gates as `write_page`.** Caller + `@ai` need `edit` permission. Optimistic locking via `expected_version` is honored. Draft locks by other users refuse the call. Summary follows the `[AI: <tool>] <description>` convention.
+
+**Preview.** Pass `dry_run: true` to get the resulting diff (added/removed lines + hunks, same shape as `preview_page_diff`) without writing.
+
+Typical uses where `edit_page` is right:
+- Fix a typo, a link, a broken directive — one edit with a unique anchor.
+- Rename a field across many mentions on one page — one edit with `replace_all: true`.
+- Migrate `@@table.field@@` placeholders to `{{field}}` in template pages — one edit per placeholder, each anchored on the unique occurrence.
+
+Use `write_page` only when you truly do want to replace the whole page (creating from scratch, wholesale reorganizations).
 
 ## Renaming and namespace conversion
 

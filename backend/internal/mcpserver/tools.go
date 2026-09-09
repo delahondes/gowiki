@@ -45,6 +45,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerInsertDatabaseRowTool(srv, deps)
 	registerDeleteDatabaseRowTool(srv, deps)
 	registerDeletePageTool(srv, deps)
+	registerEditPageTool(srv, deps)
 }
 
 // ── ACL helpers ─────────────────────────────────────────────────────────
