@@ -7,6 +7,7 @@ package mcpserver
 
 import (
 	"context"
+	"io"
 	"net/http"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -101,6 +102,30 @@ type ChangelogReader interface {
 	Read(opts storage.ReadOptions) ([]storage.ChangeEntry, error)
 }
 
+// MediaStore is the attachment-side counterpart of PageStore. Implemented by
+// storage.MediaFileStore; the API layer also holds this same interface.
+type MediaStore interface {
+	List(namespacePath string) ([]storage.MediaEntry, error)
+	Put(namespacePath, fileName string, content io.Reader, overwrite bool, author string) (storage.MediaEntry, error)
+	Delete(mediaPath string) error
+	ResolvePath(mediaPath string) (string, error)
+}
+
+// ReferenceIndex is the page↔media reference map maintained by the storage
+// layer. The MCP delete_attachment tool consults it to refuse deleting a
+// still-referenced file, and read_attachment / list_attachments surface the
+// referring-page counts to the caller.
+type ReferenceIndex interface {
+	GetReferencingPages(mediaPath string) []string
+}
+
+// MediaVersionReader reports the current version of an attachment. Used to
+// stamp entries returned by list_attachments and read_attachment with the same
+// version the page frontend sees.
+type MediaVersionReader interface {
+	GetVersion(mediaPath string) int64
+}
+
 // DraftStateProvider exposes draft and lock state. The MCP layer uses it to
 // surface pending edits in get_page_meta and to refuse external writes that
 // would race against an in-progress edit or clobber unpublished work. The
@@ -137,6 +162,10 @@ type Deps struct {
 	Changelog         ChangelogReader
 	Mover             PageMover
 	RowWriter         RowWriter
+	Media             MediaStore
+	MediaRefs         ReferenceIndex
+	MediaVersions     MediaVersionReader
+	SiteBaseURL       string // e.g. "https://wiki.example.com"; used by upload_attachment_instructions
 	ExtractUsername   UsernameExtractor
 	RequireSummary    bool // when true, write_page rejects calls without a summary
 }

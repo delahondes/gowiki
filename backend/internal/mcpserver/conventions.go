@@ -68,6 +68,29 @@ func conventionsPayload() map[string]any {
 			"use_preview":       "Always call preview_page_diff before write_page and show the diff to the user",
 			"read_before_write": "Read the page with read_pages_batch immediately before preview to get its current version for expected_version",
 		},
+		"fenced_blocks": map[string]any{
+			"description": "Fenced code blocks (```lang) render as syntax-highlighted source. Two info-string values render as embedded visualizations instead: `mermaid` and `chart`. Both are rendered natively by the wiki — no external assets, no attachments needed. Prefer them over uploading rendered PNGs when the diagram or plot is data you can express as text.",
+			"code": map[string]any{
+				"syntax":  "```<language>\\n<source>\\n```",
+				"note":    "Language name enables highlighting. Use it for real source code — not for diagrams that mermaid or chart can render.",
+				"example": "```go\\nfmt.Println(\"hello\")\\n```",
+			},
+			"mermaid": map[string]any{
+				"syntax":       "```mermaid [size=<CSSlength>] [caption=\"<text>\"]\\n<mermaid source>\\n```",
+				"library":      "Mermaid 11 (loaded on demand from a CDN). Supports flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, pie, journey, timeline, mindmap, quadrantChart, gitGraph.",
+				"info_string":  "size accepts any CSS length (e.g. 500px, 80%). caption becomes a rendered caption below the diagram. Both optional.",
+				"example":      "```mermaid caption=\"State machine\"\\nstateDiagram-v2\\n  [*] --> Draft\\n  Draft --> Review\\n  Review --> Published\\n```",
+				"when_to_use":  "Any diagram whose structure is describable as text — flow, states, sequences, dependencies. Renders live in the visual editor and in view mode.",
+			},
+			"chart": map[string]any{
+				"syntax":      "```chart <type> [<W>x<H>] [\"<title>\"] [nolegend|legend] [values] [left|right] [#RRGGBB #RRGGBB ...]\\n<label> = <number>\\n<label> = <number>\\n# comment lines allowed\\n```",
+				"types":       []string{"pie", "doughnut", "bar", "hbar", "line", "radar", "polar"},
+				"library":     "Chart.js (loaded on demand). Rendered natively — no image upload.",
+				"defaults":    "400x250, legend on, values off, center-aligned, default colour palette. Body: one `label = value` pair per line; `#` starts a comment.",
+				"example":     "```chart bar 500x300 \"Sales by quarter\" values\\nQ1 = 12\\nQ2 = 19\\nQ3 = 15\\nQ4 = 22\\n```",
+				"when_to_use": "Small quantitative charts (fewer than ~30 data points). For anything with axes/annotations/multiple series that Chart.js can't express, generate an image instead and use upload_attachment_instructions.",
+			},
+		},
 		"do_not": []string{
 			"Do not introduce alternative Markdown syntaxes — bijectivity is non-negotiable",
 			"Do not store metadata under data/content/",

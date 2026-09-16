@@ -822,8 +822,10 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if the media is still referenced by any pages.
-	if pages := s.orphanDetector.GetReferencingPages(mediaPath); len(pages) > 0 {
+	// Check if the media is still referenced by any pages. The ref index
+	// stores media keys canonically (leading slash); the chi URL param does
+	// not carry one, so add it here.
+	if pages := s.orphanDetector.GetReferencingPages("/" + mediaPath); len(pages) > 0 {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":            "media is still referenced",
 			"referencing_pages": pages,

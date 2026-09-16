@@ -164,6 +164,11 @@ npx @modelcontextprotocol/inspector \
 | `read_page_version` | Markdown of a specific historical version, with its metadata |
 | `list_recent_changes` | Cross-page changelog, filterable by `since`/`until`/`author`/`path_prefix` — every entry ACL-checked |
 | `diff_page_versions` | Line-level diff between two archived versions of the same page (same hunk shape as `preview_page_diff`) |
+| `list_attachments` | Files (with extension) directly under a namespace, with size, current version, and referring pages |
+| `read_attachment` | Attachment metadata (mime, size, sha256, version, referring pages); optionally inline body (text ≤128 KB / base64 ≤512 KB) or `out_dir` to save to disk |
+| `upload_attachment` | Create or replace an attachment via base64 (small files only); optional sha256/size_bytes verification catches transport corruption |
+| `upload_attachment_instructions` | Return a ready-to-run `curl -F` command for the wiki's HTTP multipart endpoint — use this for anything bigger than a few KB |
+| `delete_attachment` | Delete an attachment; refuses when pages still reference it unless `force=true` |
 
 ## Searching by tag
 
@@ -232,6 +237,32 @@ All three refuse cleanly when the page has an active edit lock or draft (`ErrPag
 - Non-page-bound tables — the caller must be in the `admin` group. This is deliberately strict: agent-driven row writes to schema-only tables can't be gated per-row via the page ACL, so admin is the only safe default.
 
 Typical clean-up flow for a test round-trip: `insert_database_row` → verify the created page — `read_pages_batch` on the returned `page_path` — → `delete_database_row(row.id)`.
+
+## Attachments
+
+Attachments are non-`.md` files under `data/content/`, referenced from pages via `./file.ext` (same namespace) or absolute `/path/to/file.ext` links. The four tools cover the full lifecycle:
+
+- **`list_attachments(path)`** — files (with extension) directly under a namespace. Returns each file's size, current version, MIME, and the pages that currently link to it (`referring_pages` + `referring_count`; `0` means orphaned). Does not recurse — call it per namespace.
+- **`read_attachment(path, include_content?, out_dir?)`** — metadata (size, MIME, sha256, current version, referring pages) is always returned. Three body-delivery modes:
+  - `include_content: true` — inline: UTF-8 text for text-like extensions up to 128 KB (`format: "text"`), base64 for anything else up to 512 KB (`format: "base64"`). Over the cap returns `content_omitted: true`.
+  - `out_dir: "/abs/path"` — the server writes the file to disk at `<out_dir>/<name>` and returns `saved_to`. **Preferred for binaries** — no inflation, no JSON string mutation. Combine with the returned `sha256` to verify locally.
+  - Neither — metadata only.
+- **`upload_attachment(path, content_base64, summary, overwrite?, sha256?, size_bytes?)`** — MCP-native upload for small files. The body travels as base64 through JSON-RPC, which is **not reliable** for binaries past a handful of KB — a dropped multiple-of-4 run of characters stays syntactically valid and decodes to a shorter file without any error. Optional integrity gates catch this: pass `sha256` (hex, decoded-bytes digest) and/or `size_bytes` and the write is refused on mismatch. The response always returns `sha256` and `size`, so a caller can verify. Refuses if the file exists unless `overwrite: true`; hard cap 20 MB after decode.
+- **`upload_attachment_instructions(path, overwrite?)`** — **the right path for anything bigger than a few KB.** Doesn't upload itself: it validates the target, checks edit permission upfront, warns if a file already exists or if `overwrite` mismatches, and hands back a ready-to-run `curl -F "file=@..." <site>/api/media/<ns>` command. The wiki's multipart endpoint is real binary transport (no base64), uses the same bearer-token auth as MCP, and has no size ceiling below the 20 MB backend cap. Runs from the agent's own shell — no bytes touch the JSON channel.
+- **`delete_attachment(path, force?)`** — deletes an attachment. By default a call is refused when any page still references the file; the response lists the referring pages so the caller can rewrite them first. Pass `force: true` to delete anyway — the file goes; links pointing at it will 404 until they're rewritten or restored.
+
+**ACL:** attachment reads use view permission on the target path (or namespace, for `list_attachments`); uploads use edit; deletions use delete. Both the caller and the `@ai` subject must have the required permission — same dual-gate as page tools.
+
+**Version model.** Attachments are versioned exactly like pages: v1 on first upload, incremented on overwrite, previous bytes preserved in the media attic. The frontend serves the current file for `/path/to/file.ext`, and older versions via `?v=N` — unchanged by the MCP layer.
+
+## Diagrams and charts (mermaid / chart)
+
+Before generating a diagram or chart as an image and uploading it as an attachment, check whether the wiki can render it natively — both surfaces read as first-class content, edit in place, and don't need a media file:
+
+- **Mermaid** — fence with `` ```mermaid `` (optionally `size=500px caption="…"`) and put Mermaid 11 source in the body. Covers flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, pie, journey, timeline, mindmap, quadrantChart, gitGraph. Renders live in the visual editor.
+- **Chart** — fence with `` ```chart <type> [WxH] ["title"] [nolegend|legend] [values] [left|right] [#RRGGBB …] ``. Types: `pie`, `doughnut`, `bar`, `hbar`, `line`, `radar`, `polar`. Body is `label = value` lines, `#` for comments. Defaults: 400x250, legend on. Rendered via Chart.js.
+
+When to fall back to an image: complex multi-panel figures, precise scientific plots, anything Chart.js can't express (dual axes, log scales, error bars, annotations, statistical overlays). For those, generate the image locally and use `upload_attachment_instructions`. The full syntax and examples are also returned by `get_conventions` under `fenced_blocks`.
 
 **Schema defaults.** On insert, any active field the caller doesn't supply falls back to the column's `default_value` (from the field definition, same value that pre-fills the `{database-newrow}` form), and only then to the SQL column default. So API inserts now behave like form inserts — you don't have to re-list defaults.
 

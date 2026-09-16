@@ -185,7 +185,9 @@ func (r *RefIndex) FindOrphans(contentDir string) ([]string, error) {
 			return relErr
 		}
 		rel = filepath.ToSlash(rel)
-		if len(r.MediaToPages[rel]) == 0 {
+		// The map is keyed by canonical media paths (leading slash); the
+		// filesystem walk produces relative paths without one.
+		if len(r.MediaToPages["/"+rel]) == 0 {
 			orphans = append(orphans, rel)
 		}
 		return nil

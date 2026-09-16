@@ -95,7 +95,9 @@ func TestFindOrphans(t *testing.T) {
 	mkFile(t, contentDir, "docs/diagram.svg", "svg-data")
 
 	r := NewRefIndex(t.TempDir())
-	r.UpdatePage("index", []string{"images/logo.png"})
+	// ExtractMediaRefs feeds the index with canonical (leading-slash) paths;
+	// FindOrphans normalizes filesystem-relative walk output to match.
+	r.UpdatePage("index", []string{"/images/logo.png"})
 
 	orphans, err := r.FindOrphans(contentDir)
 	if err != nil {
@@ -112,7 +114,7 @@ func TestFindOrphans_NoOrphans(t *testing.T) {
 	mkFile(t, contentDir, "page.md", "# hello")
 
 	r := NewRefIndex(t.TempDir())
-	r.UpdatePage("index", []string{"images/logo.png"})
+	r.UpdatePage("index", []string{"/images/logo.png"})
 
 	orphans, err := r.FindOrphans(contentDir)
 	if err != nil {

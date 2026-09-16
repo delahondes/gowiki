@@ -41,10 +41,24 @@ func (s *Server) buildMCPHandler() http.Handler {
 		Changelog:       s.changelog,
 		Mover:           mover,
 		RowWriter:       &mcpRowWriter{s: s},
+		Media:           s.mediaStore,
+		MediaRefs:       s.orphanDetector,
+		MediaVersions:   s.mediaVersionStore,
+		SiteBaseURL:     siteBaseURL(s),
 		ExtractUsername: UsernameFromContext,
 		RequireSummary:  s.configStore != nil && s.configStore.Get().AIAPI.RequireSummary,
 	}
 	return mcpserver.NewHandler(deps)
+}
+
+// siteBaseURL pulls the configured public origin, if any, from the config
+// store. Used by upload_attachment_instructions to render a curl command
+// with a real hostname instead of a placeholder.
+func siteBaseURL(s *Server) string {
+	if s == nil || s.configStore == nil {
+		return ""
+	}
+	return s.configStore.Get().Site.BaseURL
 }
 
 // mcpRowWriter adapts the API Server's row-write internals to the
