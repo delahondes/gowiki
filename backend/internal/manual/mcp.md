@@ -146,6 +146,7 @@ npx @modelcontextprotocol/inspector \
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page (full rewrite) — requires a summary |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption) |
+| `create_page_from_template` | Create a new page from a `{template}`-marked template. Resolves `{template-title}`/`{template-stamp}`/`{template-reviewflow}`; refuses when the template's reviewflow has open roles or when the destination exists. |
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
 | `complete_todo` | Mark a todo as done |
 | `list_database_tables` | Structured-data tables with field definitions |
@@ -215,6 +216,23 @@ Typical uses where `edit_page` is right:
 - Migrate `@@table.field@@` placeholders to `{{field}}` in template pages — one edit per placeholder, each anchored on the unique occurrence.
 
 Use `write_page` only when you truly do want to replace the whole page (creating from scratch, wholesale reorganizations).
+
+## Template stamps
+
+Templates that carry a `{template}` directive expose a dedicated creation path — `create_page_from_template` — that resolves origin metadata into the created document instead of leaving the author to write it out by hand. The version that gets stamped is **frozen at creation** (the `?v=N` link points at the template's page-version at that moment); a document from 2024 does not later claim today's form.
+
+- **`create_page_from_template(template_path, path, title, reviewflow?, summary)`** — reads the template, splits the payload from below `{template}`, resolves the three payload directives, and writes the result to `path`.
+  - `{template-title}` → the H1 heading below it is rewritten to `title`.
+  - `{template-stamp}` → `Created from template [<title>](<template_path>?v=<N>), version <tag>`. When the template has no reviewflow, the sentence reads `revision <N>` instead — the wording deliberately differs, because a wiki revision number and a reviewflow version tag name different things.
+  - `{template-reviewflow …}` → `{reviewflow …}` with defaults filled in: version defaults to `1.0`; unspecified actors inherit from the template's own `{reviewflow}`. `reviewflow` arg to this tool overrides those defaults.
+- **Refusal rules:**
+  - The source is not a template (no `{template}` marker) — `kind: "not_template"`.
+  - The template's reviewflow has open roles — `kind: "not_validated"`, with the missing role names in the message. Issuing a document from an unvalidated form contradicts the whole point of the stamp.
+  - The destination `path` already exists — `kind: "destination_exists"`.
+
+The response returns the created page's path + version AND the frozen template version, so callers can record what was issued without re-reading the page.
+
+Row-bound templates (`page_template_path` on a database table) get `{template-stamp}` resolved at row-insert time via the same rule; `{template-title}` and `{template-reviewflow}` are ignored in that path because the row supplies the title and page-bound rows carry no reviewflow of their own.
 
 ## Renaming and namespace conversion
 

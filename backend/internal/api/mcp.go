@@ -41,6 +41,7 @@ func (s *Server) buildMCPHandler() http.Handler {
 		Changelog:       s.changelog,
 		Mover:           mover,
 		RowWriter:       &mcpRowWriter{s: s},
+		TemplateCreator: &mcpTemplateCreator{s: s},
 		Media:           s.mediaStore,
 		MediaRefs:       s.orphanDetector,
 		MediaVersions:   s.mediaVersionStore,
@@ -121,3 +122,34 @@ func (w *mcpRowWriter) DeleteRowWithPage(ctx context.Context, tableName string, 
 	}
 	return result, nil
 }
+
+// mcpTemplateCreator adapts Server.createPageFromTemplate to the
+// mcpserver.TemplateCreator interface so the MCP tool and the HTTP
+// endpoint share one code path.
+type mcpTemplateCreator struct{ s *Server }
+
+func (w *mcpTemplateCreator) CreatePageFromTemplate(_ context.Context, templatePath, dstPath, title string, reviewflow map[string]string, author, summary string) (*mcpserver.TemplateCreateResult, error) {
+	res, err := w.s.createPageFromTemplate(TemplateCreateRequest{
+		TemplatePath:       templatePath,
+		Path:               dstPath,
+		Title:              title,
+		ReviewflowOverride: reviewflow,
+		Summary:            summary,
+	}, author)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpserver.TemplateCreateResult{
+		Path:               res.Path,
+		Version:            res.Version,
+		TemplatePath:       res.TemplatePath,
+		TemplateVersion:    res.TemplateVersion,
+		TemplateVersionTag: res.TemplateVersionTag,
+		Stamp:              res.Stamp,
+		ReviewflowResolved: res.ReviewflowResolved,
+	}, nil
+}
+
+// TemplateErrorKind lets mcpserver classify a create failure without
+// importing the api package.
+func (e *TemplateCreateError) TemplateErrorKind() string { return e.Kind }

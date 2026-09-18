@@ -15,6 +15,7 @@ import (
 
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
+	"gowiki/backend/internal/storage"
 )
 
 // resolvePageFolder computes a page path from a page_folder pattern and row data.
@@ -278,6 +279,19 @@ func (s *Server) buildPageContent(table *database.TableDef, row *database.Row) s
 			// Resolve {{field}} variables inside directive lines only.
 			// Regular text {{VAR}} stays unresolved for render-time expansion.
 			content = markdown.ResolveDirectiveVars(content, content)
+			// Resolve {template-stamp} — a row-bound page is a document too,
+			// and the same "which template produced this" question applies.
+			// {template-title} and {template-reviewflow} are ignored on this
+			// path per spec §2 (row supplies title, no reviewflow of its own).
+			content = markdown.ResolveTemplatePayload(content, markdown.TemplateResolveOpts{
+				Stamp: markdown.TemplateStampArgs{
+					TemplatePath:        storage.CanonicalPath(table.PageTemplatePath),
+					TemplateTitle:       markdown.ExtractTitle(tmpl.Markdown),
+					TemplatePageVersion: tmpl.Meta.Version,
+					VersionTag:          s.templateVersionTag(table.PageTemplatePath),
+				},
+				// No title / no reviewflow args on this path.
+			})
 			// Apply tag mutations (e.g. remove "tpl" tags from templates).
 			if s.configStore != nil {
 				mutations := s.configStore.Get().Tags.TemplateMutations

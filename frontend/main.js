@@ -303,6 +303,39 @@ function findLinkMarkInMarks(marks, linkType) {
   return marks.find(mark => mark.type === linkType) ?? null
 }
 
+// findMarkRangeAround returns the contiguous [from, to] range around $pos
+// covered by a mark of the given type in the current parent's inline
+// content. Returns null when $pos does not sit inside such a mark. Used by
+// the highlight toolbar button to make "click to un-highlight" work on a
+// bare caret (toggleMark on an empty selection only toggles PM stored
+// marks — invisible to the user).
+function findMarkRangeAround($pos, markType) {
+  const parent = $pos.parent
+  const parentStart = $pos.start()
+
+  let childInfo = parent.childAfter($pos.parentOffset)
+  if (!childInfo.node && $pos.parentOffset > 0) {
+    childInfo = parent.childBefore($pos.parentOffset)
+  }
+  if (!childInfo.node) return null
+  if (!markType.isInSet(childInfo.node.marks)) return null
+
+  let from = parentStart + childInfo.offset
+  let to = from + childInfo.node.nodeSize
+
+  for (let i = childInfo.index - 1; i >= 0; i--) {
+    const prev = parent.child(i)
+    if (!markType.isInSet(prev.marks)) break
+    from -= prev.nodeSize
+  }
+  for (let i = childInfo.index + 1; i < parent.childCount; i++) {
+    const next = parent.child(i)
+    if (!markType.isInSet(next.marks)) break
+    to += next.nodeSize
+  }
+  return { from, to }
+}
+
 function findLinkRangeAtPosition(doc, linkType, pos) {
   const $from = doc.resolve(pos)
   const parent = $from.parent
@@ -5394,9 +5427,39 @@ function buildMenubar() {
     hlBtn.addEventListener("mousedown", e => {
       e.preventDefault()
       if (editMode === "visual" && editorView) {
-        toggleMark(schema.marks.highlight)(editorView.state, editorView.dispatch)
+        const state = editorView.state
+        const markType = schema.marks.highlight
+        const sel = state.selection
+        // When the caret is inside a highlighted run with no range selected,
+        // toggleMark only toggles PM's stored marks — nothing changes on
+        // screen. Users expect "click to un-highlight" to remove the whole
+        // run, so expand the caret to the mark's contiguous range first.
+        if (sel.empty && markType.isInSet(sel.$from.marks())) {
+          const range = findMarkRangeAround(sel.$from, markType)
+          if (range) {
+            editorView.dispatch(state.tr.removeMark(range.from, range.to, markType))
+            editorView.focus()
+            return
+          }
+        }
+        toggleMark(markType)(state, editorView.dispatch)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
+        // Unwrap when the selection is already ==-wrapped; otherwise wrap.
+        // Recognises both plain and coloured forms: ==text== and =={color=…}text==.
+        const s = rawEditor.selectionStart
+        const e2 = rawEditor.selectionEnd
+        if (s !== e2) {
+          const sel = rawEditor.value.substring(s, e2)
+          const m = sel.match(/^==(?:\{[^}]*\})?([\s\S]*)==$/)
+          if (m) {
+            rawEditor.focus()
+            rawEditor.setSelectionRange(s, e2)
+            rawInsertText(rawEditor, m[1])
+            rawEditor.setSelectionRange(s, s + m[1].length)
+            return
+          }
+        }
         rawWrapSelection(rawEditor, "==", "==")
       }
     })

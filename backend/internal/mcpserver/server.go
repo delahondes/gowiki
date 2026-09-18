@@ -96,6 +96,33 @@ type RowWriter interface {
 	DeleteRowWithPage(ctx context.Context, tableName string, rowID int, author string) (*RowDeleteResult, error)
 }
 
+// TemplateCreator produces a new page from a template. Implemented in
+// api/template_create.go over the Server so HTTP + MCP go through the same
+// creation path.
+type TemplateCreator interface {
+	CreatePageFromTemplate(ctx context.Context, templatePath, dstPath, title string, reviewflow map[string]string, author, summary string) (*TemplateCreateResult, error)
+}
+
+// TemplateCreateResult mirrors api.TemplateCreateResult so the MCP layer
+// doesn't need to import api.
+type TemplateCreateResult struct {
+	Path               string `json:"path"`
+	Version            int64  `json:"version"`
+	TemplatePath       string `json:"template_path"`
+	TemplateVersion    int64  `json:"template_version"`
+	TemplateVersionTag string `json:"template_version_tag,omitempty"`
+	Stamp              string `json:"stamp"`
+	ReviewflowResolved string `json:"reviewflow_resolved,omitempty"`
+}
+
+// TemplateCreateKindedError is a caller-facing error whose Kind lets the
+// MCP handler produce a targeted refusal message. The api layer's
+// *TemplateCreateError implements this — we don't import api here.
+type TemplateCreateKindedError interface {
+	error
+	TemplateErrorKind() string
+}
+
 // ChangelogReader exposes the append-only global change log. Used by
 // list_recent_changes for cross-page audit queries.
 type ChangelogReader interface {
@@ -162,6 +189,7 @@ type Deps struct {
 	Changelog         ChangelogReader
 	Mover             PageMover
 	RowWriter         RowWriter
+	TemplateCreator   TemplateCreator
 	Media             MediaStore
 	MediaRefs         ReferenceIndex
 	MediaVersions     MediaVersionReader

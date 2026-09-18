@@ -323,6 +323,14 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Post("/api/move/*", s.handleMovePage)
 	})
 
+	// Template creation — auth-only at the route level; the handler
+	// checks ACL against the destination path in the request body
+	// (which requirePermission cannot inspect).
+	r.Group(func(r chi.Router) {
+		r.Use(s.requireAuth)
+		r.Post("/api/pages/from-template", s.handleCreatePageFromTemplate)
+	})
+
 	// Delete endpoints — require auth + ACL "delete" permission.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireAuth)

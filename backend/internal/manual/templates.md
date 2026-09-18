@@ -110,3 +110,38 @@ Visit date: {{visit_date}}
 ```
 
 These are described in detail in [Database](./database).
+
+## 1. Regulatory templates and the stamp directives
+
+For documents that need to record which template produced them and in which version — the ISO 13485 §4.2.4 traceability question — a second, complementary template shape exists. Instead of `_template*` filename dispatch, these are ordinary pages that carry a `{template}` directive; the wiki performs the copy itself and freezes the template's version into the created document at the moment of the copy.
+
+Four directives make this up. They live alongside the tracking block on a template page and get resolved at document creation:
+
+| Directive | Where it lives | Fate at creation |
+| --- | --- | --- |
+| `{template}` | Template only | Not copied. Marks where the copiable payload begins, and carries the **Create document** action. |
+| `{template-title}` | Template and document | Prefixes the heading that becomes the document's title. Resolved to that heading, with the pattern replaced by the user's completed title. |
+| `{template-stamp}` | Template and document | Replaced by the origin sentence (`Created from template [Title](/path?v=N), version 1.0`). |
+| `{template-reviewflow …}` | Template only | Replaced by `{reviewflow …}` in the created document — actors default to the template's own, version defaults to `1.0`. |
+
+### The copy is performed by the wiki
+
+Every `{template-*}` directive above the horizontal rule in the old hand-copy model is replaced by a single click on the **Create document** button rendered next to the `{template}` marker. The dialog asks for a destination path and title, offers optional reviewflow overrides, and refuses upfront when the template's own reviewflow isn't fully validated. Programmatic callers get the same guarantee via the MCP `create_page_from_template` tool.
+
+### Behaviour we rely on
+
+- **The version is frozen at creation.** The `?v=N` link in the stamp points at the template's page-version *at that moment*. A document from 2024 keeps announcing the form as it stood in 2024, no matter what the template does afterwards. The reviewflow VERSIONTAG is used when present (`, version 1.0`); a template without a reviewflow falls back to the raw page revision (`, revision N`) — the wording deliberately differs so the two numbers don't look alike.
+- **A stamp outside a template is loud.** If you paste a `{template-stamp}` onto a page that has no `{template}` marker, it renders as a red error rather than silently. The failure would otherwise be caught at audit rather than at writing time.
+- **Templates without a reviewflow are fine.** Some registers issue documents without a review-flow cycle; `{template}`, `{template-title}` and `{template-stamp}` work normally in that case, and `{template-reviewflow}` is simply omitted.
+- **Row-bound-page templates also get the stamp.** A page created by inserting a row into a database table with a `page_template_path` inherits the same `{template-stamp}` resolution — the row-bound-page template gets stamped with its current page version at row-insert time. `{template-title}` and `{template-reviewflow}` are ignored on that path (the row supplies the title, and row-bound pages carry no reviewflow of their own).
+
+### Migrating an existing template
+
+Templates in a QMS that follow the hand-copy convention today can be converted mechanically:
+
+1. Replace the horizontal rule that separates the tracking block from the payload with `{template}`.
+2. Replace the hand-written "Source template: …" block with `{template-stamp}`.
+3. Replace the escaped `\{reviewflow …\}` on the payload side with `{template-reviewflow}` (arguments are optional — defaults inherit the template's own reviewflow).
+4. Add `{template-title}` on the line just above the payload's H1 heading.
+
+Nothing in the resulting template needs maintaining by hand: version numbers, actor lists and origin sentences are all derived at creation time from the template's current state.

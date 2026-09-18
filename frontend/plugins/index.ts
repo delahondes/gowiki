@@ -12,6 +12,7 @@ import { reviewflowLinkPlugin } from "./reviewflowlink"
 import { versionLinkPlugin } from "./versionlink"
 import { changesPlugin } from "./changes"
 import { favoritesPlugin } from "./favorites"
+import { templatePlugin } from "./template"
 import { commentPlugin } from "./comment"
 import { spoilerPlugin } from "./spoiler"
 import { chartPlugin } from "./chart"
@@ -40,6 +41,7 @@ export const plugins: Plugin[] = [
   versionLinkPlugin,
   changesPlugin,
   favoritesPlugin,
+  templatePlugin,
   commentPlugin,
   spoilerPlugin,
   chartPlugin,
