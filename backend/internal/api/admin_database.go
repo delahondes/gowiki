@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -376,7 +378,11 @@ func (s *Server) handleCreateDatabaseField(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, f)
 }
 
-// handleUpdateDatabaseField updates a field definition.
+// handleUpdateDatabaseField updates a field definition. Standard fields
+// (label, required, default, display_order, placeholder, foreign_key,
+// display_column, enum_values) always. `name` and `type` are accepted too,
+// and honored only when the underlying data table is empty — otherwise the
+// call returns 409 with a clear message.
 // PUT /api/admin/database/tables/{id}/fields/{fid}
 func (s *Server) handleUpdateDatabaseField(w http.ResponseWriter, r *http.Request) {
 	if s.schemaStore == nil {
@@ -393,14 +399,86 @@ func (s *Server) handleUpdateDatabaseField(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid field id")
 		return
 	}
+	// Read into a map so we can tell "field omitted" from "field set to empty".
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Decode a strongly-typed copy for the standard fields.
 	var f database.FieldDef
-	if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+	body, _ := json.Marshal(raw)
+	if err := json.Unmarshal(body, &f); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	f.ID = fid
 	f.TableID = tableID
 	username := UsernameFromContext(r.Context())
+
+	// Load current definition so metadata update knows type/name.
+	current, err := s.schemaStore.GetTable(r.Context(), tableID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "table not found")
+		return
+	}
+	var existing *database.FieldDef
+	for i := range current.Fields {
+		if current.Fields[i].ID == fid {
+			existing = &current.Fields[i]
+			break
+		}
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "field not found")
+		return
+	}
+
+	// Optional rename first (schema-level side effect).
+	if newNameRaw, ok := raw["name"]; ok {
+		var newName string
+		if err := json.Unmarshal(newNameRaw, &newName); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid name")
+			return
+		}
+		newName = strings.TrimSpace(newName)
+		if newName != "" && newName != existing.Name {
+			if err := s.schemaStore.RenameField(r.Context(), fid, newName, username); err != nil {
+				if errors.Is(err, database.ErrTableNotEmpty) {
+					writeError(w, http.StatusConflict, "cannot rename field: table has active rows")
+					return
+				}
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			existing.Name = newName
+		}
+	}
+
+	// Optional retype next.
+	if newTypeRaw, ok := raw["type"]; ok {
+		var newType string
+		if err := json.Unmarshal(newTypeRaw, &newType); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid type")
+			return
+		}
+		newType = strings.TrimSpace(newType)
+		if newType != "" && newType != existing.Type {
+			if err := s.schemaStore.RetypeField(r.Context(), fid, newType, username); err != nil {
+				if errors.Is(err, database.ErrTableNotEmpty) {
+					writeError(w, http.StatusConflict, "cannot change field type: table has active rows")
+					return
+				}
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			existing.Type = newType
+		}
+	}
+
+	// Preserve immutable identity for the metadata update.
+	f.Name = existing.Name
+	f.Type = existing.Type
 	if err := s.schemaStore.UpdateField(r.Context(), &f, username); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -408,8 +486,13 @@ func (s *Server) handleUpdateDatabaseField(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, f)
 }
 
-// handleArchiveDatabaseField soft-deletes a field.
+// handleArchiveDatabaseField archives a field by default; pass ?hard=true to
+// hard-delete the storage (SQL column, junction table or sequence). Hard
+// delete requires an empty table — returns 409 otherwise. Historical
+// row-bound pages in the attic keep their inline field values and are
+// rendered by the row NodeView with a "(removed)" ghost marker.
 // DELETE /api/admin/database/tables/{id}/fields/{fid}
+// DELETE /api/admin/database/tables/{id}/fields/{fid}?hard=true
 func (s *Server) handleArchiveDatabaseField(w http.ResponseWriter, r *http.Request) {
 	if s.schemaStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "database not connected")
@@ -421,11 +504,51 @@ func (s *Server) handleArchiveDatabaseField(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	username := UsernameFromContext(r.Context())
+	hard := strings.EqualFold(r.URL.Query().Get("hard"), "true")
+	if hard {
+		if err := s.schemaStore.DeleteField(r.Context(), fid, username); err != nil {
+			if errors.Is(err, database.ErrTableNotEmpty) {
+				writeError(w, http.StatusConflict, "cannot delete field: table has active rows")
+				return
+			}
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": "ok"})
+		return
+	}
 	if err := s.schemaStore.ArchiveField(r.Context(), fid, username); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"archived": "ok"})
+}
+
+// handleCountDatabaseRows returns the current active-row count for a table.
+// Used by the admin UI to decide whether destructive field operations are
+// available.
+// GET /api/admin/database/tables/{id}/rows/count
+func (s *Server) handleCountDatabaseRows(w http.ResponseWriter, r *http.Request) {
+	if s.schemaStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "database not connected")
+		return
+	}
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid table id")
+		return
+	}
+	t, err := s.schemaStore.GetTable(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	n, err := s.schemaStore.CountRows(r.Context(), t.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": n})
 }
 
 // handleDatabaseTableHistory returns schema change history for a table.

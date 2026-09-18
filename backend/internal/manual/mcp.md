@@ -149,14 +149,15 @@ npx @modelcontextprotocol/inspector \
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
 | `complete_todo` | Mark a todo as done |
 | `list_database_tables` | Structured-data tables with field definitions |
-| `query_database_rows` | Query rows from a structured-data table (accepts `filter=[…]`; use `@null` as the value for IS NULL / IS NOT NULL tests) |
+| `query_database_rows` | Query rows from a structured-data table (accepts `filter=[…]`; use `@null` for IS NULL tests). Pass `pivot_rows`/`pivot_cols`/`pivot_cell` for a cross-tabulation instead of a flat row list. |
 | `insert_database_row` | Insert a row (page-bound tables also get their wiki page created) |
 | `delete_database_row` | Delete a row (page-bound rows also have their page removed; refuses when other rows still reference this one — pass `force=true` to override; page history stays in the attic) |
 | `delete_page` | Delete a page (archived to attic; row-bound pages also drop their DB row) |
 | `create_database_table` | Create a new structured-data table (admin only) |
 | `create_database_field` | Add a field to an existing table (admin only) |
 | `update_database_table` | Update a table's metadata — label, page_folder, sort defaults, template (admin only, non-destructive) |
-| `update_database_field` | Update a field's metadata — label, required, default, placeholder, enum_values (admin only; no rename or type change) |
+| `update_database_field` | Update a field's metadata; on an empty table also rename (`new_name`) or retype (`new_type`) — admin only |
+| `delete_database_field` | Hard-delete a field (drops the SQL column); refused when the table has active rows — admin only |
 | `move_page` | Rename a page to a new path (updates incoming links; supports `dry_run`) |
 | `convert_page_to_namespace_index` | Turn a leaf page (`foo`) into a namespace index (`foo/`) — unblocks writes under it |
 | `convert_page_to_regular_page` | Turn an empty namespace index (`foo/`) back into a leaf page (`foo`) |
@@ -238,6 +239,35 @@ All three refuse cleanly when the page has an active edit lock or draft (`ErrPag
 
 Typical clean-up flow for a test round-trip: `insert_database_row` → verify the created page — `read_pages_batch` on the returned `page_path` — → `delete_database_row(row.id)`.
 
+## Pivot queries — cross-tabulation on `{database-query}`
+
+Some registers are naturally read as a matrix: one axis is a released version, the other a software component, and the cell is the version of that component embedded in that release. Storing that as a wide table means schema changes every time a dependency appears; storing it normalized ("one row per (release, component)") means the register is unreadable as a list of ninety rows. Pivot mode makes the normalized shape render as the matrix.
+
+**Syntax** — pass any `pivot_*` parameter and the directive (or the `query_database_rows` MCP tool) switches from a flat row list to a cross-tabulation:
+
+```markdown
+{database-query table=release_component pivot_rows=release pivot_cols=component
+                pivot_cell=version filter="component.kind=SOUP" sort=release order=desc}
+```
+
+| Parameter | Required | Description |
+|---|---|---|
+| `pivot_rows` | yes | Field whose distinct values become rows |
+| `pivot_cols` | yes | Field whose distinct values become columns |
+| `pivot_cell` | yes | Field rendered inside each cell (ignored for `pivot_agg=count`) |
+| `pivot_agg` | no | Collision policy: `single` (default; flags collisions), `list`, `count`, `first`, `last` |
+| `pivot_empty` | no | Text for a cell with no matching row. Default empty |
+| `pivot_cols_sort` | no | Field of the column axis's target table used to order columns |
+| `pivot_cols_max` | no | Refusal threshold on distinct column count. Default 40 |
+
+`sort` / `order` apply to the **row axis**. `fields` and `limit` are ignored — the column set comes from the data.
+
+**Loud failure by design.** An unknown field in `pivot_rows`, `pivot_cols`, or `pivot_cell` refuses with a `400` and a `PivotError` naming the missing field. Cell collisions under `pivot_agg=single` render both values with a warning tint rather than silently picking one. Beyond `pivot_cols_max` distinct columns the pivot refuses instead of truncating — a silently-truncated matrix would read as complete.
+
+**Links follow the existing convention.** Axis labels that resolve to page-bound rows render as links; cells whose value resolves to a page-bound row do too. Same as `%field%` in normal mode.
+
+**Out of scope:** aggregations beyond `pivot_agg`; more than two axes; editing from the pivot view. The pivot is a view — storage stays normalized, and CSV export stays row-oriented.
+
 ## Attachments
 
 Attachments are non-`.md` files under `data/content/`, referenced from pages via `./file.ext` (same namespace) or absolute `/path/to/file.ext` links. The four tools cover the full lifecycle:
@@ -277,9 +307,10 @@ Four tools let an admin bootstrap and evolve structured-data tables from an agen
 - **`create_database_table`** — new table with name, label, and optional `page_folder`/`page_template_path`/sort defaults. The table's `name` and each field's `name`+`type` are **immutable** — pick carefully. `page_folder` may include `@field` substitution (e.g. `/regulatory/qms/soft/server/@server_name`).
 - **`create_database_field`** — add a field. Types: `text`, `integer`, `float`, `boolean`, `date`, `datetime`, `page_link`, `enum`, `multi_enum`, `auto_increment`, `image`, `color`, `tag`, `lookup`, `user`. `enum_values` for `enum`/`multi_enum`; `foreign_key` for `tag`/`lookup`; `display_column` for `lookup`.
 - **`update_database_table`** — non-destructive: change label, `page_folder`, template, sort defaults. Only supplied fields are updated. No renames.
-- **`update_database_field`** — non-destructive: change label, `required`, `default_value`, `display_order`, `placeholder`, `enum_values`. No rename or type change; delete a field via the admin UI.
+- **`update_database_field`** — always accepts metadata (label, `required`, `default_value`, `display_order`, `placeholder`, `enum_values`, `foreign_key`, `display_column`). On an **empty table** (zero active rows) it also accepts `new_name` (rename the SQL column) and `new_type` (drop and recreate the column with a new type). On a table with rows, `new_name`/`new_type` are refused with a clear message — clear the table first via `delete_database_row`.
+- **`delete_database_field`** — hard-deletes a field: drops the SQL column (or junction table for `multi_enum` / sequence for `auto_increment`), removes the field row, records history. Requires an empty table. Historical row-bound pages that still reference the deleted field continue to render — their inline value stays in the page attic, and the row NodeView marks the label with a muted `(removed)` suffix.
 
-Every call is gated behind the caller's membership in the `admin` group — non-admin users get `access denied: schema management is admin-only`. All changes are recorded in `database_schema_history`. To delete a table or a field, use the web admin UI: that path preserves the confirmation prompts and is where destructive operations belong.
+Every call is gated behind the caller's membership in the `admin` group — non-admin users get `access denied: schema management is admin-only`. All changes are recorded in `database_schema_history`. Table deletion still lives in the web admin UI.
 
 Typical bootstrap flow for a new SOP record: `create_database_table(name=…, label=…, page_folder=…)` → one `create_database_field` per column → write the record page with `{database-query table=NAME}` and `{database-newrow table=NAME}` directives via `write_page`.
 

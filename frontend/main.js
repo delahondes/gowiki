@@ -163,6 +163,9 @@ let slidesInsertCommand = null
 let todoInsertCommand = null
 let todoListInsertCommand = null
 let currentUserThemePref = "" // "light" | "dark" | "auto" | ""
+// Set of favorite page paths (canonical: leading slash, trailing slash for
+// namespace indexes). Populated on login, mutated by toggleFavoriteCurrent.
+const currentFavorites = new Set()
 let themeAllowUserOverride = true
 let todoCalendarInsertCommand = null
 let publicationInsertCommand = null
@@ -6698,6 +6701,8 @@ const actionIcons = {
   lock: "M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2ZM7 11V7a5 5 0 0 1 10 0v4",
   // Hourglass (main, shifted up-left) + small floppy (nudged down-right)
   saveDraft: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
+  // Five-point star (outlined by stroke; filled state via CSS)
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z",
   ai: null, // text-only button, no SVG path
 }
 
@@ -6958,8 +6963,27 @@ function renderActions() {
 
     actionsRoot.appendChild(makeActionSep())
 
+    if (currentUser && !isNewPage) {
+      const canonical = canonicalFavoritePath(pagePath)
+      const favored = currentFavorites.has(canonical)
+      const starBtn = makeActionIconBtn(
+        "star",
+        favored ? "Remove from favorites" : "Add to favorites",
+        () => void toggleFavoriteCurrent(),
+      )
+      starBtn.setAttribute("data-gowiki-star", "1")
+      if (favored) starBtn.classList.add("gowiki-action-btn--filled")
+      actionsRoot.appendChild(starBtn)
+    }
     actionsRoot.appendChild(makeActionIconBtn("newPage", "New page", () => void promptNewPage()))
-    actionsRoot.appendChild(makeActionIconBtn("siteMap", "Site map", () => { window.location.href = "/_sitemap" }))
+    actionsRoot.appendChild(makeActionIconBtn("siteMap", "Site map", () => {
+      // Hand the sitemap the current path so it can auto-expand ancestor
+      // namespaces. Falls back to a fully-collapsed tree when the param is
+      // absent (direct navigation from the URL bar).
+      const from = pagePath ? "/" + pagePath.replace(/^\/+/, "") : ""
+      const qs = from ? `?from=${encodeURIComponent(from)}` : ""
+      window.location.href = `/_sitemap${qs}`
+    }))
     actionsRoot.appendChild(makeActionIconBtn("exportPdf", "Export PDF", () => window.open(`/api/export/pdf/${pagePath}`, "_blank")))
 
     if (currentUser && !isNewPage) {
@@ -8178,9 +8202,56 @@ async function checkAuth() {
         applyTheme(resolveTheme(currentUserThemePref, adminDefault))
       }
     } catch { /* best effort */ }
+
+    // Prime the favorites set — the star button and any {favorites} view
+    // read from this. A network hiccup leaves the set empty, which is fine.
+    try {
+      const favResp = await fetch("/api/auth/me/favorites")
+      if (favResp.ok) {
+        const data = await favResp.json()
+        currentFavorites.clear()
+        for (const f of data.favorites || []) {
+          if (f && f.path) currentFavorites.add(f.path)
+        }
+      }
+    } catch { /* best effort */ }
   }
 
   renderBannerUser()
+}
+
+// Canonical page-path form for favorites: leading slash, trailing slash on
+// namespace indexes, "/index" segments stripped. Handed to the toggle API
+// and used as the local cache key.
+function canonicalFavoritePath(rawPagePath) {
+  let p = (rawPagePath || "").trim()
+  if (!p) return "/"
+  if (!p.startsWith("/")) p = "/" + p
+  if (p === "/" || p === "/index") return "/"
+  if (p.endsWith("/index")) return p.slice(0, -"index".length)
+  return p
+}
+
+async function toggleFavoriteCurrent() {
+  if (!currentUser) return
+  const p = canonicalFavoritePath(pagePath)
+  try {
+    const resp = await fetch("/api/auth/me/favorites/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: p }),
+    })
+    if (!resp.ok) return
+    const data = await resp.json()
+    if (data.favorited) currentFavorites.add(p)
+    else currentFavorites.delete(p)
+    window.dispatchEvent(new CustomEvent("gowiki:favorites-changed"))
+    // Refresh the star button's filled state in the current toolbar.
+    for (const btn of document.querySelectorAll("[data-gowiki-star]")) {
+      btn.classList.toggle("gowiki-action-btn--filled", currentFavorites.has(p))
+      btn.title = currentFavorites.has(p) ? "Remove from favorites" : "Add to favorites"
+    }
+  } catch { /* best effort */ }
 }
 
 function renderBannerUser() {
@@ -9459,6 +9530,28 @@ async function renderSitemapPage() {
   title.textContent = "Site map"
   container.appendChild(title)
 
+  // Parse ?from=… and build the set of ancestor namespaces to auto-expand.
+  // /regulatory/suivi/livrables → we want to open regulatory and suivi (but
+  // not livrables — it's a leaf, not a namespace). The set contains the
+  // NAMESPACE paths as they appear in the sitemap tree (no trailing slash,
+  // leading slash present).
+  const fromRaw = new URLSearchParams(window.location.search).get("from") || ""
+  const openNs = new Set()
+  const targetLeaf = fromRaw
+  if (fromRaw && fromRaw !== "/") {
+    const parts = fromRaw.replace(/^\/+/, "").replace(/\/+$/, "").split("/").filter(Boolean)
+    // For a page /a/b/c the ancestor namespaces are /a and /a/b. If the URL
+    // ended with a slash (a namespace index page), the last segment is also
+    // an ancestor that should be opened.
+    const isNs = fromRaw.endsWith("/")
+    const upto = isNs ? parts.length : parts.length - 1
+    let acc = ""
+    for (let i = 0; i < upto; i++) {
+      acc += "/" + parts[i]
+      openNs.add(acc)
+    }
+  }
+
   try {
     const resp = await fetch("/api/sitemap")
     if (!resp.ok) throw new Error("Failed to load sitemap")
@@ -9498,10 +9591,13 @@ async function renderSitemapPage() {
         // If the namespace has an index page, treat the namespace as having a page.
         const effectiveHasPage = node.has_page || !!nsIndex
 
+        // Auto-expand ancestors of the referring page (?from=\u2026).
+        const openInitially = isRoot || openNs.has(node.path)
+
         if (hasChildren) {
           const toggle = document.createElement("span")
           toggle.className = "gowiki-sitemap-toggle"
-          toggle.textContent = isRoot ? "\u25BE" : "\u25B8"
+          toggle.textContent = openInitially ? "\u25BE" : "\u25B8"
           toggle.addEventListener("click", () => {
             const childUl = li.querySelector(":scope > ul")
             if (childUl) {
@@ -9553,9 +9649,15 @@ async function renderSitemapPage() {
 
         if (hasChildren) {
           const childUl = document.createElement("ul")
-          if (!isRoot) childUl.style.display = "none"
+          if (!openInitially) childUl.style.display = "none"
           buildTree(node.children, childUl, depth + 1)
           li.appendChild(childUl)
+        }
+
+        // Highlight the row that matches the referring page so the user's
+        // eye lands where they came from.
+        if (targetLeaf && (node.path === targetLeaf || node.path + "/" === targetLeaf)) {
+          row.classList.add("gowiki-sitemap-current")
         }
         parentUl.appendChild(li)
       }
@@ -11766,24 +11868,45 @@ async function showDatabaseFieldsModal(tableId, tableName) {
       return
     }
     const table = await resp.json()
-    const fields = (table.fields || []).filter(f => !f.archived_at)
+    // Fetch current active-row count; drives whether name/type/hard-delete
+    // are available. An empty table lets an admin fully edit any field.
+    let rowCount = 0
+    try {
+      const cr = await authFetch(`/api/admin/database/tables/${tableId}/rows/count`)
+      if (cr.ok) rowCount = (await cr.json()).count || 0
+    } catch { /* keep default 0 */ }
 
     async function refreshFields() {
       body.innerHTML = ""
       const r = await authFetch(`/api/admin/database/tables/${tableId}`)
       if (!r.ok) return
       const t = await r.json()
+      try {
+        const cr = await authFetch(`/api/admin/database/tables/${tableId}/rows/count`)
+        if (cr.ok) rowCount = (await cr.json()).count || 0
+      } catch { /* keep last */ }
       renderFieldList(t.fields || [])
     }
 
     function renderFieldList(allFields) {
       const active = allFields.filter(f => !f.archived_at)
+      const empty = rowCount === 0
+
+      // Status banner telling the admin the mode.
+      const banner = document.createElement("div")
+      banner.style.marginBottom = "8px"
+      banner.style.fontSize = "12px"
+      banner.style.color = "var(--gw-color-muted)"
+      banner.textContent = empty
+        ? "Table is empty — fields can be renamed, retyped, or fully deleted."
+        : `Table has ${rowCount} active row${rowCount === 1 ? "" : "s"} — field name and type are immutable; use Archive to hide a field, or delete all rows first for a full edit.`
+      body.appendChild(banner)
 
       if (active.length === 0) {
-        const empty = document.createElement("div")
-        empty.style.color = "#636e72"
-        empty.textContent = "No fields defined."
-        body.appendChild(empty)
+        const emptyMsg = document.createElement("div")
+        emptyMsg.style.color = "#636e72"
+        emptyMsg.textContent = "No fields defined."
+        body.appendChild(emptyMsg)
       } else {
         const tbl = document.createElement("table")
         tbl.className = "gowiki-admin-table"
@@ -11799,7 +11922,7 @@ async function showDatabaseFieldsModal(tableId, tableName) {
           editBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm"
           editBtn.textContent = "Edit"
           editBtn.addEventListener("click", async () => {
-            await showDatabaseFieldEditModal(tableId, f)
+            await showDatabaseFieldEditModal(tableId, f, empty)
             await refreshFields()
           })
 
@@ -11814,6 +11937,24 @@ async function showDatabaseFieldsModal(tableId, tableName) {
 
           actionsTd.appendChild(editBtn)
           actionsTd.appendChild(archiveBtn)
+
+          if (empty) {
+            const deleteBtn = document.createElement("button")
+            deleteBtn.className = "gowiki-admin-btn gowiki-admin-btn-sm gowiki-admin-btn-danger"
+            deleteBtn.textContent = "Delete"
+            deleteBtn.title = "Hard-delete: drops the SQL column and removes the field row."
+            deleteBtn.addEventListener("click", async () => {
+              if (!confirm(`Permanently delete field "${f.name}"? The SQL column will be dropped and the field row removed. Any historical row-bound pages will keep the value as a "(removed)" ghost entry.`)) return
+              const r = await authFetch(`/api/admin/database/tables/${tableId}/fields/${f.id}?hard=true`, { method: "DELETE" })
+              if (!r.ok) {
+                const err = await r.json().catch(() => ({}))
+                alert(err.error || "Failed to delete field")
+              }
+              await refreshFields()
+            })
+            actionsTd.appendChild(deleteBtn)
+          }
+
           tbody.appendChild(tr)
         }
         tbl.appendChild(tbody)
@@ -11826,7 +11967,7 @@ async function showDatabaseFieldsModal(tableId, tableName) {
       addBtn.textContent = "Add Field"
       addBtn.style.marginTop = "12px"
       addBtn.addEventListener("click", async () => {
-        await showDatabaseFieldEditModal(tableId, null)
+        await showDatabaseFieldEditModal(tableId, null, empty)
         await refreshFields()
       })
       body.appendChild(addBtn)
@@ -11845,7 +11986,7 @@ async function showDatabaseFieldsModal(tableId, tableName) {
   })
 }
 
-async function showDatabaseFieldEditModal(tableId, existing) {
+async function showDatabaseFieldEditModal(tableId, existing, tableIsEmpty) {
   const fieldTypes = [
     { value: "text", label: "Text" },
     { value: "integer", label: "Integer" },
@@ -11865,10 +12006,14 @@ async function showDatabaseFieldEditModal(tableId, existing) {
 
   return showAdminModal(existing ? `Edit Field: ${existing.name}` : "Add Field", (body, close, showError) => {
     const nameInput = adminFormField(body, "Name (lowercase, underscores)", "text", existing ? existing.name : "")
-    if (existing) nameInput.readOnly = true
+    // Name is immutable when there are rows. On an empty table it can be
+    // renamed — the SQL column is renamed alongside.
+    if (existing && !tableIsEmpty) nameInput.readOnly = true
     const labelInput = adminFormField(body, "Label", "text", existing ? existing.label : "")
     const typeSelect = adminFormSelect(body, "Type", fieldTypes, existing ? existing.type : "text")
-    if (existing) typeSelect.disabled = true
+    // Type is immutable on non-empty tables; empty tables allow drop-and-
+    // recreate.
+    if (existing && !tableIsEmpty) typeSelect.disabled = true
     const requiredSelect = adminFormSelect(body, "Required", [
       { value: "false", label: "No" },
       { value: "true", label: "Yes" },

@@ -864,8 +864,9 @@ export function formulaColorPlugin(schema: Schema): PMPlugin {
                 if (para.childCount > 0 && para.child(0).type === schema.nodes.formula_display) {
                   const result = String(para.child(0).attrs.result ?? "")
                   const isError = result.startsWith("#")
+                  const isHeaderCell = cell.type === schema.nodes.table_header
 
-                  if (!isError && !cell.attrs.cellColor) {
+                  if (!isError && !cell.attrs.cellColor && !isHeaderCell) {
                     const colProps = resolveColumnProps(columns, colIdx + 1)
                     if (colProps?.color) {
                       const rules = parseColorRules(colProps.color)

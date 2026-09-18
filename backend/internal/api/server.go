@@ -240,11 +240,20 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	r.Post("/api/auth/login", s.handleLogin)
 	r.Post("/api/auth/logout", s.handleLogout)
 	r.Get("/api/auth/me", s.handleMe)
-	r.Get("/api/auth/me/preferences", s.handleGetMePreferences)
-	r.Put("/api/auth/me/preferences", s.handlePutMePreferences)
 	r.Get("/api/auth/providers", s.handleAuthProviders)
 	r.Get("/api/auth/oauth/login", s.handleOAuthLogin)
 	r.Get("/api/auth/oauth/callback", s.handleOAuthCallback)
+
+	// Per-user "me" endpoints — need the session cookie or bearer token to
+	// resolve into a username, so they go through optionalAuth (the handlers
+	// themselves 401 when unauthenticated).
+	r.Group(func(r chi.Router) {
+		r.Use(s.optionalAuth)
+		r.Get("/api/auth/me/preferences", s.handleGetMePreferences)
+		r.Put("/api/auth/me/preferences", s.handlePutMePreferences)
+		r.Get("/api/auth/me/favorites", s.handleGetMeFavorites)
+		r.Post("/api/auth/me/favorites/toggle", s.handleToggleMeFavorite)
+	})
 
 	r.Get("/api/health", s.handleHealth)
 	r.Get("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -364,6 +373,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Post("/api/admin/database/tables/{id}/fields", s.handleCreateDatabaseField)
 		r.Put("/api/admin/database/tables/{id}/fields/{fid}", s.handleUpdateDatabaseField)
 		r.Delete("/api/admin/database/tables/{id}/fields/{fid}", s.handleArchiveDatabaseField)
+		r.Get("/api/admin/database/tables/{id}/rows/count", s.handleCountDatabaseRows)
 		r.Get("/api/admin/database/tables/{id}/history", s.handleDatabaseTableHistory)
 	})
 

@@ -34,6 +34,16 @@ type User struct {
 	// ThemePreference is the user's chosen theme: "light", "dark", "auto",
 	// or "" when unset (falls back to the wiki's Themes.Default).
 	ThemePreference string `json:"theme_preference,omitempty"`
+	// Favorites is the user's saved page bookmarks — ordered by insertion so
+	// the {favorites} directive can render "most recently added first" without
+	// re-sorting on every read.
+	Favorites []Favorite `json:"favorites,omitempty"`
+}
+
+// Favorite is one entry in a user's favorites list.
+type Favorite struct {
+	Path    string `json:"path"`
+	AddedAt string `json:"added_at"`
 }
 
 // EffectiveGroups returns the union of local Groups and OAuthGroups.
@@ -380,4 +390,52 @@ func (s *UserStore) UpdateThemePreference(username, pref string) error {
 		}
 	}
 	return ErrUserNotFound
+}
+
+// GetFavorites returns the user's favorites list, most-recently-added first.
+// Returns an empty slice (never nil) for a user with no favorites.
+func (s *UserStore) GetFavorites(username string) ([]Favorite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.users {
+		if u.Username == username {
+			out := make([]Favorite, len(u.Favorites))
+			// Reverse so most recent comes first — internal storage is
+			// append-order (oldest first) so migrations/inspection stay simple.
+			for i, f := range u.Favorites {
+				out[len(u.Favorites)-1-i] = f
+			}
+			return out, nil
+		}
+	}
+	return nil, ErrUserNotFound
+}
+
+// ToggleFavorite adds the path to the user's favorites if absent, removes it
+// if present. Returns the new state (true = now favorited).
+func (s *UserStore) ToggleFavorite(username, path string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, u := range s.users {
+		if u.Username == username {
+			for j, f := range u.Favorites {
+				if f.Path == path {
+					s.users[i].Favorites = append(u.Favorites[:j], u.Favorites[j+1:]...)
+					if err := s.saveLocked(); err != nil {
+						return false, err
+					}
+					return false, nil
+				}
+			}
+			s.users[i].Favorites = append(u.Favorites, Favorite{
+				Path:    path,
+				AddedAt: time.Now().UTC().Format(time.RFC3339),
+			})
+			if err := s.saveLocked(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	return false, ErrUserNotFound
 }

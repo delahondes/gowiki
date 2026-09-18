@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -39,6 +40,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerCreateDatabaseFieldTool(srv, deps)
 	registerUpdateDatabaseTableTool(srv, deps)
 	registerUpdateDatabaseFieldTool(srv, deps)
+	registerDeleteDatabaseFieldTool(srv, deps)
 	registerMovePageTool(srv, deps)
 	registerConvertToNamespaceIndexTool(srv, deps)
 	registerConvertToRegularPageTool(srv, deps)
@@ -747,7 +749,9 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 				"First call list_database_tables to discover table names and field definitions. "+
 				"Filter syntax: each item is 'field<op>value' where <op> is one of =, !=, <>, <, >, <=, >=, ~ (ILIKE substring; % is wildcard). "+
 				"The reserved value @null tests for SQL NULL: 'field=@null' matches rows where the column is unset/void, 'field!=@null' matches rows where it is set. "+
-				"Lookup/tag joins: use 'parent.child<op>value' (one level only).",
+				"Lookup/tag joins: use 'parent.child<op>value' (one level only).\n\n"+
+				"PIVOT MODE — pass any pivot_* parameter to switch the response shape from a flat row list to a cross-tabulation. Response then contains rows, cols, and cells arrays (see the returned JSON for the exact shape). "+
+				"Required in pivot mode: pivot_rows (row axis field), pivot_cols (column axis field), pivot_cell (cell field). Optional: pivot_agg (single|list|count|first|last, default single), pivot_empty (text for empty cells), pivot_cols_sort (order the columns), pivot_cols_max (refusal threshold, default 40).",
 		),
 		mcpgo.WithString("table", mcpgo.Required(),
 			mcpgo.Description("Table name."),
@@ -756,16 +760,37 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 			mcpgo.Description("Optional array of filter expressions, ANDed together. Examples: [\"status=active\", \"priority>=2\", \"authority_notified=@null\"]."),
 		),
 		mcpgo.WithString("sort",
-			mcpgo.Description("Field name to sort by."),
+			mcpgo.Description("Field name to sort by. In pivot mode, sorts the row axis."),
 		),
 		mcpgo.WithString("order",
 			mcpgo.Description("asc or desc (default asc)."),
 		),
 		mcpgo.WithNumber("limit",
-			mcpgo.Description("Max rows (default 50, max 500)."),
+			mcpgo.Description("Max rows (default 50, max 500). Ignored in pivot mode."),
 		),
 		mcpgo.WithNumber("offset",
-			mcpgo.Description("Pagination offset (default 0)."),
+			mcpgo.Description("Pagination offset (default 0). Ignored in pivot mode."),
+		),
+		mcpgo.WithString("pivot_rows",
+			mcpgo.Description("PIVOT MODE: field whose distinct values become the rows."),
+		),
+		mcpgo.WithString("pivot_cols",
+			mcpgo.Description("PIVOT MODE: field whose distinct values become the columns."),
+		),
+		mcpgo.WithString("pivot_cell",
+			mcpgo.Description("PIVOT MODE: field rendered inside each cell. Ignored when pivot_agg=count."),
+		),
+		mcpgo.WithString("pivot_agg",
+			mcpgo.Description("PIVOT MODE: collision policy — single (default; render a Values array + Collision flag on collision), list, count, first, last."),
+		),
+		mcpgo.WithString("pivot_empty",
+			mcpgo.Description("PIVOT MODE: text for empty cells. Default empty."),
+		),
+		mcpgo.WithString("pivot_cols_sort",
+			mcpgo.Description("PIVOT MODE: field of the column axis's target table used to order columns. Defaults to the target table's own default sort for lookup/tag axes; alphabetical otherwise."),
+		),
+		mcpgo.WithNumber("pivot_cols_max",
+			mcpgo.Description("PIVOT MODE: refusal threshold on distinct column count. Default 40."),
 		),
 	)
 	srv.AddTool(tool, func(_ context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -776,6 +801,51 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if err != nil {
 			return errorResult("table is required"), nil
 		}
+		order := req.GetString("order", "asc")
+		if order != "asc" && order != "desc" {
+			order = "asc"
+		}
+		params := database.QueryParams{
+			Sort:  req.GetString("sort", ""),
+			Order: order,
+		}
+		for _, raw := range req.GetStringSlice("filter", nil) {
+			if f := parseFilterExpression(raw); f != nil {
+				params.Filters = append(params.Filters, *f)
+			}
+		}
+
+		// Pivot detection: any pivot_* param switches modes.
+		pivotRows := strings.TrimSpace(req.GetString("pivot_rows", ""))
+		pivotCols := strings.TrimSpace(req.GetString("pivot_cols", ""))
+		pivotCell := strings.TrimSpace(req.GetString("pivot_cell", ""))
+		pivotAgg := strings.TrimSpace(req.GetString("pivot_agg", ""))
+		pivotEmpty := req.GetString("pivot_empty", "")
+		pivotColsSort := strings.TrimSpace(req.GetString("pivot_cols_sort", ""))
+		pivotColsMax := req.GetInt("pivot_cols_max", 0)
+		inPivot := pivotRows != "" || pivotCols != "" || pivotCell != "" ||
+			pivotAgg != "" || pivotEmpty != "" || pivotColsSort != "" || pivotColsMax > 0
+		if inPivot {
+			pv := database.PivotParams{
+				Rows:     pivotRows,
+				Cols:     pivotCols,
+				Cell:     pivotCell,
+				Agg:      pivotAgg,
+				Empty:    pivotEmpty,
+				ColsSort: pivotColsSort,
+				ColsMax:  pivotColsMax,
+			}
+			result, err := deps.DataStore.PivotRows(context.Background(), tableName, params, pv)
+			if err != nil {
+				var perr *database.PivotError
+				if errors.As(err, &perr) {
+					return errorResult(perr.Message), nil
+				}
+				return errorResult("pivot: " + err.Error()), nil
+			}
+			return jsonResult(result), nil
+		}
+
 		limit := req.GetInt("limit", 50)
 		if limit > 500 {
 			limit = 500
@@ -783,21 +853,9 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if limit < 1 {
 			limit = 50
 		}
-		order := req.GetString("order", "asc")
-		if order != "asc" && order != "desc" {
-			order = "asc"
-		}
-		params := database.QueryParams{
-			Sort:   req.GetString("sort", ""),
-			Order:  order,
-			Limit:  limit,
-			Offset: req.GetInt("offset", 0),
-		}
-		for _, raw := range req.GetStringSlice("filter", nil) {
-			if f := parseFilterExpression(raw); f != nil {
-				params.Filters = append(params.Filters, *f)
-			}
-		}
+		params.Limit = limit
+		params.Offset = req.GetInt("offset", 0)
+
 		rows, total, err := deps.DataStore.QueryRows(context.Background(), tableName, params)
 		if err != nil {
 			return errorResult("query: " + err.Error()), nil

@@ -1293,8 +1293,13 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                   style += `vertical-align: ${cssValue}; `
                 }
 
-                // Column color (only if cell doesn't have its own color)
-                if (props.color && !cell.attrs.cellColor) {
+                // Column color (only if cell doesn't have its own color).
+                // Skip header cells — a column rule shading its own header
+                // reads as noise and hides the header's semantic contrast.
+                // Explicit per-cell colors on a header still apply (they were
+                // set by hand).
+                const isHeaderCell = cell.type === schema.nodes.table_header
+                if (props.color && !cell.attrs.cellColor && !isHeaderCell) {
                   const rules = parseColorRules(props.color)
                   const text = getCellText(cell)
                   const bg = evaluateColorRules(rules, text)
@@ -1361,6 +1366,16 @@ function cellTooltipPlugin(schema: Schema): PMPlugin {
   return new PMPlugin({
     props: {
       decorations(state) {
+        // A1/B2 addresses are useful when writing formulas, but noise when
+        // reading — they'd shadow any real cell content the browser would
+        // otherwise tooltip (e.g. link href, image alt). Only emit them
+        // while the app is in edit mode. The mode switch rebuilds the PM
+        // view, so this evaluates at the right moment.
+        const app = document.getElementById("app")
+        if (!app || !app.classList.contains("gowiki-editing")) {
+          return DecorationSet.empty
+        }
+
         const decos: Decoration[] = []
 
         state.doc.descendants((node, pos) => {

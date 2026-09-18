@@ -2,12 +2,19 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
+
+// ErrTableNotEmpty is returned by destructive schema operations that require
+// the underlying data table to be empty (rename a column, change its type,
+// hard-delete it). Callers surface this as HTTP 409 and the MCP layer maps it
+// to a clean error message.
+var ErrTableNotEmpty = errors.New("table has active rows")
 
 // SchemaStore provides CRUD operations for table and field definitions.
 type SchemaStore struct {
@@ -502,6 +509,328 @@ func (s *SchemaStore) GetHistory(ctx context.Context, tableID int) ([]SchemaHist
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+// countActiveRows returns the current row count for the given table's data
+// table. Used by destructive schema operations to gate on emptiness.
+func (s *SchemaStore) countActiveRows(ctx context.Context, tx pgx.Tx, tableName string) (int, error) {
+	dtName := dataTableName(tableName)
+	var n int
+	sql := fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(dtName))
+	if err := tx.QueryRow(ctx, sql).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count active rows: %w", err)
+	}
+	return n, nil
+}
+
+// getFieldByID returns a field definition by id (no enum values loaded).
+func (s *SchemaStore) getFieldByID(ctx context.Context, tx pgx.Tx, fieldID int) (*FieldDef, error) {
+	var f FieldDef
+	err := tx.QueryRow(ctx, `SELECT id, table_id, name, label, type, required, default_value, display_order, placeholder, foreign_key, display_column, created_at, archived_at FROM database_fields WHERE id = $1`, fieldID).
+		Scan(&f.ID, &f.TableID, &f.Name, &f.Label, &f.Type, &f.Required, &f.DefaultValue, &f.DisplayOrder, &f.Placeholder, &f.ForeignKey, &f.DisplayColumn, &f.CreatedAt, &f.ArchivedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get field: %w", err)
+	}
+	return &f, nil
+}
+
+// getTableNameByID looks up a table's name by its id.
+func (s *SchemaStore) getTableNameByID(ctx context.Context, tx pgx.Tx, tableID int) (string, error) {
+	var name string
+	if err := tx.QueryRow(ctx, `SELECT name FROM database_tables WHERE id = $1`, tableID).Scan(&name); err != nil {
+		return "", fmt.Errorf("get table name: %w", err)
+	}
+	return name, nil
+}
+
+// DeleteField hard-deletes a field: drops the SQL column (or junction table
+// for multi_enum / sequence for auto_increment), clears any enum values, and
+// removes the field row. Refuses with ErrTableNotEmpty when the underlying
+// data table has any active row. Historical row-bound pages in the attic keep
+// working — the row NodeView renders schema-absent fields as ghost entries.
+func (s *SchemaStore) DeleteField(ctx context.Context, fieldID int, changedBy string) error {
+	p := s.pool.GetPool()
+	if p == nil {
+		return fmt.Errorf("database not connected")
+	}
+
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	f, err := s.getFieldByID(ctx, tx, fieldID)
+	if err != nil {
+		return err
+	}
+	tableName, err := s.getTableNameByID(ctx, tx, f.TableID)
+	if err != nil {
+		return err
+	}
+
+	n, err := s.countActiveRows(ctx, tx, tableName)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrTableNotEmpty
+	}
+
+	dtName := dataTableName(tableName)
+
+	// Storage-shape branch by field type.
+	switch f.Type {
+	case FieldTypeMultiEnum:
+		jt := fmt.Sprintf("%s__%s", dtName, f.Name)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdent(jt))); err != nil {
+			return fmt.Errorf("drop junction table: %w", err)
+		}
+	case FieldTypeAutoIncrement:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS %s", quoteIdent(dtName), quoteIdent(f.Name))); err != nil {
+			return fmt.Errorf("drop auto_increment column: %w", err)
+		}
+		seqName := fmt.Sprintf("%s_%s_seq", dtName, f.Name)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP SEQUENCE IF EXISTS %s", quoteIdent(seqName))); err != nil {
+			return fmt.Errorf("drop sequence: %w", err)
+		}
+	default:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS %s", quoteIdent(dtName), quoteIdent(f.Name))); err != nil {
+			return fmt.Errorf("drop column: %w", err)
+		}
+	}
+
+	// Clear enum values (safe even for non-enum fields — no-op).
+	if _, err := tx.Exec(ctx, `DELETE FROM database_enum_values WHERE field_id = $1`, f.ID); err != nil {
+		return fmt.Errorf("clear enum values: %w", err)
+	}
+
+	// Delete the field row.
+	if _, err := tx.Exec(ctx, `DELETE FROM database_fields WHERE id = $1`, f.ID); err != nil {
+		return fmt.Errorf("delete field def: %w", err)
+	}
+
+	// History.
+	if _, err := tx.Exec(ctx, `INSERT INTO database_schema_history (table_id, changed_by, change_type, field_name, field_type, detail) VALUES ($1, $2, 'delete_field', $3, $4, $5)`,
+		f.TableID, changedBy, f.Name, f.Type, "Deleted field "+f.Name); err != nil {
+		return fmt.Errorf("record history: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// RenameField renames a field (SQL column + metadata row). Refuses with
+// ErrTableNotEmpty when the underlying data table has any row. multi_enum
+// junction tables and auto_increment sequences are renamed alongside.
+func (s *SchemaStore) RenameField(ctx context.Context, fieldID int, newName string, changedBy string) error {
+	p := s.pool.GetPool()
+	if p == nil {
+		return fmt.Errorf("database not connected")
+	}
+	if !validNameRe.MatchString(newName) {
+		return fmt.Errorf("invalid field name %q: must match [a-z][a-z0-9_]*", newName)
+	}
+
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	f, err := s.getFieldByID(ctx, tx, fieldID)
+	if err != nil {
+		return err
+	}
+	if f.Name == newName {
+		return tx.Commit(ctx) // no-op
+	}
+	tableName, err := s.getTableNameByID(ctx, tx, f.TableID)
+	if err != nil {
+		return err
+	}
+
+	n, err := s.countActiveRows(ctx, tx, tableName)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrTableNotEmpty
+	}
+
+	dtName := dataTableName(tableName)
+
+	switch f.Type {
+	case FieldTypeMultiEnum:
+		oldJT := fmt.Sprintf("%s__%s", dtName, f.Name)
+		newJT := fmt.Sprintf("%s__%s", dtName, newName)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quoteIdent(oldJT), quoteIdent(newJT))); err != nil {
+			return fmt.Errorf("rename junction table: %w", err)
+		}
+	case FieldTypeAutoIncrement:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", quoteIdent(dtName), quoteIdent(f.Name), quoteIdent(newName))); err != nil {
+			return fmt.Errorf("rename column: %w", err)
+		}
+		oldSeq := fmt.Sprintf("%s_%s_seq", dtName, f.Name)
+		newSeq := fmt.Sprintf("%s_%s_seq", dtName, newName)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER SEQUENCE %s RENAME TO %s", quoteIdent(oldSeq), quoteIdent(newSeq))); err != nil {
+			return fmt.Errorf("rename sequence: %w", err)
+		}
+	default:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", quoteIdent(dtName), quoteIdent(f.Name), quoteIdent(newName))); err != nil {
+			return fmt.Errorf("rename column: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE database_fields SET name=$1 WHERE id=$2`, newName, f.ID); err != nil {
+		return fmt.Errorf("update field name: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `INSERT INTO database_schema_history (table_id, changed_by, change_type, field_name, field_type, detail) VALUES ($1, $2, 'rename_field', $3, $4, $5)`,
+		f.TableID, changedBy, newName, f.Type, fmt.Sprintf("Renamed %s -> %s", f.Name, newName)); err != nil {
+		return fmt.Errorf("record history: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// RetypeField changes a field's type by dropping and re-adding the storage.
+// Refuses with ErrTableNotEmpty when the underlying data table has any row.
+// Same storage-shape branching as CreateField.
+func (s *SchemaStore) RetypeField(ctx context.Context, fieldID int, newType string, changedBy string) error {
+	p := s.pool.GetPool()
+	if p == nil {
+		return fmt.Errorf("database not connected")
+	}
+	if !ValidFieldTypes[newType] {
+		return fmt.Errorf("invalid field type %q", newType)
+	}
+
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	f, err := s.getFieldByID(ctx, tx, fieldID)
+	if err != nil {
+		return err
+	}
+	if f.Type == newType {
+		return tx.Commit(ctx) // no-op
+	}
+	tableName, err := s.getTableNameByID(ctx, tx, f.TableID)
+	if err != nil {
+		return err
+	}
+
+	n, err := s.countActiveRows(ctx, tx, tableName)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrTableNotEmpty
+	}
+
+	dtName := dataTableName(tableName)
+
+	// Drop the old storage.
+	switch f.Type {
+	case FieldTypeMultiEnum:
+		jt := fmt.Sprintf("%s__%s", dtName, f.Name)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdent(jt))); err != nil {
+			return fmt.Errorf("drop old junction table: %w", err)
+		}
+	case FieldTypeAutoIncrement:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS %s", quoteIdent(dtName), quoteIdent(f.Name))); err != nil {
+			return fmt.Errorf("drop old auto_increment column: %w", err)
+		}
+		seqName := fmt.Sprintf("%s_%s_seq", dtName, f.Name)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP SEQUENCE IF EXISTS %s", quoteIdent(seqName))); err != nil {
+			return fmt.Errorf("drop old sequence: %w", err)
+		}
+	default:
+		if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DROP COLUMN IF EXISTS %s", quoteIdent(dtName), quoteIdent(f.Name))); err != nil {
+			return fmt.Errorf("drop old column: %w", err)
+		}
+	}
+
+	// Add the new storage (mirrors CreateField's storage branch).
+	switch newType {
+	case FieldTypeMultiEnum:
+		jt := fmt.Sprintf("%s__%s", dtName, f.Name)
+		ddl := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+			row_id INTEGER NOT NULL REFERENCES %s(id) ON DELETE CASCADE,
+			value TEXT NOT NULL,
+			UNIQUE (row_id, value)
+		)`, quoteIdent(jt), quoteIdent(dtName))
+		if _, err := tx.Exec(ctx, ddl); err != nil {
+			return fmt.Errorf("create junction table: %w", err)
+		}
+	case FieldTypeAutoIncrement:
+		seqName := fmt.Sprintf("%s_%s_seq", dtName, f.Name)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("CREATE SEQUENCE IF NOT EXISTS %s", quoteIdent(seqName))); err != nil {
+			return fmt.Errorf("create sequence: %w", err)
+		}
+		sqlType := SQLTypeForField(newType)
+		alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s NOT NULL DEFAULT nextval('%s')",
+			quoteIdent(dtName), quoteIdent(f.Name), sqlType, seqName)
+		if _, err := tx.Exec(ctx, alterSQL); err != nil {
+			return fmt.Errorf("add auto_increment column: %w", err)
+		}
+	default:
+		sqlType := SQLTypeForField(newType)
+		defaultClause := ""
+		switch newType {
+		case FieldTypeText, FieldTypePageLink, FieldTypeEnum, FieldTypeImage, FieldTypeColor, FieldTypeUser:
+			defaultClause = "DEFAULT ''"
+		case FieldTypeInteger, FieldTypeFloat, FieldTypeTag, FieldTypeLookup:
+			defaultClause = "DEFAULT 0"
+		case FieldTypeBoolean:
+			defaultClause = "DEFAULT FALSE"
+		}
+		alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s %s",
+			quoteIdent(dtName), quoteIdent(f.Name), sqlType, defaultClause)
+		if _, err := tx.Exec(ctx, alterSQL); err != nil {
+			return fmt.Errorf("add column: %w", err)
+		}
+	}
+
+	// Clear enum values when moving out of enum-family; the caller can
+	// repopulate through UpdateField afterwards.
+	if f.Type == FieldTypeEnum || f.Type == FieldTypeMultiEnum {
+		if newType != FieldTypeEnum && newType != FieldTypeMultiEnum {
+			if _, err := tx.Exec(ctx, `DELETE FROM database_enum_values WHERE field_id = $1`, f.ID); err != nil {
+				return fmt.Errorf("clear stale enum values: %w", err)
+			}
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE database_fields SET type=$1 WHERE id=$2`, newType, f.ID); err != nil {
+		return fmt.Errorf("update field type: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `INSERT INTO database_schema_history (table_id, changed_by, change_type, field_name, field_type, detail) VALUES ($1, $2, 'retype_field', $3, $4, $5)`,
+		f.TableID, changedBy, f.Name, newType, fmt.Sprintf("Retyped %s: %s -> %s", f.Name, f.Type, newType)); err != nil {
+		return fmt.Errorf("record history: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// CountRows returns the number of active rows for a table. Used by the admin
+// UI to decide whether to enable destructive field operations.
+func (s *SchemaStore) CountRows(ctx context.Context, tableName string) (int, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return 0, fmt.Errorf("database not connected")
+	}
+	dtName := dataTableName(tableName)
+	var n int
+	sql := fmt.Sprintf("SELECT COUNT(*) FROM %s", quoteIdent(dtName))
+	if err := p.QueryRow(ctx, sql).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count rows: %w", err)
+	}
+	return n, nil
 }
 
 // quoteIdent quotes a PostgreSQL identifier to prevent injection.

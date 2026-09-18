@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -287,15 +288,24 @@ func registerUpdateDatabaseFieldTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithDescription(
 			"Update a field's metadata (label, required, default_value, "+
 				"display_order, placeholder, enum_values). Admin-only. Only supplied "+
-				"fields are updated. The field name AND type are immutable — the tool "+
-				"does not support renaming or retyping (both are destructive; use the "+
-				"admin UI if you truly need it).",
+				"fields are updated.\n\n"+
+				"For an EMPTY table (zero active rows) the tool also accepts `new_name` "+
+				"and `new_type` — the underlying SQL column is renamed or dropped-and-"+
+				"recreated. When the table has rows, both requests are refused with a "+
+				"clear message; the workaround is `delete_database_row` on every row "+
+				"first (or `delete_database_field` when you no longer need the field).",
 		),
 		mcpgo.WithString("table_name", mcpgo.Required(),
 			mcpgo.Description("Name of the table the field belongs to."),
 		),
 		mcpgo.WithString("field_name", mcpgo.Required(),
-			mcpgo.Description("Name of the field to update. Immutable identifier."),
+			mcpgo.Description("Current machine name of the field."),
+		),
+		mcpgo.WithString("new_name",
+			mcpgo.Description("New machine name (empty tables only). Must match [a-z][a-z0-9_]*. Renames the SQL column too."),
+		),
+		mcpgo.WithString("new_type",
+			mcpgo.Description("New field type (empty tables only). One of: text, integer, float, boolean, date, datetime, page_link, enum, multi_enum, auto_increment, image, color, tag, lookup, user. Drops and recreates the SQL column."),
 		),
 		mcpgo.WithString("label",
 			mcpgo.Description("New human-readable label. Optional."),
@@ -348,7 +358,37 @@ func registerUpdateDatabaseFieldTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if target == nil {
 			return errorResult(fmt.Sprintf("field %q not found in table %q", fieldName, tableName)), nil
 		}
+		author := deps.ExtractUsername(ctx)
 		args := req.GetArguments()
+
+		// Rename first (empty-table only).
+		if hasArg(args, "new_name") {
+			newName := strings.TrimSpace(req.GetString("new_name", ""))
+			if newName != "" && newName != target.Name {
+				if err := deps.SchemaStore.RenameField(ctx, target.ID, newName, author); err != nil {
+					if errors.Is(err, database.ErrTableNotEmpty) {
+						return errorResult("cannot rename field: table has active rows"), nil
+					}
+					return errorResult("rename field: " + err.Error()), nil
+				}
+				target.Name = newName
+			}
+		}
+
+		// Retype next (empty-table only).
+		if hasArg(args, "new_type") {
+			newType := strings.TrimSpace(req.GetString("new_type", ""))
+			if newType != "" && newType != target.Type {
+				if err := deps.SchemaStore.RetypeField(ctx, target.ID, newType, author); err != nil {
+					if errors.Is(err, database.ErrTableNotEmpty) {
+						return errorResult("cannot change field type: table has active rows"), nil
+					}
+					return errorResult("retype field: " + err.Error()), nil
+				}
+				target.Type = newType
+			}
+		}
+
 		if hasArg(args, "label") {
 			target.Label = strings.TrimSpace(req.GetString("label", ""))
 		}
@@ -373,7 +413,6 @@ func registerUpdateDatabaseFieldTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if hasArg(args, "enum_values") {
 			target.EnumValues = req.GetStringSlice("enum_values", nil)
 		}
-		author := deps.ExtractUsername(ctx)
 		if err := deps.SchemaStore.UpdateField(ctx, target, author); err != nil {
 			return errorResult("update field: " + err.Error()), nil
 		}
@@ -390,6 +429,67 @@ func registerUpdateDatabaseFieldTool(srv *mcpsrv.MCPServer, deps Deps) {
 			"foreign_key":    target.ForeignKey,
 			"display_column": target.DisplayColumn,
 			"enum_values":    target.EnumValues,
+		}), nil
+	})
+}
+
+// ── delete_database_field ─────────────────────────────────────────────────
+
+func registerDeleteDatabaseFieldTool(srv *mcpsrv.MCPServer, deps Deps) {
+	tool := mcpgo.NewTool("delete_database_field",
+		mcpgo.WithDescription(
+			"Permanently delete a field: drops the SQL column (or junction table / "+
+				"sequence for multi_enum / auto_increment) and removes the field row. "+
+				"Admin-only. Requires the table to have zero active rows — refuses "+
+				"otherwise; the alternative is `update_database_field` with only "+
+				"metadata changes, or the archive route from the admin UI. Historical "+
+				"row-bound pages that still reference the field render its value as a "+
+				"muted \"(removed)\" ghost entry — the value stays in the page attic.",
+		),
+		mcpgo.WithString("table_name", mcpgo.Required(),
+			mcpgo.Description("Name of the table the field belongs to."),
+		),
+		mcpgo.WithString("field_name", mcpgo.Required(),
+			mcpgo.Description("Machine name of the field to delete."),
+		),
+	)
+	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.SchemaStore == nil {
+			return errorResult("database not connected"), nil
+		}
+		if !deps.isAdmin(ctx) {
+			return errorResult("access denied: schema management is admin-only"), nil
+		}
+		tableName := strings.TrimSpace(req.GetString("table_name", ""))
+		fieldName := strings.TrimSpace(req.GetString("field_name", ""))
+		if tableName == "" || fieldName == "" {
+			return errorResult("table_name and field_name are both required"), nil
+		}
+		table, err := deps.SchemaStore.GetTableByName(ctx, tableName)
+		if err != nil {
+			return errorResult("table not found: " + err.Error()), nil
+		}
+		var target *database.FieldDef
+		for i := range table.Fields {
+			if table.Fields[i].Name == fieldName && table.Fields[i].ArchivedAt == nil {
+				target = &table.Fields[i]
+				break
+			}
+		}
+		if target == nil {
+			return errorResult(fmt.Sprintf("field %q not found in table %q", fieldName, tableName)), nil
+		}
+		author := deps.ExtractUsername(ctx)
+		if err := deps.SchemaStore.DeleteField(ctx, target.ID, author); err != nil {
+			if errors.Is(err, database.ErrTableNotEmpty) {
+				return errorResult("cannot delete field: table has active rows"), nil
+			}
+			return errorResult("delete field: " + err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"deleted":    true,
+			"table_name": tableName,
+			"field_name": fieldName,
 		}), nil
 	})
 }

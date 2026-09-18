@@ -55,6 +55,67 @@ const databaseQueryProperties = [
     parse: (raw: string) => raw.trim() || "20",
     serialize: (value: string | null) => String(value ?? "20"),
   },
+  {
+    name: "pivot_rows",
+    label: "Pivot rows",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Field whose distinct values become rows (pivot mode).",
+  },
+  {
+    name: "pivot_cols",
+    label: "Pivot columns",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Field whose distinct values become columns (pivot mode).",
+  },
+  {
+    name: "pivot_cell",
+    label: "Pivot cell",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Field rendered inside each cell (pivot mode).",
+  },
+  {
+    name: "pivot_agg",
+    label: "Pivot aggregation",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "single (default — flag collisions)" },
+      { value: "single", label: "single" },
+      { value: "list", label: "list" },
+      { value: "count", label: "count" },
+      { value: "first", label: "first" },
+      { value: "last", label: "last" },
+    ],
+  },
+  {
+    name: "pivot_empty",
+    label: "Pivot empty text",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+  },
+  {
+    name: "pivot_cols_sort",
+    label: "Pivot column sort",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+  },
+  {
+    name: "pivot_cols_max",
+    label: "Pivot columns max",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Refuse when distinct columns exceed this. Default 40.",
+  },
 ]
 
 const databaseRowProperties = [
@@ -123,6 +184,17 @@ const databaseStyles = `
   color: var(--gw-color-error);
   font-style: italic;
   padding: 8px;
+}
+
+/* Ghost row: field present in the historical page but not in the current
+   schema (hard-deleted after this page version was saved). The label reads
+   "<name> (removed)" and the whole row is dimmed. */
+.gowiki-database-row-ghost {
+  color: var(--gw-color-muted);
+  font-style: italic;
+}
+.gowiki-database-row-ghost td:first-child {
+  font-weight: 400 !important;
 }
 
 /* Query result table */
@@ -241,6 +313,35 @@ const databaseStyles = `
 
 .gowiki-database-page-link:hover {
   text-decoration: underline;
+}
+
+/* Pivot mode. The row-header column carries the row axis label (or a link
+   when the row resolves to a page-bound target). Empty cells stay quiet;
+   collisions get a warning tint so a duplicate never reads as clean data. */
+.gowiki-database-pivot th[scope="row"] {
+  text-align: left;
+  font-weight: 600;
+  background: var(--gw-color-surface, transparent);
+}
+
+.gowiki-database-pivot-corner {
+  font-weight: 500;
+  font-size: 0.85em;
+  color: var(--gw-color-muted);
+  white-space: nowrap;
+}
+
+.gowiki-database-pivot-empty {
+  color: var(--gw-color-muted);
+}
+
+.gowiki-database-pivot-empty-text {
+  color: var(--gw-color-muted);
+  font-style: italic;
+}
+
+.gowiki-database-pivot-collision {
+  background: var(--gw-color-warning-bg, rgba(255, 212, 59, 0.25));
 }
 
 .db-image-cell {
@@ -1032,6 +1133,12 @@ class DatabaseQueryNodeView {
     this.fetchData()
   }
 
+  private isPivotMode(): boolean {
+    const a = this.node.attrs
+    return !!(a.pivot_rows || a.pivot_cols || a.pivot_cell || a.pivot_agg ||
+      a.pivot_empty || a.pivot_cols_sort || a.pivot_cols_max)
+  }
+
   private async fetchData() {
     const table = this.node.attrs.table
     const filter = this.node.attrs.filter || ""
@@ -1044,6 +1151,37 @@ class DatabaseQueryNodeView {
     }
     if (this.currentSort) params.set("sort", this.currentSort === "__title__" ? "id" : this.currentSort)
     if (this.currentOrder) params.set("order", this.currentOrder)
+
+    if (this.isPivotMode()) {
+      const a = this.node.attrs
+      if (a.pivot_rows) params.set("pivot_rows", a.pivot_rows)
+      if (a.pivot_cols) params.set("pivot_cols", a.pivot_cols)
+      if (a.pivot_cell) params.set("pivot_cell", a.pivot_cell)
+      if (a.pivot_agg) params.set("pivot_agg", a.pivot_agg)
+      if (a.pivot_empty) params.set("pivot_empty", a.pivot_empty)
+      if (a.pivot_cols_sort) params.set("pivot_cols_sort", a.pivot_cols_sort)
+      if (a.pivot_cols_max) params.set("pivot_cols_max", a.pivot_cols_max)
+
+      try {
+        const resp = await fetch(`/api/database/${encodeURIComponent(table)}/rows?${params}`)
+        if (resp.status === 400) {
+          const body = await resp.json().catch(() => ({}))
+          this.showError(body.error || "Pivot: invalid parameters")
+          return
+        }
+        if (!resp.ok) {
+          this.showError("Failed to load pivot")
+          return
+        }
+        const data = await resp.json()
+        this.renderPivot(data)
+        document.dispatchEvent(new Event("gowiki:node-rendered"))
+      } catch {
+        this.showError("Network error")
+      }
+      return
+    }
+
     params.set("limit", String(this.displayLimit))
     params.set("offset", "0")
 
@@ -1066,6 +1204,101 @@ class DatabaseQueryNodeView {
     } catch (err) {
       this.showError("Network error")
     }
+  }
+
+  private renderPivot(result: any) {
+    // Clean previous.
+    const existing = this.dom.querySelector(".gowiki-database-loading")
+    if (existing) existing.remove()
+    const existingTable = this.dom.querySelector(".gowiki-database-table")
+    if (existingTable) existingTable.remove()
+    const existingPag = this.dom.querySelector(".gowiki-database-pagination")
+    if (existingPag) existingPag.remove()
+    const existingErr = this.dom.querySelector(".gowiki-database-error")
+    if (existingErr) existingErr.remove()
+
+    const rows: any[] = result.rows || []
+    const cols: any[] = result.cols || []
+    const cells: any[][] = result.cells || []
+    const emptyText: string = result.empty || ""
+
+    const tbl = document.createElement("table")
+    tbl.className = "gowiki-database-table gowiki-database-pivot"
+
+    // Header.
+    const thead = document.createElement("thead")
+    const htr = document.createElement("tr")
+    const corner = document.createElement("th")
+    corner.textContent = `${result.row_field || ""} \\ ${result.col_field || ""}`
+    corner.className = "gowiki-database-pivot-corner"
+    htr.appendChild(corner)
+    for (const c of cols) {
+      const th = document.createElement("th")
+      if (c.page_path) {
+        const a = document.createElement("a")
+        a.className = "gowiki-database-page-link"
+        a.href = c.page_path
+        a.textContent = String(c.label ?? c.key ?? "")
+        th.appendChild(a)
+      } else {
+        th.textContent = String(c.label ?? c.key ?? "")
+      }
+      htr.appendChild(th)
+    }
+    thead.appendChild(htr)
+    tbl.appendChild(thead)
+
+    // Body.
+    const tbody = document.createElement("tbody")
+    for (let i = 0; i < rows.length; i++) {
+      const tr = document.createElement("tr")
+      const rh = document.createElement("th")
+      rh.scope = "row"
+      const rv = rows[i]
+      if (rv?.page_path) {
+        const a = document.createElement("a")
+        a.className = "gowiki-database-page-link"
+        a.href = rv.page_path
+        a.textContent = String(rv.label ?? rv.key ?? "")
+        rh.appendChild(a)
+      } else {
+        rh.textContent = String(rv?.label ?? rv?.key ?? "")
+      }
+      tr.appendChild(rh)
+
+      const line = cells[i] || []
+      for (let j = 0; j < cols.length; j++) {
+        const cell = line[j] || { empty: true }
+        const td = document.createElement("td")
+        if (cell.empty) {
+          if (emptyText) {
+            td.textContent = emptyText
+            td.className = "gowiki-database-pivot-empty-text"
+          } else {
+            td.className = "gowiki-database-pivot-empty"
+          }
+        } else if (cell.collision) {
+          td.className = "gowiki-database-pivot-collision"
+          td.title = "Collision — multiple rows fell in this cell"
+          td.textContent = (cell.values || []).join(" · ")
+        } else if (cell.values && cell.values.length > 0) {
+          td.textContent = cell.values.join(", ")
+        } else if (cell.page_path) {
+          const a = document.createElement("a")
+          a.className = "gowiki-database-page-link"
+          a.href = cell.page_path
+          a.textContent = String(cell.value ?? "")
+          td.appendChild(a)
+        } else {
+          td.textContent = String(cell.value ?? "")
+        }
+        tr.appendChild(td)
+      }
+      tbody.appendChild(tr)
+    }
+    tbl.appendChild(tbody)
+
+    this.dom.appendChild(tbl)
   }
 
   private renderTable(schema: any, rows: any[], total: number) {
@@ -1440,9 +1673,18 @@ class DatabaseQueryNodeView {
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
+    const pivotChanged =
+      node.attrs.pivot_rows !== this.node.attrs.pivot_rows ||
+      node.attrs.pivot_cols !== this.node.attrs.pivot_cols ||
+      node.attrs.pivot_cell !== this.node.attrs.pivot_cell ||
+      node.attrs.pivot_agg !== this.node.attrs.pivot_agg ||
+      node.attrs.pivot_empty !== this.node.attrs.pivot_empty ||
+      node.attrs.pivot_cols_sort !== this.node.attrs.pivot_cols_sort ||
+      node.attrs.pivot_cols_max !== this.node.attrs.pivot_cols_max
     if (node.attrs.table !== this.node.attrs.table ||
         node.attrs.fields !== this.node.attrs.fields ||
-        node.attrs.filter !== this.node.attrs.filter) {
+        node.attrs.filter !== this.node.attrs.filter ||
+        pivotChanged) {
       this.node = node
       this.currentSort = node.attrs.sort === "id" ? "__title__" : (node.attrs.sort || "")
       this.currentOrder = node.attrs.order || "asc"
@@ -1798,10 +2040,15 @@ class DatabaseRowNodeView {
     for (const [key, val] of Object.entries(fields)) {
       const tr = document.createElement("tr")
       const f = fieldMap.get(key)
+      // Ghost field: present in the historical row but no longer in the
+      // current schema (someone hard-deleted the field after this version
+      // was saved). Render dimmed so the reader knows the value is orphan.
+      const isGhost = !f && key !== "id"
+      if (isGhost) tr.className = "gowiki-database-row-ghost"
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = f?.label || key
+      tdKey.textContent = isGhost ? `${key} (removed)` : (f?.label || key)
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
@@ -2042,10 +2289,12 @@ class DatabaseRowNodeView {
     for (const [key, val] of Object.entries(fields)) {
       const tr = document.createElement("tr")
       const f = fieldMap.get(key)
+      const isGhost = !f && key !== "id"
+      if (isGhost) tr.className = "gowiki-database-row-ghost"
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = f?.label || key
+      tdKey.textContent = isGhost ? `${key} (removed)` : (f?.label || key)
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
@@ -2611,6 +2860,13 @@ export const databasePlugin: WikiPlugin = {
             sort: { default: "" },
             order: { default: "asc" },
             limit: { default: "20" },
+            pivot_rows: { default: "" },
+            pivot_cols: { default: "" },
+            pivot_cell: { default: "" },
+            pivot_agg: { default: "" },
+            pivot_empty: { default: "" },
+            pivot_cols_sort: { default: "" },
+            pivot_cols_max: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -2815,6 +3071,13 @@ export const databasePlugin: WikiPlugin = {
             sort: attrs.sort ?? "",
             order: attrs.order ?? "asc",
             limit: attrs.limit ?? "20",
+            pivot_rows: attrs.pivot_rows ?? "",
+            pivot_cols: attrs.pivot_cols ?? "",
+            pivot_cell: attrs.pivot_cell ?? "",
+            pivot_agg: attrs.pivot_agg ?? "",
+            pivot_empty: attrs.pivot_empty ?? "",
+            pivot_cols_sort: attrs.pivot_cols_sort ?? "",
+            pivot_cols_max: attrs.pivot_cols_max ?? "",
           })
         )
       },
@@ -2870,6 +3133,15 @@ export const databasePlugin: WikiPlugin = {
         if (node.attrs.sort) parts.push(`sort=${node.attrs.sort}`)
         if (node.attrs.order && node.attrs.order !== "asc") parts.push(`order=${node.attrs.order}`)
         if (node.attrs.limit && node.attrs.limit !== "20") parts.push(`limit=${node.attrs.limit}`)
+        // Pivot params — quote when they contain spaces (rare) or operators.
+        const quoteIfNeeded = (v: string) => (/[\s"]/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v)
+        if (node.attrs.pivot_rows) parts.push(`pivot_rows=${quoteIfNeeded(node.attrs.pivot_rows)}`)
+        if (node.attrs.pivot_cols) parts.push(`pivot_cols=${quoteIfNeeded(node.attrs.pivot_cols)}`)
+        if (node.attrs.pivot_cell) parts.push(`pivot_cell=${quoteIfNeeded(node.attrs.pivot_cell)}`)
+        if (node.attrs.pivot_agg) parts.push(`pivot_agg=${node.attrs.pivot_agg}`)
+        if (node.attrs.pivot_empty) parts.push(`pivot_empty=${quoteIfNeeded(node.attrs.pivot_empty)}`)
+        if (node.attrs.pivot_cols_sort) parts.push(`pivot_cols_sort=${quoteIfNeeded(node.attrs.pivot_cols_sort)}`)
+        if (node.attrs.pivot_cols_max) parts.push(`pivot_cols_max=${node.attrs.pivot_cols_max}`)
         return `{database-query ${parts.join(" ")}}\n\n`
       },
     })

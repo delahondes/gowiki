@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -81,7 +82,9 @@ func (s *Server) handleDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-// handleDatabaseQueryRows queries rows with filters.
+// handleDatabaseQueryRows queries rows with filters, sorting and paging OR
+// with pivot parameters. Any pivot_* query param switches the response
+// shape from a flat row list to a matrix.
 // GET /api/database/{table}/rows
 func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request) {
 	if s.dataStore == nil {
@@ -90,6 +93,29 @@ func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request)
 	}
 	tableName := chi.URLParam(r, "table")
 	params := parseQueryParams(r)
+
+	// Pivot detection: any pivot_* param puts the endpoint in pivot mode.
+	if pv, ok := parsePivotParams(r); ok {
+		result, err := s.dataStore.PivotRows(r.Context(), tableName, params, pv)
+		if err != nil {
+			// Pivot validation errors are 400 (they're caller-facing), other
+			// errors are 500. The pivot layer wraps its own with *PivotError.
+			var perr *database.PivotError
+			if errors.As(err, &perr) {
+				writeJSON(w, http.StatusBadRequest, map[string]any{
+					"error":   perr.Message,
+					"kind":    perr.Kind,
+					"field":   perr.Field,
+				})
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
 	rows, total, err := s.dataStore.QueryRows(r.Context(), tableName, params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -102,6 +128,36 @@ func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request)
 		"rows":  rows,
 		"total": total,
 	})
+}
+
+// parsePivotParams reads pivot_* query parameters. Returns ok=true when at
+// least one pivot_* param is present, so the caller can switch response
+// shape. Missing required params still return ok=true — the store layer
+// validates them and returns a caller-facing error.
+func parsePivotParams(r *http.Request) (database.PivotParams, bool) {
+	q := r.URL.Query()
+	any := false
+	pv := database.PivotParams{}
+	for _, k := range []string{"pivot_rows", "pivot_cols", "pivot_cell", "pivot_agg", "pivot_empty", "pivot_cols_sort", "pivot_cols_max"} {
+		if q.Get(k) != "" {
+			any = true
+		}
+	}
+	if !any {
+		return pv, false
+	}
+	pv.Rows = q.Get("pivot_rows")
+	pv.Cols = q.Get("pivot_cols")
+	pv.Cell = q.Get("pivot_cell")
+	pv.Agg = q.Get("pivot_agg")
+	pv.Empty = q.Get("pivot_empty")
+	pv.ColsSort = q.Get("pivot_cols_sort")
+	if s := q.Get("pivot_cols_max"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			pv.ColsMax = n
+		}
+	}
+	return pv, true
 }
 
 // handleDatabaseInsertRow inserts a new row.

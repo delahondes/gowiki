@@ -505,6 +505,14 @@ a:hover {
   stroke-linejoin: round;
 }
 
+/* Filled variant: applied on the star button when the current page is a
+   favorite. Overrides the stroke-only look with a solid fill in the same
+   accent color. */
+.gowiki-action-btn--filled path {
+  fill: var(--gw-color-accent, #f0b429);
+  stroke: var(--gw-color-accent, #f0b429);
+}
+
 .gowiki-action-delete {
   color: var(--gw-color-error);
 }
@@ -2603,6 +2611,13 @@ a.gowiki-link-missing { color: var(--gw-color-link-missing); text-decoration-col
 
 .gowiki-sitemap a.gowiki-sitemap-path:hover {
   text-decoration: underline;
+}
+
+.gowiki-sitemap .gowiki-sitemap-current {
+  background: var(--gw-color-highlight-bg, rgba(255, 212, 59, 0.25));
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -1px -4px;
 }
 
 .gowiki-sitemap .gowiki-sitemap-phantom {
