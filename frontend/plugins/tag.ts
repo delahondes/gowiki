@@ -48,6 +48,17 @@ const tagQueryProperties = [
       { value: "list", label: "List" },
     ],
   },
+  {
+    name: "groupby",
+    label: "Group by",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    helpText: "Currently only \"folder\" — groups pages by their immediate subfolder under `path`. Pages sitting directly under `path` appear in an unlabelled section at the top. Future: `field~regex` for grouping on any field.",
+    options: [
+      { value: "", label: "No grouping" },
+      { value: "folder", label: "By subfolder" },
+    ],
+  },
 ]
 
 const tagStyles = `
@@ -121,6 +132,22 @@ const tagStyles = `
   margin: 4px 0;
 }
 
+/* Group heading rows in a grouped {tag-query render=table} — a full-width
+   row above each group's rows. Slightly bolder than a regular cell, no
+   border between the heading and the rows below it. */
+.gowiki-tag-query tr.gowiki-tag-query-group-heading td {
+  background: var(--gw-color-surface-alt);
+  font-weight: 600;
+  padding-top: 10px;
+}
+
+.gowiki-tag-query h4.gowiki-tag-query-group-heading {
+  margin: 12px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gw-color-muted);
+}
+
 #app.gowiki-editing .gowiki-tag-query {
   background: var(--gw-color-surface);
   padding: 8px;
@@ -136,6 +163,31 @@ const tagStyles = `
   outline-offset: 1px;
 }
 `
+
+// folderGroupKey returns the immediate-subfolder group label for a page
+// whose canonical path is `pagePath`, given the resolved `path=` prefix of
+// the query. Pages sitting directly under the prefix return "" (rendered
+// as an unlabelled section). Namespace-index pages (canonical paths that
+// end with "/") get grouped by their own leaf so they sit with their
+// child pages, not in the "direct-under-path" section.
+function folderGroupKey(pagePath: string, pathPrefix: string): string {
+  let p = pagePath.replace(/^\/+/, "")
+  const trailingSlash = p.endsWith("/")
+  const prefix = pathPrefix.replace(/^\/+/, "").replace(/\/+$/, "")
+  if (prefix) {
+    if (p === prefix || p === prefix + "/") return ""
+    if (!p.startsWith(prefix + "/")) return ""
+    p = p.slice(prefix.length + 1)
+  }
+  p = p.replace(/\/+$/, "")
+  if (!p) return ""
+  const segments = p.split("/").filter(Boolean)
+  if (segments.length === 0) return ""
+  if (segments.length >= 2) return segments[0]
+  // Single segment: it's either a leaf directly under the prefix (no group)
+  // or a namespace-index page (in which case its leaf IS the group).
+  return trailingSlash ? segments[0] : ""
+}
 
 class TagQueryNodeView {
   dom: HTMLElement
@@ -202,17 +254,48 @@ class TagQueryNodeView {
       }
 
       const render = this.node.attrs.render || "table"
-      if (render === "list") {
-        const ul = document.createElement("ul")
+      const groupby = (this.node.attrs.groupby || "").trim().toLowerCase()
+      // Groups: preserve insertion order (which mirrors the page order the
+      // backend returned) so per-group sort follows the same rule as the
+      // ungrouped view. Unlabelled group ("" key) comes first.
+      const groups = new Map<string, any[]>()
+      if (groupby === "folder") {
+        const pathPrefix = path // already resolved above (relative to the current namespace)
         for (const p of pages) {
-          const li = document.createElement("li")
-          const a = document.createElement("a")
-          a.href = p.path
-          a.textContent = p.title || p.path
-          li.appendChild(a)
-          ul.appendChild(li)
+          const key = folderGroupKey(p.path || "", pathPrefix)
+          if (!groups.has(key)) groups.set(key, [])
+          groups.get(key)!.push(p)
         }
-        this.dom.appendChild(ul)
+      } else {
+        groups.set("", pages)
+      }
+      // Sort group labels alphabetically, keeping "" first.
+      const orderedKeys = Array.from(groups.keys()).sort((a, b) => {
+        if (a === b) return 0
+        if (a === "") return -1
+        if (b === "") return 1
+        return a.localeCompare(b)
+      })
+
+      if (render === "list") {
+        for (const key of orderedKeys) {
+          if (key) {
+            const h = document.createElement("h4")
+            h.className = "gowiki-tag-query-group-heading"
+            h.textContent = key
+            this.dom.appendChild(h)
+          }
+          const ul = document.createElement("ul")
+          for (const p of groups.get(key)!) {
+            const li = document.createElement("li")
+            const a = document.createElement("a")
+            a.href = p.path
+            a.textContent = p.title || p.path
+            li.appendChild(a)
+            ul.appendChild(li)
+          }
+          this.dom.appendChild(ul)
+        }
       } else {
         const table = document.createElement("table")
         const thead = document.createElement("thead")
@@ -226,32 +309,42 @@ class TagQueryNodeView {
         table.appendChild(thead)
 
         const tbody = document.createElement("tbody")
-        for (const p of pages) {
-          const row = document.createElement("tr")
-          const tdTitle = document.createElement("td")
-          const a = document.createElement("a")
-          a.href = p.path
-          a.textContent = p.title || p.path
-          tdTitle.appendChild(a)
-          row.appendChild(tdTitle)
-
-          const tdVersion = document.createElement("td")
-          if (p.validated_version_tag) {
-            // Reviewflow page: show validated version tag, linked to that version.
-            const va = document.createElement("a")
-            va.href = `${p.path}?v=${p.validated_page_version}`
-            va.textContent = p.validated_version_tag
-            tdVersion.appendChild(va)
-          } else {
-            tdVersion.textContent = p.version ? String(p.version) : ""
+        for (const key of orderedKeys) {
+          if (key) {
+            const gr = document.createElement("tr")
+            gr.className = "gowiki-tag-query-group-heading"
+            const td = document.createElement("td")
+            td.colSpan = 3
+            td.textContent = key
+            gr.appendChild(td)
+            tbody.appendChild(gr)
           }
-          row.appendChild(tdVersion)
+          for (const p of groups.get(key)!) {
+            const row = document.createElement("tr")
+            const tdTitle = document.createElement("td")
+            const a = document.createElement("a")
+            a.href = p.path
+            a.textContent = p.title || p.path
+            tdTitle.appendChild(a)
+            row.appendChild(tdTitle)
 
-          const tdAuthor = document.createElement("td")
-          tdAuthor.textContent = p.author || ""
-          row.appendChild(tdAuthor)
+            const tdVersion = document.createElement("td")
+            if (p.validated_version_tag) {
+              const va = document.createElement("a")
+              va.href = `${p.path}?v=${p.validated_page_version}`
+              va.textContent = p.validated_version_tag
+              tdVersion.appendChild(va)
+            } else {
+              tdVersion.textContent = p.version ? String(p.version) : ""
+            }
+            row.appendChild(tdVersion)
 
-          tbody.appendChild(row)
+            const tdAuthor = document.createElement("td")
+            tdAuthor.textContent = p.author || ""
+            row.appendChild(tdAuthor)
+
+            tbody.appendChild(row)
+          }
         }
         table.appendChild(tbody)
         this.dom.appendChild(table)
@@ -267,7 +360,8 @@ class TagQueryNodeView {
       node.attrs.tag !== this.node.attrs.tag ||
       node.attrs.exclude !== this.node.attrs.exclude ||
       node.attrs.path !== this.node.attrs.path ||
-      node.attrs.render !== this.node.attrs.render
+      node.attrs.render !== this.node.attrs.render ||
+      node.attrs.groupby !== this.node.attrs.groupby
     ) {
       this.node = node
       this.fetchAndRender()
@@ -331,6 +425,7 @@ export const tagPlugin: WikiPlugin = {
             exclude: { default: "" },
             path: { default: "" },
             render: { default: "table" },
+            groupby: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -341,6 +436,7 @@ export const tagPlugin: WikiPlugin = {
                 "data-exclude": node.attrs.exclude || "",
                 "data-path": node.attrs.path || "",
                 "data-render": node.attrs.render || "table",
+                "data-groupby": node.attrs.groupby || "",
               },
               `Tag query: ${node.attrs.tag || "(no tag)"}`,
             ]
@@ -354,6 +450,7 @@ export const tagPlugin: WikiPlugin = {
                   exclude: dom.getAttribute("data-exclude") || "",
                   path: dom.getAttribute("data-path") || "",
                   render: dom.getAttribute("data-render") || "table",
+                  groupby: dom.getAttribute("data-groupby") || "",
                 }
               },
             },
@@ -394,6 +491,7 @@ export const tagPlugin: WikiPlugin = {
             exclude: attrs.exclude ?? "",
             path: attrs.path ?? "",
             render: attrs.render ?? "table",
+            groupby: attrs.groupby ?? "",
           })
         )
       },
@@ -415,6 +513,10 @@ export const tagPlugin: WikiPlugin = {
         if (node.attrs.path) parts.push(`path=${node.attrs.path}`)
         if (node.attrs.render && node.attrs.render !== "table") {
           parts.push(`render=${node.attrs.render}`)
+        }
+        if (node.attrs.groupby) {
+          const g = node.attrs.groupby
+          parts.push(/\s/.test(g) ? `groupby="${g}"` : `groupby=${g}`)
         }
         return `{tag-query ${parts.join(" ")}}\n\n`
       },
@@ -470,7 +572,7 @@ export const tagPlugin: WikiPlugin = {
       const queryType = reg.schema.nodes.tag_query
       if (!queryType) return false
       if (dispatch) {
-        const node = queryType.create({ tag: "", exclude: "", path: "", render: "table" })
+        const node = queryType.create({ tag: "", exclude: "", path: "", render: "table", groupby: "" })
         requestInputFocus("tag")
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
