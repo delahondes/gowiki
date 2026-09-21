@@ -147,6 +147,7 @@ npx @modelcontextprotocol/inspector \
 | `write_page` | Create/update a page (full rewrite) — requires a summary |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption) |
 | `create_page_from_template` | Create a new page from a `{template}`-marked template. Resolves `{template-title}`/`{template-stamp}`/`{template-reviewflow}`; refuses when the template's reviewflow has open roles or when the destination exists. |
+| `render_page` | Return the FULLY rendered page as a browser sees it — every dynamic directive resolved. `format=text` (default, structured extraction) or `format=html`. Use when the answer depends on resolved data (databases, tag queries, template stamps) rather than raw source. Heavy call; not for bulk scans. |
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
 | `complete_todo` | Mark a todo as done |
 | `list_database_tables` | Structured-data tables with field definitions |

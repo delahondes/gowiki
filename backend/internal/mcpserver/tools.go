@@ -54,6 +54,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerUploadAttachmentInstructionsTool(srv, deps)
 	registerDeleteAttachmentTool(srv, deps)
 	registerCreatePageFromTemplateTool(srv, deps)
+	registerRenderPageTool(srv, deps)
 }
 
 // ── ACL helpers ─────────────────────────────────────────────────────────

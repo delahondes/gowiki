@@ -49,6 +49,50 @@ func TestSplitTemplatePayload_NoMarker(t *testing.T) {
 	}
 }
 
+func TestSplitTemplatePayload_TrimsLeadingBlankLines(t *testing.T) {
+	// A natural template has a blank line between {template} and the first
+	// payload line ({tag rec} / {template-title}). The payload must NOT
+	// start with that blank line, otherwise the created document opens
+	// with an empty line.
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "one blank line",
+			content: "{template}\n\n{tag rec}\n\npayload",
+			want:    "{tag rec}\n\npayload",
+		},
+		{
+			name:    "two blank lines",
+			content: "{template}\n\n\n{tag rec}\n",
+			want:    "{tag rec}\n",
+		},
+		{
+			name:    "no blank line",
+			content: "{template}\n{tag rec}\n",
+			want:    "{tag rec}\n",
+		},
+		{
+			name:    "whitespace-only lines count as blank",
+			content: "{template}\n  \n\t\n{tag rec}\n",
+			want:    "{tag rec}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, payload, ok := SplitTemplatePayload(tc.content)
+			if !ok {
+				t.Fatal("expected ok=true")
+			}
+			if payload != tc.want {
+				t.Errorf("payload = %q, want %q", payload, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseTemplateReviewflowArgs(t *testing.T) {
 	args, ok := ParseTemplateReviewflowArgs(`some text
 {template-reviewflow author=alice.laporte reviewer="Michel Laborde" validation=e.f}

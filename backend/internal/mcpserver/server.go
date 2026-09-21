@@ -153,6 +153,16 @@ type MediaVersionReader interface {
 	GetVersion(mediaPath string) int64
 }
 
+// PageRenderer produces the fully-rendered HTML of a wiki page — after the
+// browser has resolved every dynamic directive ({database-query},
+// {tag-query}, resolved template stamps, etc). Implemented in api/mcp.go
+// over the same chromedp path the PDF export and /api/render/* endpoints
+// use, so an agent sees what a human sees. Nil (no Chrome available) makes
+// the render_page tool return a service-unavailable error.
+type PageRenderer interface {
+	RenderPageHTML(ctx context.Context, pagePath, username string) (html string, jsErrors []string, err error)
+}
+
 // DraftStateProvider exposes draft and lock state. The MCP layer uses it to
 // surface pending edits in get_page_meta and to refuse external writes that
 // would race against an in-progress edit or clobber unpublished work. The
@@ -193,6 +203,7 @@ type Deps struct {
 	Media             MediaStore
 	MediaRefs         ReferenceIndex
 	MediaVersions     MediaVersionReader
+	Renderer          PageRenderer
 	SiteBaseURL       string // e.g. "https://wiki.example.com"; used by upload_attachment_instructions
 	ExtractUsername   UsernameExtractor
 	RequireSummary    bool // when true, write_page rejects calls without a summary

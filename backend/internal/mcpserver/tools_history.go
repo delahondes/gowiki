@@ -171,7 +171,14 @@ func registerListRecentChangesTool(srv *mcpsrv.MCPServer, deps Deps) {
 			opts.Users = []string{author}
 		}
 		if prefix := strings.TrimSpace(req.GetString("path_prefix", "")); prefix != "" {
-			opts.IncludePaths = []string{strings.TrimPrefix(prefix, "/")}
+			// Changelog paths carry a leading slash; normalize the filter to
+			// match. Stripping the slash — as this used to do — meant that
+			// `/regulatory/qms/` filtered on `regulatory/qms/` and matched
+			// nothing.
+			if !strings.HasPrefix(prefix, "/") {
+				prefix = "/" + prefix
+			}
+			opts.IncludePaths = []string{prefix}
 		}
 
 		entries, err := deps.Changelog.Read(opts)

@@ -68,15 +68,23 @@ func IsTemplatePage(content string) bool {
 }
 
 // SplitTemplatePayload returns the tracking block (above {template}) and
-// the copiable payload (below it). Both are returned exactly as they
-// appear, minus the marker line itself. When the page has no {template}
-// marker the second return value is empty and ok is false.
+// the copiable payload (below it), minus the marker line itself. Any blank
+// lines that immediately followed the marker are stripped from the payload
+// so the created document doesn't start with an empty line (a template
+// naturally has a blank line between {template} and the first payload
+// directive). When the page has no {template} marker the second return
+// value is empty and ok is false.
 func SplitTemplatePayload(content string) (header, payload string, ok bool) {
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		if templateMarkerRe.MatchString(line) {
 			header = strings.Join(lines[:i], "\n")
-			payload = strings.Join(lines[i+1:], "\n")
+			rest := lines[i+1:]
+			// Trim leading blank lines from the payload.
+			for len(rest) > 0 && strings.TrimSpace(rest[0]) == "" {
+				rest = rest[1:]
+			}
+			payload = strings.Join(rest, "\n")
 			return header, payload, true
 		}
 	}
