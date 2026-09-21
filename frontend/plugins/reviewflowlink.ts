@@ -39,6 +39,25 @@ interface ReviewflowStatus {
   version_history?: VersionRecord[]
 }
 
+// normalizeVersionTag reduces a hand-typed version like "1", "1.0", "01.0",
+// or "1.0.0" to a canonical dot-tuple ("1.0.0"), so exact-string lookups
+// against the version history line up regardless of trailing-zero style.
+// Non-numeric tags (e.g. "draft") are returned lowercased as-is so a bad
+// tag on either side still refuses cleanly.
+function normalizeVersionTag(raw: string): string {
+  const s = (raw || "").trim().toLowerCase()
+  if (!s) return ""
+  const parts = s.split(".")
+  const nums: number[] = []
+  for (const p of parts) {
+    const n = parseInt(p, 10)
+    if (isNaN(n) || String(n) !== String(parseInt(p, 10))) return s
+    nums.push(n)
+  }
+  while (nums.length < 3) nums.push(0)
+  return nums.join(".")
+}
+
 // --- NodeView ---
 
 class ReviewflowLinkNodeView {
@@ -140,7 +159,13 @@ class ReviewflowLinkNodeView {
 
       const status: ReviewflowStatus = await resp.json()
       const history = status.version_history || []
-      const match = history.find(vr => vr.version_tag === version)
+      // Version tags are typed by hand and inconsistently: `1` and `1.0`
+      // are the same version for a reader but different strings for an
+      // exact match. Normalize both sides to a dot-tuple padded with
+      // zeros so `{reviewflow version=1}` and `{reviewflow-link
+      // version=1.0}` line up.
+      const target = normalizeVersionTag(version)
+      const match = history.find(vr => normalizeVersionTag(vr.version_tag) === target)
 
       if (!match) {
         this.loading = false

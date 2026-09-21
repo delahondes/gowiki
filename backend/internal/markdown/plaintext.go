@@ -31,8 +31,11 @@ var (
 	// Links: [text](url) or [text](url "title")
 	stripLinkRe = regexp.MustCompile(`\[([^\]]*)\]\([^)]+\)`)
 
-	// Property/directive lines: {name key=value}
-	directiveRe = regexp.MustCompile(`^\s*\{[a-zA-Z]\S*(?:\s+[^}]*)?\}\s*$`)
+	// Property/directive lines: {name key=value}. Matches the whole line so
+	// we can rewrite it to plain tokens for search indexing (the braces
+	// and `=` are stripped, so both `template-stamp` and `validator` end
+	// up as searchable words rather than one opaque token).
+	directiveRe = regexp.MustCompile(`^(\s*)\{([a-zA-Z][^{}]*)\}\s*$`)
 
 	// Code fence markers: ``` or ```language
 	codeFenceRe = regexp.MustCompile("^\\s*```")
@@ -72,8 +75,18 @@ func StripMarkdown(content string) string {
 			continue
 		}
 
-		// Skip directive/property lines.
-		if directiveRe.MatchString(line) {
+		// Rewrite directive lines to their bare contents so the search
+		// analyzer indexes the directive name, keys, and values as
+		// individual tokens. `{template-stamp}` → `template-stamp`;
+		// `{reviewflow validator=alice}` → `reviewflow validator alice`.
+		// Prior to this the whole directive line was skipped, and the
+		// only way to find a page carrying a specific directive was to
+		// hope the same word appeared in the prose.
+		if m := directiveRe.FindStringSubmatch(line); m != nil {
+			inner := m[2]
+			inner = strings.ReplaceAll(inner, "=", " ")
+			inner = strings.ReplaceAll(inner, "\"", " ")
+			result = append(result, m[1]+inner)
 			continue
 		}
 

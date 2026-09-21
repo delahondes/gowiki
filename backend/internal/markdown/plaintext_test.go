@@ -56,9 +56,19 @@ func TestStripMarkdown(t *testing.T) {
 			expected: "Before\nfmt.Println(\"hello\")\nAfter",
 		},
 		{
-			name:     "directive lines removed",
+			name:     "directive lines indexed as bare tokens",
 			input:    "{include path=footer}\nSome text\n{blockquote class=note}",
-			expected: "Some text",
+			expected: "include path footer\nSome text\nblockquote class note",
+		},
+		{
+			name:     "directive with quoted value",
+			input:    "{reviewflow author=alice.laporte validator=\"etienne formstecher\"}",
+			expected: "reviewflow author alice.laporte validator  etienne formstecher",
+		},
+		{
+			name:     "template-stamp directive indexed",
+			input:    "Body\n\n{template-stamp}\n\nMore",
+			expected: "Body\n\ntemplate-stamp\n\nMore",
 		},
 		{
 			name:     "unordered list markers stripped",
@@ -83,7 +93,7 @@ func TestStripMarkdown(t *testing.T) {
 		{
 			name:     "combined formatting",
 			input:    "# Welcome\n\nThis is **bold** and *italic* with [a link](url).\n\n```\ncode\n```\n\n{include path=sidebar}\n\nEnd.",
-			expected: "Welcome\n\nThis is bold and italic with a link.\n\ncode\n\nEnd.",
+			expected: "Welcome\n\nThis is bold and italic with a link.\n\ncode\n\ninclude path sidebar\n\nEnd.",
 		},
 	}
 

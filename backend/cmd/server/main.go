@@ -319,6 +319,20 @@ func main() {
 			log.Printf("indexes rebuilt")
 		}
 
+		// Rebuild the full-text search index too — the ref/link/tag
+		// indexes above cover metadata but leave the bleve body index
+		// untouched, so any change to StripMarkdown (e.g. new directives
+		// becoming searchable) would otherwise wait for each page to be
+		// individually rewritten before it lands in search.
+		if searchIndex != nil {
+			log.Printf("rebuilding search index...")
+			if err := searchIndex.RebuildFromDir(contentRoot); err != nil {
+				log.Printf("WARNING: rebuild search index failed: %v", err)
+			} else {
+				log.Printf("search index rebuilt")
+			}
+		}
+
 		log.Printf("running attic migration (if needed)...")
 		if err := store.Attic.MigrateExistingPages(contentRoot, metaRoot, store.Changelog); err != nil {
 			log.Printf("WARNING: attic migration failed: %v", err)
