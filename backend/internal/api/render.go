@@ -11,6 +11,8 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+
+	"gowiki/backend/internal/auth"
 )
 
 func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +30,7 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := ""
 	tempSession := false
-	if cookie, err := r.Cookie("session"); err == nil {
+	if cookie, err := r.Cookie(auth.CookieName); err == nil {
 		sessionID = cookie.Value
 	} else {
 		username := UsernameFromContext(r.Context())
@@ -119,7 +121,11 @@ func (s *Server) renderPageHTMLWithSession(baseCtx context.Context, pagePath, se
 
 	if sessionID != "" {
 		tasks = append(tasks, chromedp.ActionFunc(func(ctx context.Context) error {
-			return network.SetCookie("session", sessionID).
+			// Cookie name must match auth.CookieName ("gowiki_session"), not
+			// a bare "session" — the auth middleware only recognizes that
+			// exact name, so a mismatch means the frontend's /api/pages
+			// fetch fires anonymously and 403s on any ACL-gated page.
+			return network.SetCookie(auth.CookieName, sessionID).
 				WithDomain(host).
 				WithPath("/").
 				Do(ctx)
