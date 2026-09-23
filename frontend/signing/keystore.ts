@@ -142,6 +142,24 @@ export async function importCertificate(username: string, pem: string): Promise<
 }
 
 /**
+ * Clear the stored certificate PEM without touching the keypair.
+ * Used when the profile discovers the local PEM was polluted with a cert
+ * the server has since revoked — clearing lets the "download SPKI + get
+ * signed" flow show up again.
+ */
+export async function clearCertificate(username: string): Promise<void> {
+  const db = await openDB()
+  const entry = await txGet(db, username)
+  if (!entry) {
+    db.close()
+    return
+  }
+  entry.certificatePEM = null
+  await txPut(db, entry)
+  db.close()
+}
+
+/**
  * Export the public key as base64-encoded SPKI (for CSR or direct upload).
  */
 export async function getPublicKeySPKI(username: string): Promise<string | null> {

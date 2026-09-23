@@ -19,7 +19,7 @@ import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
 import { initComments, destroyComments, addComment, getCommentCount, createAIComment, clearAIComments, commentPmPlugin } from "./plugins/comment.ts"
-import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI, getKeyCreatedAt } from "./signing/keystore.ts"
+import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, clearCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI, getKeyCreatedAt } from "./signing/keystore.ts"
 const HLJS_THEMES = [
   "github", "atom-one-light", "vs", "xcode", "idea",
   "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
@@ -8606,6 +8606,16 @@ async function showSigningKeyModal() {
     // was never the one that got revoked.
     const localKeyIsFresh = keyCreatedAt && serverRevokedAt &&
       new Date(keyCreatedAt).getTime() > new Date(serverRevokedAt).getTime()
+
+    // Purge a stale revoked cert from IndexedDB when the local key is
+    // fresh. An earlier version of this refresh code auto-imported the
+    // server cert even when it was revoked, poisoning IndexedDB with
+    // cert #1's PEM. Without this cleanup the "Download SPKI" button
+    // never re-appears because certPEM stays truthy.
+    if (localKeyIsFresh && certPEM) {
+      await clearCertificate(username)
+      certPEM = null
+    }
 
     // Status
     const statusDiv = document.createElement("div")
