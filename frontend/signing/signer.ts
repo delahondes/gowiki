@@ -24,6 +24,12 @@ export async function computeDigest(markdown: string): Promise<string> {
 /**
  * Sign a reviewflow confirmation.
  * Returns the signature, certificate, and digest, or null if no key/cert available.
+ *
+ * The server is queried FIRST for the currently-registered cert so an admin
+ * who re-issued their own certificate via the admin form (which historically
+ * did not update this browser's IndexedDB) still signs with the fresh cert
+ * rather than the stale one — cert #1's fingerprint would otherwise trip
+ * the revocation guard the very next time they try to sign.
  */
 export async function signConfirmation(
   username: string,
@@ -32,20 +38,25 @@ export async function signConfirmation(
   const privateKey = await getPrivateKey(username)
   if (!privateKey) return null
 
-  let certPEM = await getCertificatePEM(username)
-  if (!certPEM) {
-    // Certificate not in local store — try fetching from server (admin may have signed it).
-    try {
-      const resp = await fetch(`/api/plugin/reviewflow/v1/cert/${encodeURIComponent(username)}`)
-      if (resp.ok) {
-        const data = await resp.json()
-        if (data.certificate_pem) {
-          await importCertificate(username, data.certificate_pem)
-          certPEM = data.certificate_pem
+  let certPEM: string | null = null
+  try {
+    const resp = await fetch(`/api/plugin/reviewflow/v1/cert/${encodeURIComponent(username)}`)
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data.certificate_pem) {
+        certPEM = data.certificate_pem
+        const localPEM = await getCertificatePEM(username)
+        if (localPEM !== certPEM) {
+          // Server has a newer cert than our IndexedDB — sync so future
+          // reads (and offline signing paths) see the same PEM the server
+          // is validating against.
+          try { await importCertificate(username, certPEM!) } catch { /* best-effort */ }
         }
       }
-    } catch { /* server unreachable — continue without cert */ }
-  }
+    }
+  } catch { /* server unreachable — fall through to local copy */ }
+
+  if (!certPEM) certPEM = await getCertificatePEM(username)
   if (!certPEM) return null
 
   // Compute digest (for the server to verify content matches)

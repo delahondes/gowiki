@@ -10858,6 +10858,18 @@ async function renderAdminCertsTab(container) {
         })
         if (resp.ok) {
           const data = await resp.json()
+          // If the admin just signed for themselves, mirror the new cert into
+          // their own IndexedDB — without this the local keystore keeps the
+          // previous cert PEM (revoked or otherwise) and every subsequent
+          // sign attempt sends the stale one instead of the freshly-issued
+          // certificate the server has.
+          if (currentUser && userInput.value === currentUser.username) {
+            try {
+              await importCertificate(currentUser.username, data.certificate_pem)
+            } catch (err) {
+              console.warn("Failed to update local keystore with newly-issued cert:", err)
+            }
+          }
           // Show the certificate for the user to copy — replace the form content
           signForm.innerHTML = ""
           const resultDiv = document.createElement("div")
