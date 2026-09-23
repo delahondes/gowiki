@@ -9627,13 +9627,22 @@ async function renderSitemapPage() {
     function nodeUrl(node) {
       if (node.path === "/" || node.path === "/index" || node.path === "index") return "/"
       const hasChildren = node.children && node.children.length > 0
-      if (node.is_namespace_index || hasChildren) return node.path + "/"
+      // Namespace-index paths already end with "/" in canonical form, so
+      // strip any trailing slash before appending — otherwise the URL
+      // gets a double-slash like /regulatory/qms/qara/sop03//.
+      if (node.is_namespace_index || hasChildren) {
+        return node.path.replace(/\/+$/, "") + "/"
+      }
       return node.path
     }
 
     function leafName(node) {
       if (node.path === "/" || node.path === "/index" || node.path === "index") return "/"
-      const leaf = node.path.split("/").pop()
+      // Same guard as nodeUrl — namespace-index paths carry a trailing
+      // slash canonically, so split("/").pop() would give "" instead of
+      // the last segment.
+      const stripped = node.path.replace(/\/+$/, "")
+      const leaf = stripped.split("/").pop()
       const hasChildren = node.children && node.children.length > 0
       if (node.is_namespace_index || hasChildren) return leaf + "/"
       return leaf
