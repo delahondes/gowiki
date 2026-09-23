@@ -38,22 +38,29 @@ export async function signConfirmation(
   const privateKey = await getPrivateKey(username)
   if (!privateKey) return null
 
+  const localPEM = await getCertificatePEM(username)
   let certPEM: string | null = null
   try {
     const resp = await fetch(`/api/plugin/reviewflow/v1/cert/${encodeURIComponent(username)}`)
     if (resp.ok) {
       const data = await resp.json()
       if (data.certificate_pem) {
-        // Fail loud + local when the server has marked this cert revoked
-        // — otherwise the browser goes through the whole sign + upload
-        // dance only to get a generic "revoked" error back, and the
-        // profile page won't have caught it either (IndexedDB doesn't
-        // track revocation).
         if (data.revoked) {
-          throw new Error("Your signing certificate has been revoked. Ask your admin to sign a fresh public key before confirming.")
+          // Server says the stored cert is revoked. Two cases:
+          //   - Local IndexedDB has the same PEM → user is holding the
+          //     revoked cert. Fail loud so they see the reason instead
+          //     of rounding through the sign path to a generic error.
+          //   - Local IndexedDB has a different PEM (or null) → the
+          //     browser has since generated a fresh key that has never
+          //     been signed. Silent null return, so the caller falls
+          //     back to unsigned confirmation instead of pretending to
+          //     sign with a revoked cert.
+          if (localPEM && localPEM === data.certificate_pem) {
+            throw new Error("Your signing certificate has been revoked. Ask your admin to sign a fresh public key before confirming.")
+          }
+          return null
         }
         certPEM = data.certificate_pem
-        const localPEM = await getCertificatePEM(username)
         if (localPEM !== certPEM) {
           // Server has a newer cert than our IndexedDB — sync so future
           // reads (and offline signing paths) see the same PEM the server
@@ -69,7 +76,7 @@ export async function signConfirmation(
     /* server unreachable — fall through to local copy */
   }
 
-  if (!certPEM) certPEM = await getCertificatePEM(username)
+  if (!certPEM) certPEM = localPEM
   if (!certPEM) return null
 
   // Compute digest (for the server to verify content matches)

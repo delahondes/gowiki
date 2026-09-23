@@ -115,6 +115,18 @@ export async function getCertificatePEM(username: string): Promise<string | null
 }
 
 /**
+ * When was the current keypair generated? Used to tell "certificate revoked
+ * and my old key is still around" from "certificate revoked but I've since
+ * generated a fresh keypair that just needs signing".
+ */
+export async function getKeyCreatedAt(username: string): Promise<string | null> {
+  const db = await openDB()
+  const entry = await txGet(db, username)
+  db.close()
+  return entry?.createdAt ?? null
+}
+
+/**
  * Import a signed certificate (PEM) into the key store.
  */
 export async function importCertificate(username: string, pem: string): Promise<void> {

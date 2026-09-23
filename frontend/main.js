@@ -19,7 +19,7 @@ import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
 import { initComments, destroyComments, addComment, getCommentCount, createAIComment, clearAIComments, commentPmPlugin } from "./plugins/comment.ts"
-import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI } from "./signing/keystore.ts"
+import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI, getKeyCreatedAt } from "./signing/keystore.ts"
 const HLJS_THEMES = [
   "github", "atom-one-light", "vs", "xcode", "idea",
   "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
@@ -8567,14 +8567,14 @@ async function showSigningKeyModal() {
     content.innerHTML = ""
     const has = await signingHasKey(username)
     let certPEM = has ? await getCertificatePEM(username) : null
-    // serverRevoked mirrors what the server knows — the local IndexedDB
-    // PEM is authoritative for the private-key pairing, but the server
-    // owns the "is this cert still valid" answer. Without this check the
-    // profile happily says "ready" for a cert the server has revoked and
-    // any sign attempt fails at verification time.
+    const keyCreatedAt = has ? await getKeyCreatedAt(username) : null
+
+    // Fetch server-side view: the local IndexedDB knows only about this
+    // browser, while the server owns "is this cert still valid" and "is
+    // there a newer cert an admin just signed for me".
+    let serverPEM = null
     let serverRevoked = false
     let serverRevokedAt = ""
-    let serverPEM = null
     if (has) {
       try {
         const resp = await authFetch("/api/plugin/reviewflow/v1/cert/" + username)
@@ -8584,32 +8584,42 @@ async function showSigningKeyModal() {
             serverPEM = data.certificate_pem
             serverRevoked = !!data.revoked
             serverRevokedAt = data.revoked_at || ""
-            if (!certPEM) {
-              await importCertificate(username, serverPEM)
-              certPEM = serverPEM
-            } else if (certPEM !== serverPEM) {
-              // Server has a newer cert than IndexedDB — mirror it in so
-              // the "signing sends this cert" path always agrees with the
-              // one the admin issued.
-              await importCertificate(username, serverPEM)
-              certPEM = serverPEM
-            }
           }
         }
       } catch {}
     }
+
+    // Mirror the server cert to IndexedDB — but ONLY when it's valid.
+    // Importing a revoked cert would overwrite an intentionally-empty
+    // local slot (right after the user generated a fresh keypair) with
+    // a useless PEM, hiding the fact that the new key has never been
+    // signed yet.
+    if (has && serverPEM && !serverRevoked && certPEM !== serverPEM) {
+      await importCertificate(username, serverPEM)
+      certPEM = serverPEM
+    }
+
+    // Detect "the local key is fresher than the server's revocation" —
+    // i.e. the user has already generated a new keypair after the old
+    // cert was revoked, and now just needs a signature on it. In that
+    // case the revocation message would be misleading: the current key
+    // was never the one that got revoked.
+    const localKeyIsFresh = keyCreatedAt && serverRevokedAt &&
+      new Date(keyCreatedAt).getTime() > new Date(serverRevokedAt).getTime()
 
     // Status
     const statusDiv = document.createElement("div")
     statusDiv.style.cssText = "margin-bottom:12px;padding:8px;background:var(--gw-color-surface);border:1px solid var(--gw-color-border);border-radius:6px;font-size:13px;color:var(--gw-color-text)"
     if (!has) {
       statusDiv.innerHTML = "<b>No signing key.</b> Generate one to enable cryptographic confirmations."
-    } else if (!certPEM) {
-      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it."
+    } else if (serverRevoked && localKeyIsFresh) {
+      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Your previous certificate was revoked; download the public key below and have your admin sign it."
     } else if (serverRevoked) {
       const when = serverRevokedAt ? new Date(serverRevokedAt).toLocaleString() : ""
       statusDiv.innerHTML = "<b>Certificate revoked" + (when ? " on " + when : "") + ".</b> Signing is refused until a new certificate is issued. Ask your admin to sign a fresh public key (or delete the local key and generate a new one)."
       statusDiv.style.background = "#fdecea"
+    } else if (!certPEM) {
+      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it."
     } else {
       statusDiv.innerHTML = "<b>Key + Certificate ready.</b> You can sign reviewflow confirmations."
       statusDiv.style.background = "#e8f5e9"
