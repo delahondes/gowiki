@@ -51,6 +51,8 @@ func handleGetUserCert(svc *Service) http.HandlerFunc {
 			"fingerprint":     uc.Fingerprint,
 			"issuer":          uc.Issuer,
 			"not_after":       uc.NotAfter,
+			"revoked":         uc.Revoked,
+			"revoked_at":      uc.RevokedAt,
 		})
 	}
 }

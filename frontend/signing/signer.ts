@@ -44,6 +44,14 @@ export async function signConfirmation(
     if (resp.ok) {
       const data = await resp.json()
       if (data.certificate_pem) {
+        // Fail loud + local when the server has marked this cert revoked
+        // — otherwise the browser goes through the whole sign + upload
+        // dance only to get a generic "revoked" error back, and the
+        // profile page won't have caught it either (IndexedDB doesn't
+        // track revocation).
+        if (data.revoked) {
+          throw new Error("Your signing certificate has been revoked. Ask your admin to sign a fresh public key before confirming.")
+        }
         certPEM = data.certificate_pem
         const localPEM = await getCertificatePEM(username)
         if (localPEM !== certPEM) {
@@ -54,7 +62,12 @@ export async function signConfirmation(
         }
       }
     }
-  } catch { /* server unreachable — fall through to local copy */ }
+  } catch (err) {
+    // Re-throw our own revocation error so the caller shows the message
+    // instead of silently falling back to whatever's in IndexedDB.
+    if (err instanceof Error && err.message.includes("revoked")) throw err
+    /* server unreachable — fall through to local copy */
+  }
 
   if (!certPEM) certPEM = await getCertificatePEM(username)
   if (!certPEM) return null

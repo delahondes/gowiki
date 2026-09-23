@@ -8567,16 +8567,33 @@ async function showSigningKeyModal() {
     content.innerHTML = ""
     const has = await signingHasKey(username)
     let certPEM = has ? await getCertificatePEM(username) : null
-
-    // Auto-detect if the server has a signed cert for this user that we don't have locally.
-    if (has && !certPEM) {
+    // serverRevoked mirrors what the server knows — the local IndexedDB
+    // PEM is authoritative for the private-key pairing, but the server
+    // owns the "is this cert still valid" answer. Without this check the
+    // profile happily says "ready" for a cert the server has revoked and
+    // any sign attempt fails at verification time.
+    let serverRevoked = false
+    let serverRevokedAt = ""
+    let serverPEM = null
+    if (has) {
       try {
         const resp = await authFetch("/api/plugin/reviewflow/v1/cert/" + username)
         if (resp.ok) {
           const data = await resp.json()
           if (data.certificate_pem) {
-            await importCertificate(username, data.certificate_pem)
-            certPEM = data.certificate_pem
+            serverPEM = data.certificate_pem
+            serverRevoked = !!data.revoked
+            serverRevokedAt = data.revoked_at || ""
+            if (!certPEM) {
+              await importCertificate(username, serverPEM)
+              certPEM = serverPEM
+            } else if (certPEM !== serverPEM) {
+              // Server has a newer cert than IndexedDB — mirror it in so
+              // the "signing sends this cert" path always agrees with the
+              // one the admin issued.
+              await importCertificate(username, serverPEM)
+              certPEM = serverPEM
+            }
           }
         }
       } catch {}
@@ -8588,7 +8605,11 @@ async function showSigningKeyModal() {
     if (!has) {
       statusDiv.innerHTML = "<b>No signing key.</b> Generate one to enable cryptographic confirmations."
     } else if (!certPEM) {
-      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it, or generate a self-signed certificate for testing."
+      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it."
+    } else if (serverRevoked) {
+      const when = serverRevokedAt ? new Date(serverRevokedAt).toLocaleString() : ""
+      statusDiv.innerHTML = "<b>Certificate revoked" + (when ? " on " + when : "") + ".</b> Signing is refused until a new certificate is issued. Ask your admin to sign a fresh public key (or delete the local key and generate a new one)."
+      statusDiv.style.background = "#fdecea"
     } else {
       statusDiv.innerHTML = "<b>Key + Certificate ready.</b> You can sign reviewflow confirmations."
       statusDiv.style.background = "#e8f5e9"
@@ -8634,44 +8655,6 @@ async function showSigningKeyModal() {
           URL.revokeObjectURL(a.href)
         })
         btnRow.appendChild(dlBtn)
-
-        // Self-signed certificate (for testing)
-        const selfSignBtn = document.createElement("button")
-        selfSignBtn.className = "gowiki-content-btn"
-        selfSignBtn.textContent = "Generate Self-Signed Certificate (test)"
-        selfSignBtn.addEventListener("click", async () => {
-          selfSignBtn.disabled = true
-          try {
-            // Send the public key to the server to generate a self-signed cert
-            const spki = await getPublicKeySPKI(username)
-            if (!spki) { alert("No public key found"); selfSignBtn.disabled = false; return }
-            const resp = await authFetch("/api/plugin/reviewflow/v1/self-sign", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ username, public_key_spki: spki }),
-            })
-            if (!resp.ok) {
-              const err = await resp.json().catch(() => ({}))
-              alert(err.error || "Self-sign failed")
-              selfSignBtn.disabled = false
-              return
-            }
-            const data = await resp.json()
-            // Import the certificate into the local key store
-            await importCertificate(username, data.certificate_pem)
-            // Also upload to the server
-            await authFetch("/api/plugin/reviewflow/v1/cert", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ certificate_pem: data.certificate_pem }),
-            })
-            await refresh()
-          } catch (err) {
-            alert("Self-sign failed: " + err.message)
-            selfSignBtn.disabled = false
-          }
-        })
-        btnRow.appendChild(selfSignBtn)
 
         // Import certificate from file
         const importBtn = document.createElement("button")
