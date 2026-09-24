@@ -176,6 +176,10 @@ let reviewflowQueryInsertCommand = null
 let versionLinkInsertCommand = null
 let changesInsertCommand = null
 let highlightCommand = null
+let templateInsertCommand = null
+let templateTitleInsertCommand = null
+let templateStampInsertCommand = null
+let templateReviewflowInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -293,6 +297,31 @@ registry.onCommand((namespace, name, cmd) => {
 
   if (namespace === "highlight") {
     highlightCommand = cmd
+    return
+  }
+
+  // Template family: captured into dedicated slots so buildMenubar can
+  // render them as a single icon group instead of individual text
+  // buttons. Favorites is captured too so it stops appearing in the
+  // toolbar — the star in the right-hand action bar already covers it.
+  if (namespace === "template" && name === "insert") {
+    templateInsertCommand = cmd
+    return
+  }
+  if (namespace === "template-title" && name === "insert") {
+    templateTitleInsertCommand = cmd
+    return
+  }
+  if (namespace === "template-stamp" && name === "insert") {
+    templateStampInsertCommand = cmd
+    return
+  }
+  if (namespace === "template-reviewflow" && name === "insert") {
+    templateReviewflowInsertCommand = cmd
+    return
+  }
+  if (namespace === "favorites" && name === "insert") {
+    // Star lives in the right-hand action bar; no toolbar duplicate.
     return
   }
 
@@ -6116,6 +6145,35 @@ function buildMenubar() {
         rawEditor.focus()
         rawInsertText(rawEditor, snippet + "\n\n")
         rawEditor.setSelectionRange(start + snippet.length, start + snippet.length)
+      }
+    })
+  }
+
+  // Template family — cluster the four directives behind stroke icons
+  // sharing a common page-with-folded-corner base so they read as one
+  // group at a glance instead of four indistinguishable text buttons.
+  const templateGroup = [
+    { cmd: templateInsertCommand, icon: "template.svg", title: "Template marker (payload separator)", snippet: "{template}" },
+    { cmd: templateTitleInsertCommand, icon: "template-title.svg", title: "Template title (prefix a heading)", snippet: "{template-title}" },
+    { cmd: templateStampInsertCommand, icon: "template-stamp.svg", title: "Template stamp (frozen origin sentence at creation)", snippet: "{template-stamp}" },
+    { cmd: templateReviewflowInsertCommand, icon: "template-reviewflow.svg", title: "Template reviewflow (resolved to {reviewflow} at creation)", snippet: "{template-reviewflow}" },
+  ]
+  let templateGroupHasAny = false
+  for (const entry of templateGroup) {
+    if (!entry.cmd) continue
+    if (!templateGroupHasAny) {
+      addSeparator()
+      templateGroupHasAny = true
+    }
+    addImgButton("/icons/" + entry.icon, entry.title, () => {
+      if (editMode === "visual" && editorView) {
+        entry.cmd(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, entry.snippet + "\n\n")
+        rawEditor.setSelectionRange(start + entry.snippet.length, start + entry.snippet.length)
       }
     })
   }
