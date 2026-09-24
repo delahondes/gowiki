@@ -6806,10 +6806,14 @@ const actionIcons = {
   switchRaw: "M16 18l6-6-6-6M8 6l-6 6 6 6",
   // Eye
   switchVisual: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
-  // Floppy disk
-  save: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM17 21v-8H7v8M7 3v5h8",
-  // Upload / cloud up
-  publish: "M12 16V4m-5 4 5-5 5 5M20 21H4",
+  // Hourglass (draft) + right-arrow (continue) + small floppy — used
+  // for "Save & continue", which is technically a save-to-draft + stay
+  // in edit mode. The plain floppy shape is reserved for the real
+  // publish action so its "big and clear" reading matches semantics.
+  save: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM10 9h3m-1-1 1 1-1 1M14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
+  // Plain floppy — the "commit / publish" action. Reads as save at a
+  // glance; the visual weight matches its permanence.
+  publish: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM17 21v-8H7v8M7 3v5h8",
   // X circle
   cancel: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm3.54 6.46L9.46 14.54m0-6.08 6.08 6.08",
   // Hourglass (main, shifted up-left) + small trash (nudged down-right)
@@ -9622,6 +9626,12 @@ async function adminForceDiscardDraft(draftOwner) {
 
 async function saveDraftAndExit() {
   await saveDraftExplicit()
+  // Overwrite the terse "Draft saved <time>" message from
+  // saveDraftExplicit with something a first-time user actually finds
+  // reassuring — the page is theirs now (locked) but nothing here is
+  // visible to anyone else until they hit Publish. The bare status
+  // otherwise reads as if the save were the final act.
+  setStatus(`Draft saved ${new Date().toLocaleTimeString()} — page locked to you; changes stay private until you click Publish draft.`)
   // Stash editor state so undo survives resume.
   stashEditorState()
   // Keep editToken — we'll reuse it on resume.
