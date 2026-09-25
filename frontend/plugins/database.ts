@@ -116,6 +116,22 @@ const databaseQueryProperties = [
     serialize: (value: string | null) => String(value ?? ""),
     helpText: "Refuse when distinct columns exceed this. Default 40.",
   },
+  {
+    name: "pivot_rows_labels",
+    label: "Row labels (JSON)",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Raw-value → display-label JSON for the row axis; keys sharing a label MERGE. Use \"@null\" for empty values. Example: {\"Y\":\"Archived\",\"N\":\"Active\",\"@null\":\"Active\"}.",
+  },
+  {
+    name: "pivot_cols_labels",
+    label: "Column labels (JSON)",
+    default: "",
+    parse: (raw: string) => raw.trim() || null,
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText: "Same as pivot_rows_labels but for the column axis.",
+  },
 ]
 
 const databaseRowProperties = [
@@ -1136,7 +1152,8 @@ class DatabaseQueryNodeView {
   private isPivotMode(): boolean {
     const a = this.node.attrs
     return !!(a.pivot_rows || a.pivot_cols || a.pivot_cell || a.pivot_agg ||
-      a.pivot_empty || a.pivot_cols_sort || a.pivot_cols_max)
+      a.pivot_empty || a.pivot_cols_sort || a.pivot_cols_max ||
+      a.pivot_rows_labels || a.pivot_cols_labels)
   }
 
   private async fetchData() {
@@ -1161,6 +1178,8 @@ class DatabaseQueryNodeView {
       if (a.pivot_empty) params.set("pivot_empty", a.pivot_empty)
       if (a.pivot_cols_sort) params.set("pivot_cols_sort", a.pivot_cols_sort)
       if (a.pivot_cols_max) params.set("pivot_cols_max", a.pivot_cols_max)
+      if (a.pivot_rows_labels) params.set("pivot_rows_labels", a.pivot_rows_labels)
+      if (a.pivot_cols_labels) params.set("pivot_cols_labels", a.pivot_cols_labels)
 
       try {
         const resp = await fetch(`/api/database/${encodeURIComponent(table)}/rows?${params}`)
@@ -1680,7 +1699,9 @@ class DatabaseQueryNodeView {
       node.attrs.pivot_agg !== this.node.attrs.pivot_agg ||
       node.attrs.pivot_empty !== this.node.attrs.pivot_empty ||
       node.attrs.pivot_cols_sort !== this.node.attrs.pivot_cols_sort ||
-      node.attrs.pivot_cols_max !== this.node.attrs.pivot_cols_max
+      node.attrs.pivot_cols_max !== this.node.attrs.pivot_cols_max ||
+      node.attrs.pivot_rows_labels !== this.node.attrs.pivot_rows_labels ||
+      node.attrs.pivot_cols_labels !== this.node.attrs.pivot_cols_labels
     if (node.attrs.table !== this.node.attrs.table ||
         node.attrs.fields !== this.node.attrs.fields ||
         node.attrs.filter !== this.node.attrs.filter ||
@@ -2867,6 +2888,8 @@ export const databasePlugin: WikiPlugin = {
             pivot_empty: { default: "" },
             pivot_cols_sort: { default: "" },
             pivot_cols_max: { default: "" },
+            pivot_rows_labels: { default: "" },
+            pivot_cols_labels: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -3078,6 +3101,8 @@ export const databasePlugin: WikiPlugin = {
             pivot_empty: attrs.pivot_empty ?? "",
             pivot_cols_sort: attrs.pivot_cols_sort ?? "",
             pivot_cols_max: attrs.pivot_cols_max ?? "",
+            pivot_rows_labels: attrs.pivot_rows_labels ?? "",
+            pivot_cols_labels: attrs.pivot_cols_labels ?? "",
           })
         )
       },
@@ -3142,6 +3167,9 @@ export const databasePlugin: WikiPlugin = {
         if (node.attrs.pivot_empty) parts.push(`pivot_empty=${quoteIfNeeded(node.attrs.pivot_empty)}`)
         if (node.attrs.pivot_cols_sort) parts.push(`pivot_cols_sort=${quoteIfNeeded(node.attrs.pivot_cols_sort)}`)
         if (node.attrs.pivot_cols_max) parts.push(`pivot_cols_max=${node.attrs.pivot_cols_max}`)
+        // Label maps are JSON blobs; always quote to preserve braces/colons.
+        if (node.attrs.pivot_rows_labels) parts.push(`pivot_rows_labels="${String(node.attrs.pivot_rows_labels).replace(/"/g, '\\"')}"`)
+        if (node.attrs.pivot_cols_labels) parts.push(`pivot_cols_labels="${String(node.attrs.pivot_cols_labels).replace(/"/g, '\\"')}"`)
         return `{database-query ${parts.join(" ")}}\n\n`
       },
     })

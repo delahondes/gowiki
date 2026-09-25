@@ -283,12 +283,16 @@ Some registers are naturally read as a matrix: one axis is a released version, t
 | `pivot_empty` | no | Text for a cell with no matching row. Default empty |
 | `pivot_cols_sort` | no | Field of the column axis's target table used to order columns |
 | `pivot_cols_max` | no | Refusal threshold on distinct column count. Default 40 |
+| `pivot_rows_labels` | no | JSON map of raw row value → display label. Distinct raw values sharing a label MERGE into one row. Use `"@null"` as the key for the empty-value bucket |
+| `pivot_cols_labels` | no | Same for the column axis |
 
 `sort` / `order` apply to the **row axis**. `fields` and `limit` are ignored — the column set comes from the data.
 
-**Loud failure by design.** An unknown field in `pivot_rows`, `pivot_cols`, or `pivot_cell` refuses with a `400` and a `PivotError` naming the missing field. Cell collisions under `pivot_agg=single` render both values with a warning tint rather than silently picking one. Beyond `pivot_cols_max` distinct columns the pivot refuses instead of truncating — a silently-truncated matrix would read as complete.
+**Empty values are preserved.** Rows whose row-axis or column-axis value is empty (SQL NULL or empty string) land in the `@null` bucket instead of being silently dropped. Its default column/row label is `(empty)`. Use `pivot_cols_labels: {"@null":"Active"}` to give it a meaningful name — or to merge it with other buckets (`{"N":"Active","@null":"Active"}` collapses the two into one column).
 
-**Links follow the existing convention.** Axis labels that resolve to page-bound rows render as links; cells whose value resolves to a page-bound row do too. Same as `%field%` in normal mode.
+**Loud failure by design.** An unknown field in `pivot_rows`, `pivot_cols`, or `pivot_cell` refuses with a `400` and a `PivotError` naming the missing field. Cell collisions under `pivot_agg=single` render both values with a warning tint rather than silently picking one. Beyond `pivot_cols_max` distinct columns the pivot refuses instead of truncating — a silently-truncated matrix would read as complete. The column-count check uses the MERGED count when a `pivot_cols_labels` map collapses synonyms, so a mapping can bring an otherwise-too-wide pivot back under the ceiling.
+
+**Links follow the existing convention.** Axis labels that resolve to page-bound rows render as links; cells whose value resolves to a page-bound row do too. Same as `%field%` in normal mode. When a label mapping merges several page-bound rows into one axis entry, the link is dropped (ambiguous target).
 
 **Out of scope:** aggregations beyond `pivot_agg`; more than two axes; editing from the pivot view. The pivot is a view — storage stays normalized, and CSV export stays row-oriented.
 

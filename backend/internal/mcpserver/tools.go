@@ -795,6 +795,12 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithNumber("pivot_cols_max",
 			mcpgo.Description("PIVOT MODE: refusal threshold on distinct column count. Default 40."),
 		),
+		mcpgo.WithObject("pivot_rows_labels",
+			mcpgo.Description("PIVOT MODE: raw-value → display-label map for the row axis. Distinct raw values that map to the same label MERGE into one row (counts summed). Use the key \"@null\" to relabel rows with an empty value; without an override those rows show as \"(empty)\". Example: {\"Y\":\"Archived\",\"N\":\"Active\",\"@null\":\"Active\"}."),
+		),
+		mcpgo.WithObject("pivot_cols_labels",
+			mcpgo.Description("PIVOT MODE: raw-value → display-label map for the column axis. Same merging semantics as pivot_rows_labels. Use \"@null\" for the empty-value column."),
+		),
 	)
 	srv.AddTool(tool, func(_ context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		if deps.DataStore == nil {
@@ -826,17 +832,23 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 		pivotEmpty := req.GetString("pivot_empty", "")
 		pivotColsSort := strings.TrimSpace(req.GetString("pivot_cols_sort", ""))
 		pivotColsMax := req.GetInt("pivot_cols_max", 0)
+		args := req.GetArguments()
+		rowLabels := coerceStringMap(args["pivot_rows_labels"])
+		colLabels := coerceStringMap(args["pivot_cols_labels"])
 		inPivot := pivotRows != "" || pivotCols != "" || pivotCell != "" ||
-			pivotAgg != "" || pivotEmpty != "" || pivotColsSort != "" || pivotColsMax > 0
+			pivotAgg != "" || pivotEmpty != "" || pivotColsSort != "" || pivotColsMax > 0 ||
+			len(rowLabels) > 0 || len(colLabels) > 0
 		if inPivot {
 			pv := database.PivotParams{
-				Rows:     pivotRows,
-				Cols:     pivotCols,
-				Cell:     pivotCell,
-				Agg:      pivotAgg,
-				Empty:    pivotEmpty,
-				ColsSort: pivotColsSort,
-				ColsMax:  pivotColsMax,
+				Rows:      pivotRows,
+				Cols:      pivotCols,
+				Cell:      pivotCell,
+				Agg:       pivotAgg,
+				Empty:     pivotEmpty,
+				ColsSort:  pivotColsSort,
+				ColsMax:   pivotColsMax,
+				RowLabels: rowLabels,
+				ColLabels: colLabels,
 			}
 			result, err := deps.DataStore.PivotRows(context.Background(), tableName, params, pv)
 			if err != nil {
@@ -868,6 +880,46 @@ func registerQueryDatabaseRowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 			"total": total,
 		}), nil
 	})
+}
+
+// coerceStringMap turns an MCP argument value into a map[string]string.
+// The client may hand us a real JSON object (map[string]any) or a
+// stringified JSON blob (some agents don't emit nested objects); accept
+// both. Non-string values are stringified via fmt.
+func coerceStringMap(v any) map[string]string {
+	if v == nil {
+		return nil
+	}
+	if m, ok := v.(map[string]any); ok {
+		out := make(map[string]string, len(m))
+		for k, val := range m {
+			if val == nil {
+				out[k] = ""
+				continue
+			}
+			if s, ok := val.(string); ok {
+				out[k] = s
+			} else {
+				out[k] = fmt.Sprintf("%v", val)
+			}
+		}
+		return out
+	}
+	if s, ok := v.(string); ok {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			return m
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(s), &raw); err == nil {
+			return coerceStringMap(raw)
+		}
+	}
+	return nil
 }
 
 // parseFilterExpression parses a single filter string of the form

@@ -13,15 +13,30 @@ import (
 
 // PivotParams captures the pivot-mode inputs. Unset ColsMax defaults to 40.
 // Agg defaults to "single".
+//
+// RowLabels and ColLabels remap raw axis values to human-facing labels;
+// distinct raw values that resolve to the SAME label MERGE into one
+// row/column (counts summed, values concatenated). Use the sentinel
+// "@null" as the map key to relabel the "no value" bucket — which now
+// always renders as its own row/column rather than silently dropping.
 type PivotParams struct {
-	Rows     string
-	Cols     string
-	Cell     string
-	Agg      string
-	Empty    string
-	ColsSort string
-	ColsMax  int
+	Rows      string
+	Cols      string
+	Cell      string
+	Agg       string
+	Empty     string
+	ColsSort  string
+	ColsMax   int
+	RowLabels map[string]string
+	ColLabels map[string]string
 }
+
+// PivotNullKey is the sentinel used on the row/column axis (and in
+// RowLabels/ColLabels) to represent a raw value of "" or SQL NULL. Its
+// default label is "(empty)".
+const PivotNullKey = "@null"
+
+const pivotNullDefaultLabel = "(empty)"
 
 // PivotAxisValue is one distinct value on the row or column axis, with the
 // label the UI should show and a page_path when the value resolves to a
@@ -167,7 +182,69 @@ func (ds *DataStore) PivotRows(ctx context.Context, tableName string, query Quer
 		return nil, fmt.Errorf("pivot: underlying query: %w", err)
 	}
 
-	// Group.
+	// First pass — collect distinct raw keys for each axis. Empty values
+	// are preserved as the "@null" sentinel so rows with a blank axis
+	// value stay in the picture; previously they were silently dropped,
+	// which meant total_rows and the visible matrix could disagree.
+	rawRowKeys := make([]string, 0)
+	rawRowSeen := make(map[string]struct{})
+	rawColKeys := make([]string, 0)
+	rawColSeen := make(map[string]struct{})
+	perRowKeys := make([]string, len(rows))
+	perColKeys := make([]string, len(rows))
+	for i, r := range rows {
+		rowKey := stringifyFieldValue(r.Fields[rowName], rowFD.Type)
+		colKey := stringifyFieldValue(r.Fields[colName], colFD.Type)
+		if rowKey == "" {
+			rowKey = PivotNullKey
+		}
+		if colKey == "" {
+			colKey = PivotNullKey
+		}
+		perRowKeys[i] = rowKey
+		perColKeys[i] = colKey
+		if _, seen := rawRowSeen[rowKey]; !seen {
+			rawRowSeen[rowKey] = struct{}{}
+			rawRowKeys = append(rawRowKeys, rowKey)
+		}
+		if _, seen := rawColSeen[colKey]; !seen {
+			rawColSeen[colKey] = struct{}{}
+			rawColKeys = append(rawColKeys, colKey)
+		}
+	}
+
+	// Resolve natural labels for the raw keys (lookup/tag targets, or
+	// the raw value itself), then overlay the caller's label maps. When
+	// two raw keys land on the same final label they will merge into one
+	// axis entry in the next pass — that's the whole point of the map.
+	rawRowValues, err := ds.resolveAxisValues(ctx, rowFD, rawRowKeys)
+	if err != nil {
+		return nil, fmt.Errorf("pivot: resolve row axis: %w", err)
+	}
+	rawColValues, err := ds.resolveAxisValues(ctx, colFD, rawColKeys)
+	if err != nil {
+		return nil, fmt.Errorf("pivot: resolve column axis: %w", err)
+	}
+	rowMap := applyAxisLabels(rawRowValues, pivot.RowLabels)
+	colMap := applyAxisLabels(rawColValues, pivot.ColLabels)
+
+	// Column-count guard uses the MERGED count — after the caller's
+	// mapping has collapsed synonyms, the axis might fit even if the raw
+	// cardinality wouldn't have.
+	colsMax := pivot.ColsMax
+	if colsMax <= 0 {
+		colsMax = defaultPivotColsMax
+	}
+	mergedColCount := len(uniqueMappedKeys(rawColKeys, colMap))
+	if mergedColCount > colsMax {
+		return nil, &PivotError{
+			Kind:    "too_many_columns",
+			Message: fmt.Sprintf("pivot: %d distinct column values exceeds pivot_cols_max=%d — filter first, add a pivot_cols_labels mapping to merge synonyms, or raise pivot_cols_max", mergedColCount, colsMax),
+		}
+	}
+
+	// Second pass — group by MAPPED key so distinct raw values that share
+	// a mapped label merge into one cell.
 	type cellAccum struct {
 		values   []string
 		pagePath string // only meaningful for single/first/last on page-bound cell types
@@ -179,14 +256,14 @@ func (ds *DataStore) PivotRows(ctx context.Context, tableName string, query Quer
 	colSeen := make(map[string]struct{})
 	cellsMap := make(map[string]map[string]*cellAccum)
 
-	for _, r := range rows {
-		rowKey := stringifyFieldValue(r.Fields[rowName], rowFD.Type)
-		colKey := stringifyFieldValue(r.Fields[colName], colFD.Type)
-		if rowKey == "" || colKey == "" {
-			// Rows missing an axis value silently drop — a matrix with a
-			// blank axis line reads as noise; the caller's filter should
-			// exclude them.
-			continue
+	for i, r := range rows {
+		rowKey := rowMap[perRowKeys[i]].Key
+		colKey := colMap[perColKeys[i]].Key
+		if rowKey == "" {
+			rowKey = perRowKeys[i]
+		}
+		if colKey == "" {
+			colKey = perColKeys[i]
 		}
 		if _, seen := rowSeen[rowKey]; !seen {
 			rowSeen[rowKey] = struct{}{}
@@ -214,27 +291,12 @@ func (ds *DataStore) PivotRows(ctx context.Context, tableName string, query Quer
 		}
 	}
 
-	// Column-count guard BEFORE resolving axis labels (cheaper).
-	colsMax := pivot.ColsMax
-	if colsMax <= 0 {
-		colsMax = defaultPivotColsMax
-	}
-	if len(colKeys) > colsMax {
-		return nil, &PivotError{
-			Kind:    "too_many_columns",
-			Message: fmt.Sprintf("pivot: %d distinct column values exceeds pivot_cols_max=%d — filter first or raise pivot_cols_max", len(colKeys), colsMax),
-		}
-	}
-
-	// Resolve row axis labels + page_paths.
-	rowValues, err := ds.resolveAxisValues(ctx, rowFD, rowKeys)
-	if err != nil {
-		return nil, fmt.Errorf("pivot: resolve row axis: %w", err)
-	}
-	colValues, err := ds.resolveAxisValues(ctx, colFD, colKeys)
-	if err != nil {
-		return nil, fmt.Errorf("pivot: resolve column axis: %w", err)
-	}
+	// Materialise axis values in encounter order — each mapped key uses
+	// the label produced by applyAxisLabels; page_path is preserved for
+	// unmerged keys (single raw source) and cleared when a merge collapsed
+	// several sources into one axis entry.
+	rowValues := axisValuesFromMap(rowKeys, rowMap, rawRowValues)
+	colValues := axisValuesFromMap(colKeys, colMap, rawColValues)
 
 	// Sort row axis: caller-provided Sort takes priority; otherwise the
 	// underlying table's own default; otherwise the axis label alphabetical.
@@ -360,6 +422,87 @@ func (ds *DataStore) PivotRows(ctx context.Context, tableName string, query Quer
 		TotalRows: total,
 	}
 	return res, nil
+}
+
+// axisMapping is one raw-key → mapped-key + display-label entry, produced
+// by applyAxisLabels. Key is what the pivot uses to group cells; Label is
+// what the caller sees in the response.
+type axisMapping struct {
+	Key   string
+	Label string
+}
+
+// applyAxisLabels returns a map from raw axis key to its final grouping
+// key + label. Overrides in `labels` win, otherwise the natural label from
+// resolveAxisValues is used. The "@null" bucket falls back to a fixed
+// "(empty)" label when the caller didn't supply an override.
+func applyAxisLabels(values []PivotAxisValue, labels map[string]string) map[string]axisMapping {
+	out := make(map[string]axisMapping, len(values))
+	for _, v := range values {
+		final := v.Label
+		if final == "" {
+			final = v.Key
+		}
+		if v.Key == PivotNullKey && final == PivotNullKey {
+			final = pivotNullDefaultLabel
+		}
+		if labels != nil {
+			if lbl, ok := labels[v.Key]; ok {
+				final = lbl
+			} else if v.Key == PivotNullKey {
+				if lbl, ok := labels[""]; ok {
+					final = lbl
+				}
+			}
+		}
+		out[v.Key] = axisMapping{Key: final, Label: final}
+	}
+	return out
+}
+
+// uniqueMappedKeys returns the set of grouping keys produced by mapping
+// the raw keys through the mapping. Used to compute the merged axis
+// cardinality before allocating.
+func uniqueMappedKeys(rawKeys []string, mapping map[string]axisMapping) []string {
+	seen := make(map[string]struct{}, len(rawKeys))
+	out := make([]string, 0, len(rawKeys))
+	for _, raw := range rawKeys {
+		m := mapping[raw]
+		if m.Key == "" {
+			m.Key = raw
+		}
+		if _, ok := seen[m.Key]; ok {
+			continue
+		}
+		seen[m.Key] = struct{}{}
+		out = append(out, m.Key)
+	}
+	return out
+}
+
+// axisValuesFromMap turns a slice of grouping keys (in encounter order)
+// into PivotAxisValue entries. A grouping key that came from exactly one
+// raw key inherits its page_path (so lookup/tag axes still get their link
+// target); a merged key clears page_path because there's no single target.
+func axisValuesFromMap(groupKeys []string, mapping map[string]axisMapping, rawValues []PivotAxisValue) []PivotAxisValue {
+	rawByGroup := make(map[string][]PivotAxisValue, len(rawValues))
+	for _, rv := range rawValues {
+		m := mapping[rv.Key]
+		gk := m.Key
+		if gk == "" {
+			gk = rv.Key
+		}
+		rawByGroup[gk] = append(rawByGroup[gk], rv)
+	}
+	out := make([]PivotAxisValue, 0, len(groupKeys))
+	for _, gk := range groupKeys {
+		v := PivotAxisValue{Key: gk, Label: gk}
+		if src := rawByGroup[gk]; len(src) == 1 {
+			v.PagePath = src[0].PagePath
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // stringifyFieldValue canonicalizes a field value into the string form used

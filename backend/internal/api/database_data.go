@@ -139,7 +139,7 @@ func parsePivotParams(r *http.Request) (database.PivotParams, bool) {
 	q := r.URL.Query()
 	any := false
 	pv := database.PivotParams{}
-	for _, k := range []string{"pivot_rows", "pivot_cols", "pivot_cell", "pivot_agg", "pivot_empty", "pivot_cols_sort", "pivot_cols_max"} {
+	for _, k := range []string{"pivot_rows", "pivot_cols", "pivot_cell", "pivot_agg", "pivot_empty", "pivot_cols_sort", "pivot_cols_max", "pivot_rows_labels", "pivot_cols_labels"} {
 		if q.Get(k) != "" {
 			any = true
 		}
@@ -156,6 +156,19 @@ func parsePivotParams(r *http.Request) (database.PivotParams, bool) {
 	if s := q.Get("pivot_cols_max"); s != "" {
 		if n, err := strconv.Atoi(s); err == nil && n > 0 {
 			pv.ColsMax = n
+		}
+	}
+	// Label maps arrive as JSON strings: pivot_cols_labels={"Y":"Archived","@null":"Active"}
+	if s := q.Get("pivot_rows_labels"); s != "" {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			pv.RowLabels = m
+		}
+	}
+	if s := q.Get("pivot_cols_labels"); s != "" {
+		var m map[string]string
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			pv.ColLabels = m
 		}
 	}
 	return pv, true
