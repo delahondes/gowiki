@@ -81,6 +81,13 @@ type RowDeleteResult struct {
 	PageDeleted bool   `json:"page_deleted"`
 }
 
+// RowUpdateResult is what UpdateRowWithPage returns.
+type RowUpdateResult struct {
+	Row         *database.Row `json:"row"`
+	PagePath    string        `json:"page_path,omitempty"`
+	PageUpdated bool          `json:"page_updated"`
+}
+
 // RowWriter exposes symmetric row insert/delete operations that also
 // create / archive the row's bound page when the table has a page_folder.
 // Implemented in api/mcp.go over Server internals (resolvePageFolder,
@@ -94,6 +101,11 @@ type RowWriter interface {
 	// deletes that page too (archiving it to the attic so the audit trail
 	// remains intact).
 	DeleteRowWithPage(ctx context.Context, tableName string, rowID int, author string) (*RowDeleteResult, error)
+	// UpdateRowWithPage patches the listed fields on a row and, for
+	// page-bound rows, rewrites the {database-row} block on the bound
+	// page so the two representations stay in step (same syncRowToPage
+	// path the HTTP handler uses).
+	UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author string) (*RowUpdateResult, error)
 }
 
 // TemplateCreator produces a new page from a template. Implemented in

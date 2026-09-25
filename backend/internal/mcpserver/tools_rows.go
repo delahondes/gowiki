@@ -101,6 +101,121 @@ func registerInsertDatabaseRowTool(srv *mcpsrv.MCPServer, deps Deps) {
 	})
 }
 
+// ── update_database_row ────────────────────────────────────────────────────
+
+func registerUpdateDatabaseRowTool(srv *mcpsrv.MCPServer, deps Deps) {
+	tool := mcpgo.NewTool("update_database_row",
+		mcpgo.WithDescription(
+			"Patch the listed fields on an existing row. Only the fields you "+
+				"list are changed — every other column stays as it was, so this "+
+				"is not a full-row replace.\n\n"+
+				"For page-bound tables the row's {database-row} block on the "+
+				"bound wiki page is rewritten in the same transaction so the "+
+				"two representations stay in step — the same sync path the "+
+				"visual editor uses when you double-click a cell.\n\n"+
+				"Draft-lock guard: when the bound page has an active edit lock "+
+				"or unpublished draft, the update is refused with a "+
+				"`page_draft_conflict` (with the draft owner). Pass force=true "+
+				"to override — the row is updated and the {database-row} block "+
+				"is rewritten in-place, which may collide with the open draft; "+
+				"prefer waiting for the draft to finish when you can.\n\n"+
+				"ACL: page-bound rows require the caller AND the @ai subject "+
+				"to have edit permission on the bound page (symmetric with "+
+				"insert). Non-page-bound rows require the caller to be in the "+
+				"admin group.",
+		),
+		mcpgo.WithString("table", mcpgo.Required(),
+			mcpgo.Description("Table name (matches a value returned by list_database_tables)."),
+		),
+		mcpgo.WithNumber("row_id", mcpgo.Required(),
+			mcpgo.Description("Numeric id of the row to update (the `id` column)."),
+		),
+		mcpgo.WithObject("fields", mcpgo.Required(),
+			mcpgo.Description("Column-name → new value map. Partial: only listed fields are changed. String, number, boolean, or array of strings for multi_enum fields."),
+		),
+		mcpgo.WithBoolean("force",
+			mcpgo.Description("If true, bypass the draft-lock refusal on a page-bound row. Default false."),
+		),
+		mcpgo.WithString("summary",
+			mcpgo.Description("Change summary for audit. Format: '[AI: <tool-name>] <description>'. Required when the deployment sets require_summary."),
+		),
+	)
+	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.RowWriter == nil || deps.DataStore == nil || deps.SchemaStore == nil {
+			return errorResult("database not connected"), nil
+		}
+		tableName := strings.TrimSpace(req.GetString("table", ""))
+		if tableName == "" {
+			return errorResult("table is required"), nil
+		}
+		rowID := req.GetInt("row_id", 0)
+		if rowID <= 0 {
+			return errorResult("row_id must be a positive integer"), nil
+		}
+		args := req.GetArguments()
+		rawFields, ok := args["fields"].(map[string]any)
+		if !ok || len(rawFields) == 0 {
+			return errorResult("fields must be a non-empty JSON object of column-name → value"), nil
+		}
+		summary := strings.TrimSpace(req.GetString("summary", ""))
+		if deps.RequireSummary && summary == "" {
+			return errorResult("summary is required — format '[AI: <tool>] <description>'"), nil
+		}
+
+		row, err := deps.DataStore.GetRow(ctx, tableName, rowID)
+		if err != nil {
+			return errorResult("row not found: " + err.Error()), nil
+		}
+		if row.PagePath != "" {
+			// Symmetric with insert/delete — a row's bound page is a
+			// database projection, so its edit-permission is what gates
+			// the row update.
+			pagePath := strings.TrimPrefix(row.PagePath, "/")
+			if !deps.canEdit(ctx, pagePath) {
+				return errorResult("access denied: no edit permission on " + row.PagePath), nil
+			}
+		} else if !deps.isAdmin(ctx) {
+			return errorResult("access denied: non-page-bound row updates require admin"), nil
+		}
+
+		force := req.GetBool("force", false)
+		if row.PagePath != "" && !force && deps.DraftState != nil {
+			if lock := deps.DraftState.GetLock(row.PagePath); lock.Owner != "" {
+				return jsonResult(map[string]any{
+					"error":       "page_draft_conflict",
+					"draft_owner": lock.Owner,
+					"since":       lock.Since,
+					"page_path":   row.PagePath,
+				}), nil
+			}
+			if draft, ok := deps.DraftState.FindAnyDraft(row.PagePath); ok {
+				return jsonResult(map[string]any{
+					"error":       "page_draft_conflict",
+					"draft_owner": draft.Owner,
+					"since":       draft.Since,
+					"page_path":   row.PagePath,
+				}), nil
+			}
+		}
+
+		author := deps.ExtractUsername(ctx)
+		if summary != "" {
+			author = author + " | " + summary
+		}
+		result, err := deps.RowWriter.UpdateRowWithPage(ctx, tableName, rowID, rawFields, author)
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		return jsonResult(map[string]any{
+			"table":        tableName,
+			"row":          result.Row,
+			"page_path":    result.PagePath,
+			"page_updated": result.PageUpdated,
+			"forced":       force,
+		}), nil
+	})
+}
+
 // ── delete_database_row ────────────────────────────────────────────────────
 
 func registerDeleteDatabaseRowTool(srv *mcpsrv.MCPServer, deps Deps) {

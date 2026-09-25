@@ -153,6 +153,7 @@ npx @modelcontextprotocol/inspector \
 | `list_database_tables` | Structured-data tables with field definitions |
 | `query_database_rows` | Query rows from a structured-data table (accepts `filter=[…]`; use `@null` for IS NULL tests). Pass `pivot_rows`/`pivot_cols`/`pivot_cell` for a cross-tabulation instead of a flat row list. |
 | `insert_database_row` | Insert a row (page-bound tables also get their wiki page created) |
+| `update_database_row` | Patch fields on a row (page-bound rows also have their `{database-row}` block rewritten; refuses on an active draft lock unless `force=true`) |
 | `delete_database_row` | Delete a row (page-bound rows also have their page removed; refuses when other rows still reference this one — pass `force=true` to override; page history stays in the attic) |
 | `delete_page` | Delete a page (archived to attic; row-bound pages also drop their DB row) |
 | `create_database_table` | Create a new structured-data table (admin only) |
@@ -245,15 +246,19 @@ Three tools cover the page-move plumbing that `write_page` alone can't handle:
 
 All three refuse cleanly when the page has an active edit lock or draft (`ErrPageHasLock` surfaces as `page has an active edit lock or draft: …`), when the destination already exists, or when a namespace/leaf naming collision would violate the "one canonical path per page" invariant.
 
-## Row inserts and deletes
+## Row inserts, updates and deletes
 
-`insert_database_row(table, fields)` and `delete_database_row(table, row_id)` mirror the row-write side of the HTTP API but with two important guarantees on top:
+`insert_database_row(table, fields)`, `update_database_row(table, row_id, fields, force?)` and `delete_database_row(table, row_id)` mirror the row-write side of the HTTP API but with two important guarantees on top:
 
-- **Symmetric page handling.** When the table has a `page_folder`, insert creates the associated wiki page (respecting the table's `page_template_path` if any); delete removes it. The HTTP delete alone leaves an orphan page — the MCP tool doesn't.
+- **Symmetric page handling.** When the table has a `page_folder`, insert creates the associated wiki page (respecting the table's `page_template_path` if any); update rewrites the page's `{database-row}` block so the two representations stay in step; delete removes it. The HTTP delete alone leaves an orphan page — the MCP tool doesn't.
 - **Audit-safe deletion.** The page is removed from the live content but its history stays in the attic and `list_recent_changes` shows both the creation and the deletion as page changelog entries (`change_type: "edit"` at write, `"delete"` at removal). Test rows in a regulatory register can be cleaned up without erasing the trail an auditor might inspect.
 
+**Update is a partial patch** — only the fields you list change; every other column stays as it was. To clear a value, pass an explicit empty string / null / `[]` as the new value.
+
+**Draft-lock guard on update.** When a page-bound row's page has an active edit lock or an unpublished draft, `update_database_row` refuses with `page_draft_conflict` (naming the draft owner). Wait for the draft to be published or discarded, or pass `force=true` to override — the row is updated and the `{database-row}` block is rewritten in-place, which may collide with the open draft; prefer waiting when you can.
+
 **ACL:**
-- Page-bound tables — the caller AND `@ai` need edit permission on the `page_folder` namespace (insert) or delete permission on the specific bound page (delete).
+- Page-bound tables — the caller AND `@ai` need edit permission on the `page_folder` namespace (insert) or on the specific bound page (update, delete).
 - Non-page-bound tables — the caller must be in the `admin` group. This is deliberately strict: agent-driven row writes to schema-only tables can't be gated per-row via the page ACL, so admin is the only safe default.
 
 Typical clean-up flow for a test round-trip: `insert_database_row` → verify the created page — `read_pages_batch` on the returned `page_path` — → `delete_database_row(row.id)`.

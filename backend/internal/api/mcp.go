@@ -99,6 +99,30 @@ func (w *mcpRowWriter) InsertRowWithPage(ctx context.Context, tableName string, 
 	return result, nil
 }
 
+func (w *mcpRowWriter) UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author string) (*mcpserver.RowUpdateResult, error) {
+	if w.s.dataStore == nil || w.s.schemaStore == nil {
+		return nil, errors.New("database not connected")
+	}
+	table, err := w.s.schemaStore.GetTableByName(ctx, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("table lookup: %w", err)
+	}
+	if err := w.s.dataStore.UpdateRow(ctx, tableName, rowID, fields); err != nil {
+		return nil, fmt.Errorf("update row: %w", err)
+	}
+	row, err := w.s.dataStore.GetRow(ctx, tableName, rowID)
+	if err != nil {
+		return nil, fmt.Errorf("re-read row: %w", err)
+	}
+	result := &mcpserver.RowUpdateResult{Row: row}
+	if row.PagePath != "" {
+		w.s.syncRowToPage(table, row, author)
+		result.PagePath = row.PagePath
+		result.PageUpdated = true
+	}
+	return result, nil
+}
+
 func (w *mcpRowWriter) DeleteRowWithPage(ctx context.Context, tableName string, rowID int, author string) (*mcpserver.RowDeleteResult, error) {
 	if w.s.dataStore == nil {
 		return nil, errors.New("database not connected")

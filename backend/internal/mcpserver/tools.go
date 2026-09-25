@@ -45,6 +45,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerConvertToNamespaceIndexTool(srv, deps)
 	registerConvertToRegularPageTool(srv, deps)
 	registerInsertDatabaseRowTool(srv, deps)
+	registerUpdateDatabaseRowTool(srv, deps)
 	registerDeleteDatabaseRowTool(srv, deps)
 	registerDeletePageTool(srv, deps)
 	registerEditPageTool(srv, deps)
