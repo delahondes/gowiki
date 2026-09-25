@@ -142,6 +142,26 @@ func (s *SessionStore) Delete(sessionID string) {
 	s.mu.Unlock()
 }
 
+// DeleteByUsername removes every session belonging to `username`. Called
+// when an account is disabled so already-issued browser cookies stop
+// working immediately, without waiting for the session TTL to run out.
+// Returns the count for the caller to log.
+func (s *SessionStore) DeleteByUsername(username string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for id, sess := range s.sessions {
+		if sess.Username == username {
+			delete(s.sessions, id)
+			n++
+		}
+	}
+	if n > 0 {
+		s.saveLocked()
+	}
+	return n
+}
+
 func (s *SessionStore) cleanupLoop() {
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()

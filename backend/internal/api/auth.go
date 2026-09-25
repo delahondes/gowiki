@@ -202,6 +202,15 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "session expired")
 			return
 		}
+		// Mirror the bearer-auth guard: a disabled account must lose its
+		// browser sessions too, otherwise disabling doesn't cut off a
+		// user who was already logged in until the session TTL expires.
+		if user, uErr := s.userStore.Get(sess.Username); uErr == nil && user.Disabled {
+			s.sessionStore.Delete(cookie.Value)
+			auth.ClearSessionCookie(w, r)
+			writeError(w, http.StatusUnauthorized, "user account is disabled")
+			return
+		}
 		ctx := context.WithValue(r.Context(), usernameKey, sess.Username)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -232,9 +241,17 @@ func (s *Server) optionalAuth(next http.Handler) http.Handler {
 		cookie, err := r.Cookie(auth.CookieName)
 		if err == nil {
 			if sess, ok := s.sessionStore.Get(cookie.Value); ok {
-				ctx := context.WithValue(r.Context(), usernameKey, sess.Username)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
+				// Disabled account: drop the session cookie and fall through
+				// to anonymous access rather than passing the disabled
+				// username on to the downstream handler.
+				if user, uErr := s.userStore.Get(sess.Username); uErr == nil && user.Disabled {
+					s.sessionStore.Delete(cookie.Value)
+					auth.ClearSessionCookie(w, r)
+				} else {
+					ctx := context.WithValue(r.Context(), usernameKey, sess.Username)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 			}
 		}
 		next.ServeHTTP(w, r)

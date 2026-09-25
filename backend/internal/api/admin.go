@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -112,6 +113,17 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Belt-and-braces: when the admin flips Disabled on, revoke every
+	// live browser session for that user right away. The requireAuth
+	// middleware also refuses disabled accounts per-request, but killing
+	// sessions here means the change stands even if a later middleware
+	// bypass is introduced (defense in depth).
+	if updates.Disabled != nil && *updates.Disabled && s.sessionStore != nil {
+		if n := s.sessionStore.DeleteByUsername(username); n > 0 {
+			log.Printf("admin: disabled user %q — revoked %d browser session(s)", username, n)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "user updated"})
 }
 
@@ -136,6 +148,15 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Kill live sessions for the deleted account. requireAuth would
+	// otherwise let them ride until session-cookie expiry (24h default),
+	// which for a hard delete is worse than the disable case.
+	if s.sessionStore != nil {
+		if n := s.sessionStore.DeleteByUsername(username); n > 0 {
+			log.Printf("admin: deleted user %q — revoked %d browser session(s)", username, n)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "user deleted"})
