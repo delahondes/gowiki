@@ -128,6 +128,16 @@ type ReviewflowSyncer interface {
 	SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error
 }
 
+// LifecycleSyncer is an optional hook for extracting {lifecycle} directives
+// from a page's markdown and updating the lifecycle rules index. Called on
+// every page save; the rules index drives the periodic lifecycle scanner
+// that fans out per-target-page todos. Symmetric RemovePageRules is
+// called on page delete so the rules disappear from the index too.
+type LifecycleSyncer interface {
+	SyncFromMarkdown(sourcePage, markdown string) error
+	RemovePageRules(sourcePage string) error
+}
+
 // CommentRenamer is an optional hook for moving comment sidecar files during page move.
 type CommentRenamer interface {
 	Rename(oldPath, newPath string) error
@@ -149,6 +159,7 @@ type FileStore struct {
 	DatabaseSync      DatabaseSyncer
 	TodoSync          DatabaseSyncer
 	ReviewflowSync    ReviewflowSyncer
+	LifecycleSync     LifecycleSyncer
 	CommentStore      CommentRenamer
 
 	// Per-page write mutex. Serializes concurrent Put/Move on the same path
@@ -484,6 +495,10 @@ func (s *FileStore) putWithSummary(pagePath, markdownContent, author, summary st
 		if s.ReviewflowSync != nil {
 			_ = s.ReviewflowSync.SyncFromMarkdown(normalized, meta.Version, markdownContent)
 		}
+
+		if s.LifecycleSync != nil {
+			_ = s.LifecycleSync.SyncFromMarkdown(normalized, markdownContent)
+		}
 	}
 
 	// Always index templates for search so they can be found.
@@ -589,6 +604,13 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// Sync todo: cancel tasks for deleted page.
 	if s.TodoSync != nil {
 		s.TodoSync.RemovePageRows(normalized)
+	}
+
+	// Sync lifecycle: drop any rules that were declared on the deleted
+	// page. Orphan todos the rules spawned get reconciled away on the
+	// next scan pass.
+	if s.LifecycleSync != nil {
+		_ = s.LifecycleSync.RemovePageRules(normalized)
 	}
 
 	// Snapshot old media refs before removing from index.

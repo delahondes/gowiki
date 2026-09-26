@@ -43,6 +43,7 @@ Welcome to the Gowiki user manual. This guide covers everything you need to know
 - [Document Signing — Users](./signing-user) — How to generate a signing key and sign confirmations
 - [Document Signing — Trust Model](./signing-trust) — Security assumptions, PKI model, audit export, and standalone verification
 - [Todo Tasks](./todo) — Assigning and tracking tasks within wiki pages
+- [Lifecycle Rules](./lifecycle) — Rules that generate todos when pages in scope go stale
 - [Comments](./comments) — Inline page comments
 
 ## Administration

@@ -21,6 +21,7 @@ import (
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
+	"gowiki/backend/internal/lifecycle"
 	"gowiki/backend/internal/manual"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
@@ -266,6 +267,127 @@ func main() {
 	})
 	store.ReviewflowSync = reviewflowService
 	log.Printf("reviewflow plugin: active")
+
+	// Initialize lifecycle plugin: {lifecycle} directives on pages
+	// declare "if a page in scope satisfies a condition (today: stale),
+	// spawn a todo targeting it." The Store persists the index of
+	// rules per source page; the page-save hook keeps it current; the
+	// Scanner runs periodically to reconcile todos with the current
+	// (rule × page × condition) set.
+	lifecycleStore, err := lifecycle.NewStore(metaRoot)
+	if err != nil {
+		log.Fatalf("init lifecycle store: %v", err)
+	}
+	store.LifecycleSync = lifecycle.NewSyncer(lifecycleStore)
+	if todoService != nil {
+		// Reviewflow attestation source: the latest VersionRecord's
+		// timestamp from the reviewflow state for a page. Zero-time
+		// for pages that have no reviewflow (or none validated yet).
+		reviewflowAttester := func(pagePath string) time.Time {
+			st, err := rfStore.Load(pagePath)
+			if err != nil || st == nil {
+				return time.Time{}
+			}
+			var latest time.Time
+			for _, vr := range st.VersionHistory {
+				if vr.Timestamp.After(latest) {
+					latest = vr.Timestamp
+				}
+			}
+			return latest
+		}
+		// Page-updated attestation source: the page's own meta.UpdatedAt.
+		pageEditAttester := func(pagePath string) time.Time {
+			p, err := store.Get(pagePath)
+			if err != nil {
+				return time.Time{}
+			}
+			return p.Meta.UpdatedAt
+		}
+		scanner := lifecycle.NewScanner(lifecycle.Deps{
+			Rules: lifecycleStore.AllRules,
+			ListPages: func() []string {
+				entries, err := store.ListAllPages()
+				if err != nil {
+					return nil
+				}
+				paths := make([]string, 0, len(entries))
+				for _, e := range entries {
+					paths = append(paths, e.Path)
+				}
+				return paths
+			},
+			PageTags:  tagIndex.GetTagsForPage,
+			Attesters: []lifecycle.AttestationSource{pageEditAttester, reviewflowAttester},
+			CreateTodo: func(ctx context.Context, req lifecycle.TodoRequest) error {
+				// Idempotency lives in the scanner (it consults
+				// ExistingLifecycleTodos before calling us), so this
+				// path is a straight create with no dedup pre-check.
+				_, cerr := todoService.CreateTask(ctx, todo.CreateRequest{
+					Title:      req.Title,
+					Source:     todo.SourceAPI,
+					SourcePage: req.SourcePage,
+					NodeKey:    req.NodeKey,
+					Assignee: todo.Assignee{
+						Type:       "user",
+						Target:     req.Assign,
+						Resolution: "any",
+					},
+					Tags:      req.Tags,
+					Priority:  todo.Priority(req.Priority),
+					CreatedBy: "lifecycle",
+				})
+				return cerr
+			},
+			ExistingLifecycleTodos: func(ctx context.Context) ([]lifecycle.ExistingLifecycleTodo, error) {
+				lst, _, err := todoService.Store().List(ctx, todo.ListOptions{Tag: "lifecycle", Limit: 2000})
+				if err != nil {
+					return nil, err
+				}
+				out := make([]lifecycle.ExistingLifecycleTodo, 0, len(lst))
+				for _, t := range lst {
+					if t.Status == todo.StatusCancelled || t.Status == todo.StatusDone {
+						continue
+					}
+					out = append(out, lifecycle.ExistingLifecycleTodo{ID: t.ID, NodeKey: t.NodeKey})
+				}
+				return out, nil
+			},
+			CancelTodo: func(ctx context.Context, id string) error {
+				_, err := todoService.Store().Cancel(ctx, id)
+				return err
+			},
+		})
+		// Run a scan once at startup so a freshly-deployed binary
+		// picks up any rules whose target pages went stale while the
+		// process was down. Then every 6 hours; the interval is a
+		// balance between "todos appear soon after a page goes stale"
+		// and "don't hammer the DB for a slow-moving signal."
+		go func() {
+			ctx := context.Background()
+			created, cancelled, err := scanner.Run(ctx)
+			if err != nil {
+				log.Printf("lifecycle: initial scan: %v", err)
+			} else {
+				log.Printf("lifecycle: initial scan — created=%d cancelled=%d", created, cancelled)
+			}
+			ticker := time.NewTicker(6 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				created, cancelled, err := scanner.Run(ctx)
+				if err != nil {
+					log.Printf("lifecycle: scan: %v", err)
+					continue
+				}
+				if created > 0 || cancelled > 0 {
+					log.Printf("lifecycle: scan — created=%d cancelled=%d", created, cancelled)
+				}
+			}
+		}()
+		log.Printf("lifecycle plugin: active (scan every 6h)")
+	} else {
+		log.Printf("lifecycle plugin: rules indexed but scanner disabled (no todo service)")
+	}
 
 	// Initialize comment plugin.
 	commentStore := comment.NewStore(metaRoot)
