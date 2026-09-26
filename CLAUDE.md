@@ -205,7 +205,7 @@ The backend detects and rejects circular includes at save time (not render time)
 | `` @`code with {{VAR}} expansion` `` | implemented |
 | Backticks protect table cells from directive/formula parsing | implemented |
 | Deterministic round-trip | partial |
-| HTML entities not interpreted | partial |
+| HTML entities not interpreted | implemented |
 
 ## Do not
 

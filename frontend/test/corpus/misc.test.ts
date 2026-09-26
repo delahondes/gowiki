@@ -62,13 +62,12 @@ describe("unicode", () => {
   })
 })
 
-describe("HTML entities NOT interpreted (dialect promises this, currently PARTIAL)", () => {
-  // The dialect spec says HTML entities must not be interpreted (use UTF-8
-  // directly). The current parser inherits markdown-it's default behaviour
-  // and decodes them, so `&amp;` becomes `&`. `CLAUDE.md` marks this
-  // "partial". Skipped tests are ready to un-skip the day the dialect is
-  // brought into full compliance.
-  it.skip("&amp; stays literal", () => {
+describe("HTML entities are NOT interpreted (dialect invariant)", () => {
+  // The dialect promises HTML entities stay literal — authors use UTF-8
+  // directly, and a source that contains `&amp;` means the five characters
+  // `&`, `a`, `m`, `p`, `;`. Enforced by disabling markdown-it's `entity`
+  // inline rule.
+  it("&amp; stays literal", () => {
     const rt = roundTrip("Fish &amp; chips\n")
     expect(rt.isStable).toBe(true)
     let text = ""
@@ -78,7 +77,7 @@ describe("HTML entities NOT interpreted (dialect promises this, currently PARTIA
     expect(text).toContain("&amp;")
   })
 
-  it.skip("&lt; stays literal", () => {
+  it("&lt; and &gt; stay literal", () => {
     const rt = roundTrip("Compare &lt; and &gt;\n")
     expect(rt.isStable).toBe(true)
     let text = ""
@@ -86,14 +85,38 @@ describe("HTML entities NOT interpreted (dialect promises this, currently PARTIA
       if (n.isText) text += n.text
     })
     expect(text).toContain("&lt;")
+    expect(text).toContain("&gt;")
   })
 
-  // The one thing we CAN assert today: round-trip stability holds even if
-  // entities are decoded. So the "&amp;" input serialises to "&", parses
-  // to "&", and stays that way. Not spec-correct, but at least stable.
-  it("&amp; round-trip is stable (locking in current partial behaviour)", () => {
-    const rt = roundTrip("Fish &amp; chips\n")
+  it("numeric entity &#123; stays literal", () => {
+    const rt = roundTrip("The escape sequence &#123; is inert\n")
     expect(rt.isStable).toBe(true)
+    let text = ""
+    rt.doc.descendants(n => {
+      if (n.isText) text += n.text
+    })
+    expect(text).toContain("&#123;")
+  })
+
+  it("hex entity &#x2603; stays literal (would have been ☃ if decoded)", () => {
+    const rt = roundTrip("Snowman escape: &#x2603;\n")
+    expect(rt.isStable).toBe(true)
+    let text = ""
+    rt.doc.descendants(n => {
+      if (n.isText) text += n.text
+    })
+    expect(text).toContain("&#x2603;")
+    expect(text).not.toContain("☃")
+  })
+
+  it("entity in a table cell stays literal", () => {
+    const rt = roundTrip("| head |\n| --- |\n| Fish &amp; chips |\n")
+    expect(rt.isStable).toBe(true)
+    let text = ""
+    rt.doc.descendants(n => {
+      if (n.isText) text += n.text
+    })
+    expect(text).toContain("&amp;")
   })
 })
 

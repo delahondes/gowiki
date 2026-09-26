@@ -414,6 +414,22 @@ function registerEmphasis(reg: Registry) {
     })
   })
 
+  // --- HTML entities stay literal.
+  //
+  // The dialect promises that HTML entities are not interpreted — authors
+  // use UTF-8 directly, and a source that contains `&amp;` means the five
+  // characters `&`, `a`, `m`, `p`, `;`, not the ampersand. markdown-it's
+  // default `entity` inline rule decodes them, which contradicts the
+  // spec. Disable it so `&amp;` survives parse/serialize unchanged.
+  //
+  // The serializer does not escape `&`, so no counterpart change is
+  // needed there. Backslash-escaped entities (`\&amp;`) are unaffected
+  // because the escape rule only handles ASCII punctuation, and `&` is
+  // not in that set — the backslash stays literal on both sides.
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.disable("entity")
+  })
+
   // --- markdown-it plugin: remap _text_ from em to underline ---
   reg.registerMarkdownItPlugin((md: any) => {
     md.core.ruler.push("gowiki_underline", (state: any) => {
