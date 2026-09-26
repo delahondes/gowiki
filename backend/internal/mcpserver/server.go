@@ -186,13 +186,16 @@ type DraftStateProvider interface {
 	FindAnyDraft(pagePath string) (storage.DraftInfo, bool)
 }
 
-// PresenceProbe reports whether a given user is presently connected as a
-// live editor on a page (WebSocket presence in edit mode). The MCP draft
-// tools consult it before allowing a same-user reclaim or discard, so an
-// AI can never cut a human out of an active browser session. A closed or
-// timed-out tab clears presence, so a stale lock stays reclaimable.
+// PresenceProbe reports whether any user is presently connected as a live
+// editor on a page (WebSocket presence in edit mode). The MCP draft tools
+// gate lock takeover on this signal — not on caller identity — so an AI
+// can pick up a genuinely stale lock (closed tab, crashed session) but
+// never cut a human out of an active browser session, regardless of
+// whether that human is the AI's own user account or someone else.
+// Returns the live editor's username when live=true so refusals can name
+// them.
 type PresenceProbe interface {
-	HasLiveEditor(pagePath, username string) bool
+	AnyLiveEditor(pagePath string) (username string, live bool)
 }
 
 // DraftEditor is the writable draft surface: enter/save/read/discard. The
@@ -203,6 +206,10 @@ type PresenceProbe interface {
 // markers, validation, page store write, todo auto-complete).
 type DraftEditor interface {
 	EnterEditMode(pagePath, username string, force bool, currentPublished string) (markdown string, editToken string, err error)
+	// TakeoverDraft is the identity-agnostic reclaim: move the draft (if
+	// any) to newOwner and issue a fresh token. The MCP layer only calls
+	// it after the presence gate confirms no one is live-editing.
+	TakeoverDraft(pagePath, newOwner, currentPublished string) (markdown string, editToken string, err error)
 	SaveDraft(pagePath, username, editToken, markdown string) error
 	ReadDraft(pagePath, username string) (string, error)
 	AdminReadDraft(pagePath, owner string) (string, error)

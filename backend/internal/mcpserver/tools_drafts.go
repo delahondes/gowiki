@@ -41,20 +41,21 @@ func presencePageKey(pagePath string) string {
 func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("enter_edit_session",
 		mcpgo.WithDescription(
-			"Take part in a collaborative edit: acquire (or resume) the edit lock and return the current draft markdown "+
-				"and a fresh edit_token. Requires edit permission for the caller AND the @ai subject.\n\n"+
-				"Behaviour:\n"+
-				"- No lock and no draft: creates a new draft seeded from the current published page (or from initial_markdown, if provided).\n"+
-				"- Caller already holds the lock: returns ErrEditSuperseded unless force=true (use force to reclaim a session left open in another tab).\n"+
-				"- Another user holds the lock: refused with locked_by set. This tool never steals another user's session — that is admin territory.\n"+
-				"- force=true refused with 'owner_active' if the same account is currently editing this page in a live browser tab. The aim of force is to recover stale sessions, never to interrupt someone who is actively typing.\n\n"+
-				"After entering, save with save_edit_draft, then either publish_edit_draft or discard_edit_draft. Every write uses the returned edit_token.",
+			"Join a collaborative edit session: acquire the edit lock and return the current draft markdown and a fresh "+
+				"edit_token. Requires edit permission for the caller AND the @ai subject.\n\n"+
+				"The tool gates access on liveness, not identity: if no user is presently connected as a live editor on this "+
+				"page (WebSocket presence), the lock is reclaimable and the current draft (if any) is transferred to the "+
+				"caller, regardless of whether it was previously owned by the caller, another user, or nobody. If someone "+
+				"is currently editing the page in a browser tab, the call is refused with 'owner_active' and their username "+
+				"in locked_by — reclaiming would cut them out mid-edit.\n\n"+
+				"Effect on the previous owner's browser: any live editor blocks the takeover in the first place, so the "+
+				"scenario doesn't arise. If they later reopen the tab, their old edit_token will fail and their frontend "+
+				"will offer to reload or force-reclaim.\n\n"+
+				"After entering, save with save_edit_draft, then either publish_edit_draft or discard_edit_draft. Every "+
+				"write uses the returned edit_token.",
 		),
 		mcpgo.WithString("path", mcpgo.Required(),
 			mcpgo.Description("Page path, leading slash optional. Namespace indexes end with '/'."),
-		),
-		mcpgo.WithBoolean("force",
-			mcpgo.Description("Reclaim a stale edit session you already own (a tab you closed or a crashed session). Never overrides another user's lock, and refuses when the same account is presently editing the page in a live browser tab."),
 		),
 		mcpgo.WithString("initial_markdown",
 			mcpgo.Description("Only used for a brand-new page (no published version and no existing draft). Ignored otherwise."),
@@ -71,28 +72,27 @@ func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 		if !deps.canEdit(ctx, pagePath) {
 			return errorResult("edit permission denied"), nil
 		}
-		force := req.GetBool("force", false)
 
-		// force=true is meant for recovering the caller's OWN stale
-		// session (a tab they closed, a crash, an SDK that dropped its
-		// edit_token). If the same account is presently connected as a
-		// live editor on this page, treat force as a mistake and refuse
-		// — otherwise the AI would silently invalidate the human's
-		// edit_token and the next save from the browser would lose
-		// whatever the human typed since their last checkpoint.
-		username := deps.ExtractUsername(ctx)
-		if force && deps.Presence != nil && deps.Presence.HasLiveEditor(presencePageKey(pagePath), username) {
-			return jsonResult(map[string]any{
-				"error":     "owner_active",
-				"message":   "your account is actively editing this page in a live browser session — reclaiming with force=true would cut off that session. Ask the human to save and close the tab, or wait for it to disconnect, then retry.",
-				"locked_by": username,
-			}), nil
+		// Presence gate. Any user (including the caller themselves)
+		// connected in edit mode blocks the takeover — the criterion
+		// is "is anyone actively editing?", not "does the caller own
+		// the lock?". A closed tab clears presence in the collab hub,
+		// so a genuinely stale lock stays reclaimable within seconds
+		// of the tab going away.
+		if deps.Presence != nil {
+			if liveUser, live := deps.Presence.AnyLiveEditor(presencePageKey(pagePath)); live {
+				return jsonResult(map[string]any{
+					"error":     "owner_active",
+					"message":   liveUser + " is actively editing this page in a live browser session — reclaiming would cut off that session. Wait for the tab to disconnect, or ask them to save and close, then retry.",
+					"locked_by": liveUser,
+				}), nil
+			}
 		}
 
-		// Seed content: published if any, else the caller-supplied initial
-		// markdown for a brand-new page. We never overwrite an existing
-		// draft with initial_markdown — DraftStore.EnterEditMode reads the
-		// draft file directly when one exists.
+		// Seed content: current published version if any, else the
+		// caller-supplied initial markdown for a brand-new page. The
+		// storage layer prefers an existing draft file over this seed
+		// so we never clobber unpublished work.
 		var published string
 		var version int64
 		if deps.Store != nil {
@@ -107,37 +107,28 @@ func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 			}
 		}
 
-		markdown, editToken, err := deps.DraftEditor.EnterEditMode(pagePath, username, force, published)
-		if errors.Is(err, storage.ErrPageLocked) {
-			resp := map[string]any{
-				"error":   "page_locked",
-				"message": err.Error(),
-			}
-			if deps.DraftState != nil {
-				lock := deps.DraftState.GetLock(pagePath)
-				if lock.Owner != "" {
-					resp["locked_by"] = lock.Owner
-					resp["since"] = lock.Since
-				}
-			}
-			return jsonResult(resp), nil
+		username := deps.ExtractUsername(ctx)
+		lockBefore := deps.DraftState.GetLock(pagePath)
+		reclaimedFrom := ""
+		if lockBefore.Owner != "" && lockBefore.Owner != username {
+			reclaimedFrom = lockBefore.Owner
 		}
-		if errors.Is(err, storage.ErrEditSuperseded) {
-			return jsonResult(map[string]any{
-				"error":   "edit_superseded",
-				"message": "you already have this page open in another session — retry with force=true to reclaim it",
-			}), nil
-		}
+
+		markdown, editToken, err := deps.DraftEditor.TakeoverDraft(pagePath, username, published)
 		if err != nil {
 			return errorResult("enter_edit_session: " + err.Error()), nil
 		}
 
-		return jsonResult(map[string]any{
+		resp := map[string]any{
 			"path":         "/" + pagePath,
 			"edit_token":   editToken,
 			"markdown":     markdown,
 			"page_version": version,
-		}), nil
+		}
+		if reclaimedFrom != "" {
+			resp["reclaimed_from"] = reclaimedFrom
+		}
+		return jsonResult(resp), nil
 	})
 }
 
@@ -405,15 +396,17 @@ func registerDiscardEditDraftTool(srv *mcpsrv.MCPServer, deps Deps) {
 		editToken := strings.TrimSpace(req.GetString("edit_token", ""))
 
 		username := deps.ExtractUsername(ctx)
-		// Same-account live editor guard: if the human is on the page in
-		// edit mode right now, refuse the discard — otherwise the AI
-		// would silently blank the draft under them. A closed tab clears
-		// presence, so genuinely stale sessions stay discardable.
-		if deps.Presence != nil && deps.Presence.HasLiveEditor(presencePageKey(pagePath), username) {
-			return jsonResult(map[string]any{
-				"error":   "owner_active",
-				"message": "your account is actively editing this page in a live browser session — discarding would wipe unsaved work. Close the tab first, or publish/save from the browser, then retry.",
-			}), nil
+		// Live-editor guard: if anyone is on the page in edit mode
+		// right now, refuse the discard — otherwise the AI would
+		// silently blank the draft under them. A closed tab clears
+		// presence, so genuinely stale drafts stay discardable.
+		if deps.Presence != nil {
+			if liveUser, live := deps.Presence.AnyLiveEditor(presencePageKey(pagePath)); live {
+				return jsonResult(map[string]any{
+					"error":   "owner_active",
+					"message": liveUser + " is actively editing this page in a live browser session — discarding would wipe unsaved work. Close the tab first, or publish/save from the browser, then retry.",
+				}), nil
+			}
 		}
 		if err := deps.DraftEditor.DiscardDraft(pagePath, username, editToken); err != nil {
 			switch {

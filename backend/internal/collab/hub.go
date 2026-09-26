@@ -149,24 +149,23 @@ func (h *Hub) GetPagePresence(page string) []UserPresence {
 	return h.pagePresenceLocked(page)
 }
 
-// HasLiveEditor reports whether `username` is currently connected to `page`
+// AnyLiveEditor reports whether any user is currently connected to `page`
 // in edit mode (WebSocket presence, mode == "edit"). Used by the MCP
-// draft-session tools to block a same-user AI from reclaiming a lock the
-// human is actively holding open in a browser tab. A closed tab clears
-// presence in Unregister, so as soon as the tab goes away the check
-// returns false and the AI can safely take over the stale lock.
-func (h *Hub) HasLiveEditor(page, username string) bool {
+// draft-session tools to gate lock takeover on liveness, not identity: if
+// no one is presently editing, the lock is fair game to reclaim; if
+// someone is, taking it would cut them out mid-edit. Also returns the
+// live editor's username (empty when none) so the caller can name them
+// in the refusal.
+func (h *Hub) AnyLiveEditor(page string) (username string, live bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	users := h.pages[page]
-	if users == nil {
-		return false
+	for _, cp := range users {
+		if cp.presence.Mode == "edit" {
+			return cp.presence.Username, true
+		}
 	}
-	cp, ok := users[username]
-	if !ok {
-		return false
-	}
-	return cp.presence.Mode == "edit"
+	return "", false
 }
 
 func (h *Hub) pagePresenceLocked(page string) []UserPresence {

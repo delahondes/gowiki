@@ -40,6 +40,7 @@ type DraftManager interface {
 	AdminDiscardDraft(pagePath, draftOwner string) error
 	AdminReadDraft(pagePath, owner string) (string, error)
 	AdminReclaimDraft(pagePath, fromUser, toUser string) error
+	TakeoverDraft(pagePath, newOwner, currentPublished string) (markdown string, editToken string, err error)
 }
 
 func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {

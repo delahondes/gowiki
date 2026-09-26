@@ -360,6 +360,73 @@ func (d *DraftStore) AdminReadDraft(pagePath, owner string) (string, error) {
 	return string(data), nil
 }
 
+// TakeoverDraft moves the current draft to newOwner and issues a fresh
+// edit token in one atomic step, returning both the current draft
+// markdown and the token. Skips ownership checks — the caller must have
+// already decided the takeover is safe (e.g. by verifying no user is
+// presently connected as a live editor on the page). If there is no
+// existing lock, the draft is seeded from currentPublished; if the lock
+// exists but the draft file is missing, the same seeding path is used.
+//
+// This is the identity-agnostic entry point used by the MCP draft-session
+// tools: the presence hub gates whether the takeover is allowed, not the
+// caller's relationship to the previous lock owner.
+func (d *DraftStore) TakeoverDraft(pagePath, newOwner, currentPublished string) (markdown string, editToken string, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	prevLock, lerr := d.readLock(pagePath)
+	if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
+		return "", "", fmt.Errorf("read lock: %w", lerr)
+	}
+
+	// If a previous owner's draft exists, move it to the new owner. If
+	// only the new owner's draft exists, keep it. If nothing exists,
+	// seed from currentPublished.
+	dstPath := d.draftPath(newOwner, pagePath)
+	if prevLock.Owner != "" && prevLock.Owner != newOwner {
+		srcPath := d.draftPath(prevLock.Owner, pagePath)
+		if data, rerr := os.ReadFile(srcPath); rerr == nil {
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				return "", "", fmt.Errorf("create draft dir: %w", err)
+			}
+			if err := writeFileAtomic(dstPath, data); err != nil {
+				return "", "", fmt.Errorf("write reclaimed draft: %w", err)
+			}
+			os.Remove(srcPath)
+			markdown = string(data)
+		}
+	}
+
+	// Ensure the new owner has a draft file. Prefer whatever already
+	// exists at their path (could be their own resume, or the just-moved
+	// content); otherwise seed from published.
+	if markdown == "" {
+		if data, rerr := os.ReadFile(dstPath); rerr == nil {
+			markdown = string(data)
+		} else {
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				return "", "", fmt.Errorf("create draft dir: %w", err)
+			}
+			if err := writeFileAtomic(dstPath, []byte(currentPublished)); err != nil {
+				return "", "", fmt.Errorf("write initial draft: %w", err)
+			}
+			markdown = currentPublished
+		}
+	}
+
+	editToken = generateEditToken()
+	newLock := DraftLock{
+		Owner:     newOwner,
+		Since:     time.Now().UTC().Format(time.RFC3339),
+		EditToken: editToken,
+	}
+	if err := d.writeLock(pagePath, newLock); err != nil {
+		return "", "", err
+	}
+	return markdown, editToken, nil
+}
+
 // AdminReclaimDraft transfers a draft from one user to another.
 // The draft file is moved and the lock is updated to the new owner.
 func (d *DraftStore) AdminReclaimDraft(pagePath, fromUser, toUser string) error {
