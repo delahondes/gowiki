@@ -46,7 +46,8 @@ jobs:
           cache: true
           cache-dependency-path: backend/go.sum
       - name: golangci-lint (includes gofmt + govet + staticcheck + unused + ineffassign)
-        uses: golangci/golangci-lint-action@v6
+        # v7 is the first tag that supports golangci-lint v2's config schema.
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.14.0
           working-directory: backend
