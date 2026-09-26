@@ -39,6 +39,13 @@ test: test-backend test-frontend
 test-backend:
 	cd backend && go test ./...
 
+# Integration tests need a live Postgres. Point DATABASE_URL at your
+# local instance (or use the default gowiki:gowiki@localhost:5432/gowiki_test)
+# and run `make test-integration`. CI does this automatically via a
+# postgres service container.
+test-integration:
+	cd backend && go test -tags=integration ./...
+
 test-frontend:
 	npm --prefix frontend test
 

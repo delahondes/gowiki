@@ -16,6 +16,28 @@ jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
+    # Postgres service container — the integration-tagged tests need a
+    # live DB (DataStore, SchemaStore, DatabaseSync, HTTP handlers, MCP
+    # tools). Unit-only tests are unaffected and still run without it.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gowiki
+          POSTGRES_PASSWORD: gowiki
+          POSTGRES_DB: gowiki_test
+        ports:
+          - 5432:5432
+        # `pg_isready` polling — the job proceeds only once the DB
+        # accepts connections. Without this, the first test race-loses
+        # to a still-initialising Postgres.
+        options: >-
+          --health-cmd "pg_isready -U gowiki -d gowiki_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://gowiki:gowiki@localhost:5432/gowiki_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -29,9 +51,12 @@ jobs:
       - name: go build
         working-directory: backend
         run: go build ./...
-      - name: go test
+      - name: go test (unit)
         working-directory: backend
         run: go test -race -timeout 5m ./...
+      - name: go test (integration — Postgres-backed)
+        working-directory: backend
+        run: go test -race -tags=integration -timeout 10m ./...
 
   frontend:
     name: Frontend (TS + Vite + Vitest)
