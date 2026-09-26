@@ -451,10 +451,11 @@ func TestCreateFromTemplate_ReviewflowNotValidated_409(t *testing.T) {
 		"{reviewflow version=1.0 author=alice reviewer=bob}\n\n"+
 			"{template}\n\n"+
 			"{template-title}\n# T\n\nBody\n")
-	// Force reviewflow state to reflect the directive but no confirmations.
-	if _, err := s.reviewflowService.EnsureState("docs/_template"); err == nil {
-		// Bootstrap made the state; no confirmations yet, so not validated.
-	}
+	// Bootstrap reviewflow state from the directive. No confirmations yet,
+	// so the resulting state is not-fully-validated — the invariant this
+	// test pins. Errors here are non-fatal because a missing state file
+	// is normal for a page never opened before.
+	_, _ = s.reviewflowService.EnsureState("docs/_template")
 
 	rec := postCreate(t, s, TemplateCreateRequest{
 		TemplatePath: "/docs/_template",
