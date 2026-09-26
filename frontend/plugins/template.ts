@@ -258,7 +258,7 @@ class TemplateReviewflowNodeView {
     label.textContent = "Template reviewflow — resolved at document creation"
     this.dom.appendChild(label)
 
-    const roles: Record<string, string> = {}
+    let roles: Record<string, string> = {}
     try {
       roles = JSON.parse(this.node.attrs.roles || "{}")
     } catch { /* empty */ }
