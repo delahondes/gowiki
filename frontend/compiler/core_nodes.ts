@@ -356,8 +356,13 @@ function registerParagraph(reg: Registry) {
       const inTableCell =
         ctx.hasOpenNode("table_cell") || ctx.hasOpenNode("table_header")
 
-      // In this dialect, plain newlines are hard breaks in top-level and list paragraphs.
-      if (inParagraph && !inTableCell && (topLevelParagraph || inListItem)) {
+      // Hard-break in all three carriers of hard breaks in this dialect:
+      // top-level paragraphs, list items (where a wrapped source line
+      // still means a break), and table cells (where any newline is
+      // synthesized by the pre-inline `\n` → newline promotion above and
+      // means the author wrote `\n` explicitly). Elsewhere, a softbreak
+      // is a soft wrap and folds to a single space.
+      if (inParagraph && (topLevelParagraph || inListItem || inTableCell)) {
         ctx.push(ctx.schema.nodes.hard_break.create())
         return
       }
@@ -383,6 +388,31 @@ function registerEmphasis(reg: Registry) {
     // Allow #fragment (same-page anchor), and internal paths with optional fragment
     return /^(#\S+|(\/(?!\/)|\.\/|\.\.\/)\S*)$/.test(href)
   }
+
+  // --- markdown-it plugin: promote literal `\n` in inline content to real
+  // newlines BEFORE markdown-it's inline parser runs.
+  //
+  // Cells and list items encode explicit hard breaks as the two-character
+  // sequence "\\n" (backslash + n) because their source stays on one line.
+  // At inline-tokenisation time that sequence is just text — no whitespace
+  // — so markdown-it's `_`-em rule considers a `_` right after it to be
+  // between two word characters (n and whatever follows) and refuses to
+  // open em (the `snake_case` guard). `*` / `**` / `==` don't have this
+  // guard, so bold/em/highlight worked while underline silently didn't.
+  //
+  // Replacing "\\n" with a real newline before inline runs makes the em
+  // rule see whitespace before the `_` and it opens correctly. The
+  // resulting softbreak becomes a hard_break in cells and list items via
+  // the softbreak handler below.
+  reg.registerMarkdownItPlugin((md: any) => {
+    md.core.ruler.before("inline", "gowiki_hardbreak_escape", (state: any) => {
+      for (const tok of state.tokens) {
+        if (tok.type === "inline" && typeof tok.content === "string" && tok.content.indexOf("\\n") !== -1) {
+          tok.content = tok.content.replace(/\\n/g, "\n")
+        }
+      }
+    })
+  })
 
   // --- markdown-it plugin: remap _text_ from em to underline ---
   reg.registerMarkdownItPlugin((md: any) => {
