@@ -11,6 +11,14 @@ import (
 	"gowiki/backend/internal/storage"
 )
 
+// presencePageKey returns the canonical page path used by the presence hub
+// (leading slash; trailing slash preserved for namespace indexes). The
+// tools receive `pagePath` with the leading slash already stripped, so we
+// reintroduce it here for the presence lookup.
+func presencePageKey(pagePath string) string {
+	return "/" + pagePath
+}
+
 // The draft-session tools let an agent act as a member of Gowiki's
 // collaborative edit system. The flow mirrors what a human editor does in
 // the browser:
@@ -38,14 +46,15 @@ func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 				"Behaviour:\n"+
 				"- No lock and no draft: creates a new draft seeded from the current published page (or from initial_markdown, if provided).\n"+
 				"- Caller already holds the lock: returns ErrEditSuperseded unless force=true (use force to reclaim a session left open in another tab).\n"+
-				"- Another user holds the lock: refused with locked_by set. This tool never steals another user's session — that is admin territory.\n\n"+
+				"- Another user holds the lock: refused with locked_by set. This tool never steals another user's session — that is admin territory.\n"+
+				"- force=true refused with 'owner_active' if the same account is currently editing this page in a live browser tab. The aim of force is to recover stale sessions, never to interrupt someone who is actively typing.\n\n"+
 				"After entering, save with save_edit_draft, then either publish_edit_draft or discard_edit_draft. Every write uses the returned edit_token.",
 		),
 		mcpgo.WithString("path", mcpgo.Required(),
 			mcpgo.Description("Page path, leading slash optional. Namespace indexes end with '/'."),
 		),
 		mcpgo.WithBoolean("force",
-			mcpgo.Description("Reclaim an edit session you already own from another tab. Never overrides another user's lock."),
+			mcpgo.Description("Reclaim a stale edit session you already own (a tab you closed or a crashed session). Never overrides another user's lock, and refuses when the same account is presently editing the page in a live browser tab."),
 		),
 		mcpgo.WithString("initial_markdown",
 			mcpgo.Description("Only used for a brand-new page (no published version and no existing draft). Ignored otherwise."),
@@ -63,6 +72,22 @@ func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult("edit permission denied"), nil
 		}
 		force := req.GetBool("force", false)
+
+		// force=true is meant for recovering the caller's OWN stale
+		// session (a tab they closed, a crash, an SDK that dropped its
+		// edit_token). If the same account is presently connected as a
+		// live editor on this page, treat force as a mistake and refuse
+		// — otherwise the AI would silently invalidate the human's
+		// edit_token and the next save from the browser would lose
+		// whatever the human typed since their last checkpoint.
+		username := deps.ExtractUsername(ctx)
+		if force && deps.Presence != nil && deps.Presence.HasLiveEditor(presencePageKey(pagePath), username) {
+			return jsonResult(map[string]any{
+				"error":     "owner_active",
+				"message":   "your account is actively editing this page in a live browser session — reclaiming with force=true would cut off that session. Ask the human to save and close the tab, or wait for it to disconnect, then retry.",
+				"locked_by": username,
+			}), nil
+		}
 
 		// Seed content: published if any, else the caller-supplied initial
 		// markdown for a brand-new page. We never overwrite an existing
@@ -82,7 +107,6 @@ func registerEnterEditSessionTool(srv *mcpsrv.MCPServer, deps Deps) {
 			}
 		}
 
-		username := deps.ExtractUsername(ctx)
 		markdown, editToken, err := deps.DraftEditor.EnterEditMode(pagePath, username, force, published)
 		if errors.Is(err, storage.ErrPageLocked) {
 			resp := map[string]any{
@@ -356,7 +380,9 @@ func registerDiscardEditDraftTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithDescription(
 			"Throw away the caller's own draft and clear the lock. Requires edit permission. When edit_token is provided it must "+
 				"match the current lock; when omitted, the call is refused if a token-bearing session still exists (another tab). "+
-				"Never touches another user's draft.",
+				"Never touches another user's draft.\n\n"+
+				"Refused with 'owner_active' if the same account is currently editing this page in a live browser tab — discarding "+
+				"would silently wipe the human's in-progress work.",
 		),
 		mcpgo.WithString("path", mcpgo.Required(),
 			mcpgo.Description("Page path, leading slash optional."),
@@ -379,6 +405,16 @@ func registerDiscardEditDraftTool(srv *mcpsrv.MCPServer, deps Deps) {
 		editToken := strings.TrimSpace(req.GetString("edit_token", ""))
 
 		username := deps.ExtractUsername(ctx)
+		// Same-account live editor guard: if the human is on the page in
+		// edit mode right now, refuse the discard — otherwise the AI
+		// would silently blank the draft under them. A closed tab clears
+		// presence, so genuinely stale sessions stay discardable.
+		if deps.Presence != nil && deps.Presence.HasLiveEditor(presencePageKey(pagePath), username) {
+			return jsonResult(map[string]any{
+				"error":   "owner_active",
+				"message": "your account is actively editing this page in a live browser session — discarding would wipe unsaved work. Close the tab first, or publish/save from the browser, then retry.",
+			}), nil
+		}
 		if err := deps.DraftEditor.DiscardDraft(pagePath, username, editToken); err != nil {
 			switch {
 			case errors.Is(err, storage.ErrNotDraftOwner):

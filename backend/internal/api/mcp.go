@@ -44,6 +44,7 @@ func (s *Server) buildMCPHandler() http.Handler {
 		TemplateCreator: &mcpTemplateCreator{s: s},
 		DraftEditor:     s.draftManager,
 		DraftPublisher:  &mcpDraftPublisher{s: s},
+		Presence:        s.presenceHub,
 		Media:           s.mediaStore,
 		MediaRefs:       s.orphanDetector,
 		MediaVersions:   s.mediaVersionStore,

@@ -186,6 +186,15 @@ type DraftStateProvider interface {
 	FindAnyDraft(pagePath string) (storage.DraftInfo, bool)
 }
 
+// PresenceProbe reports whether a given user is presently connected as a
+// live editor on a page (WebSocket presence in edit mode). The MCP draft
+// tools consult it before allowing a same-user reclaim or discard, so an
+// AI can never cut a human out of an active browser session. A closed or
+// timed-out tab clears presence, so a stale lock stays reclaimable.
+type PresenceProbe interface {
+	HasLiveEditor(pagePath, username string) bool
+}
+
 // DraftEditor is the writable draft surface: enter/save/read/discard. The
 // draft-session MCP tools use it to let an agent take part in a
 // collaborative edit — take over its own session, peek at any user's
@@ -263,6 +272,7 @@ type Deps struct {
 	TemplateCreator   TemplateCreator
 	DraftEditor       DraftEditor
 	DraftPublisher    DraftPublisher
+	Presence          PresenceProbe
 	Media             MediaStore
 	MediaRefs         ReferenceIndex
 	MediaVersions     MediaVersionReader
