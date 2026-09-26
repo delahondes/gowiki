@@ -70,15 +70,18 @@ func (r *RefIndex) Load() error {
 }
 
 // Save persists the ref index to disk atomically (write temp file, rename).
+// The RLock is held across MarshalIndent because refIndexJSON aliases the
+// live PageToMedia / MediaToPages maps — releasing the lock first and
+// then marshalling would race with concurrent UpdatePage / RemovePage
+// on those maps. Matches the pattern used in tags.go, links.go, attic.go.
 func (r *RefIndex) Save() error {
 	r.mu.RLock()
 	idx := refIndexJSON{
 		PageToMedia:  r.PageToMedia,
 		MediaToPages: r.MediaToPages,
 	}
-	r.mu.RUnlock()
-
 	data, err := json.MarshalIndent(idx, "", "  ")
+	r.mu.RUnlock()
 	if err != nil {
 		return err
 	}

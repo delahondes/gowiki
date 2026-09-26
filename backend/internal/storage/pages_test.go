@@ -490,21 +490,14 @@ func TestFileStore_ConcurrentPutsOnSamePageAreSerialized(t *testing.T) {
 	}
 }
 
+// TestFileStore_ConcurrentPutsOnDifferentPages pins the fix for a
+// RefIndex race the storage fork surfaced: Save() used to release its
+// RLock before calling json.MarshalIndent, so a concurrent UpdatePage
+// from a sibling Put would race on the shared PageToMedia map. The
+// fix in refs.go now holds the RLock across the Marshal, matching the
+// pattern in attic.go, tags.go, and links.go. Under -race this used to
+// fail every parallel test in the package; now it's clean.
 func TestFileStore_ConcurrentPutsOnDifferentPages(t *testing.T) {
-	// DEFECT: RefIndex.Save() releases its RLock before calling
-	// json.MarshalIndent (refs.go:79 → refs.go:81), so concurrent Puts
-	// on different pages race on r.PageToMedia. Verified with -race
-	// while writing this test — every parallel test in the package
-	// gets marked failed once the race detector fires.
-	//
-	// Fix would be to hold the RLock across the Marshal call
-	// (`defer r.mu.RUnlock()`), matching the pattern used in
-	// storage/attic.go, storage/tags.go, and storage/links.go. That's
-	// a production-code change outside this fork's scope; flagging.
-	//
-	// Once fixed, remove the Skip and this test will exercise the
-	// per-page-mutex + shared-index safety guarantee end-to-end.
-	t.Skip("known defect: RefIndex.Save() marshals without holding the RLock — races with concurrent UpdatePage from a sibling Put")
 	t.Parallel()
 	s := newTestFileStore(t)
 	var wg sync.WaitGroup
