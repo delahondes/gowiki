@@ -25,6 +25,24 @@ The reviewflow panel shows:
 - Which roles have confirmed (green checkmarks)
 - Which roles are pending
 
+## 1. Notification order
+
+By **default** roles are notified **sequentially**, in the order they appear in the directive. When the page is saved:
+
+1. Only the FIRST role's assignee receives a "please review" todo (and, if email is enabled, an email).
+2. When they confirm, the SECOND role's assignee is notified.
+3. And so on, until the last role confirms and the version becomes fully validated.
+
+This matches how most regulatory workflows expect an author / reviewer / validator chain to run: the validator is not asked to sign until the reviewer has done their pass. Order comes from the directive's source, not any alphabetical rule — `{reviewflow validator=v reviewer=r author=a}` would put the validator first.
+
+If you need every role to be notified at once instead — for example a peer-review committee where each reviewer scores independently — opt in with `parallel=true`:
+
+```markdown
+{reviewflow author=alice reviewer=bob validator=cathy parallel=true}
+```
+
+In parallel mode every assignee gets their task the moment the page is saved and can confirm in any order.
+
 ## 1. Version lifecycle
 
 1. Author writes content and sets the version tag (e.g. "1.0")

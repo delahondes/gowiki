@@ -91,7 +91,7 @@ func main() {
 			if err != nil {
 				continue
 			}
-			_, versionTag, found := reviewflow.ParseDirective(string(content))
+			dir, found := reviewflow.ParseDirective(string(content))
 			if !found {
 				// No directive in this version — record empty tag.
 				tagged = append(tagged, taggedEntry{
@@ -104,7 +104,7 @@ func main() {
 			}
 			tagged = append(tagged, taggedEntry{
 				version:   e.Version,
-				tag:       versionTag,
+				tag:       dir.VersionTag,
 				timestamp: e.Timestamp,
 				author:    e.Author,
 			})

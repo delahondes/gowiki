@@ -7,33 +7,65 @@ import (
 
 var directiveRe = regexp.MustCompile(`(?m)^\{reviewflow\s+(.*?)\}\s*$`)
 
-// ParseDirective extracts the reviewflow directive from markdown content.
-// Returns roles (all non-"version" key=value pairs), the version tag, and
-// whether a directive was found.
-func ParseDirective(markdown string) (roles map[string]string, versionTag string, found bool) {
-	m := directiveRe.FindStringSubmatch(markdown)
-	if m == nil {
-		return nil, "", false
-	}
-
-	roles = make(map[string]string)
-	pairs := parseKeyValues(m[1])
-	for k, v := range pairs {
-		if k == "version" {
-			versionTag = v
-		} else {
-			roles[k] = v
-		}
-	}
-	if len(roles) == 0 {
-		return nil, "", false
-	}
-	return roles, versionTag, true
+// Directive is the parsed shape of a `{reviewflow ...}` block.
+//
+// Roles is role → user (same as before, callers that only need lookups
+// keep working). RoleOrder is the same role names in the order they
+// appeared in the source — the sequential-notification path uses this
+// to know who to email FIRST when the page is saved and who is NEXT
+// after each confirmation. Parallel reverts to the historical
+// all-at-once behaviour when the author opts in via `parallel=true`.
+type Directive struct {
+	Roles      map[string]string
+	RoleOrder  []string
+	VersionTag string
+	Parallel   bool
 }
 
-// parseKeyValues parses key=value or key="value" pairs from a directive body.
-func parseKeyValues(s string) map[string]string {
-	result := make(map[string]string)
+// ParseDirective extracts the reviewflow directive from markdown content.
+// Returns nil when no directive is present or no roles were declared.
+func ParseDirective(markdown string) (*Directive, bool) {
+	m := directiveRe.FindStringSubmatch(markdown)
+	if m == nil {
+		return nil, false
+	}
+
+	pairs := parseKeyValues(m[1])
+	d := &Directive{Roles: make(map[string]string)}
+	for _, kv := range pairs {
+		switch kv.Key {
+		case "version":
+			d.VersionTag = kv.Value
+		case "parallel":
+			// Any truthy string enables parallel (true/1/yes). Anything
+			// else — including "false" — leaves the default sequential.
+			v := strings.ToLower(kv.Value)
+			d.Parallel = v == "true" || v == "1" || v == "yes"
+		default:
+			d.Roles[kv.Key] = kv.Value
+			d.RoleOrder = append(d.RoleOrder, kv.Key)
+		}
+	}
+	if len(d.Roles) == 0 {
+		return nil, false
+	}
+	return d, true
+}
+
+// KV preserves the source order of directive attributes — needed so the
+// sequential-notification path can hand out review tasks in the order the
+// author declared them.
+type KV struct {
+	Key, Value string
+}
+
+// parseKeyValues parses key=value or key="value" pairs from a directive
+// body, preserving source order. Duplicate keys keep the LAST value (same
+// as the previous map-based behaviour) but appear once in the order of
+// their first occurrence.
+func parseKeyValues(s string) []KV {
+	var result []KV
+	seen := make(map[string]int) // key → index in result
 	s = strings.TrimSpace(s)
 	for len(s) > 0 {
 		// Find key.
@@ -69,7 +101,12 @@ func parseKeyValues(s string) map[string]string {
 			}
 		}
 		if key != "" {
-			result[key] = val
+			if idx, dup := seen[key]; dup {
+				result[idx].Value = val
+			} else {
+				seen[key] = len(result)
+				result = append(result, KV{Key: key, Value: val})
+			}
 		}
 		s = strings.TrimLeft(s, " \t")
 	}

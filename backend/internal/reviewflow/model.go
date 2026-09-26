@@ -35,9 +35,18 @@ type VersionRecord struct {
 }
 
 // State is the persisted reviewflow state for a page.
+//
+// RoleOrder + Parallel are new. When Parallel is false (the default),
+// sequential-notification logic reads RoleOrder to know who to notify
+// first and who advances after each confirmation. Existing state files
+// written before these fields existed unmarshal cleanly (missing keys
+// → zero values); the next SyncFromMarkdown after upgrade rewrites the
+// state with the new fields populated from the current directive.
 type State struct {
 	Roles              map[string]string `json:"roles"`
+	RoleOrder          []string          `json:"role_order,omitempty"`
 	VersionTag         string            `json:"version_tag"`
+	Parallel           bool              `json:"parallel,omitempty"`
 	CurrentPageVersion int64             `json:"current_page_version"`
 	Confirmations      []Confirmation    `json:"confirmations"`
 	VersionHistory     []VersionRecord   `json:"version_history,omitempty"`

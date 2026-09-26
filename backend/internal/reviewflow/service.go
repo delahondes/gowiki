@@ -3,6 +3,7 @@ package reviewflow
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (svc *Service) ReconcileValidatedTasks() (int, error) {
 // SyncFromMarkdown parses the reviewflow directive from page markdown and
 // updates the stored state. Called on every page save.
 func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error {
-	roles, versionTag, found := ParseDirective(markdown)
+	dir, found := ParseDirective(markdown)
 
 	st, err := svc.store.Load(pagePath)
 	if err != nil {
@@ -171,7 +172,9 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 		// Directive removed — clean up transient state but keep history.
 		if st != nil {
 			st.Roles = nil
+			st.RoleOrder = nil
 			st.VersionTag = ""
+			st.Parallel = false
 			st.Confirmations = nil
 			st.CurrentPageVersion = pageVersion
 			if svc.todo != nil {
@@ -187,23 +190,84 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 	}
 
 	// If page version changed, reset confirmations (content changed)
-	// and create todo tasks for each role.
+	// and create the review todo task(s). In parallel mode we create
+	// every role's task at once (historical behaviour); in sequential
+	// mode we create only the FIRST role's task and advance the chain
+	// on each confirmation (see Confirm).
 	if st.CurrentPageVersion != pageVersion {
 		st.Confirmations = nil
 		if svc.todo != nil {
-			// Cancel any existing review tasks first.
 			_ = svc.todo.CancelReviewTasks(pagePath)
-			// Compute due date from deadline config.
-			dueDate := svc.computeDueDate(roles)
-			_ = svc.todo.CreateReviewTasks(pagePath, roles, versionTag, dueDate)
+			dueDate := svc.computeDueDate(dir.Roles)
+			if dir.Parallel {
+				_ = svc.todo.CreateReviewTasks(pagePath, dir.Roles, dir.VersionTag, dueDate)
+			} else {
+				first := firstOrderedRole(dir.RoleOrder, dir.Roles)
+				if first != "" {
+					_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{first: dir.Roles[first]}, dir.VersionTag, dueDate)
+				}
+			}
 		}
 	}
 
-	st.Roles = roles
-	st.VersionTag = versionTag
+	st.Roles = dir.Roles
+	st.RoleOrder = dir.RoleOrder
+	st.VersionTag = dir.VersionTag
+	st.Parallel = dir.Parallel
 	st.CurrentPageVersion = pageVersion
 
 	return svc.store.Save(pagePath, st)
+}
+
+// firstOrderedRole returns the first role in `order` that also appears in
+// `roles`. Both are inputs from the same directive parse, so in practice
+// every entry in `order` is present in `roles`; the guard is there to
+// tolerate a state file whose RoleOrder was migrated from a nil legacy
+// value and might have drifted.
+func firstOrderedRole(order []string, roles map[string]string) string {
+	for _, r := range order {
+		if _, ok := roles[r]; ok {
+			return r
+		}
+	}
+	// Fallback: if the order slice is empty (old state file, first save
+	// after upgrade), pick any role deterministically so the flow can
+	// still make progress. Sorting means we don't depend on Go's random
+	// map iteration.
+	if len(order) == 0 && len(roles) > 0 {
+		var keys []string
+		for k := range roles {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		return keys[0]
+	}
+	return ""
+}
+
+// nextUnconfirmedRole returns the next role in state.RoleOrder that has
+// not been confirmed for the current page version. Empty string means
+// every role is confirmed. Used by the sequential-notification path
+// after each Confirm.
+func nextUnconfirmedRole(st *State) string {
+	if st == nil || len(st.RoleOrder) == 0 {
+		return ""
+	}
+	confirmed := make(map[string]bool)
+	for _, c := range st.Confirmations {
+		if c.PageVersion == st.CurrentPageVersion {
+			confirmed[c.Role] = true
+		}
+	}
+	for _, r := range st.RoleOrder {
+		if _, assigned := st.Roles[r]; !assigned {
+			continue
+		}
+		if !confirmed[r] {
+			return r
+		}
+	}
+	return ""
 }
 
 // EnsureState loads the reviewflow state for a page, or bootstraps it from
@@ -226,16 +290,18 @@ func (svc *Service) EnsureState(pagePath string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read page %s to bootstrap reviewflow: %w", pagePath, err)
 	}
-	roles, versionTag, found := ParseDirective(page.Markdown)
-	if !found || len(roles) == 0 {
+	dir, found := ParseDirective(page.Markdown)
+	if !found || len(dir.Roles) == 0 {
 		return nil, fmt.Errorf("no reviewflow directive on page %s", pagePath)
 	}
 
 	if st == nil {
 		st = &State{}
 	}
-	st.Roles = roles
-	st.VersionTag = versionTag
+	st.Roles = dir.Roles
+	st.RoleOrder = dir.RoleOrder
+	st.VersionTag = dir.VersionTag
+	st.Parallel = dir.Parallel
 	st.CurrentPageVersion = page.Meta.Version
 	if err := svc.store.Save(pagePath, st); err != nil {
 		return nil, err
@@ -287,6 +353,21 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 	// performed their review, regardless of whether other roles have confirmed.
 	if svc.todo != nil {
 		_, _ = svc.todo.CompleteReviewTasks(pagePath, map[string]string{role: user})
+	}
+
+	// Sequential-notification chain: if this page is in sequential mode
+	// (the default) and the just-confirmed role was the current head of
+	// the chain, hand the baton to the next unconfirmed role by creating
+	// its review task. `nextUnconfirmedRole` returns "" when the just
+	// -confirmed role wasn't the head (unusual — only happens when a
+	// role signs out-of-order in parallel mode) or when everyone else
+	// is already confirmed (the allConfirmed block below closes the
+	// version out).
+	if !st.Parallel && svc.todo != nil {
+		if next := nextUnconfirmedRole(st); next != "" && next != role {
+			dueDate := svc.computeDueDate(st.Roles)
+			_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{next: st.Roles[next]}, st.VersionTag, dueDate)
+		}
 	}
 
 	// Check if all roles are now confirmed.
