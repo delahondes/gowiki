@@ -215,7 +215,11 @@ func (s *SchemaStore) DeleteTable(ctx context.Context, id int, changedBy string)
 		}
 	}
 
-	// Drop the auto_increment sequences.
+	// Collect auto_increment sequence names first — they'll be dropped
+	// AFTER the data table, since the data table's column has
+	// `DEFAULT nextval('seq')` and Postgres refuses to drop a sequence
+	// while a dependent column still references it. Dropping the table
+	// first releases the reference; then the sequences drop cleanly.
 	seqRows, err := tx.Query(ctx, `SELECT name FROM database_fields WHERE table_id = $1 AND type = 'auto_increment'`, id)
 	if err != nil {
 		return fmt.Errorf("list auto_increment fields: %w", err)
@@ -231,17 +235,18 @@ func (s *SchemaStore) DeleteTable(ctx context.Context, id int, changedBy string)
 	}
 	seqRows.Close()
 
-	for _, fn := range autoFields {
-		seqName := fmt.Sprintf("%s_%s_seq", dataTableName(name), fn)
-		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP SEQUENCE IF EXISTS %s", quoteIdent(seqName))); err != nil {
-			return fmt.Errorf("drop sequence %s: %w", seqName, err)
-		}
-	}
-
-	// Drop the data table.
+	// Drop the data table (releases sequence dependencies).
 	dtName := dataTableName(name)
 	if _, err := tx.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", quoteIdent(dtName))); err != nil {
 		return fmt.Errorf("drop data table: %w", err)
+	}
+
+	// Drop the now-orphan sequences.
+	for _, fn := range autoFields {
+		seqName := fmt.Sprintf("%s_%s_seq", dtName, fn)
+		if _, err := tx.Exec(ctx, fmt.Sprintf("DROP SEQUENCE IF EXISTS %s", quoteIdent(seqName))); err != nil {
+			return fmt.Errorf("drop sequence %s: %w", seqName, err)
+		}
 	}
 
 	// Delete the table definition (cascades to fields, enum_values, history).

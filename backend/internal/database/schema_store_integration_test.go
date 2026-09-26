@@ -164,18 +164,13 @@ func TestSchemaStore_DeleteTable_DropsDataAndFields(t *testing.T) {
 	}
 }
 
-// TestSchemaStore_DeleteTable_AutoIncrement_KnownBroken pins a real
-// defect surfaced while writing this suite: DeleteTable drops each
-// auto_increment column's sequence BEFORE it drops the data table
-// carrying the column with `DEFAULT nextval('seq')`. Postgres refuses
-// the sequence drop because the column depends on it, and DeleteTable
-// returns an error, leaving the table half-deleted.
-//
-// Fix: reverse the order — drop the data table first, then the
-// sequences (nothing depends on them by that point). Once the fix
-// lands, remove the t.Skip.
-func TestSchemaStore_DeleteTable_AutoIncrement_KnownBroken(t *testing.T) {
-	t.Skip("known bug: DeleteTable drops sequences before the column that DEFAULTs nextval(seq) — see schema_store.go DeleteTable ordering")
+// TestSchemaStore_DeleteTable_AutoIncrement pins the fix for a defect
+// surfaced while writing this suite: DeleteTable was dropping each
+// auto_increment column's sequence BEFORE the data table carrying the
+// column with `DEFAULT nextval('seq')`, so Postgres refused the
+// sequence drop and the transaction erred mid-flight. Fix: drop the
+// data table first, then the (now orphan) sequences.
+func TestSchemaStore_DeleteTable_AutoIncrement(t *testing.T) {
 	t.Parallel()
 	s, ctx := newSchemaStore(t)
 	id := makeTable(t, s, "auto_del")
@@ -183,6 +178,12 @@ func TestSchemaStore_DeleteTable_AutoIncrement_KnownBroken(t *testing.T) {
 	if err := s.DeleteTable(ctx, id, "cleaner"); err != nil {
 		t.Fatalf("DeleteTable with auto_increment: %v", err)
 	}
+	// Re-create should not collide with a leftover sequence.
+	newID := makeTable(t, s, "auto_del")
+	if newID == id {
+		t.Errorf("expected fresh id, got same %d", newID)
+	}
+	makeField(t, s, newID, "seq", FieldTypeAutoIncrement)
 }
 
 func TestSchemaStore_CreateField_RejectsBadNameAndType(t *testing.T) {
