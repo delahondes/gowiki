@@ -175,6 +175,83 @@ func (s *Server) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "draft saved"})
 }
 
+// PublishDraftErrorKind classifies a publish failure so callers (HTTP, MCP)
+// can map to their own error surface without matching error strings.
+type PublishDraftErrorKind string
+
+const (
+	PublishErrDatabaseRowConflict PublishDraftErrorKind = "database_row_conflict"
+	PublishErrEditSuperseded      PublishDraftErrorKind = "edit_superseded"
+	PublishErrNoDraft             PublishDraftErrorKind = "no_draft"
+	PublishErrValidation          PublishDraftErrorKind = "validation"
+	PublishErrInternal            PublishDraftErrorKind = "internal"
+)
+
+// PublishDraftError carries a machine-readable kind alongside the message.
+type PublishDraftError struct {
+	Kind    PublishDraftErrorKind
+	Message string
+	// Table is set when Kind is PublishErrDatabaseRowConflict.
+	Table string
+}
+
+func (e *PublishDraftError) Error() string { return e.Message }
+
+// PublishDraft runs the full publish pipeline for a draft: the inline-edit
+// conflict guard, DraftManager.Publish, flow-marker stripping, database
+// validation, page store write, and todo auto-completion. Shared between the
+// HTTP handler and the MCP tool so both go through one code path.
+func (s *Server) PublishDraft(pagePath, username, editToken string, forcePublish bool) (*storage.PutResult, *PublishDraftError) {
+	pagePath = strings.TrimSpace(pagePath)
+	if pagePath == "" {
+		return nil, &PublishDraftError{Kind: PublishErrInternal, Message: "missing page path"}
+	}
+
+	if !forcePublish {
+		if tableNameVal, ok := s.inlineEditConflicts.Load(pagePath); ok {
+			table, _ := tableNameVal.(string)
+			return nil, &PublishDraftError{
+				Kind:    PublishErrDatabaseRowConflict,
+				Message: "database row was edited inline while this draft was open; retry with force_publish=true to overwrite",
+				Table:   table,
+			}
+		}
+	}
+
+	s.inlineEditConflicts.Delete(pagePath)
+
+	md, err := s.draftManager.Publish(pagePath, username, editToken)
+	if errors.Is(err, storage.ErrEditSuperseded) {
+		return nil, &PublishDraftError{Kind: PublishErrEditSuperseded, Message: "edit session superseded"}
+	}
+	if errors.Is(err, storage.ErrNoDraft) {
+		return nil, &PublishDraftError{Kind: PublishErrNoDraft, Message: "no draft to publish"}
+	}
+	if err != nil {
+		return nil, &PublishDraftError{Kind: PublishErrInternal, Message: err.Error()}
+	}
+
+	md = stripFlowMarkers(md)
+
+	if s.databaseSync != nil {
+		if err := s.databaseSync.ValidatePageContent(pagePath, md); err != nil {
+			return nil, &PublishDraftError{Kind: PublishErrValidation, Message: err.Error()}
+		}
+	}
+
+	result, err := s.store.Put(pagePath, md, username)
+	if err != nil {
+		return nil, &PublishDraftError{Kind: PublishErrInternal, Message: err.Error()}
+	}
+
+	if s.todoService != nil {
+		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, username)
+		go s.todoService.AutoCompleteCreateAction(context.Background(), result.Page.Path, username)
+		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
+	}
+	return &result, nil
+}
+
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
 	if pagePath == "" {
@@ -193,53 +270,22 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Before publishing, check if a forced inline edit modified this page while the draft was open.
-	if !req.ForcePublish {
-		if tableNameVal, ok := s.inlineEditConflicts.Load(pagePath); ok {
+	result, perr := s.PublishDraft(pagePath, username, req.EditToken, req.ForcePublish)
+	if perr != nil {
+		switch perr.Kind {
+		case PublishErrDatabaseRowConflict:
 			writeJSON(w, http.StatusConflict, map[string]any{
 				"error": "database_row_conflict",
-				"table": tableNameVal,
+				"table": perr.Table,
 			})
-			return
+		case PublishErrEditSuperseded, PublishErrNoDraft:
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "edit session superseded"})
+		case PublishErrValidation:
+			writeError(w, http.StatusBadRequest, perr.Message)
+		default:
+			writeError(w, http.StatusInternalServerError, perr.Message)
 		}
-	}
-
-	// Clear the conflict flag — either force-published or no conflict.
-	s.inlineEditConflicts.Delete(pagePath)
-
-	md, err := s.draftManager.Publish(pagePath, username, req.EditToken)
-	if errors.Is(err, storage.ErrEditSuperseded) || errors.Is(err, storage.ErrNoDraft) {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "edit session superseded"})
 		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Strip ephemeral flow markers before publishing.
-	md = stripFlowMarkers(md)
-
-	// Validate database system columns (e.g. id) before saving.
-	if s.databaseSync != nil {
-		if err := s.databaseSync.ValidatePageContent(pagePath, md); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	// Write through the page store (which handles archiving, indexes, etc.)
-	result, err := s.store.Put(pagePath, md, username)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Auto-complete "edit" wiki action tasks.
-	if s.todoService != nil {
-		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, username)
-		go s.todoService.AutoCompleteCreateAction(context.Background(), result.Page.Path, username)
-		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
 	}
 
 	writeJSON(w, http.StatusOK, result)

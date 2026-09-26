@@ -42,6 +42,8 @@ func (s *Server) buildMCPHandler() http.Handler {
 		Mover:           mover,
 		RowWriter:       &mcpRowWriter{s: s},
 		TemplateCreator: &mcpTemplateCreator{s: s},
+		DraftEditor:     s.draftManager,
+		DraftPublisher:  &mcpDraftPublisher{s: s},
 		Media:           s.mediaStore,
 		MediaRefs:       s.orphanDetector,
 		MediaVersions:   s.mediaVersionStore,
@@ -178,3 +180,42 @@ func (w *mcpTemplateCreator) CreatePageFromTemplate(_ context.Context, templateP
 // TemplateErrorKind lets mcpserver classify a create failure without
 // importing the api package.
 func (e *TemplateCreateError) TemplateErrorKind() string { return e.Kind }
+
+// mcpDraftPublisher adapts Server.PublishDraft to the mcpserver
+// DraftPublisher interface. HTTP handler and MCP tool both route through
+// PublishDraft, so the pipeline (inline-edit guard, draft.Publish, flow
+// markers, database validation, page store, todo auto-complete) is
+// executed once per publish, regardless of caller.
+type mcpDraftPublisher struct{ s *Server }
+
+func (p *mcpDraftPublisher) PublishDraft(_ context.Context, pagePath, username, editToken string, force bool) (*mcpserver.DraftPublishResult, mcpserver.DraftPublisherError) {
+	result, err := p.s.PublishDraft(pagePath, username, editToken, force)
+	if err != nil {
+		return nil, err
+	}
+	return &mcpserver.DraftPublishResult{
+		Path:    result.Page.Path,
+		Version: result.Page.Meta.Version,
+	}, nil
+}
+
+// PublishErrorKind maps PublishDraftError.Kind onto the mcpserver enum so
+// the MCP layer can classify refusals without matching strings.
+func (e *PublishDraftError) PublishErrorKind() mcpserver.DraftPublisherErrorKind {
+	switch e.Kind {
+	case PublishErrDatabaseRowConflict:
+		return mcpserver.PublishKindDatabaseRowConflict
+	case PublishErrEditSuperseded:
+		return mcpserver.PublishKindEditSuperseded
+	case PublishErrNoDraft:
+		return mcpserver.PublishKindNoDraft
+	case PublishErrValidation:
+		return mcpserver.PublishKindValidation
+	default:
+		return mcpserver.PublishKindInternal
+	}
+}
+
+// ConflictTable exposes the offending table for database_row_conflict; empty
+// for every other kind.
+func (e *PublishDraftError) ConflictTable() string { return e.Table }

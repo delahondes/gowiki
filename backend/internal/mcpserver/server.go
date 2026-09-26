@@ -186,6 +186,55 @@ type DraftStateProvider interface {
 	FindAnyDraft(pagePath string) (storage.DraftInfo, bool)
 }
 
+// DraftEditor is the writable draft surface: enter/save/read/discard. The
+// draft-session MCP tools use it to let an agent take part in a
+// collaborative edit — take over its own session, peek at any user's
+// in-progress draft, or throw one away. Publish lives on DraftPublisher so
+// the MCP layer can share the full server-side publish pipeline (flow
+// markers, validation, page store write, todo auto-complete).
+type DraftEditor interface {
+	EnterEditMode(pagePath, username string, force bool, currentPublished string) (markdown string, editToken string, err error)
+	SaveDraft(pagePath, username, editToken, markdown string) error
+	ReadDraft(pagePath, username string) (string, error)
+	AdminReadDraft(pagePath, owner string) (string, error)
+	DiscardDraft(pagePath, username, editToken string) error
+}
+
+// DraftPublishResult mirrors storage.PutResult minus the api-side wrapping so
+// mcpserver doesn't import api. Adapters convert the concrete result.
+type DraftPublishResult struct {
+	Path    string `json:"path"`
+	Version int64  `json:"version"`
+}
+
+// DraftPublisherErrorKind classifies a publish failure so MCP handlers can
+// map to a targeted refusal without matching error strings.
+type DraftPublisherErrorKind string
+
+const (
+	PublishKindDatabaseRowConflict DraftPublisherErrorKind = "database_row_conflict"
+	PublishKindEditSuperseded      DraftPublisherErrorKind = "edit_superseded"
+	PublishKindNoDraft             DraftPublisherErrorKind = "no_draft"
+	PublishKindValidation          DraftPublisherErrorKind = "validation"
+	PublishKindInternal            DraftPublisherErrorKind = "internal"
+)
+
+// DraftPublisherError carries a kind + message for MCP to classify refusals.
+// The api layer's *PublishDraftError implements it — we don't import api here.
+type DraftPublisherError interface {
+	error
+	PublishErrorKind() DraftPublisherErrorKind
+	ConflictTable() string
+}
+
+// DraftPublisher runs the full server-side publish pipeline for a draft:
+// inline-edit conflict guard, DraftManager.Publish, flow-marker stripping,
+// database validation, page store write, todo auto-complete. Implemented in
+// api/mcp.go over api.Server.PublishDraft so MCP + HTTP share one path.
+type DraftPublisher interface {
+	PublishDraft(ctx context.Context, pagePath, username, editToken string, force bool) (*DraftPublishResult, DraftPublisherError)
+}
+
 // UsernameExtractor pulls the authenticated username from a request context.
 // The MCP handler is mounted behind the existing auth middleware, so the
 // caller wires this to the same helper the HTTP API uses.
@@ -212,6 +261,8 @@ type Deps struct {
 	Mover             PageMover
 	RowWriter         RowWriter
 	TemplateCreator   TemplateCreator
+	DraftEditor       DraftEditor
+	DraftPublisher    DraftPublisher
 	Media             MediaStore
 	MediaRefs         ReferenceIndex
 	MediaVersions     MediaVersionReader

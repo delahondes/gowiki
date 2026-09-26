@@ -173,6 +173,11 @@ npx @modelcontextprotocol/inspector \
 | `upload_attachment` | Create or replace an attachment via base64 (small files only); optional sha256/size_bytes verification catches transport corruption |
 | `upload_attachment_instructions` | Return a ready-to-run `curl -F` command for the wiki's HTTP multipart endpoint — use this for anything bigger than a few KB |
 | `delete_attachment` | Delete an attachment; refuses when pages still reference it unless `force=true` |
+| `enter_edit_session` | Take part in a collaborative edit — acquire (or resume) the lock and get the draft markdown + edit_token. `force=true` reclaims the caller's OWN earlier session (never steals another user's) |
+| `save_edit_draft` | Checkpoint work-in-progress on a draft you own (needs the edit_token). Non-publishing |
+| `read_edit_draft` | Peek at the current draft for a page regardless of owner — the same view collaborative editors see. Requires view permission |
+| `publish_edit_draft` | Publish the draft: full server-side pipeline (inline-row-edit guard, validation, page store, todo auto-complete). Requires the edit_token from `enter_edit_session` |
+| `discard_edit_draft` | Throw away the caller's own draft and clear the lock |
 
 ## Searching by tag
 
@@ -218,6 +223,54 @@ Typical uses where `edit_page` is right:
 - Migrate `@@table.field@@` placeholders to `{{field}}` in template pages — one edit per placeholder, each anchored on the unique occurrence.
 
 Use `write_page` only when you truly do want to replace the whole page (creating from scratch, wholesale reorganizations).
+
+## Draft sessions — joining an edit in flight
+
+`write_page` and `edit_page` publish immediately. Sometimes that's the wrong shape: the user is co-editing the page in a browser tab and wants the agent to contribute inside the same draft, or wants to review the agent's work-in-progress before it goes live. The draft-session tools mirror the collaborative-edit flow the frontend uses:
+
+1. **`enter_edit_session(path, force?, initial_markdown?)`** — acquire or resume the edit lock. Returns `{edit_token, markdown, page_version}` (plus `locked_by` on refusal). The markdown is the current draft file — or the published page if no draft exists yet. `initial_markdown` seeds a brand-new page only; it is ignored when a draft or published version exists.
+   - **`force=true` supersedes the caller's OWN earlier session** (a second tab, or a session left open). It NEVER overrides another user's lock — that's admin territory and is refused with `error: "page_locked"`, `locked_by: <username>`.
+   - Requires edit permission for the caller AND the `@ai` subject on this page.
+
+2. **`save_edit_draft(path, edit_token, markdown, summary?)`** — checkpoint work-in-progress. Non-publishing. The edit_token must match the current lock; if another tab has reclaimed the session, the save returns `error: "edit_superseded"` and the agent should re-enter.
+
+3. **`read_edit_draft(path)`** — peek at the current draft for a page regardless of who owns it. This is the same view collaborative editors see. Requires view permission. Returns `{markdown, owner, since, is_own_draft}`, or `{error: "no_draft"}` when nothing exists (with a `lock` field if a bare lock is present without a draft file).
+
+4. **`publish_edit_draft(path, edit_token, summary?, force_publish?)`** — run the full server-side publish pipeline: inline-row-edit conflict guard, flow-marker strip, database validation, page store write (which handles archiving + indexes), auto-complete of "edit" wiki-action todos. Clears the lock and draft on success. Returns `{path, version, edit_token_cleared: true}`.
+   - **`force_publish=true` is a targeted override** for the `error: "database_row_conflict"` case (a row bound to this page was edited inline while the draft was open). Confirm the choice with the user; otherwise re-enter the session to pick up the inline change.
+   - `error: "validation"` means the draft failed database system-column validation — fix the markdown, save again, retry.
+   - `error: "edit_superseded"` / `"no_draft"` mean the session was reclaimed or never existed.
+
+5. **`discard_edit_draft(path, edit_token?)`** — throw away the caller's own draft and clear the lock. The token is optional; when omitted, the call is refused if a token-bearing session still exists (belt-and-braces against accidentally discarding another tab's work).
+
+Typical agent workflow:
+
+```
+1. get_page_meta(path) → confirm no other user holds a lock
+2. enter_edit_session(path) → { edit_token, markdown, page_version }
+3. (apply edits to markdown in memory)
+4. save_edit_draft(path, edit_token, new_markdown, "[AI: Claude] draft translation")
+5. show diff to the user (preview_page_diff, or human review of the draft)
+6. publish_edit_draft(path, edit_token, "[AI: Claude] publish translation")
+```
+
+Or, to help a human editor mid-session:
+
+```
+1. read_edit_draft(path) → { markdown, owner, is_own_draft: false }
+2. (agent proposes edits inline in chat, or the human asks for a rewrite)
+3. Human editor pastes the agent's version into their own session and saves.
+```
+
+Or, when the human has walked away from an open tab and the agent needs to finish:
+
+```
+1. read_edit_draft(path) → { owner: "raynald", is_own_draft: false }
+2. enter_edit_session(path)  # refused: page_locked
+3. (Ask the human to close their tab, or admin unlocks first.)
+```
+
+The tools never break the "one active edit per page" invariant: taking part in an edit is a coordinated hand-off, not a race.
 
 ## Template stamps
 
