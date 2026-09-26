@@ -90,6 +90,31 @@ One level of indirection is supported (no chained `a.b.c`). `multi_enum`
 children are not joinable. Unresolvable filters (typos, wrong types) are
 silently dropped rather than raising an error.
 
+#### Template variables inside `filter=`
+
+The `filter=` value is interpolated with `{{...}}` template variables
+before it reaches the backend, so a page can filter using its own
+context without you needing to hard-code the value:
+
+```markdown
+{database-query table=comments filter="ticket_id={{id}}"}
+```
+
+Resolution order is the same as anywhere else on the page:
+
+1. **Global variables** (`ALL_CAPS`): `{{TITLE}}`, `{{VERSION}}`,
+   `{{PATH}}`, `{{PAGE}}`, and the rest of the set documented in
+   [Templates](./templates).
+2. **Database-row fields** (lowercase): resolved from the
+   `{database-row}` block on the *current* page. Only usable when
+   the page is bound to a row — see [Page-bound rows](#1-page-bound-rows).
+
+Unknown names are left literal on purpose. A typo like `{{ide}}`
+reaches the backend as `ticket_id={{ide}}` and the query fails with
+a visible error, which is much easier to notice than the silent
+"match every row" you'd get if we substituted an empty string. Fix
+the name and the filter starts working immediately — no reload.
+
 ## 1. Inserting rows
 
 Display an insert form using `{database-newrow}`:

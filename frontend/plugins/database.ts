@@ -2944,23 +2944,44 @@ function resolveTemplateFields(state: EditorState): { fields: Record<string, str
   return { fields, table }
 }
 
-// expandTemplateVars replaces {{name}} references in a string using the
-// same two-source resolution the template-var NodeView uses:
-// ALL_CAPS globals (TITLE, VERSION, ID, …) first, then database-row
-// _fields from the current document. Unknown names stay literal so a
-// typo surfaces at the request site rather than becoming an empty
-// string. Called from directive-attr paths (filter=, …) that reach the
-// backend directly — the backend has no template context of its own.
-export function expandTemplateVars(s: string, view: EditorView): string {
+/**
+ * interpolateVars replaces `{{name}}` occurrences in `s` using the
+ * supplied `resolve` function. The resolver returns:
+ *   - `undefined` → the name is unknown; leave `{{name}}` literal so
+ *     the caller notices (e.g. a typo shows up in the failing request
+ *     rather than silently becoming `""`).
+ *   - a string     → substituted verbatim (even the empty string).
+ * Kept pure so it can be tested without an EditorView. The view-aware
+ * wrapper `expandTemplateVars` composes this with `resolveGlobalVar` +
+ * database-row fields.
+ */
+export function interpolateVars(s: string, resolve: (name: string) => string | undefined): string {
   if (!s || s.indexOf("{{") === -1) return s
-  const { fields } = resolveTemplateFields(view.state)
   return s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, rawName) => {
     const name = String(rawName).trim()
     if (!name) return whole
+    const value = resolve(name)
+    return value === undefined ? whole : value
+  })
+}
+
+// expandTemplateVars replaces {{name}} references in a string using the
+// same two-source resolution the template-var NodeView uses:
+// ALL_CAPS globals (TITLE, VERSION, ID, …) first, then database-row
+// _fields from the current document. Unknown names stay literal (see
+// interpolateVars). Called from directive-attr paths (filter=, …) that
+// reach the backend directly — the backend has no template context of
+// its own.
+export function expandTemplateVars(s: string, view: EditorView): string {
+  if (!s || s.indexOf("{{") === -1) return s
+  const { fields } = resolveTemplateFields(view.state)
+  return interpolateVars(s, (name) => {
     const g = resolveGlobalVar(name, view)
+    // resolveGlobalVar returns undefined for unknown ALL_CAPS (error case),
+    // null for "not an ALL_CAPS name at all", or the value.
     if (g !== undefined && g !== null) return g
     if (name in fields) return fields[name]
-    return whole
+    return undefined
   })
 }
 
