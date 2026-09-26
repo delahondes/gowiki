@@ -234,6 +234,16 @@ func main() {
 	signingVerifier := reviewflow.NewSigningVerifier(configStore, certStore)
 	reviewflowService.SetSigningVerifier(signingVerifier)
 	reviewflowService.SetCertStore(certStore)
+	// Cascade revocation on re-issue: the moment CertStore.Save overwrites
+	// a prior cert, the prior fingerprint gets added to the config
+	// revocation list. Admins don't have to remember a separate revoke
+	// step, and a re-issue that follows an ordinary revoke keeps the old
+	// fingerprint blacklisted (the certstore file that carried the
+	// Revoked flag is about to be overwritten by the new cert).
+	certStore.OnPreviousCertOverwritten = func(fingerprint string) {
+		reviewflowService.AddRevokedFingerprint(fingerprint, time.Now())
+		log.Printf("reviewflow: cert re-issue cascaded revocation of previous fingerprint %s", fingerprint)
+	}
 	reviewflowService.SetCAStore(caStore)
 	if cfg.Reviewflow.Signing.Enabled {
 		log.Printf("reviewflow plugin: X.509 signing enabled")

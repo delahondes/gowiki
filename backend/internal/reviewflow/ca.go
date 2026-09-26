@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
-	"gowiki/backend/internal/config"
 )
 
 // CAStore manages the company Certificate Authority files.
@@ -277,29 +275,14 @@ func handleRevokeCert(certStore *CertStore, svc *Service) http.HandlerFunc {
 			return
 		}
 
-		// Also add to config revocation list so it's included in audit exports.
-		if svc.configStore != nil {
-			cfg := svc.configStore.Get()
-			// Check if already in the list.
-			found := false
-			for _, rc := range cfg.Reviewflow.Signing.RevokedCerts {
-				if rc.Fingerprint == uc.Fingerprint {
-					found = true
-					break
-				}
-			}
-			if !found {
-				revokedAt := ""
-				if uc.RevokedAt != nil {
-					revokedAt = uc.RevokedAt.Format(time.RFC3339)
-				}
-				cfg.Reviewflow.Signing.RevokedCerts = append(cfg.Reviewflow.Signing.RevokedCerts, config.RevokedCert{
-					Fingerprint: uc.Fingerprint,
-					RevokedAt:   revokedAt,
-				})
-				svc.configStore.Update(cfg)
-			}
+		// Mirror to the config revocation list — same helper the cascade
+		// callback uses, so the "already listed?" dedup lives in one
+		// place. RevokedAt on uc is authoritative (set by CertStore.Revoke).
+		revokedAt := time.Now()
+		if uc.RevokedAt != nil {
+			revokedAt = *uc.RevokedAt
 		}
+		svc.AddRevokedFingerprint(uc.Fingerprint, revokedAt)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"revoked":    true,

@@ -22,6 +22,15 @@ var (
 // CertStore manages user X.509 certificates on disk.
 type CertStore struct {
 	dir string // data/meta/_certs/
+
+	// OnPreviousCertOverwritten, if set, is invoked during Save when a
+	// previous cert existed for the same username with a different
+	// fingerprint. Callers (main.go) wire this to append the old
+	// fingerprint to config.Reviewflow.Signing.RevokedCerts, so re-issuing
+	// a cert automatically revokes the one it superseded — without
+	// requiring an admin to remember a separate revoke step. Pure tests
+	// leave it nil and observe the absence of a cascade.
+	OnPreviousCertOverwritten func(previousFingerprint string)
 }
 
 // NewCertStore creates a certificate store in the meta directory.
@@ -31,7 +40,11 @@ func NewCertStore(metaRoot string) *CertStore {
 	return &CertStore{dir: dir}
 }
 
-// Save persists a user certificate. The PEM is parsed and validated before saving.
+// Save persists a user certificate. The PEM is parsed and validated before
+// saving. If a previous cert existed for the same username with a
+// different fingerprint and OnPreviousCertOverwritten is set, the old
+// fingerprint is passed to that callback AFTER the new cert is on disk —
+// so the callback firing implies the supersession actually happened.
 func (cs *CertStore) Save(username, certPEM string) (*UserCertificate, error) {
 	cert, err := parsePEMCertificate(certPEM)
 	if err != nil {
@@ -39,6 +52,14 @@ func (cs *CertStore) Save(username, certPEM string) (*UserCertificate, error) {
 	}
 
 	fingerprint := certFingerprint(cert)
+
+	// Capture the previous cert (if any) BEFORE we overwrite. Errors here
+	// are silent: if the previous file is corrupt we can't cascade its
+	// fingerprint, but we still want the new cert to write successfully.
+	var previousFingerprint string
+	if prev, err := cs.Load(username); err == nil && prev != nil {
+		previousFingerprint = prev.Fingerprint
+	}
 
 	uc := &UserCertificate{
 		Username:       username,
@@ -72,6 +93,18 @@ func (cs *CertStore) Save(username, certPEM string) (*UserCertificate, error) {
 		os.Remove(tmpPath)
 		return nil, err
 	}
+
+	// Cascade revocation of the superseded cert. Fingerprints differ only
+	// when the key material changed (same key + re-signed by the same CA
+	// yields the same fingerprint via the whole-cert-DER hash, but
+	// re-signing on a new day still changes NotBefore, which changes the
+	// DER, which changes the fingerprint — so in practice every re-issue
+	// cascades). No self-cascade if the fingerprint is identical (idempotent
+	// republish of the same PEM).
+	if previousFingerprint != "" && previousFingerprint != fingerprint && cs.OnPreviousCertOverwritten != nil {
+		cs.OnPreviousCertOverwritten(previousFingerprint)
+	}
+
 	return uc, nil
 }
 

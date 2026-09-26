@@ -194,13 +194,12 @@ func TestCertStore_Revoke_MissingReturnsErrNotFound(t *testing.T) {
 	}
 }
 
-// Cascade documentation test — the certstore does NOT model "revoke this
-// user's cert -> also mark prior issuances as revoked", because it only
-// keeps one cert per user (Save overwrites). This test pins that absence:
-// re-issuing after a revoke silently makes the new cert non-revoked.
-// If a real cascade is added later, this test must fail so the change is
-// noticed.
-func TestCertStore_Revoke_NoCascade_ReIssuingClearsRevocation(t *testing.T) {
+// Overwriting the on-disk cert file with a new issuance clears the
+// per-file Revoked flag — that flag lives on the JSON blob that Save
+// replaces atomically. The durable revocation record is the config
+// fingerprint list; the cascade callback (tested below) is what keeps
+// that list in sync when a re-issue supersedes an old cert.
+func TestCertStore_ReIssueClearsPerFileRevokedFlag(t *testing.T) {
 	meta := t.TempDir()
 	ca := NewCAStore(meta)
 	cs := NewCertStore(meta)
@@ -209,7 +208,6 @@ func TestCertStore_Revoke_NoCascade_ReIssuingClearsRevocation(t *testing.T) {
 	if _, err := cs.Revoke("alice"); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	// Re-issue for the same user.
 	issueForUser(t, ca, cs, "alice")
 
 	loaded, _ := cs.Load("alice")
@@ -217,6 +215,72 @@ func TestCertStore_Revoke_NoCascade_ReIssuingClearsRevocation(t *testing.T) {
 		t.Fatal("cert missing after re-issue")
 	}
 	if loaded.Revoked {
-		t.Errorf("re-issued cert unexpectedly Revoked=true — did somebody add a cascade? Update or remove this test if so")
+		t.Errorf("expected per-file Revoked flag to be cleared by overwrite, got Revoked=true")
 	}
+}
+
+// Cascade: Save invokes OnPreviousCertOverwritten with the OLD
+// fingerprint when a re-issue supersedes a prior cert. This is the hook
+// production wires to config.Reviewflow.Signing.RevokedCerts so admins
+// don't have to manually revoke the old cert before issuing a new one.
+func TestCertStore_Save_CascadesPreviousFingerprint(t *testing.T) {
+	meta := t.TempDir()
+	ca := NewCAStore(meta)
+	cs := NewCertStore(meta)
+
+	var cascaded []string
+	cs.OnPreviousCertOverwritten = func(fp string) {
+		cascaded = append(cascaded, fp)
+	}
+
+	// First issue: no previous cert, no cascade.
+	first := issueForUser(t, ca, cs, "alice")
+	if len(cascaded) != 0 {
+		t.Errorf("first issuance cascaded %v — expected no callback on empty prior", cascaded)
+	}
+
+	// Re-issue: the old fingerprint must be handed to the callback.
+	second := issueForUser(t, ca, cs, "alice")
+	if first.Fingerprint == second.Fingerprint {
+		t.Fatalf("test invariant broken: two consecutive issuances produced identical fingerprints")
+	}
+	if len(cascaded) != 1 {
+		t.Fatalf("re-issue cascaded %v — expected exactly one callback", cascaded)
+	}
+	if cascaded[0] != first.Fingerprint {
+		t.Errorf("cascade fingerprint = %q, want %q (the previous cert's fingerprint)", cascaded[0], first.Fingerprint)
+	}
+}
+
+// Saving the exact same PEM byte-for-byte (idempotent republish) must
+// NOT cascade — nothing was superseded.
+func TestCertStore_Save_IdempotentReplayDoesNotCascade(t *testing.T) {
+	meta := t.TempDir()
+	ca := NewCAStore(meta)
+	cs := NewCertStore(meta)
+
+	// Issue and grab the PEM.
+	uc := issueForUser(t, ca, cs, "alice")
+
+	cascaded := 0
+	cs.OnPreviousCertOverwritten = func(string) { cascaded++ }
+
+	if _, err := cs.Save("alice", uc.CertificatePEM); err != nil {
+		t.Fatalf("Save (replay): %v", err)
+	}
+	if cascaded != 0 {
+		t.Errorf("idempotent replay cascaded %d times — expected 0 (same fingerprint means nothing was superseded)", cascaded)
+	}
+}
+
+// A nil callback stays a no-op — pure-store tests and any embedding
+// that doesn't wire the callback see the previous, unchanged behaviour.
+func TestCertStore_Save_NoCallbackIsNoOp(t *testing.T) {
+	meta := t.TempDir()
+	ca := NewCAStore(meta)
+	cs := NewCertStore(meta) // no OnPreviousCertOverwritten set
+
+	issueForUser(t, ca, cs, "alice")
+	// Second issue — must not panic even though callback is nil.
+	issueForUser(t, ca, cs, "alice")
 }

@@ -63,6 +63,29 @@ func (svc *Service) SetGroupResolver(resolver func(string) []string) {
 	svc.groupResolver = resolver
 }
 
+// AddRevokedFingerprint appends fingerprint to the config revocation list
+// if it is not already present. Both the explicit revoke handler and the
+// cascade-on-re-issue callback route through here so the "already listed?
+// then append" logic lives in one place. Safe to call with a nil
+// configStore — it becomes a no-op, matching the pattern the rest of the
+// service uses for optional deps.
+func (svc *Service) AddRevokedFingerprint(fingerprint string, at time.Time) {
+	if svc.configStore == nil || fingerprint == "" {
+		return
+	}
+	cfg := svc.configStore.Get()
+	for _, rc := range cfg.Reviewflow.Signing.RevokedCerts {
+		if rc.Fingerprint == fingerprint {
+			return
+		}
+	}
+	cfg.Reviewflow.Signing.RevokedCerts = append(cfg.Reviewflow.Signing.RevokedCerts, config.RevokedCert{
+		Fingerprint: fingerprint,
+		RevokedAt:   at.UTC().Format(time.RFC3339),
+	})
+	svc.configStore.Update(cfg)
+}
+
 // IsObserver returns true if the user is in the global observer list
 // (either directly by username or via a group membership).
 func (svc *Service) IsObserver(username string, groups []string) bool {
