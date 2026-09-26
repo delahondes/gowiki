@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch when a new commit arrives —
+# no point burning compute on a rev the reviewer has already superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
+      - name: go build
+        working-directory: backend
+        run: go build ./...
+      - name: go test
+        working-directory: backend
+        run: go test -race -timeout 5m ./...
+
+  frontend:
+    name: Frontend (TS + Vite + Vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        working-directory: frontend
+        # `npm ci` demands a lockfile. If the lockfile is missing (early
+        # in a repo's life) fall back to `npm install` — the failure is
+        # informative so CI still shows the drift.
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+      - name: vite build
+        working-directory: frontend
+        run: npx vite build
+      - name: vitest
+        working-directory: frontend
+        run: npm test

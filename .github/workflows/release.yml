@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `gh release upload` needs contents:write on the tag being released.
+permissions:
+  contents: write
+
+jobs:
+  verify-version:
+    name: Version constant matches tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract Version constant and compare to tag
+        id: extract
+        # The Go const stores the version WITHOUT the leading `v`; the git
+        # tag has it. Strip and compare. A mismatch means somebody pushed a
+        # tag without bumping the constant — refuse the release rather than
+        # ship a binary that lies about what it is.
+        run: |
+          set -euo pipefail
+          version=$(grep -oE 'const Version = "[^"]+"' backend/internal/api/server.go | sed 's/.*"\(.*\)"/\1/')
+          tag=${GITHUB_REF_NAME#v}
+          echo "Constant: '$version'"
+          echo "Tag:      '$tag' (from ${GITHUB_REF_NAME})"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Version constant '$version' does not match tag '${GITHUB_REF_NAME}'. Bump backend/internal/api/server.go::Version and re-tag."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    needs: verify-version
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: go test
+        working-directory: backend
+        run: go test -race -timeout 5m ./...
+      - name: npm ci
+        working-directory: frontend
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+      - name: vitest
+        working-directory: frontend
+        run: npm test
+
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    needs: [verify-version, test]
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Build binary
+        working-directory: backend
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        # Stamp the exact commit + date this artefact was built from. The
+        # binary's /api/version endpoint reads these back at runtime, so
+        # deployers and auditors can prove they're running exactly what
+        # was signed off in this release.
+        run: |
+          set -euo pipefail
+          commit=${GITHUB_SHA}
+          build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          ldflags="-X gowiki/backend/internal/api.BuildCommit=${commit} -X gowiki/backend/internal/api.BuildDate=${build_date}"
+          out=gowiki-server-${{ matrix.goos }}-${{ matrix.goarch }}
+          go build -ldflags "${ldflags}" -o "${out}" ./cmd/server
+          ls -lh "${out}"
+      - name: Upload binary to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `gh release upload --clobber` overwrites if the file was uploaded
+        # earlier (e.g. a re-run of the workflow). Safer than failing the
+        # whole workflow when an operator retries.
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "backend/gowiki-server-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            --clobber
+
+  build-frontend:
+    name: Build frontend bundle
+    runs-on: ubuntu-latest
+    needs: [verify-version, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build
+        working-directory: frontend
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+          npx vite build
+      - name: Package dist
+        working-directory: frontend
+        run: |
+          tarball="gowiki-frontend-dist-${GITHUB_REF_NAME}.tar.gz"
+          tar -czf "../${tarball}" dist
+          ls -lh "../${tarball}"
+      - name: Upload frontend bundle to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "gowiki-frontend-dist-${GITHUB_REF_NAME}.tar.gz" \
+            --clobber

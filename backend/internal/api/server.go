@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,6 +40,19 @@ var openapiJSON []byte
 // Version is the Gowiki software version string. Bump before tagging a
 // release; the site-info endpoint and any manifest ride on this constant.
 const Version = "1.0.0-rc.1"
+
+// BuildCommit and BuildDate are injected at build time via -ldflags:
+//
+//	go build -ldflags "-X gowiki/backend/internal/api.BuildCommit=$(git rev-parse HEAD) -X gowiki/backend/internal/api.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/server
+//
+// A dev build (plain `go build`) leaves them as "unknown", which is fine
+// for local work but means `/api/version` can't tell you what's deployed.
+// Production and CI builds MUST set both so the validated-vs-deployed
+// gap is measurable.
+var (
+	BuildCommit = "unknown"
+	BuildDate   = "unknown"
+)
 
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
@@ -257,6 +271,7 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 	})
 
 	r.Get("/api/health", s.handleHealth)
+	r.Get("/api/version", s.handleVersion)
 	r.Get("/api/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -587,6 +602,20 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
+	})
+}
+
+// handleVersion returns the software version, build commit, build date,
+// and Go runtime version. Public (no auth) — the whole point is to let
+// CI, deploy verifiers, and the reviewflow audit trail read what is
+// actually running against what was validated. Never cache this.
+func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":    Version,
+		"commit":     BuildCommit,
+		"build_date": BuildDate,
+		"go_version": runtime.Version(),
 	})
 }
 
