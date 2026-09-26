@@ -122,6 +122,7 @@ let stashedEditorState = null // ProseMirror EditorState preserved across draft 
 let historyLatestVersion = null // latest version number from history listing
 let draftSavedThisSession = false // true once any draft save succeeds in this edit session
 let lastSavedDraftMarkdown = null // markdown from the last successful draft save
+let resumedPreexistingDraft = false // true when this edit session started by resuming a draft that already existed on the server (cancel must not discard it)
 
 let mode = "view"
 let editMode = "visual"
@@ -7989,9 +7990,17 @@ function cancelEdit() {
     return
   }
 
-  if (draftSavedThisSession) {
-    // Draft was explicitly saved — preserve it, show saved draft content.
+  // A draft is preserved if EITHER we saved during this session OR we
+  // opened edit mode to resume a draft that already existed on the server.
+  // In both cases, "Cancel" means "throw away unsaved edits", never
+  // "delete the draft" — deletion is what the explicit "Discard draft"
+  // action is for.
+  const preserveDraft = draftSavedThisSession || resumedPreexistingDraft
+  if (preserveDraft) {
     stashEditorState()
+    // Prefer the last saved-in-this-session content, then the resumed
+    // draft content (which was captured into editBaselineMarkdown on
+    // entry), then a bare fall-back to the baseline.
     currentMarkdown = lastSavedDraftMarkdown || editBaselineMarkdown
     try {
       currentDoc = markdownToPM(currentMarkdown, registry)
@@ -8003,9 +8012,12 @@ function cancelEdit() {
     if (currentUser) {
       pageLockInfo = { locked_by: currentUser.username, is_draft: true }
     }
-    setStatus("Draft preserved, exiting edit mode")
+    setStatus(draftSavedThisSession
+      ? "Draft preserved, exiting edit mode"
+      : "Unsaved changes discarded — draft preserved")
   } else {
-    // No save happened — draft is just a copy of published content, discard it.
+    // No preexisting draft and nothing was saved — the draft is just a
+    // copy of published content, so discarding it costs the user nothing.
     if (editToken) {
       authFetch(`/api/draft/${encodePagePath(pagePath)}?edit_token=${encodeURIComponent(editToken)}`, { method: "DELETE" }).catch(() => {})
     }
@@ -8022,6 +8034,7 @@ function cancelEdit() {
     }
     setStatus("Edit cancelled")
   }
+  resumedPreexistingDraft = false
   setMode("view")
 }
 
@@ -9020,6 +9033,7 @@ async function joinCollabSession(lockOwner) {
   stashedEditorState = null
   draftSavedThisSession = false
   lastSavedDraftMarkdown = null
+  resumedPreexistingDraft = false
 
   // Fetch the current draft content so we start with the same document.
   try {
@@ -9081,6 +9095,16 @@ function stashEditorState() {
 }
 
 async function enterEditMode(force, asNamespaceIndex = false) {
+  // Detect a preexisting draft we're about to resume — the page metadata
+  // that fed pageLockInfo would have flagged is_draft when we loaded, and
+  // if the lock is ours the /api/edit call will hand back that draft's
+  // content, not a fresh copy of the published version. Cancel treats
+  // "resumed" like "saved this session" so it never silently discards a
+  // draft the user only opened to peek at.
+  const willResumePreexistingDraft = !!(
+    pageLockInfo && pageLockInfo.is_draft && currentUser && pageLockInfo.locked_by === currentUser.username
+  )
+
   // If we still have a valid edit token (saved-to-draft without exiting the session),
   // verify the token is still valid before resuming (draft may have been reclaimed).
   if (editToken && stashedEditorState) {
@@ -9176,7 +9200,8 @@ async function enterEditMode(force, asNamespaceIndex = false) {
   editToken = data.edit_token
   stashedEditorState = null // new session — discard any old stash
   draftSavedThisSession = false
-  lastSavedDraftMarkdown = null
+  lastSavedDraftMarkdown = willResumePreexistingDraft ? data.markdown : null
+  resumedPreexistingDraft = willResumePreexistingDraft
   currentMarkdown = data.markdown
 
   // Update namespace index flag if we just created a namespace index.
@@ -9443,6 +9468,7 @@ async function publishDraft() {
           editToken = null
           pageLockInfo = null
           stashedEditorState = null
+          resumedPreexistingDraft = false
           clearCursorLocalStorage()
           applyNormalizedEditState(normalized)
           editBaselineMarkdown = normalized.markdown
@@ -9480,6 +9506,7 @@ async function publishDraft() {
   editToken = null
   pageLockInfo = null
   stashedEditorState = null
+  resumedPreexistingDraft = false
   clearCursorLocalStorage()
   applyNormalizedEditState(normalized)
   editBaselineMarkdown = normalized.markdown
@@ -9532,6 +9559,7 @@ async function discardDraft() {
     editToken = null
     pageLockInfo = null
     stashedEditorState = null
+    resumedPreexistingDraft = false
     clearCursorLocalStorage()
     // Reload published content.
     const page = await fetchPage(pagePath)
@@ -9576,6 +9604,7 @@ async function publishDraftFromHistory() {
   editToken = null
   pageLockInfo = null
   stashedEditorState = null
+  resumedPreexistingDraft = false
   clearCursorLocalStorage()
   await reloadPageContent()
   setStatus("Draft published")
@@ -9600,6 +9629,7 @@ async function discardDraftFromHistory(hasChanges) {
     editToken = null
     pageLockInfo = null
     stashedEditorState = null
+    resumedPreexistingDraft = false
     clearCursorLocalStorage()
     await reloadPageContent()
     setStatus("Draft discarded")
