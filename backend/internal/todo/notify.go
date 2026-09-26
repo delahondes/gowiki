@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -100,7 +101,7 @@ func (d *Dispatcher) sendEmail(event NotifyEvent) {
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		cfg.From, event.Recipient, subject, body)
 
-	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
+	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
