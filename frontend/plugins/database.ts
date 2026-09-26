@@ -1176,14 +1176,16 @@ const inflightSaveKeys = new Set<string>()
 class DatabaseQueryNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
   private currentSort: string
   private currentOrder: string
   private initialLimit: number
   private displayLimit: number
   private refreshHandler: ((e: Event) => void) | null = null
 
-  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+  constructor(node: PMNode, view: EditorView, _getPos: () => number | undefined) {
     this.node = node
+    this.view = view
     this.currentSort = node.attrs.sort === "id" ? "__title__" : node.attrs.sort || ""
     this.currentOrder = node.attrs.order || "asc"
     this.initialLimit = parseInt(node.attrs.limit) || 20
@@ -1238,7 +1240,14 @@ class DatabaseQueryNodeView {
 
   private async fetchData() {
     const table = this.node.attrs.table
-    const filter = this.node.attrs.filter || ""
+    // Expand {{name}} references before we hand the filter to the backend.
+    // The backend has no idea about the current page's template context,
+    // so `filter="id={{id}}"` on a database-row-bound page only works if
+    // we resolve {{id}} to the row's value here. Same policy as the
+    // template-var NodeView: try globals first (TITLE, VERSION, …),
+    // then database-row fields; leave unresolved names literal so a
+    // typo shows up in the request rather than silently becoming "".
+    const filter = expandTemplateVars(this.node.attrs.filter || "", this.view)
 
     const params = new URLSearchParams()
     if (filter) {
@@ -2933,6 +2942,26 @@ function resolveTemplateFields(state: EditorState): { fields: Record<string, str
     }
   })
   return { fields, table }
+}
+
+// expandTemplateVars replaces {{name}} references in a string using the
+// same two-source resolution the template-var NodeView uses:
+// ALL_CAPS globals (TITLE, VERSION, ID, …) first, then database-row
+// _fields from the current document. Unknown names stay literal so a
+// typo surfaces at the request site rather than becoming an empty
+// string. Called from directive-attr paths (filter=, …) that reach the
+// backend directly — the backend has no template context of its own.
+export function expandTemplateVars(s: string, view: EditorView): string {
+  if (!s || s.indexOf("{{") === -1) return s
+  const { fields } = resolveTemplateFields(view.state)
+  return s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, rawName) => {
+    const name = String(rawName).trim()
+    if (!name) return whole
+    const g = resolveGlobalVar(name, view)
+    if (g !== undefined && g !== null) return g
+    if (name in fields) return fields[name]
+    return whole
+  })
 }
 
 class TemplateVarNodeView {
