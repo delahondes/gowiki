@@ -22,10 +22,10 @@ type LockInfo struct {
 }
 
 var (
-	ErrPageLocked      = errors.New("page is locked by another user")
-	ErrEditSuperseded  = errors.New("edit session superseded")
-	ErrNotDraftOwner   = errors.New("not the draft owner")
-	ErrNoDraft         = errors.New("no draft exists")
+	ErrPageLocked     = errors.New("page is locked by another user")
+	ErrEditSuperseded = errors.New("edit session superseded")
+	ErrNotDraftOwner  = errors.New("not the draft owner")
+	ErrNoDraft        = errors.New("no draft exists")
 )
 
 // DraftLock is stored in page metadata to track who is editing.

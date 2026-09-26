@@ -80,10 +80,10 @@ func main() {
 
 		// Walk through entries in order, parsing the version tag from each.
 		type taggedEntry struct {
-			version    int64
-			tag        string
-			timestamp  string
-			author     string
+			version   int64
+			tag       string
+			timestamp string
+			author    string
 		}
 		var tagged []taggedEntry
 		for _, e := range entries {

@@ -156,13 +156,9 @@ func htmlToStructuredText(src string) string {
 }
 
 type renderCtx struct {
-	listDepth  int
-	inList     string // "ul" or "ol"
-	orderedIdx int
-	inTable    bool
-	tableRow   []string
-	tableRows  [][]string
-	inHeader   bool
+	listDepth int
+	inList    string // "ul" or "ol"
+	inTable   bool
 }
 
 // isInvisible returns true for elements that should never contribute to

@@ -336,15 +336,15 @@ func handleAuditExport(svc *Service, extractUsername func(*http.Request) string,
 
 		// Collect signed confirmations for this version.
 		type auditConfirmation struct {
-			Role               string `json:"role"`
-			User               string `json:"user"`
-			Timestamp          string `json:"timestamp"`
-			SignatureBase64    string `json:"signature_base64,omitempty"`
-			CertificatePEM     string `json:"certificate_pem,omitempty"`
-			CertFingerprint    string `json:"certificate_fingerprint,omitempty"`
-			Digest             string `json:"digest,omitempty"`
-			TimestampToken     string `json:"timestamp_token,omitempty"`
-			Signed             bool   `json:"signed"`
+			Role            string `json:"role"`
+			User            string `json:"user"`
+			Timestamp       string `json:"timestamp"`
+			SignatureBase64 string `json:"signature_base64,omitempty"`
+			CertificatePEM  string `json:"certificate_pem,omitempty"`
+			CertFingerprint string `json:"certificate_fingerprint,omitempty"`
+			Digest          string `json:"digest,omitempty"`
+			TimestampToken  string `json:"timestamp_token,omitempty"`
+			Signed          bool   `json:"signed"`
 		}
 
 		var confirmations []auditConfirmation
@@ -396,17 +396,17 @@ func handleAuditExport(svc *Service, extractUsername func(*http.Request) string,
 
 		// Build the audit export.
 		export := map[string]any{
-			"page":               pagePath,
-			"page_url":           pageURL,
-			"version":            version,
-			"version_tag":        st.VersionTag,
-			"markdown_sha256":    markdownDigest,
-			"markdown":           markdownContent,
-			"ca_certificate_pem": caPEM,
-			"revoked_certs":      revokedCerts,
+			"page":                pagePath,
+			"page_url":            pageURL,
+			"version":             version,
+			"version_tag":         st.VersionTag,
+			"markdown_sha256":     markdownDigest,
+			"markdown":            markdownContent,
+			"ca_certificate_pem":  caPEM,
+			"revoked_certs":       revokedCerts,
 			"signed_payload_spec": "SHA-256 of raw UTF-8 markdown bytes, signed with ECDSA P-256 (IEEE P1363 format, 64 bytes: r || s, 32 bytes each)",
-			"exported_at":        time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-			"confirmations":      confirmations,
+			"exported_at":         time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			"confirmations":       confirmations,
 		}
 
 		// Set download filename.

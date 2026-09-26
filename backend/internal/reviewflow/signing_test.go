@@ -395,4 +395,3 @@ func TestSigningVerifier_IsEnabledIsRequired(t *testing.T) {
 		t.Errorf("required: IsRequired=false, want true")
 	}
 }
-

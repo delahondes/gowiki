@@ -116,8 +116,8 @@ func (s *stubDraftManager) GetLock(pagePath string) storage.DraftLock {
 func (s *stubDraftManager) FindAnyDraft(pagePath string) (storage.DraftInfo, bool) {
 	return storage.DraftInfo{}, false
 }
-func (s *stubDraftManager) ListLocks() []storage.LockInfo         { return nil }
-func (s *stubDraftManager) ListDrafts() []storage.DraftInfo       { return nil }
+func (s *stubDraftManager) ListLocks() []storage.LockInfo   { return nil }
+func (s *stubDraftManager) ListDrafts() []storage.DraftInfo { return nil }
 func (s *stubDraftManager) AdminDiscardDraft(pagePath, draftOwner string) error {
 	return nil
 }

@@ -32,7 +32,7 @@ let pendingInputRefocus: {
 /** Tracks which panel instances the user has manually expanded.
  *  Keyed by a stable identifier derived from node type + position + attrs,
  *  so expanding one node doesn't expand others. */
-let panelExpandedKeys = new Set<string>()
+const panelExpandedKeys = new Set<string>()
 
 export function requestInputFocus(propName: string) {
   pendingInputRefocus = { propName, start: null, end: null }
@@ -149,193 +149,178 @@ function isPropActive(prop: NodePropertySpec, attrs: Record<string, any>): boole
   return true
 }
 
-function buildPropGroup(
-  view: any,
-  node: PMNode,
-  pos: number,
-  prop: NodePropertySpec,
-): HTMLElement {
-    const label = document.createElement("span")
-    label.className = "gowiki-props-label"
-    label.textContent = prop.label
+function buildPropGroup(view: any, node: PMNode, pos: number, prop: NodePropertySpec): HTMLElement {
+  const label = document.createElement("span")
+  label.className = "gowiki-props-label"
+  label.textContent = prop.label
 
-    const current = node.attrs[prop.name]
-    const error = document.createElement("span")
-    error.className = "gowiki-props-error"
+  const current = node.attrs[prop.name]
+  const error = document.createElement("span")
+  error.className = "gowiki-props-error"
 
-    const dispatchChange = (raw: string) => {
-      let parsed: string | null
-      try {
-        parsed =
-          raw === ""
-            ? prop.default ?? null
-            : prop.parse
-            ? prop.parse(raw)
-            : raw
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Invalid value"
-        error.textContent = msg
-        return
-      }
-      error.textContent = ""
-      const live = view.state.doc.nodeAt(pos)
-      if (!live) return
-      const attrs = { ...live.attrs, [prop.name]: parsed }
-
-      const state = view.state
-      const wasNodeSelection =
-        state.selection instanceof NodeSelection && state.selection.from === pos
-
-      let tr = state.tr
-
-      tr = tr.setNodeMarkup(pos, live.type, attrs)
-      if (wasNodeSelection) {
-        tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
-      }
-      view.dispatch(tr)
+  const dispatchChange = (raw: string) => {
+    let parsed: string | null
+    try {
+      parsed = raw === "" ? (prop.default ?? null) : prop.parse ? prop.parse(raw) : raw
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Invalid value"
+      error.textContent = msg
+      return
     }
+    error.textContent = ""
+    const live = view.state.doc.nodeAt(pos)
+    if (!live) return
+    const attrs = { ...live.attrs, [prop.name]: parsed }
 
-    const displayValue = prop.serialize
-      ? prop.serialize(current)
-      : String(current ?? prop.default ?? "")
+    const state = view.state
+    const wasNodeSelection = state.selection instanceof NodeSelection && state.selection.from === pos
 
-    let control: HTMLElement
-    const resolvedOptions = typeof prop.options === "function"
-      ? prop.options(node.attrs)
-      : prop.options
-    if (resolvedOptions && resolvedOptions.length > 0) {
-      const select = document.createElement("select")
-      const populateOptions = (opts: typeof resolvedOptions, currentVal: string) => {
-        select.innerHTML = ""
-        for (const opt of opts) {
-          const option = document.createElement("option")
-          option.value = opt.value
-          option.textContent = opt.label
-          select.appendChild(option)
-        }
-        select.value = currentVal
+    let tr = state.tr
+
+    tr = tr.setNodeMarkup(pos, live.type, attrs)
+    if (wasNodeSelection) {
+      tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
+    }
+    view.dispatch(tr)
+  }
+
+  const displayValue = prop.serialize ? prop.serialize(current) : String(current ?? prop.default ?? "")
+
+  let control: HTMLElement
+  const resolvedOptions = typeof prop.options === "function" ? prop.options(node.attrs) : prop.options
+  if (resolvedOptions && resolvedOptions.length > 0) {
+    const select = document.createElement("select")
+    const populateOptions = (opts: typeof resolvedOptions, currentVal: string) => {
+      select.innerHTML = ""
+      for (const opt of opts) {
+        const option = document.createElement("option")
+        option.value = opt.value
+        option.textContent = opt.label
+        select.appendChild(option)
       }
-      populateOptions(resolvedOptions, current ?? prop.default ?? "")
-      select.addEventListener("change", () => dispatchChange(select.value))
-      if (typeof prop.options === "function") {
-        const optionsFn = prop.options
-        select.addEventListener("focus", () => {
-          const liveNode = view.state.doc.nodeAt(pos)
-          if (!liveNode) return
-          const freshOptions = optionsFn(liveNode.attrs)
-          populateOptions(freshOptions, select.value)
-        })
-      }
-      control = select
-    } else if (prop.multiline) {
-      const textarea = document.createElement("textarea")
-      textarea.value = displayValue
+      select.value = currentVal
+    }
+    populateOptions(resolvedOptions, current ?? prop.default ?? "")
+    select.addEventListener("change", () => dispatchChange(select.value))
+    if (typeof prop.options === "function") {
+      const optionsFn = prop.options
+      select.addEventListener("focus", () => {
+        const liveNode = view.state.doc.nodeAt(pos)
+        if (!liveNode) return
+        const freshOptions = optionsFn(liveNode.attrs)
+        populateOptions(freshOptions, select.value)
+      })
+    }
+    control = select
+  } else if (prop.multiline) {
+    const textarea = document.createElement("textarea")
+    textarea.value = displayValue
 
-      const autosize = () => {
-        textarea.style.height = "auto"
-        textarea.style.height = (textarea.scrollHeight + 2) + "px"
-      }
-      requestAnimationFrame(autosize)
-      textarea.addEventListener("input", autosize)
+    const autosize = () => {
+      textarea.style.height = "auto"
+      textarea.style.height = textarea.scrollHeight + 2 + "px"
+    }
+    requestAnimationFrame(autosize)
+    textarea.addEventListener("input", autosize)
 
-      if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
-        const focus = pendingInputRefocus
-        pendingInputRefocus = null
-        requestAnimationFrame(() => {
-          textarea.focus()
-          if (focus.start !== null && focus.end !== null) {
-            try {
-              textarea.setSelectionRange(focus.start, focus.end)
-            } catch {
-              // Ignore browsers that reject range restoration.
-            }
+    if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
+      const focus = pendingInputRefocus
+      pendingInputRefocus = null
+      requestAnimationFrame(() => {
+        textarea.focus()
+        if (focus.start !== null && focus.end !== null) {
+          try {
+            textarea.setSelectionRange(focus.start, focus.end)
+          } catch {
+            // Ignore browsers that reject range restoration.
           }
-        })
+        }
+      })
+    }
+
+    textarea.addEventListener("input", () => {
+      pendingInputRefocus = {
+        propName: prop.name,
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
       }
+      dispatchChange(textarea.value)
+    })
 
-      textarea.addEventListener("input", () => {
-        pendingInputRefocus = {
-          propName: prop.name,
-          start: textarea.selectionStart,
-          end: textarea.selectionEnd,
-        }
-        dispatchChange(textarea.value)
-      })
+    textarea.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Tab") {
+        // Let the panel-level handler deal with it
+      }
+      if (e.key === "Backspace" && textarea.value === "" && prop.backspaceEmpty !== undefined) {
+        e.preventDefault()
+        e.stopPropagation()
+        const live = view.state.doc.nodeAt(pos)
+        if (!live) return
+        const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
+        let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
+        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
+        view.dispatch(tr)
+        view.focus()
+      }
+    })
 
-      textarea.addEventListener("keydown", (e: KeyboardEvent) => {
-        if (e.key === "Tab") {
-          // Let the panel-level handler deal with it
-        }
-        if (e.key === "Backspace" && textarea.value === "" && prop.backspaceEmpty !== undefined) {
-          e.preventDefault()
-          e.stopPropagation()
-          const live = view.state.doc.nodeAt(pos)
-          if (!live) return
-          const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
-          let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
-          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
-          view.dispatch(tr)
-          view.focus()
-        }
-      })
+    control = textarea
+  } else {
+    const input = document.createElement("input")
+    input.type = "text"
+    input.value = displayValue
 
-      control = textarea
-    } else {
-      const input = document.createElement("input")
-      input.type = "text"
-      input.value = displayValue
-
-      if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
-        const focus = pendingInputRefocus
-        pendingInputRefocus = null
-        requestAnimationFrame(() => {
-          input.focus()
-          if (focus.start !== null && focus.end !== null) {
-            try {
-              input.setSelectionRange(focus.start, focus.end)
-            } catch {
-              // Ignore browsers that reject range restoration.
-            }
+    if (pendingInputRefocus && pendingInputRefocus.propName === prop.name) {
+      const focus = pendingInputRefocus
+      pendingInputRefocus = null
+      requestAnimationFrame(() => {
+        input.focus()
+        if (focus.start !== null && focus.end !== null) {
+          try {
+            input.setSelectionRange(focus.start, focus.end)
+          } catch {
+            // Ignore browsers that reject range restoration.
           }
-        })
+        }
+      })
+    }
+
+    input.addEventListener("input", () => {
+      pendingInputRefocus = {
+        propName: prop.name,
+        start: input.selectionStart,
+        end: input.selectionEnd,
       }
+      dispatchChange(input.value)
+    })
+    input.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Backspace" && input.value === "" && prop.backspaceEmpty !== undefined) {
+        e.preventDefault()
+        e.stopPropagation()
+        const live = view.state.doc.nodeAt(pos)
+        if (!live) return
+        const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
+        let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
+        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
+        view.dispatch(tr)
+        view.focus()
+      }
+    })
+    control = input
+  }
 
-      input.addEventListener("input", () => {
-        pendingInputRefocus = {
-          propName: prop.name,
-          start: input.selectionStart,
-          end: input.selectionEnd,
-        }
-        dispatchChange(input.value)
-      })
-      input.addEventListener("keydown", (e: KeyboardEvent) => {
-        if (e.key === "Backspace" && input.value === "" && prop.backspaceEmpty !== undefined) {
-          e.preventDefault()
-          e.stopPropagation()
-          const live = view.state.doc.nodeAt(pos)
-          if (!live) return
-          const attrs = { ...live.attrs, [prop.name]: prop.backspaceEmpty }
-          let tr = view.state.tr.setNodeMarkup(pos, live.type, attrs)
-          tr = tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)))
-          view.dispatch(tr)
-          view.focus()
-        }
-      })
-      control = input
-    }
-
-    const group = document.createElement("span")
-    group.className = prop.wide ? "gowiki-props-group gowiki-props-group--wide" : "gowiki-props-group"
-    group.appendChild(label)
-    group.appendChild(control)
-    group.appendChild(error)
-    if (prop.helpText) {
-      const help = document.createElement("span")
-      help.className = "gowiki-props-help"
-      help.textContent = prop.helpText
-      group.appendChild(help)
-    }
-    return group
+  const group = document.createElement("span")
+  group.className = prop.wide ? "gowiki-props-group gowiki-props-group--wide" : "gowiki-props-group"
+  group.appendChild(label)
+  group.appendChild(control)
+  group.appendChild(error)
+  if (prop.helpText) {
+    const help = document.createElement("span")
+    help.className = "gowiki-props-help"
+    help.textContent = prop.helpText
+    group.appendChild(help)
+  }
+  return group
 }
 
 function buildPanel(
@@ -344,7 +329,7 @@ function buildPanel(
   pos: number,
   properties: NodePropertySpec[],
   collapsible = false,
-  panelKey = "",
+  panelKey = ""
 ) {
   const wrap = document.createElement("div")
   wrap.className = "gowiki-props-panel"
@@ -405,7 +390,7 @@ function buildPanel(
   // Use a stable key (node type + pos) rather than just pos, since pos can shift.
   const expandKey = panelKey || `${node.type.name}:${pos}`
 
-  if (collapsible && pendingInputRefocus && hiddenProps.some(p => p.name === pendingInputRefocus!.propName)) {
+  if (collapsible && pendingInputRefocus && hiddenProps.some((p) => p.name === pendingInputRefocus!.propName)) {
     forceExpand = true
     // Persist so the panel stays expanded across subsequent rebuilds
     // (e.g. when the user starts typing in the focused field).
@@ -496,7 +481,7 @@ function buildPanel(
         tr = tr.insert(insertPos, plainImage)
         view.dispatch(tr)
         if ((window as any).__gowikiSetStatus) {
-          (window as any).__gowikiSetStatus("Image converted to inline (properties removed)")
+          ;(window as any).__gowikiSetStatus("Image converted to inline (properties removed)")
         }
       })
       inlineSep.appendChild(inlineBtn)
@@ -515,30 +500,17 @@ type PropertyTarget = {
   autoShow: boolean
 }
 
-function addNodeSelectionTarget(
-  targets: PropertyTarget[],
-  node: any,
-  nodePos: number,
-  $from: any,
-  registry: Registry,
-) {
+function addNodeSelectionTarget(targets: PropertyTarget[], node: any, nodePos: number, $from: any, registry: Registry) {
   const props = registry.getNodeProperties(node.type.name)
   if (props.length === 0) return
 
   const isStandaloneImageParagraph =
-    node.type.name === "image" &&
-    $from.parent?.type?.name === "paragraph" &&
-    $from.parent.childCount === 1
+    node.type.name === "image" && $from.parent?.type?.name === "paragraph" && $from.parent.childCount === 1
 
-  const isTableCell =
-    node.type.name === "table_cell" || node.type.name === "table_header"
+  const isTableCell = node.type.name === "table_cell" || node.type.name === "table_header"
 
   const anchorPos =
-    isStandaloneImageParagraph && $from.depth > 0
-      ? $from.before($from.depth)
-      : isTableCell
-      ? nodePos + 1
-      : nodePos
+    isStandaloneImageParagraph && $from.depth > 0 ? $from.before($from.depth) : isTableCell ? nodePos + 1 : nodePos
 
   targets.push({ node, pos: nodePos, anchorPos, props, autoShow: false })
 }
@@ -574,10 +546,9 @@ function findPropertyNodes(state: any, registry: Registry): PropertyTarget[] {
     const pos = $from.before(depth)
 
     // Skip if we already have a target at this position (from NodeSelection above)
-    if (targets.some(t => t.pos === pos)) continue
+    if (targets.some((t) => t.pos === pos)) continue
 
-    const isTableCell =
-      node.type.name === "table_cell" || node.type.name === "table_header"
+    const isTableCell = node.type.name === "table_cell" || node.type.name === "table_header"
     const anchorPos = isTableCell ? pos + 1 : pos
 
     const isAutoShow = false
@@ -604,7 +575,7 @@ function shiftTabToPanel(view: any, event: KeyboardEvent): boolean {
   if (targets.length === 0) return false
 
   // Only respond if at least one panel is actually showing
-  const hasShowing = targets.some(t => pluginState?.enabled || t.autoShow)
+  const hasShowing = targets.some((t) => pluginState?.enabled || t.autoShow)
   if (!hasShowing) return false
 
   // In a table: only intercept Shift-Tab on the first cell (A1).
@@ -645,7 +616,11 @@ function cleanupVtextOverlay(pos: number) {
  *  The real panel is a separate element on document.body, positioned via
  *  getBoundingClientRect. */
 function buildVtextPanelOverlay(
-  view: any, node: PMNode, pos: number, props: NodePropertySpec[], collapsible = false
+  view: any,
+  node: PMNode,
+  pos: number,
+  props: NodePropertySpec[],
+  collapsible = false
 ): HTMLElement {
   // Clean up any previous overlay at this position.
   cleanupVtextOverlay(pos)
@@ -677,16 +652,23 @@ function buildVtextPanelOverlay(
 
   // Append after a microtask so the placeholder is in the DOM.
   setTimeout(() => {
-    if (!placeholder.isConnected) { cleanup(); vtextOverlays.delete(pos); return }
+    if (!placeholder.isConnected) {
+      cleanup()
+      vtextOverlays.delete(pos)
+      return
+    }
     document.body.appendChild(overlay)
 
     const cell = placeholder.closest("td, th") as HTMLElement | null
     const reposition = () => {
       const anchor = cell && cell.isConnected ? cell : placeholder
-      if (!anchor.isConnected) { cleanupVtextOverlay(pos); return }
+      if (!anchor.isConnected) {
+        cleanupVtextOverlay(pos)
+        return
+      }
       const r = anchor.getBoundingClientRect()
       overlay.style.left = r.left + "px"
-      overlay.style.top = (r.top - overlay.offsetHeight - 2) + "px"
+      overlay.style.top = r.top - overlay.offsetHeight - 2 + "px"
     }
     reposition()
 
@@ -788,13 +770,13 @@ function propertiesPlugin(reg: Registry) {
 
           // For auto-show targets, skip if no props are visible
           if (!pluginState?.enabled) {
-            const visibleProps = target.props.filter(p => !p.visible || p.visible(target.node.attrs))
+            const visibleProps = target.props.filter((p) => !p.visible || p.visible(target.node.attrs))
             if (visibleProps.length === 0) continue
           }
 
           const deco = Decoration.widget(
             target.anchorPos,
-            view => {
+            (view) => {
               const collapsible = !!pluginState?.enabled
               // For vertical-text cells, render the panel as a body overlay
               // to escape the cell's writing-mode/transform context.
@@ -804,7 +786,14 @@ function propertiesPlugin(reg: Registry) {
               }
               // Clean up any stale vtext overlay at this position (e.g. switched to horizontal).
               cleanupVtextOverlay(target.pos)
-              const panel = buildPanel(view, target.node, target.pos, target.props, collapsible, `${target.node.type.name}:${target.pos}`)
+              const panel = buildPanel(
+                view,
+                target.node,
+                target.pos,
+                target.props,
+                collapsible,
+                `${target.node.type.name}:${target.pos}`
+              )
               if (target.anchorPos !== target.pos) {
                 panel.classList.add("gowiki-props-panel--block")
               }
@@ -854,10 +843,12 @@ export function promoteInlineImage(view: any, pos: number, attrs: Record<string,
   const newImagePos = insertPos + 1
   try {
     tr = tr.setSelection(NodeSelection.create(tr.doc, newImagePos))
-  } catch { /* leave default */ }
+  } catch {
+    /* leave default */
+  }
   view.dispatch(tr)
   if ((window as any).__gowikiSetStatus) {
-    (window as any).__gowikiSetStatus("Image converted to block (moved to its own paragraph)")
+    ;(window as any).__gowikiSetStatus("Image converted to block (moved to its own paragraph)")
   }
   return true
 }

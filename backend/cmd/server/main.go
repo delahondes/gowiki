@@ -204,12 +204,12 @@ func main() {
 			todoStore := todo.NewTodoStore(dbPool)
 			todoHub := todo.NewHub()
 			dispatcher := todo.NewDispatcher(configStore, func(username string) string {
-			u, err := userStore.Get(username)
-			if err != nil {
-				return ""
-			}
-			return u.Email
-		})
+				u, err := userStore.Get(username)
+				if err != nil {
+					return ""
+				}
+				return u.Email
+			})
 			todoService = todo.NewService(todoStore, todoHub, dispatcher)
 			store.TodoSync = todo.NewTodoSyncer(todoStore, todoHub, dispatcher)
 			go todo.RunScheduler(context.Background(), todoStore, dispatcher)

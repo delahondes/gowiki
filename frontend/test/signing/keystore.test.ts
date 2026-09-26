@@ -26,14 +26,8 @@ import {
 // the certificate structure, not the ability to sign with the CA.
 async function makeCertificatePEM(spkiB64: string, subjectCN: string): Promise<string> {
   // Decode the caller's SPKI.
-  const spkiBytes = Uint8Array.from(atob(spkiB64), c => c.charCodeAt(0))
-  await crypto.subtle.importKey(
-    "spki",
-    spkiBytes,
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["verify"],
-  )
+  const spkiBytes = Uint8Array.from(atob(spkiB64), (c) => c.charCodeAt(0))
+  await crypto.subtle.importKey("spki", spkiBytes, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"])
   // For an "any bytes" PEM the tests below just want back verbatim, we
   // fake a certificate PEM by wrapping the SPKI itself in a CERTIFICATE
   // block. This is NOT a real X.509 — importCertificate only stores the
@@ -63,7 +57,7 @@ describe("keystore — key lifecycle", () => {
     const createdAt = await getKeyCreatedAt(name)
     expect(createdAt).not.toBeNull()
     const ts = Date.parse(createdAt!)
-    expect(ts).toBeGreaterThanOrEqual(before - 5)   // -5ms tolerance for clock quirks
+    expect(ts).toBeGreaterThanOrEqual(before - 5) // -5ms tolerance for clock quirks
     expect(ts).toBeLessThanOrEqual(after + 5)
   })
 
@@ -80,15 +74,9 @@ describe("keystore — key lifecycle", () => {
     // Round-trip through crypto.subtle.importKey — this is what proves
     // the exported bytes are actually a well-formed SPKI, not just
     // opaque binary the certstore treats as base64.
-    const bytes = Uint8Array.from(atob(spkiB64!), c => c.charCodeAt(0))
+    const bytes = Uint8Array.from(atob(spkiB64!), (c) => c.charCodeAt(0))
     await expect(
-      crypto.subtle.importKey(
-        "spki",
-        bytes,
-        { name: "ECDSA", namedCurve: "P-256" },
-        true,
-        ["verify"],
-      ),
+      crypto.subtle.importKey("spki", bytes, { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"])
     ).resolves.toBeDefined()
   })
 
@@ -132,8 +120,8 @@ describe("keystore — certificate import / clear", () => {
     await clearCertificate(name)
 
     expect(await getCertificatePEM(name)).toBeNull()
-    expect(await hasKey(name)).toBe(true)                     // key still there
-    expect(await getPublicKeySPKI(name)).toBe(spkiB64)        // same key, same SPKI
+    expect(await hasKey(name)).toBe(true) // key still there
+    expect(await getPublicKeySPKI(name)).toBe(spkiB64) // same key, same SPKI
   })
 
   it("clearCertificate is a no-op for a missing user", async () => {
@@ -175,7 +163,7 @@ describe("keystore — multi-user isolation", () => {
     await deleteKey("alice-iso")
 
     expect(await hasKey("alice-iso")).toBe(false)
-    expect(await hasKey("bob-iso")).toBe(true)             // bob survives
+    expect(await hasKey("bob-iso")).toBe(true) // bob survives
     expect(await getPublicKeySPKI("bob-iso")).toBe(bobSPKI)
   })
 })

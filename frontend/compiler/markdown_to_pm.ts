@@ -90,7 +90,19 @@ function directivePlugin(md: MarkdownIt) {
 
 /** Inject paragraph tokens that render as a visible error message. */
 function emitErrorTokens(out: any[], message: string) {
-  out.push({ type: "paragraph_open", tag: "p", nesting: 1, block: true, level: 0, attrs: [["style", "background:#fce4ec;border:1px solid #ef9a9a;border-radius:4px;padding:8px 12px;color:#b71c1c;font-size:13px;font-family:monospace"]] })
+  out.push({
+    type: "paragraph_open",
+    tag: "p",
+    nesting: 1,
+    block: true,
+    level: 0,
+    attrs: [
+      [
+        "style",
+        "background:#fce4ec;border:1px solid #ef9a9a;border-radius:4px;padding:8px 12px;color:#b71c1c;font-size:13px;font-family:monospace",
+      ],
+    ],
+  })
   out.push({
     type: "inline",
     content: `⚠ ${message}`,
@@ -144,7 +156,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
             parsedAttrs[key] = raw
             continue
           }
-          const prop = selfContained.properties.find(p => p.name === key)
+          const prop = selfContained.properties.find((p) => p.name === key)
           if (!prop) {
             if (selfContained.collectExtra) {
               // Pass through unknown keys as raw strings (e.g. role assignments).
@@ -152,9 +164,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
               continue
             }
             if (strict) {
-              throw new Error(
-                `Unknown property "${key}" for directive "${meta.name}"${lineRef(token.map)}`
-              )
+              throw new Error(`Unknown property "${key}" for directive "${meta.name}"${lineRef(token.map)}`)
             }
             continue
           }
@@ -167,12 +177,14 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
           out.push({
             type: "inline",
             content: "",
-            children: [{
-              type: selfContained.tokenType,
-              tag: "",
-              nesting: 0,
-              meta: { directiveName: meta.name, attrs: parsedAttrs },
-            }],
+            children: [
+              {
+                type: selfContained.tokenType,
+                tag: "",
+                nesting: 0,
+                meta: { directiveName: meta.name, attrs: parsedAttrs },
+              },
+            ],
             level: 1,
             map: token.map,
           })
@@ -197,9 +209,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
         emitErrorTokens(out, `Unknown directive "{${meta.name}}"`)
         continue
       }
-      const directiveLineCount = Array.isArray(token.map)
-        ? Math.max(1, token.map[1] - token.map[0])
-        : 1
+      const directiveLineCount = Array.isArray(token.map) ? Math.max(1, token.map[1] - token.map[0]) : 1
       pending = { ...meta, lineCount: directiveLineCount, map: token.map }
       pendingSpec = spec
       continue
@@ -208,9 +218,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
     if (pending && token.block && token.nesting === 1) {
       if (!pendingSpec || !pendingSpec.appliesTo.includes(token.type)) {
         if (strict) {
-          throw new Error(
-            `Directive "${pending.name}"${lineRef(pending.map)} cannot apply to "${token.type}"`
-          )
+          throw new Error(`Directive "${pending.name}"${lineRef(pending.map)} cannot apply to "${token.type}"`)
         }
         emitErrorTokens(out, `Directive "{${pending.name}}" cannot apply to the following block`)
         pending = null
@@ -218,7 +226,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
       } else {
         const parsedAttrs: Record<string, any> = {}
         for (const [key, raw] of Object.entries(pending.attrs)) {
-          const prop = pendingSpec.properties.find(p => p.name === key)
+          const prop = pendingSpec.properties.find((p) => p.name === key)
           if (!prop) {
             if (pendingSpec.parseUnknownAttr) {
               const result = pendingSpec.parseUnknownAttr(key, raw)
@@ -228,9 +236,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
               }
             }
             if (strict) {
-              throw new Error(
-                `Unknown property "${key}" for directive "${pending.name}"${lineRef(pending.map)}`
-              )
+              throw new Error(`Unknown property "${key}" for directive "${pending.name}"${lineRef(pending.map)}`)
             }
             continue
           }
@@ -250,9 +256,7 @@ function applyDirectives(tokens: any[], registry: Registry, strict: boolean) {
 
   if (pending) {
     if (strict) {
-      throw new Error(
-        `Directive "${pending.name}"${lineRef(pending.map)} must be followed by a block`
-      )
+      throw new Error(`Directive "${pending.name}"${lineRef(pending.map)} must be followed by a block`)
     }
     emitErrorTokens(out, `Directive "{${pending.name}}" at end of document has no target block`)
   }
@@ -320,7 +324,10 @@ function defaultLinkTextForTarget(target: string): string {
   if (target.startsWith("#")) return target.slice(1).replace(/-/g, " ") || "section"
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
-  const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
+  const parts = clean
+    .split("/")
+    .filter(Boolean)
+    .filter((p) => p !== "." && p !== "..")
   return parts[parts.length - 1] ?? "index"
 }
 
@@ -539,10 +546,16 @@ function convertInlineSelfContainedDirectiveChildren(children: any[], registry: 
 
       const parsedAttrs: Record<string, string | null> = {}
       for (const [key, raw] of Object.entries(parsed.attrs)) {
-        if (key === "_args") { parsedAttrs[key] = raw; continue }
-        const prop = spec.properties.find(p => p.name === key)
+        if (key === "_args") {
+          parsedAttrs[key] = raw
+          continue
+        }
+        const prop = spec.properties.find((p) => p.name === key)
         if (!prop) {
-          if (spec.collectExtra) { parsedAttrs[key] = raw; continue }
+          if (spec.collectExtra) {
+            parsedAttrs[key] = raw
+            continue
+          }
           continue
         }
         parsedAttrs[key] = prop.parse ? prop.parse(raw) : raw
@@ -616,20 +629,12 @@ function injectExtraBlankParagraphs(tokens: any[]) {
       // Use the block's own map[1] as a floor — semanticBlockEnd may under-report
       // for blocks like header-only tables where inline content ends before the
       // separator row but the block itself extends further.
-      const semanticEnd = Math.max(
-        semanticBlockEnd(tokens, i, blockEndIndex, token.map[1]),
-        token.map[1]
-      )
+      const semanticEnd = Math.max(semanticBlockEnd(tokens, i, blockEndIndex, token.map[1]), token.map[1])
       const directiveLineCount =
-        token.meta && typeof token.meta.directiveLineCount === "number"
-          ? token.meta.directiveLineCount
-          : 0
+        token.meta && typeof token.meta.directiveLineCount === "number" ? token.meta.directiveLineCount : 0
 
       if (lastSemanticEnd !== null) {
-        const effectiveGap = Math.max(
-          0,
-          startLine - lastSemanticEnd - directiveLineCount
-        )
+        const effectiveGap = Math.max(0, startLine - lastSemanticEnd - directiveLineCount)
         const extraBlankParagraphs = Math.max(0, effectiveGap - 1)
         for (let j = 0; j < extraBlankParagraphs; j++) {
           out.push({ type: "paragraph_open", tag: "p", nesting: 1 })
@@ -661,10 +666,7 @@ function injectExtraBlankParagraphs(tokens: any[]) {
  * - Markdown → tokens
  * - tokens → PM DocModel
  */
-export function markdownToPM(
-  markdown: string,
-  registry: Registry
-): Node {
+export function markdownToPM(markdown: string, registry: Registry): Node {
   const schema = registry.schema
   // 1. Parse Markdown
   const md = new MarkdownIt({
@@ -680,11 +682,7 @@ export function markdownToPM(
   const tokens = injectExtraBlankParagraphs(
     convertCaptionRefTokens(
       convertTemplateVarTokens(
-        convertMediaLinkTokens(
-          normalizeEmptyLinkLabels(
-            applyDirectives(md.parse(markdown, {}), registry, false)
-          )
-        )
+        convertMediaLinkTokens(normalizeEmptyLinkLabels(applyDirectives(md.parse(markdown, {}), registry, false)))
       )
     )
   )

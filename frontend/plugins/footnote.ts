@@ -10,9 +10,12 @@ const footnoteMd = new MarkdownIt("zero") // start with nothing enabled
 footnoteMd.enable(["text", "newline", "escape", "link", "emphasis", "backticks", "strikethrough"])
 
 // When link text is empty ([](url)), show a shortened URL as the visible text.
-const defaultLinkRender = footnoteMd.renderer.rules.link_open ||
-  function(tokens: any, idx: any, options: any, _env: any, self: any) { return self.renderToken(tokens, idx, options) }
-footnoteMd.renderer.rules.link_open = function(tokens: any, idx: any, options: any, env: any, self: any) {
+const defaultLinkRender =
+  footnoteMd.renderer.rules.link_open ||
+  function (tokens: any, idx: any, options: any, _env: any, self: any) {
+    return self.renderToken(tokens, idx, options)
+  }
+footnoteMd.renderer.rules.link_open = function (tokens: any, idx: any, options: any, env: any, self: any) {
   const next = tokens[idx + 1]
   // If next token is link_close (no text between open/close), inject a text label.
   const isEmpty = next && next.type === "link_close"
@@ -89,7 +92,10 @@ class FootnoteNodeView {
   }
 
   private renderNumber(numbering: FootnoteNumbering | null | undefined) {
-    if (!numbering) { this.dom.textContent = "?"; return }
+    if (!numbering) {
+      this.dom.textContent = "?"
+      return
+    }
     // Find this node's position to look up its deduplicated number
     const doc = this.outerView.state.doc
     let myNumber = 0
@@ -113,7 +119,7 @@ class FootnoteNodeView {
     document.body.appendChild(this.tooltip)
     const rect = this.dom.getBoundingClientRect()
     this.tooltip.style.left = rect.left + "px"
-    this.tooltip.style.top = (rect.bottom + 4) + "px"
+    this.tooltip.style.top = rect.bottom + 4 + "px"
   }
 
   private hideTooltip() {
@@ -224,18 +230,24 @@ export const footnotePlugin: WikiPlugin = {
           selectable: true,
           attrs: { content: { default: "" } },
           toDOM(node: PMNode) {
-            return ["sup", {
-              class: "gowiki-footnote",
-              "data-footnote": node.attrs.content,
-              contenteditable: "false",
-            }, "0"]
+            return [
+              "sup",
+              {
+                class: "gowiki-footnote",
+                "data-footnote": node.attrs.content,
+                contenteditable: "false",
+              },
+              "0",
+            ]
           },
-          parseDOM: [{
-            tag: "sup.gowiki-footnote",
-            getAttrs(dom: HTMLElement) {
-              return { content: dom.getAttribute("data-footnote") || "" }
+          parseDOM: [
+            {
+              tag: "sup.gowiki-footnote",
+              getAttrs(dom: HTMLElement) {
+                return { content: dom.getAttribute("data-footnote") || "" }
+              },
             },
-          }],
+          ],
         },
       },
     })
@@ -246,16 +258,19 @@ export const footnotePlugin: WikiPlugin = {
         const src = state.src
         const start = state.pos
         // Must start with ^[
-        if (src.charCodeAt(start) !== 0x5E /* ^ */) return false
-        if (start + 1 >= state.posMax || src.charCodeAt(start + 1) !== 0x5B /* [ */) return false
+        if (src.charCodeAt(start) !== 0x5e /* ^ */) return false
+        if (start + 1 >= state.posMax || src.charCodeAt(start + 1) !== 0x5b /* [ */) return false
         // Find matching closing ] (handle nested brackets)
         let depth = 1
         let end = start + 2
         while (end < state.posMax && depth > 0) {
           const ch = src.charCodeAt(end)
-          if (ch === 0x5C /* \ */) { end += 2; continue }
-          if (ch === 0x5B /* [ */) depth++
-          if (ch === 0x5D /* ] */) depth--
+          if (ch === 0x5c /* \ */) {
+            end += 2
+            continue
+          }
+          if (ch === 0x5b /* [ */) depth++
+          if (ch === 0x5d /* ] */) depth--
           end++
         }
         if (depth !== 0) return false
@@ -303,8 +318,12 @@ export const footnotePlugin: WikiPlugin = {
       return new PMPlugin({
         key: footnoteNumberingKey,
         state: {
-          init(_, state) { return buildFootnoteNumbering(state.doc) },
-          apply(tr, old) { return tr.docChanged ? buildFootnoteNumbering(tr.doc) : old },
+          init(_, state) {
+            return buildFootnoteNumbering(state.doc)
+          },
+          apply(tr, old) {
+            return tr.docChanged ? buildFootnoteNumbering(tr.doc) : old
+          },
         },
       })
     })
@@ -367,8 +386,12 @@ export const footnotePlugin: WikiPlugin = {
 
           rebuild(editorView.state.doc)
           return {
-            update(view) { rebuild(view.state.doc) },
-            destroy() { section.remove() },
+            update(view) {
+              rebuild(view.state.doc)
+            },
+            destroy() {
+              section.remove()
+            },
           }
         },
       })

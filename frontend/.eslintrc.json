@@ -1,0 +1,52 @@
+{
+  "root": true,
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "node": true
+  },
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "plugins": ["@typescript-eslint"],
+  "extends": ["eslint:recommended"],
+  "ignorePatterns": ["dist/", "node_modules/", "tmp_*.html", "*.min.js"],
+  "rules": {
+    "no-unused-vars": "off",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "no-empty": ["error", { "allowEmptyCatch": true }],
+    "no-constant-condition": ["error", { "checkLoops": false }],
+    "no-inner-declarations": "off",
+    "no-fallthrough": ["error", { "allowEmptyCase": true }],
+    "no-cond-assign": ["error", "except-parens"],
+    "no-undef": "off",
+    "no-redeclare": "off",
+    "prefer-const": ["error", { "destructuring": "all" }],
+    "no-var": "error"
+  },
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx"],
+      "rules": {
+        "no-redeclare": "off",
+        "@typescript-eslint/no-redeclare": "off"
+      }
+    },
+    {
+      "files": ["test/**/*.ts", "test/**/*.js"],
+      "rules": {
+        "@typescript-eslint/no-unused-vars": "off",
+        "no-empty": "off"
+      }
+    }
+  ]
+}

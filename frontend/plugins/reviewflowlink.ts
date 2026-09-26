@@ -165,7 +165,7 @@ class ReviewflowLinkNodeView {
       // zeros so `{reviewflow version=1}` and `{reviewflow-link
       // version=1.0}` line up.
       const target = normalizeVersionTag(version)
-      const match = history.find(vr => normalizeVersionTag(vr.version_tag) === target)
+      const match = history.find((vr) => normalizeVersionTag(vr.version_tag) === target)
 
       if (!match) {
         this.loading = false
@@ -182,7 +182,9 @@ class ReviewflowLinkNodeView {
           const pageData = await metaResp.json()
           if (pageData.title) title = pageData.title
         }
-      } catch { /* use path as fallback */ }
+      } catch {
+        /* use path as fallback */
+      }
 
       this.resolved = {
         pageVersion: match.page_version,
@@ -200,9 +202,7 @@ class ReviewflowLinkNodeView {
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
-    const changed =
-      node.attrs.version !== this.node.attrs.version ||
-      node.attrs.page !== this.node.attrs.page
+    const changed = node.attrs.version !== this.node.attrs.version || node.attrs.page !== this.node.attrs.page
     this.node = node
     if (changed) {
       this.loading = true
@@ -373,9 +373,7 @@ export const reviewflowLinkPlugin: WikiPlugin = {
         if (node.attrs.page) {
           parts.push(`page=${node.attrs.page}`)
         }
-        return parts.length
-          ? `{reviewflow-link ${parts.join(" ")}}`
-          : `{reviewflow-link}`
+        return parts.length ? `{reviewflow-link ${parts.join(" ")}}` : `{reviewflow-link}`
       },
     })
 
@@ -404,7 +402,9 @@ export const reviewflowLinkPlugin: WikiPlugin = {
         try {
           tr = tr.setSelection(NodeSelection.create(tr.doc, from))
           tr = enablePropertiesPanel(tr)
-        } catch { /* leave default selection */ }
+        } catch {
+          /* leave default selection */
+        }
         dispatch(tr.scrollIntoView())
       }
       return true

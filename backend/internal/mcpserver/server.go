@@ -68,9 +68,9 @@ type PageMover interface {
 
 // RowInsertResult is what InsertRowWithPage returns.
 type RowInsertResult struct {
-	Row      *database.Row `json:"row"`
-	PagePath string        `json:"page_path,omitempty"`
-	PageCreated bool       `json:"page_created"`
+	Row         *database.Row `json:"row"`
+	PagePath    string        `json:"page_path,omitempty"`
+	PageCreated bool          `json:"page_created"`
 }
 
 // RowDeleteResult is what DeleteRowWithPage returns.
@@ -260,33 +260,33 @@ type UsernameExtractor func(ctx context.Context) string
 // optional except Store, ACL, UserStore, and ExtractUsername. Missing
 // optional deps cause the matching tools/resources to return a clear error.
 type Deps struct {
-	Store             PageStore
-	Sitemap           SitemapLister
-	Search            SearchStore
-	ACL               *auth.ACLStore
-	UserStore         *auth.UserStore
-	Backlinks         BacklinkProvider
-	TagIndex          *storage.TagIndex
-	Reviewflow        *reviewflow.Service
-	DraftState        DraftStateProvider
-	Todo              *todo.TodoService
-	SchemaStore       *database.SchemaStore
-	DataStore         *database.DataStore
-	Attic             AtticStore
-	Changelog         ChangelogReader
-	Mover             PageMover
-	RowWriter         RowWriter
-	TemplateCreator   TemplateCreator
-	DraftEditor       DraftEditor
-	DraftPublisher    DraftPublisher
-	Presence          PresenceProbe
-	Media             MediaStore
-	MediaRefs         ReferenceIndex
-	MediaVersions     MediaVersionReader
-	Renderer          PageRenderer
-	SiteBaseURL       string // e.g. "https://wiki.example.com"; used by upload_attachment_instructions
-	ExtractUsername   UsernameExtractor
-	RequireSummary    bool // when true, write_page rejects calls without a summary
+	Store           PageStore
+	Sitemap         SitemapLister
+	Search          SearchStore
+	ACL             *auth.ACLStore
+	UserStore       *auth.UserStore
+	Backlinks       BacklinkProvider
+	TagIndex        *storage.TagIndex
+	Reviewflow      *reviewflow.Service
+	DraftState      DraftStateProvider
+	Todo            *todo.TodoService
+	SchemaStore     *database.SchemaStore
+	DataStore       *database.DataStore
+	Attic           AtticStore
+	Changelog       ChangelogReader
+	Mover           PageMover
+	RowWriter       RowWriter
+	TemplateCreator TemplateCreator
+	DraftEditor     DraftEditor
+	DraftPublisher  DraftPublisher
+	Presence        PresenceProbe
+	Media           MediaStore
+	MediaRefs       ReferenceIndex
+	MediaVersions   MediaVersionReader
+	Renderer        PageRenderer
+	SiteBaseURL     string // e.g. "https://wiki.example.com"; used by upload_attachment_instructions
+	ExtractUsername UsernameExtractor
+	RequireSummary  bool // when true, write_page rejects calls without a summary
 }
 
 // NewHandler builds an http.Handler that speaks MCP Streamable HTTP. Mount

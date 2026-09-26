@@ -12,19 +12,19 @@ import (
 
 // Config holds the full site configuration.
 type Config struct {
-	DataDir    string           `yaml:"data_dir" json:"data_dir"`       // root data directory (contains content/, meta/, attic/, etc.)
-	Server     ServerConfig     `yaml:"server" json:"server"`
-	Site       SiteConfig       `yaml:"site" json:"site"`
-	Auth       AuthConfig       `yaml:"auth" json:"auth"`
-	Drafts     DraftsConfig     `yaml:"drafts" json:"drafts"`
-	Database   DatabaseConfig   `yaml:"database" json:"database"`
-	Todo       TodoConfig       `yaml:"todo" json:"todo"`
-	Tags       TagConfig        `yaml:"tags" json:"tags"`
-	Reviewflow    ReviewflowConfig  `yaml:"reviewflow" json:"reviewflow"`
-	AIAPI         AIAPIConfig       `yaml:"ai_api" json:"ai_api"`
-	AIAssistant   AIAssistantConfig `yaml:"ai_assistant" json:"ai_assistant"`
-	Bibliography  BibliographyConfig `yaml:"bibliography" json:"bibliography"`
-	Themes        ThemeConfig        `yaml:"themes" json:"themes"`
+	DataDir      string             `yaml:"data_dir" json:"data_dir"` // root data directory (contains content/, meta/, attic/, etc.)
+	Server       ServerConfig       `yaml:"server" json:"server"`
+	Site         SiteConfig         `yaml:"site" json:"site"`
+	Auth         AuthConfig         `yaml:"auth" json:"auth"`
+	Drafts       DraftsConfig       `yaml:"drafts" json:"drafts"`
+	Database     DatabaseConfig     `yaml:"database" json:"database"`
+	Todo         TodoConfig         `yaml:"todo" json:"todo"`
+	Tags         TagConfig          `yaml:"tags" json:"tags"`
+	Reviewflow   ReviewflowConfig   `yaml:"reviewflow" json:"reviewflow"`
+	AIAPI        AIAPIConfig        `yaml:"ai_api" json:"ai_api"`
+	AIAssistant  AIAssistantConfig  `yaml:"ai_assistant" json:"ai_assistant"`
+	Bibliography BibliographyConfig `yaml:"bibliography" json:"bibliography"`
+	Themes       ThemeConfig        `yaml:"themes" json:"themes"`
 }
 
 // ThemeConfig controls the appearance/theme system.
@@ -58,9 +58,9 @@ func (t ThemeConfig) ImageAutoFrameEnabled() bool {
 
 // BibliographyConfig controls the bibliography (PubMed/DOI citation) plugin.
 type BibliographyConfig struct {
-	Enabled            bool   `yaml:"enabled" json:"enabled"`
-	PubmedAPIKey       string `yaml:"pubmed_api_key" json:"pubmed_api_key"`             // optional NCBI API key (raises rate limit to 10/s)
-	AdminContactEmail  string `yaml:"admin_contact_email" json:"admin_contact_email"`   // included in the User-Agent header per NIH etiquette
+	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	PubmedAPIKey      string `yaml:"pubmed_api_key" json:"pubmed_api_key"`           // optional NCBI API key (raises rate limit to 10/s)
+	AdminContactEmail string `yaml:"admin_contact_email" json:"admin_contact_email"` // included in the User-Agent header per NIH etiquette
 }
 
 // ServerConfig holds network/serving settings.
@@ -156,14 +156,14 @@ type TagConfig struct {
 
 // SiteConfig holds site-wide display settings.
 type SiteConfig struct {
-	Title          string `yaml:"title" json:"title"`
-	BaseURL        string `yaml:"base_url" json:"base_url"`               // e.g. "https://wiki.example.com"
-	FooterPage     string `yaml:"footer_page" json:"footer_page"`
-	SidebarPage    string `yaml:"sidebar_page" json:"sidebar_page"`
-	TOCMaxLevel    int    `yaml:"toc_max_level" json:"toc_max_level"`     // 0 = disabled, 1-6 = show headings up to this level
-	UserDisplay    string `yaml:"user_display" json:"user_display"`       // "login" (default), "fullname", "email"
-	CodeTheme      string `yaml:"code_theme" json:"code_theme"`           // highlight.js theme name (light mode)
-	CodeThemeDark  string `yaml:"code_theme_dark" json:"code_theme_dark"` // highlight.js theme name (dark mode)
+	Title         string `yaml:"title" json:"title"`
+	BaseURL       string `yaml:"base_url" json:"base_url"` // e.g. "https://wiki.example.com"
+	FooterPage    string `yaml:"footer_page" json:"footer_page"`
+	SidebarPage   string `yaml:"sidebar_page" json:"sidebar_page"`
+	TOCMaxLevel   int    `yaml:"toc_max_level" json:"toc_max_level"`     // 0 = disabled, 1-6 = show headings up to this level
+	UserDisplay   string `yaml:"user_display" json:"user_display"`       // "login" (default), "fullname", "email"
+	CodeTheme     string `yaml:"code_theme" json:"code_theme"`           // highlight.js theme name (light mode)
+	CodeThemeDark string `yaml:"code_theme_dark" json:"code_theme_dark"` // highlight.js theme name (dark mode)
 }
 
 // AuthConfig holds authentication settings.
@@ -174,12 +174,12 @@ type AuthConfig struct {
 
 // OAuthConfig holds external OAuth/OIDC provider settings.
 type OAuthConfig struct {
-	Provider        string   `yaml:"provider" json:"provider"`                 // "azure" or "" (disabled)
-	TenantID        string   `yaml:"tenant_id" json:"tenant_id"`              // Azure AD tenant ID
-	ClientID        string   `yaml:"client_id" json:"client_id"`              // Application (client) ID
-	ClientSecret    string   `yaml:"client_secret" json:"client_secret"`      // Client secret value
+	Provider        string   `yaml:"provider" json:"provider"`                   // "azure" or "" (disabled)
+	TenantID        string   `yaml:"tenant_id" json:"tenant_id"`                 // Azure AD tenant ID
+	ClientID        string   `yaml:"client_id" json:"client_id"`                 // Application (client) ID
+	ClientSecret    string   `yaml:"client_secret" json:"client_secret"`         // Client secret value
 	AutoCreateUsers bool     `yaml:"auto_create_users" json:"auto_create_users"` // Create user on first OAuth login
-	DefaultGroups   []string `yaml:"default_groups" json:"default_groups"`    // Groups for auto-created users
+	DefaultGroups   []string `yaml:"default_groups" json:"default_groups"`       // Groups for auto-created users
 }
 
 // AIAPIConfig holds settings for the AI Content API (token-based access).
@@ -193,13 +193,13 @@ type AIAPIConfig struct {
 
 // AIAssistantConfig holds settings for the integrated AI assistant (browser-based).
 type AIAssistantConfig struct {
-	Enabled       bool                `yaml:"enabled" json:"enabled"`
-	Provider      string              `yaml:"provider" json:"provider"`             // "anthropic" | "openai" (future)
-	APIKey        string              `yaml:"api_key" json:"api_key"`               // provider API key (overridden by AI_ASSISTANT_API_KEY env var)
-	Model         string              `yaml:"model" json:"model"`                   // model identifier
-	MaxTokens     int                 `yaml:"max_tokens" json:"max_tokens"`         // max response tokens per request
-	AllowedGroups []string            `yaml:"allowed_groups" json:"allowed_groups"` // groups that can use the assistant (empty = all authenticated)
-	Costs         AIAssistantCosts    `yaml:"costs" json:"costs"`
+	Enabled       bool             `yaml:"enabled" json:"enabled"`
+	Provider      string           `yaml:"provider" json:"provider"`             // "anthropic" | "openai" (future)
+	APIKey        string           `yaml:"api_key" json:"api_key"`               // provider API key (overridden by AI_ASSISTANT_API_KEY env var)
+	Model         string           `yaml:"model" json:"model"`                   // model identifier
+	MaxTokens     int              `yaml:"max_tokens" json:"max_tokens"`         // max response tokens per request
+	AllowedGroups []string         `yaml:"allowed_groups" json:"allowed_groups"` // groups that can use the assistant (empty = all authenticated)
+	Costs         AIAssistantCosts `yaml:"costs" json:"costs"`
 }
 
 // AIAssistantCosts holds cost control settings for the integrated AI assistant.
@@ -255,9 +255,9 @@ func DefaultConfig() Config {
 			RequireSummary:   true,
 		},
 		AIAssistant: AIAssistantConfig{
-			Enabled:  false,
-			Provider: "anthropic",
-			Model:    "claude-sonnet-4-20250514",
+			Enabled:   false,
+			Provider:  "anthropic",
+			Model:     "claude-sonnet-4-20250514",
 			MaxTokens: 4096,
 			Costs: AIAssistantCosts{
 				RateLimitPerUser:    30,

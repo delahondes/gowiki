@@ -29,7 +29,10 @@ func main() {
 		Disabled     bool     `json:"disabled"`
 		CreatedAt    string   `json:"created_at"`
 	}
-	userDefs := []struct{ name, display, email string; groups []string }{
+	userDefs := []struct {
+		name, display, email string
+		groups               []string
+	}{
 		{"admin", "Administrator", "admin@example.com", []string{"admin", "editors"}},
 		{"alice", "Alice Martin", "alice@example.com", []string{"editors", "quality"}},
 		{"bob", "Bob Wilson", "bob@example.com", []string{"editors", "development"}},

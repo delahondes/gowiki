@@ -59,27 +59,32 @@ export const flowMarkerPlugin: WikiPlugin = {
           selectable: false,
           attrs: {
             id: { default: "" },
-            type: { default: "open" },   // "open", "close", "point"
-            prefix: { default: "" },      // "", "@", "!"
+            type: { default: "open" }, // "open", "close", "point"
+            prefix: { default: "" }, // "", "@", "!"
           },
           toDOM(node: any) {
-            return ["span", {
-              class: "gowiki-flow-marker",
-              "data-marker-id": node.attrs.id,
-              "data-marker-type": node.attrs.type,
-              "data-marker-prefix": node.attrs.prefix,
-            }]
+            return [
+              "span",
+              {
+                class: "gowiki-flow-marker",
+                "data-marker-id": node.attrs.id,
+                "data-marker-type": node.attrs.type,
+                "data-marker-prefix": node.attrs.prefix,
+              },
+            ]
           },
-          parseDOM: [{
-            tag: "span.gowiki-flow-marker",
-            getAttrs(dom: HTMLElement) {
-              return {
-                id: dom.getAttribute("data-marker-id") || "",
-                type: dom.getAttribute("data-marker-type") || "open",
-                prefix: dom.getAttribute("data-marker-prefix") || "",
-              }
+          parseDOM: [
+            {
+              tag: "span.gowiki-flow-marker",
+              getAttrs(dom: HTMLElement) {
+                return {
+                  id: dom.getAttribute("data-marker-id") || "",
+                  type: dom.getAttribute("data-marker-type") || "open",
+                  prefix: dom.getAttribute("data-marker-prefix") || "",
+                }
+              },
             },
-          }],
+          ],
         },
       },
     })
@@ -90,7 +95,7 @@ export const flowMarkerPlugin: WikiPlugin = {
       md.inline.ruler.push("gowiki_flow_marker", (state: any, silent: boolean) => {
         const src = state.src
         const start = state.pos
-        if (src.charCodeAt(start) !== 0x7B) return false // {
+        if (src.charCodeAt(start) !== 0x7b) return false // {
         if (src.charCodeAt(start + 1) !== 0x23) return false // #
 
         // Find closing }
@@ -141,11 +146,13 @@ export const flowMarkerPlugin: WikiPlugin = {
     reg.registerText("flow_marker", {
       run(ctx: any, tok: any) {
         const { id, type, prefix } = tok.meta || {}
-        ctx.push(ctx.schema.nodes.flow_marker.create({
-          id: id || "",
-          type: type || "open",
-          prefix: prefix || "",
-        }))
+        ctx.push(
+          ctx.schema.nodes.flow_marker.create({
+            id: id || "",
+            type: type || "open",
+            prefix: prefix || "",
+          })
+        )
       },
     })
 

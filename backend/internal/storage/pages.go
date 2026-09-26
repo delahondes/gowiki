@@ -33,6 +33,7 @@ func (e *NamespaceConflictError) Error() string {
 func (e *NamespaceConflictError) Is(target error) bool {
 	return target == ErrNamespaceConflict
 }
+
 var ErrPageHasLock = errors.New("page is locked by a draft")
 var ErrDestinationExists = errors.New("destination already exists")
 var ErrNamespaceNotEmpty = errors.New("namespace not empty")
@@ -1392,11 +1393,12 @@ type TemplateMatch struct {
 // from a `_template*.md` filename. Returns ok=false for any other filename.
 //
 // Rules (underscore = constraint):
-//   _template.md           → slug="", constrained=false    (default)
-//   _template1.md          → slug="1", constrained=false   (unconstrained variant)
-//   _templatefoo.md        → slug="foo", constrained=false
-//   _template_sop.md       → slug="sop", constrained=true
-//   _template_foo_bar.md   → slug="foo_bar", constrained=true
+//
+//	_template.md           → slug="", constrained=false    (default)
+//	_template1.md          → slug="1", constrained=false   (unconstrained variant)
+//	_templatefoo.md        → slug="foo", constrained=false
+//	_template_sop.md       → slug="sop", constrained=true
+//	_template_foo_bar.md   → slug="foo_bar", constrained=true
 func parseTemplateFilename(name string) (slug string, constrained bool, ok bool) {
 	const prefix = "_template"
 	if !strings.HasSuffix(name, ".md") {

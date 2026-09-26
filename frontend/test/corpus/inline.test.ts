@@ -156,8 +156,8 @@ describe("links", () => {
     // markdown, not the first parse of the raw source.
     const doc2 = markdownToPM(rt.first, registry)
     let found = false
-    doc2.descendants(n => {
-      if (n.isText && n.marks.some(m => m.type.name === "link")) found = true
+    doc2.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === "link")) found = true
     })
     expect(found).toBe(true)
   })
@@ -167,8 +167,8 @@ describe("links", () => {
     expect(rt.isStable).toBe(true)
     const doc2 = markdownToPM(rt.first, registry)
     let found = false
-    doc2.descendants(n => {
-      if (n.isText && n.marks.some(m => m.type.name === "link")) found = true
+    doc2.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === "link")) found = true
     })
     expect(found).toBe(true)
   })

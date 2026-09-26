@@ -54,7 +54,11 @@ if (typeof window !== "undefined") {
     const api = (window as any).mermaid
     if (api) initMermaid(api)
     for (const v of liveMermaidViews) {
-      try { v.rerender() } catch { /* ignore */ }
+      try {
+        v.rerender()
+      } catch {
+        /* ignore */
+      }
     }
   })
 }
@@ -319,75 +323,87 @@ export const mermaidPlugin: WikiPlugin = {
             data: { default: "" },
           },
           toDOM(node: any) {
-            return ["div", {
-              class: "gowiki-mermaid",
-              "data-mermaid-size": node.attrs.size,
-              "data-mermaid-caption": node.attrs.caption,
-              "data-mermaid-data": node.attrs.data,
-            }, "Mermaid diagram"]
+            return [
+              "div",
+              {
+                class: "gowiki-mermaid",
+                "data-mermaid-size": node.attrs.size,
+                "data-mermaid-caption": node.attrs.caption,
+                "data-mermaid-data": node.attrs.data,
+              },
+              "Mermaid diagram",
+            ]
           },
-          parseDOM: [{
-            tag: "div.gowiki-mermaid",
-            getAttrs(dom: any) {
-              return {
-                size: dom.getAttribute("data-mermaid-size") || "",
-                caption: dom.getAttribute("data-mermaid-caption") || "",
-                data: dom.getAttribute("data-mermaid-data") || "",
-              }
+          parseDOM: [
+            {
+              tag: "div.gowiki-mermaid",
+              getAttrs(dom: any) {
+                return {
+                  size: dom.getAttribute("data-mermaid-size") || "",
+                  caption: dom.getAttribute("data-mermaid-caption") || "",
+                  data: dom.getAttribute("data-mermaid-data") || "",
+                }
+              },
             },
-          }],
+          ],
         },
       },
     })
 
     // ── Markdown-it: fenced block ```mermaid [size=...] ──
     reg.registerMarkdownItPlugin((md: any) => {
-      md.block.ruler.before("fence", "mermaid_fence", (state: any, startLine: number, endLine: number, silent: boolean) => {
-        const start = state.bMarks[startLine] + state.tShift[startLine]
-        const max = state.eMarks[startLine]
-        const line = state.src.slice(start, max)
+      md.block.ruler.before(
+        "fence",
+        "mermaid_fence",
+        (state: any, startLine: number, endLine: number, silent: boolean) => {
+          const start = state.bMarks[startLine] + state.tShift[startLine]
+          const max = state.eMarks[startLine]
+          const line = state.src.slice(start, max)
 
-        if (!line.startsWith("```mermaid")) return false
-        if (silent) return true
+          if (!line.startsWith("```mermaid")) return false
+          if (silent) return true
 
-        // Parse info string for attributes (size etc.)
-        const infoStr = line.slice(3).trim() // "mermaid size=500px"
-        const attrs = parseInfoString(infoStr)
+          // Parse info string for attributes (size etc.)
+          const infoStr = line.slice(3).trim() // "mermaid size=500px"
+          const attrs = parseInfoString(infoStr)
 
-        // Find closing fence
-        let nextLine = startLine + 1
-        while (nextLine < endLine) {
-          const nStart = state.bMarks[nextLine] + state.tShift[nextLine]
-          const nMax = state.eMarks[nextLine]
-          const nLine = state.src.slice(nStart, nMax)
-          if (nLine.startsWith("```") && nLine.trim() === "```") break
-          nextLine++
+          // Find closing fence
+          let nextLine = startLine + 1
+          while (nextLine < endLine) {
+            const nStart = state.bMarks[nextLine] + state.tShift[nextLine]
+            const nMax = state.eMarks[nextLine]
+            const nLine = state.src.slice(nStart, nMax)
+            if (nLine.startsWith("```") && nLine.trim() === "```") break
+            nextLine++
+          }
+
+          // Extract body
+          const bodyStart = state.bMarks[startLine + 1]
+          const bodyEnd = nextLine < endLine ? state.bMarks[nextLine] : state.eMarks[endLine - 1]
+          const body = state.src.slice(bodyStart, bodyEnd).trim()
+
+          const token = state.push("mermaid_diagram", "", 0)
+          token.meta = { data: body, size: attrs.size, caption: attrs.caption }
+          token.map = [startLine, nextLine + 1]
+          token.block = true
+
+          state.line = nextLine + 1
+          return true
         }
-
-        // Extract body
-        const bodyStart = state.bMarks[startLine + 1]
-        const bodyEnd = nextLine < endLine ? state.bMarks[nextLine] : state.eMarks[endLine - 1]
-        const body = state.src.slice(bodyStart, bodyEnd).trim()
-
-        const token = state.push("mermaid_diagram", "", 0)
-        token.meta = { data: body, size: attrs.size, caption: attrs.caption }
-        token.map = [startLine, nextLine + 1]
-        token.block = true
-
-        state.line = nextLine + 1
-        return true
-      })
+      )
     })
 
     // ── Markdown → PM ──
     reg.registerText("mermaid_diagram", {
       run(ctx, tok) {
         const meta = tok.meta ?? {}
-        ctx.push(ctx.schema.nodes.mermaid_diagram.create({
-          size: meta.size ?? "",
-          caption: meta.caption ?? "",
-          data: meta.data ?? "",
-        }))
+        ctx.push(
+          ctx.schema.nodes.mermaid_diagram.create({
+            size: meta.size ?? "",
+            caption: meta.caption ?? "",
+            data: meta.data ?? "",
+          })
+        )
       },
     })
 
@@ -426,7 +442,9 @@ export const mermaidPlugin: WikiPlugin = {
         try {
           tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
           tr = enablePropertiesPanel(tr)
-        } catch { /* leave default selection */ }
+        } catch {
+          /* leave default selection */
+        }
         dispatch(tr.scrollIntoView())
       }
       return true

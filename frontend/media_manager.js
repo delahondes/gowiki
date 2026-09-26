@@ -2,7 +2,7 @@ function encodePath(path) {
   return String(path ?? "")
     .split("/")
     .filter(Boolean)
-    .map(part => encodeURIComponent(part))
+    .map((part) => encodeURIComponent(part))
     .join("/")
 }
 
@@ -65,9 +65,7 @@ async function deleteMedia(mediaPath) {
     const body = await resp.json().catch(() => null)
     if (resp.status === 409 && body?.referencing_pages) {
       const pages = body.referencing_pages
-      throw new Error(
-        `Still referenced by: ${pages.join(", ")}`
-      )
+      throw new Error(`Still referenced by: ${pages.join(", ")}`)
     }
     throw new Error(body?.error || `Failed to delete media: ${resp.status}`)
   }
@@ -173,7 +171,7 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
           }
         }
       }
-      state.entries = allEntries.filter(entry => {
+      state.entries = allEntries.filter((entry) => {
         if (entry.kind !== "file") return true
         if (state.showMarkdownFiles) return true
         return !/\.md$/i.test(String(entry.name ?? ""))
@@ -295,7 +293,7 @@ export function openMediaManager(initialNamespacePath, onStatus, onInsert) {
   }
 
   closeBtn.addEventListener("click", close)
-  overlay.addEventListener("click", event => {
+  overlay.addEventListener("click", (event) => {
     if (event.target === overlay) close()
   })
   upBtn.addEventListener("click", () => {

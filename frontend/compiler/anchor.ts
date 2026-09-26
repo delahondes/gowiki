@@ -34,9 +34,9 @@ export interface ContentNode {
 }
 
 export interface TextQuote {
-  prefix: string   // ≤ QUOTE_CTX chars of plain text immediately before the anchor
-  suffix: string   // ≤ QUOTE_CTX chars of plain text immediately after the anchor
-  exact?: string   // for ranges: the selected text (truncated to QUOTE_EXACT_MAX)
+  prefix: string // ≤ QUOTE_CTX chars of plain text immediately before the anchor
+  suffix: string // ≤ QUOTE_CTX chars of plain text immediately after the anchor
+  exact?: string // for ranges: the selected text (truncated to QUOTE_EXACT_MAX)
 }
 
 export interface AnchorPoint {
@@ -64,18 +64,24 @@ export interface ResolvedRange {
   confidence: Confidence
 }
 
-const QUOTE_CTX = 32           // chars of prefix/suffix in a textQuote
-const QUOTE_EXACT_MAX = 200    // max length of stored exact text
+const QUOTE_CTX = 32 // chars of prefix/suffix in a textQuote
+const QUOTE_EXACT_MAX = 200 // max length of stored exact text
 
 // PM content types that directly contain inline text and represent one structural slot.
-const PM_CONTENT_TYPES: ReadonlySet<string> = new Set([
-  "paragraph", "heading", "code_block",
-])
+const PM_CONTENT_TYPES: ReadonlySet<string> = new Set(["paragraph", "heading", "code_block"])
 
 // Containers that we descend into when walking content nodes.
 const PM_CONTAINER_TYPES: ReadonlySet<string> = new Set([
-  "doc", "table", "table_row", "table_cell", "table_header",
-  "bullet_list", "ordered_list", "list_item", "blockquote", "spoiler",
+  "doc",
+  "table",
+  "table_row",
+  "table_cell",
+  "table_header",
+  "bullet_list",
+  "ordered_list",
+  "list_item",
+  "blockquote",
+  "spoiler",
 ])
 
 // ── Markdown scanning ───────────────────────────────────────────────────────
@@ -130,25 +136,43 @@ export function scanMarkdownContentNodes(markdown: string): ContentNode[] {
     }
 
     // Blank line — skip
-    if (line.trim() === "") { i++; continue }
+    if (line.trim() === "") {
+      i++
+      continue
+    }
 
     // Directive on its own line: {name ...}
-    if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(line)) { i++; continue }
+    if (/^\{[\p{L}][\p{L}0-9_-]*(\s[^}]*)?\}\s*$/u.test(line)) {
+      i++
+      continue
+    }
 
     // Table separator row: | --- | --- |
-    if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) { i++; continue }
+    if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line)) {
+      i++
+      continue
+    }
 
     // Horizontal rule
-    if (/^([-*_])\1{2,}\s*$/.test(line)) { i++; continue }
+    if (/^([-*_])\1{2,}\s*$/.test(line)) {
+      i++
+      continue
+    }
 
     // Table row: | cell | cell |
     if (line.includes("|") && /^\|/.test(line.trim())) {
       const stripped = line.replace(/^\|/, "").replace(/\|\s*$/, "")
       const cellTexts: string[] = []
-      let cur = "", depth = 0, ci = 0
+      let cur = "",
+        depth = 0,
+        ci = 0
       for (ci = 0; ci < stripped.length; ci++) {
         const ch = stripped[ci]
-        if (ch === "\\" && ci + 1 < stripped.length) { cur += ch + stripped[ci + 1]; ci++; continue }
+        if (ch === "\\" && ci + 1 < stripped.length) {
+          cur += ch + stripped[ci + 1]
+          ci++
+          continue
+        }
         if (ch === "`") depth = depth ? 0 : 1
         if (ch === "|" && !depth) {
           cellTexts.push(cur)
@@ -252,39 +276,51 @@ export function rawToPlainOffset(rawText: string, rawOffset: number): number {
   const target = Math.min(rawOffset, len)
 
   while (i < target) {
-    if (rawText[i] === "\\" && i + 1 < len) { i += 2; plain++; continue }
+    if (rawText[i] === "\\" && i + 1 < len) {
+      i += 2
+      plain++
+      continue
+    }
     if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
-      let depth = 1, j = i + 2
+      let depth = 1,
+        j = i + 2
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
       if (depth === 0) {
         if (target <= j) return plain
-        i = j; continue
+        i = j
+        continue
       }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
       const j = rawText.indexOf("}", i + 2)
       if (j >= 0) {
         if (target <= j + 1) return plain
-        i = j + 1; continue
+        i = j + 1
+        continue
       }
     }
     if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
       const j = rawText.indexOf("}", i + 2)
       if (j >= 0) {
         if (target <= j + 1) return plain
-        i = j + 1; continue
+        i = j + 1
+        continue
       }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
       const j = rawText.indexOf("}}", i + 2)
       if (j >= 0) {
         if (target <= j + 2) return plain
-        i = j + 2; continue
+        i = j + 2
+        continue
       }
     }
     if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
@@ -296,25 +332,40 @@ export function rawToPlainOffset(rawText: string, rawOffset: number): number {
       continue
     }
     if (rawText[i] === "[") {
-      let depth = 1, j = i + 1
+      let depth = 1,
+        j = i + 1
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
       if (depth === 0 && j < len && rawText[j] === "(") {
-        let pd = 1, k = j + 1
+        let pd = 1,
+          k = j + 1
         while (k < len && pd > 0) {
-          if (rawText[k] === "\\") { k += 2; continue }
+          if (rawText[k] === "\\") {
+            k += 2
+            continue
+          }
           if (rawText[k] === "(") pd++
           if (rawText[k] === ")") pd--
           k++
         }
         if (pd === 0) {
-          const textStart = i + 1, textEnd = j - 1
-          if (target <= textStart) { i = textStart; continue }
-          if (target <= textEnd) { i++; continue }
+          const textStart = i + 1,
+            textEnd = j - 1
+          if (target <= textStart) {
+            i = textStart
+            continue
+          }
+          if (target <= textEnd) {
+            i++
+            continue
+          }
           if (target < k) return plain + rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
           plain += rawToPlainOffset(rawText.slice(textStart, textEnd), textEnd - textStart)
           i = k
@@ -322,15 +373,40 @@ export function rawToPlainOffset(rawText: string, rawOffset: number): number {
         }
       }
     }
-    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") { i += 2; continue }
-    if (rawText[i] === "*") { i++; continue }
-    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") { i += 2; continue }
-    if (rawText[i] === "~") { i++; continue }
-    if (rawText[i] === "^") { i++; continue }
-    if (rawText[i] === "_") { i++; continue }
-    if (rawText[i] === "`") { i++; continue }
-    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
-    i++; plain++
+    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "*") {
+      i++
+      continue
+    }
+    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "~") {
+      i++
+      continue
+    }
+    if (rawText[i] === "^") {
+      i++
+      continue
+    }
+    if (rawText[i] === "_") {
+      i++
+      continue
+    }
+    if (rawText[i] === "`") {
+      i++
+      continue
+    }
+    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") {
+      i++
+      continue
+    }
+    i++
+    plain++
   }
   return plain
 }
@@ -343,28 +419,48 @@ export function plainToRawOffset(rawText: string, plainTarget: number): number {
   const len = rawText.length
 
   while (i < len && plain < plainTarget) {
-    if (rawText[i] === "\\" && i + 1 < len) { i += 2; plain++; continue }
+    if (rawText[i] === "\\" && i + 1 < len) {
+      i += 2
+      plain++
+      continue
+    }
     if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
-      let depth = 1, j = i + 2
+      let depth = 1,
+        j = i + 2
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
-      if (depth === 0) { i = j; continue }
+      if (depth === 0) {
+        i = j
+        continue
+      }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
       const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) { i = j + 1; continue }
+      if (j >= 0) {
+        i = j + 1
+        continue
+      }
     }
     if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
       const j = rawText.indexOf("}", i + 2)
-      if (j >= 0) { i = j + 1; continue }
+      if (j >= 0) {
+        i = j + 1
+        continue
+      }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
       const j = rawText.indexOf("}}", i + 2)
-      if (j >= 0) { i = j + 2; continue }
+      if (j >= 0) {
+        i = j + 2
+        continue
+      }
     }
     if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
       i += 2
@@ -375,33 +471,69 @@ export function plainToRawOffset(rawText: string, plainTarget: number): number {
       continue
     }
     if (rawText[i] === "[") {
-      let depth = 1, j = i + 1
+      let depth = 1,
+        j = i + 1
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
       if (depth === 0 && j < len && rawText[j] === "(") {
-        let pd = 1, k = j + 1
+        let pd = 1,
+          k = j + 1
         while (k < len && pd > 0) {
-          if (rawText[k] === "\\") { k += 2; continue }
+          if (rawText[k] === "\\") {
+            k += 2
+            continue
+          }
           if (rawText[k] === "(") pd++
           if (rawText[k] === ")") pd--
           k++
         }
-        if (pd === 0) { i++; continue }
+        if (pd === 0) {
+          i++
+          continue
+        }
       }
     }
-    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") { i += 2; continue }
-    if (rawText[i] === "*") { i++; continue }
-    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") { i += 2; continue }
-    if (rawText[i] === "~") { i++; continue }
-    if (rawText[i] === "^") { i++; continue }
-    if (rawText[i] === "_") { i++; continue }
-    if (rawText[i] === "`") { i++; continue }
-    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
-    i++; plain++
+    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "*") {
+      i++
+      continue
+    }
+    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "~") {
+      i++
+      continue
+    }
+    if (rawText[i] === "^") {
+      i++
+      continue
+    }
+    if (rawText[i] === "_") {
+      i++
+      continue
+    }
+    if (rawText[i] === "`") {
+      i++
+      continue
+    }
+    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") {
+      i++
+      continue
+    }
+    i++
+    plain++
   }
   return i
 }
@@ -413,59 +545,122 @@ function rawNodePlainText(rawText: string): string {
   let i = 0
   const len = rawText.length
   while (i < len) {
-    if (rawText[i] === "\\" && i + 1 < len) { out += rawText[i + 1]; i += 2; continue }
+    if (rawText[i] === "\\" && i + 1 < len) {
+      out += rawText[i + 1]
+      i += 2
+      continue
+    }
     if (rawText[i] === "^" && i + 1 < len && rawText[i + 1] === "[") {
-      let depth = 1, j = i + 2
+      let depth = 1,
+        j = i + 2
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
-      if (depth === 0) { i = j; continue }
+      if (depth === 0) {
+        i = j
+        continue
+      }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "#") {
-      const j = rawText.indexOf("}", i + 2); if (j >= 0) { i = j + 1; continue }
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) {
+        i = j + 1
+        continue
+      }
     }
     if (rawText[i] === "{" && rawText.startsWith("ref ", i + 1)) {
-      const j = rawText.indexOf("}", i + 2); if (j >= 0) { i = j + 1; continue }
+      const j = rawText.indexOf("}", i + 2)
+      if (j >= 0) {
+        i = j + 1
+        continue
+      }
     }
     if (rawText[i] === "{" && i + 1 < len && rawText[i + 1] === "{") {
-      const j = rawText.indexOf("}}", i + 2); if (j >= 0) { i = j + 2; continue }
+      const j = rawText.indexOf("}}", i + 2)
+      if (j >= 0) {
+        i = j + 2
+        continue
+      }
     }
     if (rawText[i] === "=" && i + 1 < len && rawText[i + 1] === "=") {
       i += 2
-      if (i < len && rawText[i] === "{") { const j = rawText.indexOf("}", i); if (j >= 0) i = j + 1 }
+      if (i < len && rawText[i] === "{") {
+        const j = rawText.indexOf("}", i)
+        if (j >= 0) i = j + 1
+      }
       continue
     }
     if (rawText[i] === "[") {
-      let depth = 1, j = i + 1
+      let depth = 1,
+        j = i + 1
       while (j < len && depth > 0) {
-        if (rawText[j] === "\\") { j += 2; continue }
+        if (rawText[j] === "\\") {
+          j += 2
+          continue
+        }
         if (rawText[j] === "[") depth++
         if (rawText[j] === "]") depth--
         j++
       }
       if (depth === 0 && j < len && rawText[j] === "(") {
-        let pd = 1, k = j + 1
+        let pd = 1,
+          k = j + 1
         while (k < len && pd > 0) {
-          if (rawText[k] === "\\") { k += 2; continue }
+          if (rawText[k] === "\\") {
+            k += 2
+            continue
+          }
           if (rawText[k] === "(") pd++
           if (rawText[k] === ")") pd--
           k++
         }
-        if (pd === 0) { out += rawNodePlainText(rawText.slice(i + 1, j - 1)); i = k; continue }
+        if (pd === 0) {
+          out += rawNodePlainText(rawText.slice(i + 1, j - 1))
+          i = k
+          continue
+        }
       }
     }
-    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") { i += 2; continue }
-    if (rawText[i] === "*") { i++; continue }
-    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") { i += 2; continue }
-    if (rawText[i] === "~") { i++; continue }
-    if (rawText[i] === "^") { i++; continue }
-    if (rawText[i] === "_") { i++; continue }
-    if (rawText[i] === "`") { i++; continue }
-    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") { i++; continue }
-    out += rawText[i]; i++
+    if (rawText[i] === "*" && i + 1 < len && rawText[i + 1] === "*") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "*") {
+      i++
+      continue
+    }
+    if (rawText[i] === "~" && i + 1 < len && rawText[i + 1] === "~") {
+      i += 2
+      continue
+    }
+    if (rawText[i] === "~") {
+      i++
+      continue
+    }
+    if (rawText[i] === "^") {
+      i++
+      continue
+    }
+    if (rawText[i] === "_") {
+      i++
+      continue
+    }
+    if (rawText[i] === "`") {
+      i++
+      continue
+    }
+    if (rawText[i] === "@" && i + 1 < len && rawText[i + 1] === "`") {
+      i++
+      continue
+    }
+    out += rawText[i]
+    i++
   }
   return out
 }
@@ -505,9 +700,16 @@ export function pointFromPm(doc: PMNode, pmPos: number, opts: { withTextQuote?: 
             if (captured) return
             const childPos = pos + 1 + offset
             const childEnd = childPos + child.nodeSize
-            if (pmPos <= childPos) { captured = true; return }
+            if (pmPos <= childPos) {
+              captured = true
+              return
+            }
             if (child.isText) {
-              if (pmPos < childEnd) { charCount += pmPos - childPos; captured = true; return }
+              if (pmPos < childEnd) {
+                charCount += pmPos - childPos
+                captured = true
+                return
+              }
               charCount += (child.text || "").length
             } else if (child.type.name === "hard_break") {
               charCount += 1
@@ -539,9 +741,7 @@ export function pointFromRaw(markdown: string, rawPos: number, opts: { withTextQ
     if (rawPos >= n.rawStart && rawPos <= n.rawEnd) {
       const rawText = markdown.slice(n.rawStart, n.rawEnd)
       const rawOffsetInNode = rawPos - n.rawStart
-      const plainOffset = n.type === "code_block"
-        ? rawOffsetInNode
-        : rawToPlainOffset(rawText, rawOffsetInNode)
+      const plainOffset = n.type === "code_block" ? rawOffsetInNode : rawToPlainOffset(rawText, rawOffsetInNode)
       const anchor: AnchorPoint = { nodeIndex: idx, plainOffset }
       if (opts.withTextQuote) {
         const plain = n.type === "code_block" ? rawText : rawNodePlainText(rawText)
@@ -553,14 +753,17 @@ export function pointFromRaw(markdown: string, rawPos: number, opts: { withTextQ
   for (let idx = 0; idx < nodes.length; idx++) {
     if (nodes[idx].rawStart > rawPos) return { nodeIndex: idx, plainOffset: 0 }
   }
-  return nodes.length > 0
-    ? { nodeIndex: nodes.length - 1, plainOffset: 0 }
-    : { nodeIndex: 0, plainOffset: 0 }
+  return nodes.length > 0 ? { nodeIndex: nodes.length - 1, plainOffset: 0 } : { nodeIndex: 0, plainOffset: 0 }
 }
 
 // Range anchor from a PM selection. textQuote captures the doc-wide plain-text
 // neighborhood plus the selected text — this is the fallback used by comments.
-export function rangeFromPm(doc: PMNode, from: number, to: number, opts: { withTextQuote?: boolean } = {}): AnchorRange {
+export function rangeFromPm(
+  doc: PMNode,
+  from: number,
+  to: number,
+  opts: { withTextQuote?: boolean } = {}
+): AnchorRange {
   const start = pointFromPm(doc, from)
   const end = pointFromPm(doc, to)
   const range: AnchorRange = { start, end }
@@ -599,7 +802,11 @@ function resolveAddressInPm(doc: PMNode, nodeIndex: number, plainOffset: number)
               }
               charCount += textLen
             } else if (child.type.name === "hard_break") {
-              if (charCount + 1 >= plainOffset) { result = childPos; found = true; return }
+              if (charCount + 1 >= plainOffset) {
+                result = childPos
+                found = true
+                return
+              }
               charCount += 1
             }
           })
@@ -621,7 +828,10 @@ export function resolvePointInPm(doc: PMNode, anchor: AnchorPoint): ResolvedPoin
   const totalNodes = countPmContentNodes(doc)
   if (anchor.nodeIndex < totalNodes) {
     const { pos, node } = resolveAddressInPm(doc, anchor.nodeIndex, anchor.plainOffset)
-    if (node && (!anchor.textQuote || textQuoteMatchesAtPoint(pmNodePlainText(node), anchor.plainOffset, anchor.textQuote))) {
+    if (
+      node &&
+      (!anchor.textQuote || textQuoteMatchesAtPoint(pmNodePlainText(node), anchor.plainOffset, anchor.textQuote))
+    ) {
       return { pos, confidence: "exact" }
     }
   }
@@ -642,9 +852,10 @@ export function resolvePointInRaw(markdown: string, anchor: AnchorPoint): Resolv
     const rawText = markdown.slice(n.rawStart, n.rawEnd)
     const plain = n.type === "code_block" ? rawText : rawNodePlainText(rawText)
     if (!anchor.textQuote || textQuoteMatchesAtPoint(plain, anchor.plainOffset, anchor.textQuote)) {
-      const pos = n.type === "code_block"
-        ? Math.min(n.rawStart + anchor.plainOffset, n.rawEnd)
-        : n.rawStart + plainToRawOffset(rawText, anchor.plainOffset)
+      const pos =
+        n.type === "code_block"
+          ? Math.min(n.rawStart + anchor.plainOffset, n.rawEnd)
+          : n.rawStart + plainToRawOffset(rawText, anchor.plainOffset)
       return { pos, confidence: "exact" }
     }
   }
@@ -657,9 +868,10 @@ export function resolvePointInRaw(markdown: string, anchor: AnchorPoint): Resolv
   }
   const n = nodes[anchor.nodeIndex]
   const rawText = markdown.slice(n.rawStart, n.rawEnd)
-  const pos = n.type === "code_block"
-    ? Math.min(n.rawStart + anchor.plainOffset, n.rawEnd)
-    : n.rawStart + plainToRawOffset(rawText, anchor.plainOffset)
+  const pos =
+    n.type === "code_block"
+      ? Math.min(n.rawStart + anchor.plainOffset, n.rawEnd)
+      : n.rawStart + plainToRawOffset(rawText, anchor.plainOffset)
   return { pos, confidence: "lost" }
 }
 
@@ -676,7 +888,7 @@ export function resolveRangeInPm(doc: PMNode, anchor: AnchorRange): ResolvedRang
     if (fuzzy) return { from: fuzzy.from, to: fuzzy.to, confidence: "fuzzy" }
   }
   // Fall back to whatever endpoints we got.
-  const confidence: Confidence = (start.confidence === "lost" || end.confidence === "lost") ? "lost" : "fuzzy"
+  const confidence: Confidence = start.confidence === "lost" || end.confidence === "lost" ? "lost" : "fuzzy"
   return { from: Math.min(start.pos, end.pos), to: Math.max(start.pos, end.pos), confidence }
 }
 
@@ -767,7 +979,7 @@ function pmPosToPlain(marks: PlainProjection["marks"], pmPos: number, plainLen: 
       const offsetInPm = pmPos - m.pmStart
       const plainSpan = m.plainEnd - m.plainStart
       if (span === 0) return m.plainStart
-      return m.plainStart + Math.min(plainSpan, Math.round(offsetInPm * plainSpan / span))
+      return m.plainStart + Math.min(plainSpan, Math.round((offsetInPm * plainSpan) / span))
     }
   }
   return plainLen
@@ -780,7 +992,7 @@ function plainToPmPos(marks: PlainProjection["marks"], plainPos: number): number
       const pmSpan = m.pmEnd - m.pmStart
       if (plainSpan === 0) return m.pmStart
       const offsetInPlain = plainPos - m.plainStart
-      return m.pmStart + Math.min(pmSpan, Math.round(offsetInPlain * pmSpan / plainSpan))
+      return m.pmStart + Math.min(pmSpan, Math.round((offsetInPlain * pmSpan) / plainSpan))
     }
   }
   return null
@@ -807,17 +1019,22 @@ function fuzzyFindRangeInPm(doc: PMNode, quote: TextQuote): { from: number; to: 
 function fuzzyFindPointInRaw(markdown: string, quote: TextQuote, nodes: ContentNode[]): number | null {
   // Build a markdown-wide plain projection from the scanned nodes.
   const parts: string[] = []
-  const marks: Array<{ plainStart: number; plainEnd: number; rawStart: number; rawEnd: number; isCodeBlock: boolean }> = []
+  const marks: Array<{ plainStart: number; plainEnd: number; rawStart: number; rawEnd: number; isCodeBlock: boolean }> =
+    []
   let plainLen = 0
   for (const n of nodes) {
     const rawText = markdown.slice(n.rawStart, n.rawEnd)
     const text = n.type === "code_block" ? rawText : rawNodePlainText(rawText)
     const plainStart = plainLen
-    parts.push(text); plainLen += text.length
-    parts.push("\n"); plainLen += 1
+    parts.push(text)
+    plainLen += text.length
+    parts.push("\n")
+    plainLen += 1
     marks.push({
-      plainStart, plainEnd: plainStart + text.length,
-      rawStart: n.rawStart, rawEnd: n.rawEnd,
+      plainStart,
+      plainEnd: plainStart + text.length,
+      rawStart: n.rawStart,
+      rawEnd: n.rawEnd,
       isCodeBlock: n.type === "code_block",
     })
   }
@@ -869,7 +1086,8 @@ function findBestQuoteMatch(plain: string, quote: TextQuote): { start: number; e
   }
   if (positions.length === 1) return { start: positions[0], end: positions[0] + exact.length }
   // Multiple matches — score by context.
-  let bestStart = positions[0], bestScore = -1
+  let bestStart = positions[0],
+    bestScore = -1
   for (const p of positions) {
     let score = 0
     if (quote.prefix) {
@@ -882,7 +1100,10 @@ function findBestQuoteMatch(plain: string, quote: TextQuote): { start: number; e
       if (ctx.startsWith(quote.suffix)) score += 2
       else if (ctx.includes(quote.suffix)) score += 1
     }
-    if (score > bestScore) { bestScore = score; bestStart = p }
+    if (score > bestScore) {
+      bestScore = score
+      bestStart = p
+    }
   }
   return { start: bestStart, end: bestStart + exact.length }
 }
@@ -903,7 +1124,10 @@ function allIndexesOf(haystack: string, needle: string): number[] {
 function countPmContentNodes(doc: PMNode): number {
   let count = 0
   doc.descendants((node) => {
-    if (PM_CONTENT_TYPES.has(node.type.name)) { count++; return false }
+    if (PM_CONTENT_TYPES.has(node.type.name)) {
+      count++
+      return false
+    }
     return PM_CONTAINER_TYPES.has(node.type.name)
   })
   return count
@@ -913,7 +1137,10 @@ function countPmContentNodes(doc: PMNode): number {
 
 // Convert a window.Selection (typically from a user click-drag in the rendered view)
 // into PM doc positions. Returns null if the selection is empty or outside the view.
-export function domSelectionToPmRange(view: EditorView, selection: Selection | null): { from: number; to: number } | null {
+export function domSelectionToPmRange(
+  view: EditorView,
+  selection: Selection | null
+): { from: number; to: number } | null {
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null
   const range = selection.getRangeAt(0)
   if (!view.dom.contains(range.startContainer) || !view.dom.contains(range.endContainer)) return null

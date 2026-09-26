@@ -124,7 +124,7 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, storage.ErrPageLocked) {
 		lock := s.draftManager.GetLock(pagePath)
 		writeJSON(w, http.StatusLocked, map[string]any{
-			"error":    err.Error(),
+			"error":     err.Error(),
 			"locked_by": lock.Owner,
 		})
 		return

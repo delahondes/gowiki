@@ -13,8 +13,8 @@ import (
 type contextKey string
 
 const (
-	usernameKey contextKey = "username"
-	tokenIDKey  contextKey = "token_id"
+	usernameKey  contextKey = "username"
+	tokenIDKey   contextKey = "token_id"
 	tokenAuthKey contextKey = "token_auth"
 )
 

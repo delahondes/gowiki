@@ -97,7 +97,7 @@ func (s *Server) renderBaseAndHost(r *http.Request) (baseURL, host string) {
 // any JS console errors observed during navigation.
 func (s *Server) renderPageHTMLWithSession(baseCtx context.Context, pagePath, sessionID, baseURL, host string) (string, []string, error) {
 	if s.browserAllocCtx == nil {
-		return "", nil, fmt.Errorf("Chrome not available for rendering")
+		return "", nil, fmt.Errorf("chrome not available for rendering")
 	}
 
 	pageURL := fmt.Sprintf("%s/%s?export=pdf", baseURL, pagePath)

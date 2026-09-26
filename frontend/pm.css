@@ -55,9 +55,15 @@
   font-weight: bold;
 }
 
-.ProseMirror h1 { font-size: 2em; }
-.ProseMirror h2 { font-size: 1.5em; }
-.ProseMirror h3 { font-size: 1.17em; }
+.ProseMirror h1 {
+  font-size: 2em;
+}
+.ProseMirror h2 {
+  font-size: 1.5em;
+}
+.ProseMirror h3 {
+  font-size: 1.17em;
+}
 
 .ProseMirror p {
   margin: 0.75em 0;

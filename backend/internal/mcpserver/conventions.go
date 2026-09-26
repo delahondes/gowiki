@@ -76,11 +76,11 @@ func conventionsPayload() map[string]any {
 				"example": "```go\\nfmt.Println(\"hello\")\\n```",
 			},
 			"mermaid": map[string]any{
-				"syntax":       "```mermaid [size=<CSSlength>] [caption=\"<text>\"]\\n<mermaid source>\\n```",
-				"library":      "Mermaid 11 (loaded on demand from a CDN). Supports flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, pie, journey, timeline, mindmap, quadrantChart, gitGraph.",
-				"info_string":  "size accepts any CSS length (e.g. 500px, 80%). caption becomes a rendered caption below the diagram. Both optional.",
-				"example":      "```mermaid caption=\"State machine\"\\nstateDiagram-v2\\n  [*] --> Draft\\n  Draft --> Review\\n  Review --> Published\\n```",
-				"when_to_use":  "Any diagram whose structure is describable as text — flow, states, sequences, dependencies. Renders live in the visual editor and in view mode.",
+				"syntax":      "```mermaid [size=<CSSlength>] [caption=\"<text>\"]\\n<mermaid source>\\n```",
+				"library":     "Mermaid 11 (loaded on demand from a CDN). Supports flowchart, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, pie, journey, timeline, mindmap, quadrantChart, gitGraph.",
+				"info_string": "size accepts any CSS length (e.g. 500px, 80%). caption becomes a rendered caption below the diagram. Both optional.",
+				"example":     "```mermaid caption=\"State machine\"\\nstateDiagram-v2\\n  [*] --> Draft\\n  Draft --> Review\\n  Review --> Published\\n```",
+				"when_to_use": "Any diagram whose structure is describable as text — flow, states, sequences, dependencies. Renders live in the visual editor and in view mode.",
 			},
 			"chart": map[string]any{
 				"syntax":      "```chart <type> [<W>x<H>] [\"<title>\"] [nolegend|legend] [values] [left|right] [#RRGGBB #RRGGBB ...]\\n<label> = <number>\\n<label> = <number>\\n# comment lines allowed\\n```",

@@ -38,14 +38,14 @@ import (
 )
 
 var (
-	ErrRegisteredClientNotFound   = errors.New("oauth client not found")
-	ErrOAuthInvalidRedirect  = errors.New("redirect_uri does not match a registered value")
-	ErrOAuthCodeNotFound     = errors.New("authorization code not found or already used")
-	ErrOAuthCodeExpired      = errors.New("authorization code expired")
-	ErrOAuthBadPKCE          = errors.New("PKCE verifier does not match challenge")
-	ErrOAuthUnsupportedPKCE  = errors.New("only S256 code_challenge_method is supported")
-	ErrOAuthMissingChallenge = errors.New("code_challenge is required (PKCE mandatory)")
-	ErrOAuthNoRedirectURIs   = errors.New("at least one redirect_uri is required")
+	ErrRegisteredClientNotFound = errors.New("oauth client not found")
+	ErrOAuthInvalidRedirect     = errors.New("redirect_uri does not match a registered value")
+	ErrOAuthCodeNotFound        = errors.New("authorization code not found or already used")
+	ErrOAuthCodeExpired         = errors.New("authorization code expired")
+	ErrOAuthBadPKCE             = errors.New("PKCE verifier does not match challenge")
+	ErrOAuthUnsupportedPKCE     = errors.New("only S256 code_challenge_method is supported")
+	ErrOAuthMissingChallenge    = errors.New("code_challenge is required (PKCE mandatory)")
+	ErrOAuthNoRedirectURIs      = errors.New("at least one redirect_uri is required")
 )
 
 // RegisteredClient is a registered client (typically an MCP host like Claude).

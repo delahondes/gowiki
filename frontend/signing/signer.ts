@@ -6,9 +6,9 @@
 import { getPrivateKey, getCertificatePEM, importCertificate } from "./keystore"
 
 export interface SignatureResult {
-  signature: string    // base64-encoded ECDSA signature
-  certificate: string  // PEM certificate
-  digest: string       // hex-encoded SHA-256
+  signature: string // base64-encoded ECDSA signature
+  certificate: string // PEM certificate
+  digest: string // hex-encoded SHA-256
 }
 
 /**
@@ -18,7 +18,9 @@ export async function computeDigest(markdown: string): Promise<string> {
   const bytes = new TextEncoder().encode(markdown)
   const hash = await crypto.subtle.digest("SHA-256", bytes)
   const arr = new Uint8Array(hash)
-  return Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("")
+  return Array.from(arr)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
 }
 
 /**
@@ -31,10 +33,7 @@ export async function computeDigest(markdown: string): Promise<string> {
  * rather than the stale one — cert #1's fingerprint would otherwise trip
  * the revocation guard the very next time they try to sign.
  */
-export async function signConfirmation(
-  username: string,
-  markdown: string,
-): Promise<SignatureResult | null> {
+export async function signConfirmation(username: string, markdown: string): Promise<SignatureResult | null> {
   const privateKey = await getPrivateKey(username)
   if (!privateKey) return null
 
@@ -56,7 +55,9 @@ export async function signConfirmation(
           //     back to unsigned confirmation instead of pretending to
           //     sign with a revoked cert.
           if (localPEM && localPEM === data.certificate_pem) {
-            throw new Error("Your signing certificate has been revoked. Ask your admin to sign a fresh public key before confirming.")
+            throw new Error(
+              "Your signing certificate has been revoked. Ask your admin to sign a fresh public key before confirming."
+            )
           }
           return null
         }
@@ -65,7 +66,11 @@ export async function signConfirmation(
           // Server has a newer cert than our IndexedDB — sync so future
           // reads (and offline signing paths) see the same PEM the server
           // is validating against.
-          try { await importCertificate(username, certPEM!) } catch { /* best-effort */ }
+          try {
+            await importCertificate(username, certPEM!)
+          } catch {
+            /* best-effort */
+          }
         }
       }
     }
@@ -86,11 +91,7 @@ export async function signConfirmation(
   // hashes the input internally before signing.
   const markdownBytes = new TextEncoder().encode(markdown)
 
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    markdownBytes,
-  )
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, markdownBytes)
 
   const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
 

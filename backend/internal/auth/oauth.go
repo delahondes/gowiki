@@ -37,11 +37,11 @@ type OAuthConfig struct {
 
 // OAuthClaims holds the user info extracted from the ID token.
 type OAuthClaims struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
-	UPN   string `json:"upn"`                // Azure-specific: user principal name
-	OID   string `json:"oid"`                // Azure object ID
-	Sub   string `json:"sub"`                // Standard subject
+	Email             string `json:"email"`
+	Name              string `json:"name"`
+	UPN               string `json:"upn"` // Azure-specific: user principal name
+	OID               string `json:"oid"` // Azure object ID
+	Sub               string `json:"sub"` // Standard subject
 	PreferredUsername string `json:"preferred_username"`
 }
 

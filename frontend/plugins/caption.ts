@@ -125,9 +125,11 @@ function buildCaptionDecorations(doc: PMNode) {
       figCounter++
       // Node decoration with data-figure-number triggers ImageNodeView.update()
       // when the number changes, enabling live re-numbering.
-      decorations.push(Decoration.node(pos, pos + node.nodeSize, {
-        "data-figure-number": String(figCounter),
-      }))
+      decorations.push(
+        Decoration.node(pos, pos + node.nodeSize, {
+          "data-figure-number": String(figCounter),
+        })
+      )
       return false
     }
 
@@ -138,20 +140,24 @@ function buildCaptionDecorations(doc: PMNode) {
 
       // Widget decoration: figcaption above the table
       const num = tabCounter
-      const widget = Decoration.widget(pos, () => {
-        const figcaption = document.createElement("figcaption")
-        figcaption.className = "gowiki-caption"
-        figcaption.contentEditable = "false"
-        const numSpan = document.createElement("span")
-        numSpan.className = "gowiki-caption-number"
-        numSpan.textContent = `Table ${num}:`
-        const textSpan = document.createElement("span")
-        textSpan.className = "gowiki-caption-text"
-        renderInlineMarkdown(caption, textSpan)
-        figcaption.appendChild(numSpan)
-        figcaption.appendChild(textSpan)
-        return figcaption
-      }, { side: -1 })
+      const widget = Decoration.widget(
+        pos,
+        () => {
+          const figcaption = document.createElement("figcaption")
+          figcaption.className = "gowiki-caption"
+          figcaption.contentEditable = "false"
+          const numSpan = document.createElement("span")
+          numSpan.className = "gowiki-caption-number"
+          numSpan.textContent = `Table ${num}:`
+          const textSpan = document.createElement("span")
+          textSpan.className = "gowiki-caption-text"
+          renderInlineMarkdown(caption, textSpan)
+          figcaption.appendChild(numSpan)
+          figcaption.appendChild(textSpan)
+          return figcaption
+        },
+        { side: -1 }
+      )
       decorations.push(widget)
 
       // Node decoration: add id and figure class
@@ -289,18 +295,24 @@ export const captionPlugin: WikiPlugin = {
           group: "inline",
           attrs: { label: { default: "" } },
           toDOM(node: PMNode) {
-            return ["a", {
-              class: "gowiki-ref",
-              href: "#" + node.attrs.label,
-              contenteditable: "false",
-            }, "??"]
+            return [
+              "a",
+              {
+                class: "gowiki-ref",
+                href: "#" + node.attrs.label,
+                contenteditable: "false",
+              },
+              "??",
+            ]
           },
-          parseDOM: [{
-            tag: "a.gowiki-ref",
-            getAttrs(dom: HTMLElement) {
-              return { label: dom.getAttribute("href")?.slice(1) || "" }
+          parseDOM: [
+            {
+              tag: "a.gowiki-ref",
+              getAttrs(dom: HTMLElement) {
+                return { label: dom.getAttribute("href")?.slice(1) || "" }
+              },
             },
-          }],
+          ],
         },
       },
     })
@@ -391,19 +403,16 @@ export const captionPlugin: WikiPlugin = {
       }
 
       // Show a simple prompt for label selection
-      const labelList = labels.map(l => {
+      const labelList = labels.map((l) => {
         const e = captionState.map.get(l)!
         const prefix = e.kind === "figure" ? "Figure" : "Table"
         return `${l} (${prefix} ${e.number}: ${e.caption})`
       })
-      const choice = window.prompt(
-        "Enter label to reference:\n\n" + labelList.join("\n"),
-        labels[0]
-      )
+      const choice = window.prompt("Enter label to reference:\n\n" + labelList.join("\n"), labels[0])
       if (!choice) return true
 
       // Match by label prefix
-      const label = labels.find(l => choice.startsWith(l)) ?? choice.trim()
+      const label = labels.find((l) => choice.startsWith(l)) ?? choice.trim()
       const node = state.schema.nodes.caption_ref.create({ label })
       dispatch(state.tr.replaceSelectionWith(node).scrollIntoView())
       return true

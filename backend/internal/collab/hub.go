@@ -21,7 +21,7 @@ type UserPresence struct {
 
 // PresenceUpdate is sent to clients when presence changes on a page.
 type PresenceUpdate struct {
-	Type  string         `json:"type"`  // "presence" or "owner_left"
+	Type  string         `json:"type"` // "presence" or "owner_left"
 	Page  string         `json:"page"`
 	Users []UserPresence `json:"users,omitempty"`
 	Owner string         `json:"owner,omitempty"` // for owner_left: who left

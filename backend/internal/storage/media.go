@@ -24,9 +24,9 @@ type MediaEntry struct {
 }
 
 type MediaFileStore struct {
-	rootDir       string
-	VersionStore  *MediaVersionStore
-	MediaAttic    *MediaAttic
+	rootDir      string
+	VersionStore *MediaVersionStore
+	MediaAttic   *MediaAttic
 }
 
 func NewMediaFileStore(rootDir string) (*MediaFileStore, error) {

@@ -59,7 +59,7 @@ export class CompileContext {
   }
 
   hasOpenNode(name: string): boolean {
-    return this.stack.some(frame => frame.node.type.name === name)
+    return this.stack.some((frame) => frame.node.type.name === name)
   }
 
   close() {
@@ -96,9 +96,7 @@ export class CompileContext {
     const popped = this.tokenStack.pop()
     if (!popped) return
     if (expectedOpenType && popped.type !== expectedOpenType) {
-      throw new Error(
-        `Token stack mismatch: expected ${expectedOpenType}, got ${popped.type}`
-      )
+      throw new Error(`Token stack mismatch: expected ${expectedOpenType}, got ${popped.type}`)
     }
   }
 

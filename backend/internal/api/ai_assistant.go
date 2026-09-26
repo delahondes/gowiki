@@ -173,7 +173,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 						if s.aclStore != nil && !s.aclStore.CheckAIPermission(p.Path, "view") {
 							continue
 						}
-						sb.WriteString(fmt.Sprintf("- [%s](%s)\n", p.Title, p.Path))
+						fmt.Fprintf(&sb, "- [%s](%s)\n", p.Title, p.Path)
 					}
 					pageListing = sb.String()
 				}
@@ -395,8 +395,8 @@ type aiProposal struct {
 	Original  string `json:"original"`
 	Proposed  string `json:"proposed"`
 	Rationale string `json:"rationale"`
-	Marker    string `json:"marker,omitempty"`    // marker ID (set by backend)
-	Verified  bool   `json:"verified,omitempty"`  // true if original was found in content
+	Marker    string `json:"marker,omitempty"`   // marker ID (set by backend)
+	Verified  bool   `json:"verified,omitempty"` // true if original was found in content
 }
 
 // parseAIProposals extracts a JSON array of proposals from the AI response.
@@ -437,7 +437,7 @@ func insertProposalMarkers(content string, proposals []aiProposal) (string, []ai
 			continue
 		}
 		// Check for ambiguity.
-		if strings.Index(content[idx+1:], p.Original) >= 0 {
+		if strings.Contains(content[idx+1:], p.Original) {
 			continue // ambiguous, skip
 		}
 		markerID := fmt.Sprintf("p%d", p.Number)
@@ -574,7 +574,7 @@ func buildAISystemPrompt(mode, pageContent, pagePath, _ string) string {
 	// the content are not confused with prompt formatting.
 	if pageContent != "" {
 		b.WriteString("# Current Page\n\n")
-		b.WriteString(fmt.Sprintf("Path: `%s`\n\n", pagePath))
+		fmt.Fprintf(&b, "Path: `%s`\n\n", pagePath)
 		b.WriteString("The page content is enclosed in <page-content> tags. Everything between these tags is the raw markdown of the page, verbatim.\n\n")
 		b.WriteString("<page-content>\n")
 		b.WriteString(pageContent)

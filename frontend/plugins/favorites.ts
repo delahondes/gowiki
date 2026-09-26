@@ -123,7 +123,8 @@ class FavoritesNodeView {
 
       this.dom.innerHTML = ""
       if (entries.length === 0) {
-        this.dom.innerHTML = '<div class="gowiki-favorites-empty">No favorites yet — click the star icon on a page to add it</div>'
+        this.dom.innerHTML =
+          '<div class="gowiki-favorites-empty">No favorites yet — click the star icon on a page to add it</div>'
         return
       }
 
@@ -264,21 +265,19 @@ export const favoritesPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === favType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === favType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

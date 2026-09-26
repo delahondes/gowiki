@@ -56,7 +56,10 @@ export type ColorRule = {
 
 export function parseColorRules(spec: string): ColorRule[] {
   const rules: ColorRule[] = []
-  for (const part of spec.split(",").map(s => s.trim()).filter(Boolean)) {
+  for (const part of spec
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const tokens = part.split(/\s+/)
     if (tokens.length < 2) continue
 
@@ -142,8 +145,8 @@ export function evaluateColorRules(rules: ColorRule[], text: string): string | n
 
 export function getCellText(cell: Node): string {
   let text = ""
-  cell.content.forEach(block => {
-    block.content.forEach(inline => {
+  cell.content.forEach((block) => {
+    block.content.forEach((inline) => {
       if (inline.isText) {
         text += inline.text
       } else if (inline.type.name === "formula_display") {
@@ -164,16 +167,14 @@ function cellIsCodeMarked(cell: Node): boolean {
   if (firstBlock.childCount === 0) return false
   const firstChild = firstBlock.child(0)
   if (!firstChild.isText) return false
-  return firstChild.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+  return firstChild.marks.some((m) => m.type.name === "code" || m.type.name === "code_expand")
 }
 
 // ─── Header variants ────────────────────────────────────
 
 // NrMc syntax: "1r" (default), "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none"
 // Also accepts legacy values for backward compat during parse.
-const HEADER_VALUES = [
-  "1r", "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none",
-] as const
+const HEADER_VALUES = ["1r", "2r", "1c", "2c", "1r1c", "2r1c", "1r2c", "2r2c", "none"] as const
 type HeaderVariant = (typeof HEADER_VALUES)[number]
 
 const LEGACY_HEADER_MAP: Record<string, HeaderVariant> = {
@@ -181,7 +182,7 @@ const LEGACY_HEADER_MAP: Record<string, HeaderVariant> = {
   "2_rows": "2r",
   "1st_col": "1c",
   "2_cols": "2c",
-  "both": "1r1c",
+  both: "1r1c",
 }
 
 function parseHeaderValue(raw: string): HeaderVariant {
@@ -228,9 +229,9 @@ function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
   }
 
   const rows: Node[][] = []
-  tableNode.content.forEach(row => {
+  tableNode.content.forEach((row) => {
     const cells: Node[] = []
-    row.content.forEach(cell => cells.push(cell))
+    row.content.forEach((cell) => cells.push(cell))
     rows.push(cells)
   })
 
@@ -252,12 +253,8 @@ function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
       if (wantHeader === isHeader) {
         newCells.push(cell)
       } else {
-        const targetType = wantHeader
-          ? schema.nodes.table_header
-          : schema.nodes.table_cell
-        newCells.push(
-          targetType.create(cell.attrs, cell.content, cell.marks)
-        )
+        const targetType = wantHeader ? schema.nodes.table_header : schema.nodes.table_cell
+        newCells.push(targetType.create(cell.attrs, cell.content, cell.marks))
       }
       offset += cell.nodeSize
     }
@@ -272,9 +269,9 @@ function applyHeaderVariant(tableNode: Node, schema: Schema): Node {
 
 function resolveMerges(tableNode: Node, schema: Schema): Node {
   const rows: Node[][] = []
-  tableNode.content.forEach(row => {
+  tableNode.content.forEach((row) => {
     const cells: Node[] = []
-    row.content.forEach(cell => cells.push(cell))
+    row.content.forEach((cell) => cells.push(cell))
     rows.push(cells)
   })
 
@@ -297,12 +294,8 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
   if (!hasMerges) return tableNode
 
   // Owner grid: tracks which real cell owns each position
-  const owner: { r: number; c: number }[][] = rows.map((row, r) =>
-    row.map((_, c) => ({ r, c }))
-  )
-  const spans: { colspan: number; rowspan: number }[][] = rows.map(row =>
-    row.map(() => ({ colspan: 1, rowspan: 1 }))
-  )
+  const owner: { r: number; c: number }[][] = rows.map((row, r) => row.map((_, c) => ({ r, c })))
+  const spans: { colspan: number; rowspan: number }[][] = rows.map((row) => row.map(() => ({ colspan: 1, rowspan: 1 })))
   const removed = new Set<string>()
 
   // First pass: << (colspan)
@@ -344,13 +337,7 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
       const cell = rows[r][c]
       const { colspan, rowspan } = spans[r][c]
       if (colspan > 1 || rowspan > 1) {
-        cells.push(
-          cell.type.create(
-            { ...cell.attrs, colspan, rowspan },
-            cell.content,
-            cell.marks
-          )
-        )
+        cells.push(cell.type.create({ ...cell.attrs, colspan, rowspan }, cell.content, cell.marks))
       } else {
         cells.push(cell)
       }
@@ -372,9 +359,9 @@ function applyCellFeatures(tableNode: Node, schema: Schema): Node {
   let changed = false
 
   const newRows: Node[] = []
-  tableNode.content.forEach(row => {
+  tableNode.content.forEach((row) => {
     const newCells: Node[] = []
-    row.content.forEach(cell => {
+    row.content.forEach((cell) => {
       const result = processCellFeatures(cell, schema)
       if (result !== cell) changed = true
       newCells.push(result)
@@ -382,9 +369,7 @@ function applyCellFeatures(tableNode: Node, schema: Schema): Node {
     newRows.push(schema.nodes.table_row.create(null, newCells))
   })
 
-  return changed
-    ? tableNode.type.create(tableNode.attrs, newRows)
-    : tableNode
+  return changed ? tableNode.type.create(tableNode.attrs, newRows) : tableNode
 }
 
 // INVARIANT: Backticks (code mark) protect cell content from ALL in-cell parsing.
@@ -403,10 +388,10 @@ function processCellFeatures(cell: Node, schema: Schema): Node {
   const text = firstChild.text ?? ""
 
   // Code marks protect cell content from all in-cell parsing.
-  const hasCodeMark = firstChild.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+  const hasCodeMark = firstChild.marks.some((m) => m.type.name === "code" || m.type.name === "code_expand")
   if (hasCodeMark) return cell
 
-  let newAttrs = { ...cell.attrs }
+  const newAttrs = { ...cell.attrs }
   let newText = text
   let changed = false
 
@@ -482,10 +467,7 @@ export type ColumnProps = Record<string, ColumnPropEntry>
  * Resolve column properties for a given column number (1-based).
  * Priority: "*" (lowest) < "N-" < "N+" < exact "N" (highest).
  */
-export function resolveColumnProps(
-  columns: ColumnProps,
-  colNum: number
-): ColumnPropEntry | null {
+export function resolveColumnProps(columns: ColumnProps, colNum: number): ColumnPropEntry | null {
   const merged: ColumnPropEntry = {}
   let found = false
 
@@ -607,7 +589,9 @@ function aggregateTableAttrs(raw: Record<string, any>): Record<string, any> {
 // ─── Width normalization ─────────────────────────────────
 
 function normalizeTableWidth(raw: string): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase()
   if (!value) return null
 
   const pct = value.match(/^(\d+)%$/)
@@ -736,7 +720,7 @@ const tableProperties: NodePropertySpec[] = [
     label: "Column rules",
     default: null,
     multiline: true,
-    helpText: "col2.align=center  col2-5.width=100px  col2+.color=\"rule\"  col3.decimals=2  col.valign=centered",
+    helpText: 'col2.align=center  col2-5.width=100px  col2+.color="rule"  col3.decimals=2  col.valign=centered',
     parse: (raw: string) => parseColumnRulesText(raw) as any,
     serialize: (value: any) => serializeColumnRulesText(value as ColumnProps | null),
   },
@@ -764,13 +748,10 @@ const tableProperties: NodePropertySpec[] = [
 function addStyleToDOM(spec: any, style: string): any {
   if (!style || !Array.isArray(spec)) return spec
   const [tag, maybeAttrs, ...rest] = spec
-  const hasAttrs =
-    maybeAttrs && typeof maybeAttrs === "object" && !Array.isArray(maybeAttrs)
+  const hasAttrs = maybeAttrs && typeof maybeAttrs === "object" && !Array.isArray(maybeAttrs)
   const attrs = hasAttrs ? maybeAttrs : {}
   const existing = attrs.style ? String(attrs.style) : ""
-  const newStyle = existing
-    ? `${existing}${existing.trim().endsWith(";") ? " " : "; "}${style}`
-    : style
+  const newStyle = existing ? `${existing}${existing.trim().endsWith(";") ? " " : "; "}${style}` : style
   const newAttrs = { ...attrs, style: newStyle }
   const children = hasAttrs ? rest : [maybeAttrs, ...rest]
   return [tag, newAttrs, ...children]
@@ -808,7 +789,7 @@ function serializeColumnSpecs(columns: ColumnProps): string[] {
 
   // Numeric keys — existing range-collapsing logic
   const sortedKeys = Object.keys(columns)
-    .filter(k => /^\d+$/.test(k))
+    .filter((k) => /^\d+$/.test(k))
     .map(Number)
     .sort((a, b) => a - b)
 
@@ -868,19 +849,16 @@ function serializeColumnSpecs(columns: ColumnProps): string[] {
 
 // ─── Serialization grid ──────────────────────────────────
 
-type GridCell =
-  | { type: "cell"; node: Node }
-  | { type: "<<" }
-  | { type: "^^" }
+type GridCell = { type: "cell"; node: Node } | { type: "<<" } | { type: "^^" }
 
 function buildSerializationGrid(tableNode: Node): {
   grid: GridCell[][]
   totalCols: number
 } {
   const rows: Node[][] = []
-  tableNode.content.forEach(row => {
+  tableNode.content.forEach((row) => {
     const cells: Node[] = []
-    row.content.forEach(cell => cells.push(cell))
+    row.content.forEach((cell) => cells.push(cell))
     rows.push(cells)
   })
 
@@ -896,10 +874,7 @@ function buildSerializationGrid(tableNode: Node): {
     totalCols = Math.max(totalCols, rowCols)
   }
 
-  const grid: (GridCell | null)[][] = Array.from(
-    { length: rows.length },
-    () => new Array(totalCols).fill(null)
-  )
+  const grid: (GridCell | null)[][] = Array.from({ length: rows.length }, () => new Array(totalCols).fill(null))
 
   for (let r = 0; r < rows.length; r++) {
     let c = 0
@@ -928,19 +903,14 @@ function buildSerializationGrid(tableNode: Node): {
     }
   }
 
-  const finalGrid: GridCell[][] = grid.map(row =>
-    row.map(cell => cell ?? { type: "cell", node: null as any })
-  )
+  const finalGrid: GridCell[][] = grid.map((row) => row.map((cell) => cell ?? { type: "cell", node: null as any }))
 
   return { grid: finalGrid, totalCols }
 }
 
 // ─── Serialize cell content ──────────────────────────────
 
-function serializeCellContent(
-  cell: Node,
-  recurse: (node: Node) => string
-): string {
+function serializeCellContent(cell: Node, recurse: (node: Node) => string): string {
   if (!cell) return ""
   let prefix = ""
   const dirParts: string[] = []
@@ -956,7 +926,7 @@ function serializeCellContent(
   }
 
   let txt = ""
-  cell.content.forEach(p => {
+  cell.content.forEach((p) => {
     txt += recurse(p).trim()
   })
 
@@ -1078,7 +1048,7 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
     const parent = findParentCell(view.state, sel.from)
     if (!parent) return
     // Delete the atom, then clear formula attr
-    let tr = view.state.tr.delete(sel.from, sel.from + sel.node.nodeSize)
+    const tr = view.state.tr.delete(sel.from, sel.from + sel.node.nodeSize)
     const mappedCellPos = tr.mapping.map(parent.cellPos)
     const liveCell = tr.doc.nodeAt(mappedCellPos)
     if (liveCell) {
@@ -1105,9 +1075,11 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
 
       // If old state had NodeSelection on the same formula atom, user is
       // navigating away (e.g. arrow keys) — let them leave.
-      if (oldState.selection instanceof NodeSelection &&
-          oldState.selection.node.type === schema.nodes.formula_display &&
-          oldState.selection.from === atomPos) {
+      if (
+        oldState.selection instanceof NodeSelection &&
+        oldState.selection.node.type === schema.nodes.formula_display &&
+        oldState.selection.from === atomPos
+      ) {
         return null
       }
 
@@ -1168,9 +1140,7 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
             const parent = findParentCell(view.state, sel.from)
             if (!parent) return true
             const afterCell = parent.cellPos + parent.cellNode.nodeSize
-            const $after = view.state.doc.resolve(
-              Math.min(afterCell, view.state.doc.content.size)
-            )
+            const $after = view.state.doc.resolve(Math.min(afterCell, view.state.doc.content.size))
             const newSel = Selection.near($after, 1)
             view.dispatch(view.state.tr.setSelection(newSel))
             return true
@@ -1199,7 +1169,7 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
               event.preventDefault()
               const cellPos = $from.before(d)
               const formula = text.slice(1) // remove "=" prefix
-              let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
+              const tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
                 ...node.attrs,
                 formula,
               })
@@ -1333,9 +1303,7 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
 
                 const cellFrom = cellPos
                 const cellTo = cellPos + cell.nodeSize
-                const selOverlapsCell =
-                  state.selection.from < cellTo &&
-                  state.selection.to > cellFrom
+                const selOverlapsCell = state.selection.from < cellTo && state.selection.to > cellFrom
 
                 if (style) {
                   const attrs: Record<string, string> = { style }
@@ -1343,9 +1311,7 @@ function columnDecoPlugin(schema: Schema): PMPlugin {
                   if (formatted !== null && !selOverlapsCell) {
                     attrs["data-format"] = "num"
                   }
-                  decos.push(
-                    Decoration.node(cellPos, cellPos + cell.nodeSize, attrs)
-                  )
+                  decos.push(Decoration.node(cellPos, cellPos + cell.nodeSize, attrs))
                 }
               }
             }
@@ -1434,11 +1400,7 @@ function indexToColLetter(index: number): string {
  * Adjust a single cell reference (0-based row/col) for a structural change.
  * Returns the adjusted index, or -1 if the ref is deleted (#REF).
  */
-function adjustIndex(
-  idx: number,
-  changeType: "insert" | "delete",
-  changeIdx: number
-): number {
+function adjustIndex(idx: number, changeType: "insert" | "delete", changeIdx: number): number {
   if (changeType === "insert") {
     return idx >= changeIdx ? idx + 1 : idx
   } else {
@@ -1458,81 +1420,74 @@ export function adjustFormula(
 
   // Match ranges (A1:B3) and individual refs (A1).
   // Ranges are matched first by the alternation order.
-  return formula.replace(
-    /([A-Z]+)(\d+):([A-Z]+)(\d+)|([A-Z]+)(\d+)/g,
-    (_full, rC1, rR1, rC2, rR2, sC, sR) => {
-      if (rC1 !== undefined) {
-        // Range match: rC1+rR1 : rC2+rR2
-        let sCol = colLetterToIndex(rC1)
-        let sRow = parseInt(rR1) - 1
-        let eCol = colLetterToIndex(rC2)
-        let eRow = parseInt(rR2) - 1
+  return formula.replace(/([A-Z]+)(\d+):([A-Z]+)(\d+)|([A-Z]+)(\d+)/g, (_full, rC1, rR1, rC2, rR2, sC, sR) => {
+    if (rC1 !== undefined) {
+      // Range match: rC1+rR1 : rC2+rR2
+      let sCol = colLetterToIndex(rC1)
+      let sRow = parseInt(rR1) - 1
+      let eCol = colLetterToIndex(rC2)
+      let eRow = parseInt(rR2) - 1
 
-        if (isRow) {
-          if (isInsert) {
-            // Expand range when insert is inside the range or right after
-            // the end. This supports the common "total on last line" pattern:
-            // =SUM(B2:B4) with insert at row 4 → =SUM(B2:B5).
-            if (changeIdx > sRow && changeIdx <= eRow) {
-              eRow++
-            } else {
-              if (sRow >= changeIdx) sRow++
-              if (eRow >= changeIdx) eRow++
-            }
+      if (isRow) {
+        if (isInsert) {
+          // Expand range when insert is inside the range or right after
+          // the end. This supports the common "total on last line" pattern:
+          // =SUM(B2:B4) with insert at row 4 → =SUM(B2:B5).
+          if (changeIdx > sRow && changeIdx <= eRow) {
+            eRow++
           } else {
-            // Delete inside range → shrink
-            if (changeIdx >= sRow && changeIdx <= eRow) {
-              if (sRow === eRow) return "#REF"
-              eRow--
-            } else {
-              if (sRow > changeIdx) sRow--
-              if (eRow > changeIdx) eRow--
-            }
+            if (sRow >= changeIdx) sRow++
+            if (eRow >= changeIdx) eRow++
           }
         } else {
-          // Column operations — same logic on col axis
-          if (isInsert) {
-            if (changeIdx > sCol && changeIdx <= eCol) {
-              eCol++
-            } else {
-              if (sCol >= changeIdx) sCol++
-              if (eCol >= changeIdx) eCol++
-            }
+          // Delete inside range → shrink
+          if (changeIdx >= sRow && changeIdx <= eRow) {
+            if (sRow === eRow) return "#REF"
+            eRow--
           } else {
-            if (changeIdx >= sCol && changeIdx <= eCol) {
-              if (sCol === eCol) return "#REF"
-              eCol--
-            } else {
-              if (sCol > changeIdx) sCol--
-              if (eCol > changeIdx) eCol--
-            }
+            if (sRow > changeIdx) sRow--
+            if (eRow > changeIdx) eRow--
           }
         }
-
-        return (
-          indexToColLetter(sCol) + String(sRow + 1) +
-          ":" +
-          indexToColLetter(eCol) + String(eRow + 1)
-        )
       } else {
-        // Single ref: sC + sR
-        let col = colLetterToIndex(sC)
-        let row = parseInt(sR) - 1
-
-        if (isRow) {
-          const newRow = adjustIndex(row, op, changeIdx)
-          if (newRow < 0) return "#REF"
-          row = newRow
+        // Column operations — same logic on col axis
+        if (isInsert) {
+          if (changeIdx > sCol && changeIdx <= eCol) {
+            eCol++
+          } else {
+            if (sCol >= changeIdx) sCol++
+            if (eCol >= changeIdx) eCol++
+          }
         } else {
-          const newCol = adjustIndex(col, op, changeIdx)
-          if (newCol < 0) return "#REF"
-          col = newCol
+          if (changeIdx >= sCol && changeIdx <= eCol) {
+            if (sCol === eCol) return "#REF"
+            eCol--
+          } else {
+            if (sCol > changeIdx) sCol--
+            if (eCol > changeIdx) eCol--
+          }
         }
-
-        return indexToColLetter(col) + String(row + 1)
       }
+
+      return indexToColLetter(sCol) + String(sRow + 1) + ":" + indexToColLetter(eCol) + String(eRow + 1)
+    } else {
+      // Single ref: sC + sR
+      let col = colLetterToIndex(sC)
+      let row = parseInt(sR) - 1
+
+      if (isRow) {
+        const newRow = adjustIndex(row, op, changeIdx)
+        if (newRow < 0) return "#REF"
+        row = newRow
+      } else {
+        const newCol = adjustIndex(col, op, changeIdx)
+        if (newCol < 0) return "#REF"
+        col = newCol
+      }
+
+      return indexToColLetter(col) + String(row + 1)
     }
-  )
+  })
 }
 
 /**
@@ -1636,12 +1591,9 @@ export function adjustColumnSpecs(
 
 function tableHasFormulas(tableNode: Node): boolean {
   let found = false
-  tableNode.descendants(node => {
+  tableNode.descendants((node) => {
     if (found) return false
-    if (
-      (node.type.name === "table_cell" || node.type.name === "table_header") &&
-      node.attrs.formula
-    ) {
+    if ((node.type.name === "table_cell" || node.type.name === "table_header") && node.attrs.formula) {
       found = true
       return false
     }
@@ -1714,13 +1666,10 @@ function wrapTableCmd(
     const isColChange = changeType === "insertCol" || changeType === "deleteCol"
     const hasColumns = !!info.tableNode.attrs.columns
 
-    if (!hasFormulas && !(isColChange && hasColumns))
-      return cmd(state, dispatch, view)
+    if (!hasFormulas && !(isColChange && hasColumns)) return cmd(state, dispatch, view)
 
     const isRow = changeType === "insertRow" || changeType === "deleteRow"
-    const changeIndex = isRow
-      ? info.rowIndex + indexOffset
-      : info.colIndex + indexOffset
+    const changeIndex = isRow ? info.rowIndex + indexOffset : info.colIndex + indexOffset
 
     // Intercept dispatch to inject formula + column spec adjustments into the same
     // transaction, so we don't need `view` and it's a single undo step.
@@ -1758,11 +1707,7 @@ function wrapTableCmd(
         tr.doc.descendants((node: Node, pos: number) => {
           if (node.type !== state.schema.nodes.table) return true
 
-          const newColumns = adjustColumnSpecs(
-            node.attrs.columns,
-            changeType as "insertCol" | "deleteCol",
-            changeIndex
-          )
+          const newColumns = adjustColumnSpecs(node.attrs.columns, changeType as "insertCol" | "deleteCol", changeIndex)
           if (newColumns !== node.attrs.columns) {
             tr.setNodeMarkup(pos, undefined, {
               ...node.attrs,
@@ -1783,12 +1728,7 @@ function wrapTableCmd(
 
 // ─── Public API ──────────────────────────────────────────
 
-export function makeTable(
-  schema: any,
-  rows: number,
-  cols: number,
-  withHeader = true
-): Node {
+export function makeTable(schema: any, rows: number, cols: number, withHeader = true): Node {
   const { table, table_row, table_cell, table_header } = schema.nodes
 
   const rowNodes: Node[] = []
@@ -1811,7 +1751,7 @@ export function makeTable(
  */
 export const tablePlugin: GowikiPlugin = {
   register(reg) {
-    reg.registerMarkdownItPlugin(md => {
+    reg.registerMarkdownItPlugin((md) => {
       md.use(markdownItMultiMdTable, {
         multiline: false,
         rowspan: false,
@@ -1844,7 +1784,7 @@ export const tablePlugin: GowikiPlugin = {
           // Escape markdown-significant chars in the formula part
           const prefix = content.slice(0, formulaStart)
           const formula = content.slice(formulaStart)
-          tokens[i].content = prefix + formula.replace(/([*_~^`\[\]])/g, "\\$1")
+          tokens[i].content = prefix + formula.replace(/([*_~^`[\]])/g, "\\$1")
         }
       })
     })
@@ -1855,8 +1795,7 @@ export const tablePlugin: GowikiPlugin = {
       cellAttributes: {
         cellColor: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-cell-color") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-cell-color") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-color"] = value
@@ -1867,8 +1806,7 @@ export const tablePlugin: GowikiPlugin = {
         },
         cellTextColor: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-cell-text-color") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-cell-text-color") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-text-color"] = value
@@ -1879,8 +1817,7 @@ export const tablePlugin: GowikiPlugin = {
         },
         cellAlign: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-cell-align") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-cell-align") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-align"] = value
@@ -1891,8 +1828,7 @@ export const tablePlugin: GowikiPlugin = {
         },
         cellValign: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-cell-valign") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-cell-valign") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-valign"] = value
@@ -1903,8 +1839,7 @@ export const tablePlugin: GowikiPlugin = {
         },
         cellVtext: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-cell-vtext") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-cell-vtext") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-cell-vtext"] = value
@@ -1913,8 +1848,7 @@ export const tablePlugin: GowikiPlugin = {
         },
         formula: {
           default: null,
-          getFromDOM: (dom: HTMLElement) =>
-            dom.getAttribute("data-formula") || null,
+          getFromDOM: (dom: HTMLElement) => dom.getAttribute("data-formula") || null,
           setDOMAttr(value: any, attrs: any) {
             if (value) {
               attrs["data-formula"] = value
@@ -1936,17 +1870,23 @@ export const tablePlugin: GowikiPlugin = {
       toDOM(node: Node) {
         const r = String(node.attrs.result ?? "")
         const isError = r.startsWith("#")
-        return ["span", {
-          class: isError ? "formula-display formula-display-error" : "formula-display",
-          contenteditable: "false",
-        }, r]
+        return [
+          "span",
+          {
+            class: isError ? "formula-display formula-display-error" : "formula-display",
+            contenteditable: "false",
+          },
+          r,
+        ]
       },
-      parseDOM: [{
-        tag: "span.formula-display",
-        getAttrs(dom: HTMLElement) {
-          return { result: dom.textContent || "" }
+      parseDOM: [
+        {
+          tag: "span.formula-display",
+          getAttrs(dom: HTMLElement) {
+            return { result: dom.textContent || "" }
+          },
         },
-      }],
+      ],
     }
 
     const baseTable = nodes.table
@@ -1961,9 +1901,7 @@ export const tablePlugin: GowikiPlugin = {
         label: { default: null },
       },
       toDOM(node: Node) {
-        const domSpec = baseTable.toDOM
-          ? baseTable.toDOM(node)
-          : ["table", ["tbody", 0]]
+        const domSpec = baseTable.toDOM ? baseTable.toDOM(node) : ["table", ["tbody", 0]]
         const width = node.attrs.width ?? null
         return width ? addStyleToDOM(domSpec, `width: ${width};`) : domSpec
       },
@@ -1999,7 +1937,12 @@ export const tablePlugin: GowikiPlugin = {
     }
     // Show align/valign/vtext whenever any cell property is active.
     const anyCellProp = (attrs: Record<string, any>) =>
-      !!attrs.cellColor || !!attrs.cellTextColor || !!attrs.formula || !!attrs.cellAlign || !!attrs.cellValign || !!attrs.cellVtext
+      !!attrs.cellColor ||
+      !!attrs.cellTextColor ||
+      !!attrs.formula ||
+      !!attrs.cellAlign ||
+      !!attrs.cellValign ||
+      !!attrs.cellVtext
     const cellAlignProperty: NodePropertySpec = {
       name: "cellAlign",
       label: "Align",
@@ -2039,8 +1982,22 @@ export const tablePlugin: GowikiPlugin = {
         { value: "downward", label: "Downward" },
       ],
     }
-    reg.registerNodeProperties("table_cell", [formulaProperty, cellColorProperty, cellTextColorProperty, cellAlignProperty, cellValignProperty, cellVtextProperty])
-    reg.registerNodeProperties("table_header", [formulaProperty, cellColorProperty, cellTextColorProperty, cellAlignProperty, cellValignProperty, cellVtextProperty])
+    reg.registerNodeProperties("table_cell", [
+      formulaProperty,
+      cellColorProperty,
+      cellTextColorProperty,
+      cellAlignProperty,
+      cellValignProperty,
+      cellVtextProperty,
+    ])
+    reg.registerNodeProperties("table_header", [
+      formulaProperty,
+      cellColorProperty,
+      cellTextColorProperty,
+      cellAlignProperty,
+      cellValignProperty,
+      cellVtextProperty,
+    ])
 
     reg.registerDirective("table", {
       nodeType: "table",
@@ -2192,8 +2149,7 @@ export const tablePlugin: GowikiPlugin = {
 
           // Separator after first row
           if (r === 0) {
-            out +=
-              "| " + Array(totalCols).fill("---").join(" | ") + " |\n"
+            out += "| " + Array(totalCols).fill("---").join(" | ") + " |\n"
           }
         }
 
@@ -2205,7 +2161,7 @@ export const tablePlugin: GowikiPlugin = {
     reg.registerPMNode("table_row", {
       print(node, _ctx, recurse) {
         const cells: string[] = []
-        node.forEach(cell => {
+        node.forEach((cell) => {
           cells.push(serializeCellContent(cell, recurse))
         })
         const row = "| " + cells.join(" | ") + " |"
@@ -2218,14 +2174,18 @@ export const tablePlugin: GowikiPlugin = {
     reg.registerPMNode("table_cell", {
       print(node, _ctx, recurse) {
         let txt = ""
-        node.content.forEach(p => { txt += recurse(p).trim() })
+        node.content.forEach((p) => {
+          txt += recurse(p).trim()
+        })
         return txt
       },
     })
     reg.registerPMNode("table_header", {
       print(node, _ctx, recurse) {
         let txt = ""
-        node.content.forEach(p => { txt += recurse(p).trim() })
+        node.content.forEach((p) => {
+          txt += recurse(p).trim()
+        })
         return txt
       },
     })
@@ -2289,80 +2249,86 @@ export const tablePlugin: GowikiPlugin = {
     reg.registerEditorPlugin(() => tableEditing())
 
     // Formula display keyboard/clipboard (Backspace, =, copy, cut)
-    reg.registerEditorPlugin(schema => formulaDisplayPlugin(schema))
+    reg.registerEditorPlugin((schema) => formulaDisplayPlugin(schema))
 
     // Column property decorations
-    reg.registerEditorPlugin(schema => columnDecoPlugin(schema))
+    reg.registerEditorPlugin((schema) => columnDecoPlugin(schema))
 
     // Formula sync (manages formula_display atoms via appendTransaction)
-    reg.registerEditorPlugin(schema => formulaSyncPlugin(schema))
+    reg.registerEditorPlugin((schema) => formulaSyncPlugin(schema))
 
     // Formula color decorations (column colors on formula cells)
-    reg.registerEditorPlugin(schema => formulaColorPlugin(schema))
+    reg.registerEditorPlugin((schema) => formulaColorPlugin(schema))
 
     // Cell coordinate tooltips
-    reg.registerEditorPlugin(schema => cellTooltipPlugin(schema))
+    reg.registerEditorPlugin((schema) => cellTooltipPlugin(schema))
 
     // Dynamic headers: reactively convert cells to th/td when headers attr changes
-    reg.registerEditorPlugin(schema => new PMPlugin({
-      appendTransaction(_trs, _oldState, newState) {
-        let tr: Transaction | null = null
+    reg.registerEditorPlugin(
+      (schema) =>
+        new PMPlugin({
+          appendTransaction(_trs, _oldState, newState) {
+            let tr: Transaction | null = null
 
-        newState.doc.descendants((node, pos) => {
-          if (node.type !== schema.nodes.table) return true
+            newState.doc.descendants((node, pos) => {
+              if (node.type !== schema.nodes.table) return true
 
-          const fixed = applyHeaderVariant(node, schema)
-          if (!fixed.eq(node)) {
-            if (!tr) tr = newState.tr
-            tr.replaceWith(pos, pos + node.nodeSize, fixed)
-          }
-
-          return false
-        })
-
-        return tr
-      },
-    }))
-
-    // Formula creation via "=" in empty cell
-    reg.registerEditorPlugin(schema => new PMPlugin({
-      props: {
-        handleTextInput(view, _from, _to, text) {
-          if (text !== "=") return false
-
-          const $from = view.state.selection.$from
-          for (let depth = $from.depth; depth > 0; depth--) {
-            const node = $from.node(depth)
-            if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
-              // If cell already has a formula, just open the panel
-              if (node.attrs.formula != null) {
-                let tr = enablePropertiesPanel(view.state.tr)
-                requestInputFocus("formula")
-                view.dispatch(tr)
-                return true
+              const fixed = applyHeaderVariant(node, schema)
+              if (!fixed.eq(node)) {
+                if (!tr) tr = newState.tr
+                tr.replaceWith(pos, pos + node.nodeSize, fixed)
               }
 
-              // Check: cell has exactly one paragraph child with no content
-              if (node.childCount !== 1) return false
-              const para = node.child(0)
-              if (para.type !== schema.nodes.paragraph) return false
-              if (para.content.size !== 0) return false
+              return false
+            })
 
-              const cellPos = $from.before(depth)
-              let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
-                ...node.attrs,
-                formula: "",
-              })
-              tr = enablePropertiesPanel(tr)
-              requestInputFocus("formula")
-              view.dispatch(tr)
-              return true
-            }
-          }
-          return false
-        },
-      },
-    }))
+            return tr
+          },
+        })
+    )
+
+    // Formula creation via "=" in empty cell
+    reg.registerEditorPlugin(
+      (schema) =>
+        new PMPlugin({
+          props: {
+            handleTextInput(view, _from, _to, text) {
+              if (text !== "=") return false
+
+              const $from = view.state.selection.$from
+              for (let depth = $from.depth; depth > 0; depth--) {
+                const node = $from.node(depth)
+                if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
+                  // If cell already has a formula, just open the panel
+                  if (node.attrs.formula != null) {
+                    const tr = enablePropertiesPanel(view.state.tr)
+                    requestInputFocus("formula")
+                    view.dispatch(tr)
+                    return true
+                  }
+
+                  // Check: cell has exactly one paragraph child with no content
+                  if (node.childCount !== 1) return false
+                  const para = node.child(0)
+                  if (para.type !== schema.nodes.paragraph) return false
+                  if (para.content.size !== 0) return false
+
+                  const cellPos = $from.before(depth)
+                  let tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
+                    ...node.attrs,
+                    formula: "",
+                  })
+                  tr = enablePropertiesPanel(tr)
+                  requestInputFocus("formula")
+                  view.dispatch(tr)
+                  return true
+                }
+              }
+              return false
+            },
+          },
+        })
+    )
 
     /* ----------------------------
      * Styles

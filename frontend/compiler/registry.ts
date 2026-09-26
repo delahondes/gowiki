@@ -26,11 +26,7 @@ export interface TextHandler {
  * ----------------------------- */
 
 export interface NodePrinter {
-  print(
-    node: PMNode,
-    ctx: PrintContext,
-    recurse: (node: PMNode) => string
-  ): string
+  print(node: PMNode, ctx: PrintContext, recurse: (node: PMNode) => string): string
 }
 
 export interface MarkPrinter {
@@ -42,11 +38,7 @@ export interface MarkPrinter {
  * Unified Registry
  * ----------------------------- */
 
-export type CommandListener = (
-  namespace: string,
-  name: string,
-  cmd: Command
-) => void
+export type CommandListener = (namespace: string, name: string, cmd: Command) => void
 
 export type SchemaNodesSpec = { [name: string]: any }
 export type SchemaMarksSpec = { [name: string]: any }
@@ -137,22 +129,14 @@ export class Registry {
   registerSchema(contrib: SchemaContributor) {
     if (contrib.nodes) {
       for (const k of Object.keys(contrib.nodes)) {
-        this.assertFree(
-          new Map(Object.keys(this.schemaNodes).map(k => [k, true])),
-          k,
-          "schema node"
-        )
+        this.assertFree(new Map(Object.keys(this.schemaNodes).map((k) => [k, true])), k, "schema node")
         this.schemaNodes[k] = contrib.nodes[k]
       }
     }
 
     if (contrib.marks) {
       for (const k of Object.keys(contrib.marks)) {
-        this.assertFree(
-          new Map(Object.keys(this.schemaMarks).map(k => [k, true])),
-          k,
-          "schema mark"
-        )
+        this.assertFree(new Map(Object.keys(this.schemaMarks).map((k) => [k, true])), k, "schema mark")
         this.schemaMarks[k] = contrib.marks[k]
       }
     }
@@ -219,15 +203,9 @@ export class Registry {
 
   /* ---- helpers ---- */
 
-  private assertFree(
-    map: Map<string, unknown>,
-    key: string,
-    kind: string
-  ) {
+  private assertFree(map: Map<string, unknown>, key: string, kind: string) {
     if (map.has(key)) {
-      throw new Error(
-        `Duplicate ${kind} registration for "${key}"`
-      )
+      throw new Error(`Duplicate ${kind} registration for "${key}"`)
     }
   }
 
@@ -247,11 +225,7 @@ export class Registry {
     }
   }
 
-  registerCommand(
-    namespace: string,
-    name: string,
-    cmd: Command
-  ) {
+  registerCommand(namespace: string, name: string, cmd: Command) {
     const fullName = `${namespace}.${name}`
     this.assertFree(this.commands, fullName, "command")
     this.commands.set(fullName, cmd)
@@ -269,7 +243,7 @@ export class Registry {
   }
 
   getEditorPlugins(): PMPlugin[] {
-    return this.editorPlugins.map(factory => factory(this.schema))
+    return this.editorPlugins.map((factory) => factory(this.schema))
   }
 
   /* ---- styles ---- */
@@ -325,16 +299,11 @@ export class Registry {
     return this.nodeProperties.get(nodeType) ?? []
   }
 
-  registerNodeProperties(
-    nodeType: string,
-    properties: NodePropertySpec[]
-  ) {
+  registerNodeProperties(nodeType: string, properties: NodePropertySpec[]) {
     const existing = this.nodeProperties.get(nodeType) ?? []
     for (const prop of properties) {
-      if (existing.some(p => p.name === prop.name)) {
-        throw new Error(
-          `Duplicate property "${prop.name}" for node "${nodeType}"`
-        )
+      if (existing.some((p) => p.name === prop.name)) {
+        throw new Error(`Duplicate property "${prop.name}" for node "${nodeType}"`)
       }
       existing.push(prop)
     }

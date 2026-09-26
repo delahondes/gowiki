@@ -171,7 +171,7 @@ func (ds *DataStore) UpdateRow(ctx context.Context, tableName string, rowID int,
 	}
 
 	if len(setClauses) > 0 {
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = NOW()"))
+		setClauses = append(setClauses, "updated_at = NOW()")
 		args = append(args, rowID)
 		sql := fmt.Sprintf("UPDATE %s SET %s WHERE id = $%d",
 			quoteIdent(dtName), strings.Join(setClauses, ", "), idx)

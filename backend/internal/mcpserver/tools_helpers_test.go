@@ -35,12 +35,12 @@ func TestPageFolderRoot(t *testing.T) {
 
 func TestHasArg(t *testing.T) {
 	args := map[string]any{
-		"present":       "value",
-		"empty_string":  "",
-		"nil_value":     nil,
-		"zero_int":      0,
-		"false_bool":    false,
-		"empty_object":  map[string]any{},
+		"present":      "value",
+		"empty_string": "",
+		"nil_value":    nil,
+		"zero_int":     0,
+		"false_bool":   false,
+		"empty_object": map[string]any{},
 	}
 	// hasArg only reports presence — the actual value does not matter.
 	// This is what lets partial updates distinguish "keep it" (absent)
@@ -60,13 +60,6 @@ func TestHasArg(t *testing.T) {
 // These enforce the dual-ACL model that every MCP write depends on. A
 // regression here would let an agent slip past ACLs, so pin the shapes
 // with real UserStore / ACLStore.
-
-// ctxWithUser adds the username to context using the extractor deps holds.
-func ctxWithUser(username string) context.Context {
-	type key struct{}
-	ctx := context.WithValue(context.Background(), key{}, username)
-	return ctx
-}
 
 // depsForTest builds Deps with real Auth stores in a temp dir. The
 // ExtractUsername closure reads from our test context key.

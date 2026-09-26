@@ -78,7 +78,7 @@ interface ReviewflowStatus {
 const userDisplayCache: Record<string, string> = {}
 
 async function resolveUserLabels(usernames: string[]): Promise<void> {
-  const unknown = usernames.filter(u => !(u in userDisplayCache))
+  const unknown = usernames.filter((u) => !(u in userDisplayCache))
   if (unknown.length === 0) return
   try {
     const resp = await fetch(`/api/users/display?users=${encodeURIComponent(unknown.join(","))}`)
@@ -87,7 +87,9 @@ async function resolveUserLabels(usernames: string[]): Promise<void> {
     for (const [name, info] of Object.entries(data.users || {})) {
       userDisplayCache[name] = (info as any).label || name
     }
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
 }
 
 function getUserLabel(username: string): string {
@@ -103,7 +105,11 @@ const gate = {
     return resp.json()
   },
 
-  async confirm(pagePath: string, role: string, sigData?: { signature: string; certificate: string; digest: string } | null): Promise<ReviewflowStatus> {
+  async confirm(
+    pagePath: string,
+    role: string,
+    sigData?: { signature: string; certificate: string; digest: string } | null
+  ): Promise<ReviewflowStatus> {
     const cleanPath = pagePath.replace(/^\/+/, "")
     const body: any = { role }
     if (sigData) {
@@ -153,10 +159,12 @@ class ReviewflowNodeView {
     // Check if the current user has a signing key.
     const currentUser = (window as any).__gowikiCurrentUser?.username
     if (currentUser) {
-      hasKey(currentUser).then(has => {
-        this.userHasKey = has
-        if (this.status) this.render() // re-render with updated button label
-      }).catch(() => {})
+      hasKey(currentUser)
+        .then((has) => {
+          this.userHasKey = has
+          if (this.status) this.render() // re-render with updated button label
+        })
+        .catch(() => {})
     }
   }
 
@@ -166,13 +174,15 @@ class ReviewflowNodeView {
     let roles: Record<string, string> = {}
     try {
       roles = JSON.parse(this.node.attrs.roles || "{}")
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const version = this.node.attrs.version || ""
     const roleEntries = Object.entries(roles).sort(([a], [b]) => a.localeCompare(b))
     // If the backend has no state yet (no roles in status), treat all roles as pending.
     const backendHasState = this.status != null && Object.keys(this.status.roles || {}).length > 0
-    const missingRoles = backendHasState ? (this.status!.missing_roles || {}) : roles
+    const missingRoles = backendHasState ? this.status!.missing_roles || {} : roles
     const overdueSet = new Set(this.status?.overdue_roles || [])
     const currentUser = (window as any).__gowikiCurrentUser?.username || ""
     const isValidated = backendHasState && this.status!.is_fully_validated === true
@@ -180,8 +190,8 @@ class ReviewflowNodeView {
     // Check if the current version tag was already validated in a previous cycle.
     // If so, the version tag must be bumped before new approvals can proceed.
     const versionHistory = this.status?.version_history || []
-    const versionTagStale = !this.historyVersion && !isValidated && version !== "" &&
-      versionHistory.some(vr => vr.version_tag === version)
+    const versionTagStale =
+      !this.historyVersion && !isValidated && version !== "" && versionHistory.some((vr) => vr.version_tag === version)
 
     // Wrapper with border color
     const wrapper = document.createElement("div")
@@ -322,8 +332,10 @@ class ReviewflowNodeView {
     }
     // Resolve display names for all role assignees
     let roles: Record<string, string> = {}
-    try { roles = JSON.parse(this.node.attrs.roles || "{}") } catch {}
-    const usernames = Object.values(roles).filter(u => u)
+    try {
+      roles = JSON.parse(this.node.attrs.roles || "{}")
+    } catch {}
+    const usernames = Object.values(roles).filter((u) => u)
     if (usernames.length > 0) {
       await resolveUserLabels(usernames)
     }
@@ -338,9 +350,16 @@ class ReviewflowNodeView {
     if (this.historyVersion) return
     const contentRoot = document.getElementById("content") || document.querySelector(".ProseMirror")
     if (!contentRoot) return
-    const hasRoles = Object.keys(
-      (() => { try { return JSON.parse(this.node.attrs.roles || "{}") } catch { return {} } })()
-    ).length > 0
+    const hasRoles =
+      Object.keys(
+        (() => {
+          try {
+            return JSON.parse(this.node.attrs.roles || "{}")
+          } catch {
+            return {}
+          }
+        })()
+      ).length > 0
     if (hasRoles && !this.status?.is_fully_validated) {
       contentRoot.classList.add("gowiki-rf-page-invalid")
     } else {
@@ -372,7 +391,9 @@ class ReviewflowNodeView {
         }
       }
       if (this.status?.signing_required && !sigData) {
-        alert("Confirm failed: cryptographic signature required but signing failed.\n\nCheck your signing key in the user menu.")
+        alert(
+          "Confirm failed: cryptographic signature required but signing failed.\n\nCheck your signing key in the user menu."
+        )
         return
       }
       this.status = await gate.confirm(pagePath, role, sigData)
@@ -614,12 +635,14 @@ class ReviewflowQueryNodeView {
           const status = await resp.json()
           if (!status.roles || Object.keys(status.roles).length === 0) return null
           return { page: p, status }
-        } catch { return null }
+        } catch {
+          return null
+        }
       })
       const results = (await Promise.all(statusPromises)).filter(Boolean) as any[]
 
       // 3. Filter by status
-      const filtered = results.filter(r => {
+      const filtered = results.filter((r) => {
         const isValidated = r.status.is_fully_validated === true
         if (statusFilter === "draft") return !isValidated
         if (statusFilter === "validated") return isValidated
@@ -638,18 +661,19 @@ class ReviewflowQueryNodeView {
       // Header
       const header = document.createElement("div")
       header.className = "gowiki-rfq-header"
-      const label = statusFilter === "draft" ? "Documents pending validation"
-        : statusFilter === "validated" ? "Validated documents"
-        : "All reviewflow documents"
+      const label =
+        statusFilter === "draft"
+          ? "Documents pending validation"
+          : statusFilter === "validated"
+            ? "Validated documents"
+            : "All reviewflow documents"
       header.textContent = `Reviewflow: ${label} (/${path})`
       this.dom.appendChild(header)
 
       if (filtered.length === 0) {
         const empty = document.createElement("div")
         empty.className = "gowiki-rfq-empty"
-        empty.textContent = statusFilter === "draft"
-          ? "No documents pending validation."
-          : "No documents found."
+        empty.textContent = statusFilter === "draft" ? "No documents pending validation." : "No documents found."
         this.dom.appendChild(empty)
         return
       }
@@ -660,7 +684,7 @@ class ReviewflowQueryNodeView {
         for (const user of Object.values(r.status.roles || {})) allUsers.add(user as string)
         if (r.page.author) allUsers.add(r.page.author)
       }
-      const unknownUsers = [...allUsers].filter(u => !(u in userDisplayCache))
+      const unknownUsers = [...allUsers].filter((u) => !(u in userDisplayCache))
       if (unknownUsers.length > 0) {
         await resolveUserLabels(unknownUsers)
       }
@@ -708,9 +732,7 @@ class ReviewflowQueryNodeView {
 
         // Date
         const tdDate = document.createElement("td")
-        tdDate.textContent = r.page.last_modified
-          ? new Date(r.page.last_modified).toLocaleDateString()
-          : ""
+        tdDate.textContent = r.page.last_modified ? new Date(r.page.last_modified).toLocaleDateString() : ""
         tr.appendChild(tdDate)
 
         // Author
@@ -755,7 +777,6 @@ class ReviewflowQueryNodeView {
       }
       table.appendChild(tbody)
       this.dom.appendChild(table)
-
     } catch (err) {
       this.dom.innerHTML = '<div class="gowiki-rfq-error">Failed to load reviewflow data</div>'
     }
@@ -962,7 +983,9 @@ export const reviewflowPlugin: WikiPlugin = {
         let roles: Record<string, string> = {}
         try {
           roles = JSON.parse(node.attrs.roles || "{}")
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
 
         for (const key of Object.keys(roles).sort()) {
           parts.push(`${key}=${roles[key]}`)
@@ -998,15 +1021,11 @@ export const reviewflowPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 200),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === rfType) {
-              insertedAt = pos
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 200), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === rfType) {
+            insertedAt = pos
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -1039,7 +1058,7 @@ export const reviewflowPlugin: WikiPlugin = {
         default: "draft",
         parse: (raw: string) => {
           const v = raw.trim().toLowerCase()
-          return (v === "draft" || v === "validated" || v === "all") ? v : "draft"
+          return v === "draft" || v === "validated" || v === "all" ? v : "draft"
         },
         serialize: (value: string | null) => String(value ?? "draft"),
         options: [
@@ -1110,9 +1129,7 @@ export const reviewflowPlugin: WikiPlugin = {
         if (node.attrs.status && node.attrs.status !== "draft") {
           parts.push(`status=${node.attrs.status}`)
         }
-        return parts.length
-          ? `{reviewflow-query ${parts.join(" ")}}\n\n`
-          : `{reviewflow-query}\n\n`
+        return parts.length ? `{reviewflow-query ${parts.join(" ")}}\n\n` : `{reviewflow-query}\n\n`
       },
     })
 
@@ -1138,21 +1155,19 @@ export const reviewflowPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === queryType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === queryType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

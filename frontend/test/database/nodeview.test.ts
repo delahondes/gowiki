@@ -56,9 +56,7 @@ describe("database_row NodeView", () => {
   })
 
   it("bare placeholder (no table) renders the 'No table specified' hint", () => {
-    const doc = schema.nodes.doc.create(null, [
-      schema.nodes.database_row.create({ table: "", _fields: {} }),
-    ])
+    const doc = schema.nodes.doc.create(null, [schema.nodes.database_row.create({ table: "", _fields: {} })])
     const { view, container } = mount(doc)
     try {
       const err = container.querySelector(".gowiki-database-row .gowiki-database-error")
@@ -72,9 +70,7 @@ describe("database_row NodeView", () => {
 
 describe("database_query NodeView", () => {
   it("mounts a NodeView for a query with a table attr", () => {
-    const doc = schema.nodes.doc.create(null, [
-      schema.nodes.database_query.create({ table: "orders" }),
-    ])
+    const doc = schema.nodes.doc.create(null, [schema.nodes.database_query.create({ table: "orders" })])
     const { view, container } = mount(doc)
     try {
       const nodeEl = container.querySelector(".gowiki-database-query")
@@ -86,9 +82,7 @@ describe("database_query NodeView", () => {
   })
 
   it("renders the 'No table specified' hint when table is empty", () => {
-    const doc = schema.nodes.doc.create(null, [
-      schema.nodes.database_query.create({ table: "" }),
-    ])
+    const doc = schema.nodes.doc.create(null, [schema.nodes.database_query.create({ table: "" })])
     const { view, container } = mount(doc)
     try {
       const err = container.querySelector(".gowiki-database-query .gowiki-database-error")
@@ -102,9 +96,7 @@ describe("database_query NodeView", () => {
 
 describe("database_newrow NodeView", () => {
   it("mounts a NodeView", () => {
-    const doc = schema.nodes.doc.create(null, [
-      schema.nodes.database_newrow.create({ table: "orders" }),
-    ])
+    const doc = schema.nodes.doc.create(null, [schema.nodes.database_newrow.create({ table: "orders" })])
     const { view, container } = mount(doc)
     try {
       // Class prefix is consistent with sibling views.

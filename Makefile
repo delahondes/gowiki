@@ -1,4 +1,4 @@
-.PHONY: frontend-install dev dev-backend dev-frontend build-frontend build-backend build-backend-release test test-backend test-frontend run-prod
+.PHONY: frontend-install dev dev-backend dev-frontend build-frontend build-backend build-backend-release test test-backend test-frontend test-integration lint lint-backend lint-frontend run-prod
 
 BACKEND_BIN := backend/server
 
@@ -48,6 +48,17 @@ test-integration:
 
 test-frontend:
 	npm --prefix frontend test
+
+lint: lint-backend lint-frontend
+
+# Requires golangci-lint (`brew install golangci-lint`). CI installs it
+# automatically via the golangci-lint-action.
+lint-backend:
+	cd backend && golangci-lint run
+
+lint-frontend:
+	npm --prefix frontend run lint
+	npm --prefix frontend run format:check
 
 run-prod: build-backend
 	$(BACKEND_BIN) -addr :8080 -data-dir ./backend/data -serve-web -web-dir ./frontend/dist

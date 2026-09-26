@@ -159,11 +159,11 @@ func registerConvertToNamespaceIndexTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult(mapMoveError(err)), nil
 		}
 		return jsonResult(map[string]any{
-			"converted":    true,
-			"from":         "/" + pagePath,
-			"to":           result.Page.Path,
-			"version":      result.Page.Meta.Version,
-			"is_ns_index":  result.Page.IsNamespaceIndex,
+			"converted":   true,
+			"from":        "/" + pagePath,
+			"to":          result.Page.Path,
+			"version":     result.Page.Meta.Version,
+			"is_ns_index": result.Page.IsNamespaceIndex,
 		}), nil
 	})
 }
@@ -205,9 +205,9 @@ func registerDeletePageTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult(mapMoveError(err)), nil
 		}
 		return jsonResult(map[string]any{
-			"deleted":          true,
-			"page_path":        "/" + pagePath,
-			"orphaned_media":   result.OrphanedMedia,
+			"deleted":        true,
+			"page_path":      "/" + pagePath,
+			"orphaned_media": result.OrphanedMedia,
 		}), nil
 	})
 }

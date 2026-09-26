@@ -5,23 +5,19 @@ import { Schema } from "prosemirror-model"
  * ----------------------------- */
 
 export class PrintContext {
-  constructor(
-    public readonly schema: Schema
-  ) {}
+  constructor(public readonly schema: Schema) {}
 }
-
-
 
 import { Fragment, Mark, Node as PMNode } from "prosemirror-model"
 import { Registry } from "./registry"
 
 function escapeMarkdownText(text: string): string {
-  return text.replace(/[\\*_`>{}~^]/g, ch => "\\" + ch)
+  return text.replace(/[\\*_`>{}~^]/g, (ch) => "\\" + ch)
 }
 
 function serializePlainTextWithAutoLinks(text: string): string {
   // Match both URLs and bare email addresses
-  const autoRe = /https?:\/\/[^\s<>()]+|[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
+  const autoRe = /https?:\/\/[^\s<>()]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
   let out = ""
   let last = 0
   let m: RegExpExecArray | null
@@ -63,7 +59,7 @@ export function serializeInlineFragment(
   printNode: (node: PMNode) => string
 ): string {
   const nodes: PMNode[] = []
-  fragment.forEach(n => nodes.push(n))
+  fragment.forEach((n) => nodes.push(n))
 
   let out = ""
   let activeMarks: readonly Mark[] = []
@@ -85,7 +81,7 @@ export function serializeInlineFragment(
     }
 
     // Link with autoText: self-contained serialization via printNode.
-    if (node.marks.some(m => m.type.name === "link" && m.attrs.autoText)) {
+    if (node.marks.some((m) => m.type.name === "link" && m.attrs.autoText)) {
       closeAllMarks()
       out += printNode(node)
       continue
@@ -98,8 +94,11 @@ export function serializeInlineFragment(
 
     // Find the longest common prefix of active marks and this node's marks.
     let commonLen = 0
-    while (commonLen < activeMarks.length && commonLen < nodeMarks.length &&
-           activeMarks[commonLen].eq(nodeMarks[commonLen])) {
+    while (
+      commonLen < activeMarks.length &&
+      commonLen < nodeMarks.length &&
+      activeMarks[commonLen].eq(nodeMarks[commonLen])
+    ) {
       commonLen++
     }
 
@@ -116,7 +115,7 @@ export function serializeInlineFragment(
     activeMarks = nodeMarks
 
     // Emit text content.
-    const hasCodeMark = node.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+    const hasCodeMark = node.marks.some((m) => m.type.name === "code" || m.type.name === "code_expand")
     if (hasCodeMark) {
       out += node.text ?? ""
     } else if (nodeMarks.length === 0) {
@@ -135,10 +134,7 @@ export function serializeInlineFragment(
 /**
  * Convert a ProseMirror document to Markdown.
  */
-export function pmToMarkdown(
-  doc: PMNode,
-  registry: Registry
-): string {
+export function pmToMarkdown(doc: PMNode, registry: Registry): string {
   const ctx = new PrintContext(registry.schema)
 
   function printNode(node: PMNode): string {
@@ -147,7 +143,7 @@ export function pmToMarkdown(
       if (node.marks.length === 0) {
         return serializePlainTextWithAutoLinks(node.text ?? "")
       }
-      const hasCodeMark = node.marks.some(m => m.type.name === "code" || m.type.name === "code_expand")
+      const hasCodeMark = node.marks.some((m) => m.type.name === "code" || m.type.name === "code_expand")
       let text = hasCodeMark ? (node.text ?? "") : escapeMarkdownText(node.text ?? "")
       for (const mark of node.marks) {
         const printer = registry.getPMMark(mark.type.name)
@@ -165,14 +161,8 @@ export function pmToMarkdown(
           }
           continue
         }
-        const open =
-          typeof printer.open === "function"
-            ? printer.open(mark)
-            : printer.open
-        const close =
-          typeof printer.close === "function"
-            ? printer.close(mark)
-            : printer.close
+        const open = typeof printer.open === "function" ? printer.open(mark) : printer.open
+        const close = typeof printer.close === "function" ? printer.close(mark) : printer.close
         text = open + text + close
       }
       return text
@@ -189,7 +179,7 @@ export function pmToMarkdown(
 
   // Root doc node: print children only
   let out = ""
-  doc.content.forEach(child => {
+  doc.content.forEach((child) => {
     out += printNode(child)
   })
 

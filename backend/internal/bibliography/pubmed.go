@@ -22,15 +22,15 @@ type esummaryEnvelope struct {
 }
 
 type esummaryArticle struct {
-	UID       string `json:"uid"`
-	PubDate   string `json:"pubdate"`
-	EPubDate  string `json:"epubdate"`
-	Source    string `json:"source"`
-	Title     string `json:"title"`
-	Volume    string `json:"volume"`
-	Issue     string `json:"issue"`
-	Pages     string `json:"pages"`
-	Authors   []struct {
+	UID      string `json:"uid"`
+	PubDate  string `json:"pubdate"`
+	EPubDate string `json:"epubdate"`
+	Source   string `json:"source"`
+	Title    string `json:"title"`
+	Volume   string `json:"volume"`
+	Issue    string `json:"issue"`
+	Pages    string `json:"pages"`
+	Authors  []struct {
 		Name string `json:"name"` // "Derosa L"
 	} `json:"authors"`
 	FullJournalName string `json:"fulljournalname"`

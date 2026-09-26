@@ -8,7 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "keywords": [],
   "author": "",
@@ -36,8 +40,12 @@
     "yjs": "^13.6.30"
   },
   "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.70.1",
+    "@typescript-eslint/parser": "^8.70.1",
+    "eslint": "^8.57.1",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.1.1",
+    "prettier": "^3.9.9",
     "vitest": "^5.0.2"
   }
 }

@@ -12,7 +12,7 @@ import { roundTrip, countNodes } from "../helpers"
 
 function firstQuery(doc: PMNode): Record<string, any> | null {
   let found: Record<string, any> | null = null
-  doc.descendants(n => {
+  doc.descendants((n) => {
     if (found === null && n.type.name === "database_query") {
       found = { ...n.attrs }
       return false
@@ -33,13 +33,13 @@ describe("database-query: minimum shape", () => {
 
 describe("database-query: individual params", () => {
   it("fields=", () => {
-    const rt = roundTrip("{database-query table=orders fields=\"id,name,amount\"}\n")
+    const rt = roundTrip('{database-query table=orders fields="id,name,amount"}\n')
     expect(rt.isStable).toBe(true)
     expect(firstQuery(rt.doc)?.fields).toBe("id,name,amount")
   })
 
   it("filter= with operator", () => {
-    const rt = roundTrip("{database-query table=orders filter=\"amount>100\"}\n")
+    const rt = roundTrip('{database-query table=orders filter="amount>100"}\n')
     expect(rt.isStable).toBe(true)
     expect(firstQuery(rt.doc)?.filter).toBe("amount>100")
   })
@@ -75,7 +75,7 @@ describe("database-query: individual params", () => {
 describe("database-query: pivot params", () => {
   it("pivot_rows + pivot_cols + pivot_cell + pivot_agg", () => {
     const rt = roundTrip(
-      "{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cell=amount pivot_agg=sum}\n",
+      "{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cell=amount pivot_agg=sum}\n"
     )
     expect(rt.isStable).toBe(true)
     const q = firstQuery(rt.doc)
@@ -86,25 +86,19 @@ describe("database-query: pivot params", () => {
   })
 
   it("pivot_empty= sentinel", () => {
-    const rt = roundTrip(
-      "{database-query table=orders pivot_rows=customer pivot_cols=status pivot_empty=\"(none)\"}\n",
-    )
+    const rt = roundTrip('{database-query table=orders pivot_rows=customer pivot_cols=status pivot_empty="(none)"}\n')
     expect(rt.isStable).toBe(true)
     expect(firstQuery(rt.doc)?.pivot_empty).toBe("(none)")
   })
 
   it("pivot_cols_sort=alpha", () => {
-    const rt = roundTrip(
-      "{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cols_sort=alpha}\n",
-    )
+    const rt = roundTrip("{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cols_sort=alpha}\n")
     expect(rt.isStable).toBe(true)
     expect(firstQuery(rt.doc)?.pivot_cols_sort).toBe("alpha")
   })
 
   it("pivot_cols_max=5", () => {
-    const rt = roundTrip(
-      "{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cols_max=5}\n",
-    )
+    const rt = roundTrip("{database-query table=orders pivot_rows=customer pivot_cols=status pivot_cols_max=5}\n")
     expect(rt.isStable).toBe(true)
     expect(firstQuery(rt.doc)?.pivot_cols_max).toBe("5")
   })
@@ -158,10 +152,7 @@ describe("database-query: pivot label maps (JSON blobs)", () => {
 
 describe("database-query: interaction with tables and code", () => {
   it("directive inside a code fence stays literal (no parse)", () => {
-    const src =
-      "```\n" +
-      "{database-query table=orders}\n" +
-      "```\n"
+    const src = "```\n" + "{database-query table=orders}\n" + "```\n"
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
     expect(countNodes(rt.doc, "database_query")).toBe(0)
@@ -170,10 +161,7 @@ describe("database-query: interaction with tables and code", () => {
   it("directive in a table cell wrapped in backticks stays literal", () => {
     // Backtick-protected cell content must not spawn a directive node.
     // This mirrors the invariant tested across the tables corpus.
-    const src =
-      "| head |\n" +
-      "| --- |\n" +
-      "| `{database-query table=orders}` |\n"
+    const src = "| head |\n" + "| --- |\n" + "| `{database-query table=orders}` |\n"
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
     expect(countNodes(rt.doc, "database_query")).toBe(0)

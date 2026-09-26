@@ -42,35 +42,35 @@ var ValidFieldTypes = map[string]bool{
 
 // TableDef represents a structured data table definition.
 type TableDef struct {
-	ID                int       `json:"id"`
-	Name              string    `json:"name"`
-	Label             string    `json:"label"`
-	ScopeRegexp       string    `json:"scope_regexp"`
-	PageFolder        string    `json:"page_folder"`
-	DefaultSortField  string    `json:"default_sort_field"`
-	DefaultSortOrder  string    `json:"default_sort_order"`
-	PageTemplatePath  string    `json:"page_template_path"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	Fields            []FieldDef `json:"fields,omitempty"`
+	ID               int        `json:"id"`
+	Name             string     `json:"name"`
+	Label            string     `json:"label"`
+	ScopeRegexp      string     `json:"scope_regexp"`
+	PageFolder       string     `json:"page_folder"`
+	DefaultSortField string     `json:"default_sort_field"`
+	DefaultSortOrder string     `json:"default_sort_order"`
+	PageTemplatePath string     `json:"page_template_path"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Fields           []FieldDef `json:"fields,omitempty"`
 }
 
 // FieldDef represents a column definition in a structured data table.
 type FieldDef struct {
-	ID           int        `json:"id"`
-	TableID      int        `json:"table_id"`
-	Name         string     `json:"name"`
-	Label        string     `json:"label"`
-	Type         string     `json:"type"`
-	Required     bool       `json:"required"`
-	DefaultValue string     `json:"default_value"`
-	DisplayOrder int        `json:"display_order"`
-	Placeholder  string     `json:"placeholder"`
-	ForeignKey   string     `json:"foreign_key"`
-	DisplayColumn string    `json:"display_column"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ArchivedAt   *time.Time `json:"archived_at,omitempty"`
-	EnumValues   []string   `json:"enum_values,omitempty"`
+	ID            int        `json:"id"`
+	TableID       int        `json:"table_id"`
+	Name          string     `json:"name"`
+	Label         string     `json:"label"`
+	Type          string     `json:"type"`
+	Required      bool       `json:"required"`
+	DefaultValue  string     `json:"default_value"`
+	DisplayOrder  int        `json:"display_order"`
+	Placeholder   string     `json:"placeholder"`
+	ForeignKey    string     `json:"foreign_key"`
+	DisplayColumn string     `json:"display_column"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
+	EnumValues    []string   `json:"enum_values,omitempty"`
 }
 
 // SchemaHistoryEntry records a schema change.

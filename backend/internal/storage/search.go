@@ -22,8 +22,8 @@ type SearchResult struct {
 
 // searchDocument is the struct indexed by Bleve.
 type searchDocument struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
+	Path  string `json:"path"`
+	Name  string `json:"name"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }

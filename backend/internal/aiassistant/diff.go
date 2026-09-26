@@ -28,9 +28,9 @@ func ComputeEdits(original, modified string) []Edit {
 }
 
 type diffOp struct {
-	kind byte // '=' keep, '-' delete, '+' insert
-	oldIdx int // line index in original (-1 for inserts)
-	newIdx int // line index in modified (-1 for deletes)
+	kind   byte // '=' keep, '-' delete, '+' insert
+	oldIdx int  // line index in original (-1 for inserts)
+	newIdx int  // line index in modified (-1 for deletes)
 }
 
 func lcsTable(a, b []string) [][]int {

@@ -13,12 +13,7 @@
 import "./setup"
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import {
-  generateKeypair,
-  importCertificate,
-  deleteKey,
-  getPublicKeySPKI,
-} from "../../signing/keystore"
+import { generateKeypair, importCertificate, deleteKey, getPublicKeySPKI } from "../../signing/keystore"
 import { computeDigest, signConfirmation } from "../../signing/signer"
 
 let fetchSpy: ReturnType<typeof vi.spyOn> | null = null
@@ -74,15 +69,11 @@ describe("computeDigest", () => {
   it("matches the known SHA-256 hex of 'hello world'", async () => {
     // Same expected value the backend test uses — proves the two ends
     // agree on the digest wire format.
-    expect(await computeDigest("hello world")).toBe(
-      "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
-    )
+    expect(await computeDigest("hello world")).toBe("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
   })
 
   it("digest of the empty string is the SHA-256 of empty input", async () => {
-    expect(await computeDigest("")).toBe(
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    )
+    expect(await computeDigest("")).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
   })
 })
 
@@ -124,22 +115,13 @@ describe("signConfirmation", () => {
     // the wire-level assertion: the browser's Web Crypto output is
     // valid ECDSA-SHA256 that any P-256 verifier — including the Go
     // backend's — will accept.
-    const spkiBytes = Uint8Array.from(atob((await getPublicKeySPKI(name))!), c => c.charCodeAt(0))
-    const pubKey = await crypto.subtle.importKey(
-      "spki",
-      spkiBytes,
-      { name: "ECDSA", namedCurve: "P-256" },
-      true,
-      ["verify"],
-    )
-    const sigBytes = Uint8Array.from(atob(res!.signature), c => c.charCodeAt(0))
+    const spkiBytes = Uint8Array.from(atob((await getPublicKeySPKI(name))!), (c) => c.charCodeAt(0))
+    const pubKey = await crypto.subtle.importKey("spki", spkiBytes, { name: "ECDSA", namedCurve: "P-256" }, true, [
+      "verify",
+    ])
+    const sigBytes = Uint8Array.from(atob(res!.signature), (c) => c.charCodeAt(0))
     const payload = new TextEncoder().encode(body)
-    const ok = await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      pubKey,
-      sigBytes,
-      payload,
-    )
+    const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pubKey, sigBytes, payload)
     expect(ok).toBe(true)
 
     await deleteKey(name)

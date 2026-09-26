@@ -4,7 +4,9 @@ import type { Node as PMNode } from "prosemirror-model"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 
 function normalizeMediaVersion(raw: string): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase()
   if (!value) return null
   if (value === "latest") return "latest"
   const n = Number(value)
@@ -49,10 +51,42 @@ const medialinkProperties = [
 
 // Extensions that have a dedicated vivid icon in /icons/filetypes/.
 const knownIconExtensions = new Set([
-  "7z", "avi", "bmp", "csv", "doc", "docx", "epub", "gif", "gz",
-  "html", "jpeg", "jpg", "json", "md", "mov", "mp3", "mp4", "ods",
-  "odt", "ogg", "pdf", "png", "ppt", "pptx", "rar", "rtf", "svg",
-  "tar", "tgz", "txt", "wav", "webp", "xls", "xlsx", "xml", "zip",
+  "7z",
+  "avi",
+  "bmp",
+  "csv",
+  "doc",
+  "docx",
+  "epub",
+  "gif",
+  "gz",
+  "html",
+  "jpeg",
+  "jpg",
+  "json",
+  "md",
+  "mov",
+  "mp3",
+  "mp4",
+  "ods",
+  "odt",
+  "ogg",
+  "pdf",
+  "png",
+  "ppt",
+  "pptx",
+  "rar",
+  "rtf",
+  "svg",
+  "tar",
+  "tgz",
+  "txt",
+  "wav",
+  "webp",
+  "xls",
+  "xlsx",
+  "xml",
+  "zip",
 ])
 
 function iconPathForHref(href: string): string {
@@ -91,7 +125,7 @@ const medialinkStyles = `
 `
 
 function escapeMarkdownText(text: string): string {
-  return String(text ?? "").replace(/[\[\]]/g, ch => "\\" + ch)
+  return String(text ?? "").replace(/[[\]]/g, (ch) => "\\" + ch)
 }
 
 class MedialinkNodeView {
@@ -205,12 +239,17 @@ export const medialinkPlugin: WikiPlugin = {
             if (node.attrs.title) {
               attrs.title = node.attrs.title
             }
-            return ["a", attrs,
-              ["img", {
-                class: "gowiki-media-link-icon",
-                src: iconPathForHref(rawHref),
-                "aria-hidden": "true",
-              }],
+            return [
+              "a",
+              attrs,
+              [
+                "img",
+                {
+                  class: "gowiki-media-link-icon",
+                  src: iconPathForHref(rawHref),
+                  "aria-hidden": "true",
+                },
+              ],
               node.attrs.label || node.attrs.href || "file",
             ]
           },
@@ -253,9 +292,7 @@ export const medialinkPlugin: WikiPlugin = {
           label = href.split("/").pop() || "file"
         }
 
-        ctx.push(
-          ctx.schema.nodes.medialink.create({ href, label, version, title, autoText })
-        )
+        ctx.push(ctx.schema.nodes.medialink.create({ href, label, version, title, autoText }))
       },
     })
 

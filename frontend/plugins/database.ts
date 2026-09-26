@@ -122,7 +122,8 @@ const databaseQueryProperties = [
     default: "",
     parse: (raw: string) => raw.trim() || null,
     serialize: (value: string | null) => String(value ?? ""),
-    helpText: "Raw-value → display-label JSON for the row axis; keys sharing a label MERGE. Use \"@null\" for empty values. Example: {\"Y\":\"Archived\",\"N\":\"Active\",\"@null\":\"Active\"}.",
+    helpText:
+      'Raw-value → display-label JSON for the row axis; keys sharing a label MERGE. Use "@null" for empty values. Example: {"Y":"Archived","N":"Active","@null":"Active"}.',
   },
   {
     name: "pivot_cols_labels",
@@ -473,7 +474,10 @@ function isolateInput(el: HTMLElement) {
 function parseMultiEnumValue(raw: string): Set<string> {
   const cleaned = String(raw ?? "").replace(/^\s*\[(.*)\]\s*$/, "$1")
   return new Set(
-    cleaned.split(",").map(s => s.trim()).filter(Boolean),
+    cleaned
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
   )
 }
 
@@ -504,7 +508,11 @@ function createMultiEnumWidget(enumValues: string[], initial: string): HTMLDivEl
     wrap.appendChild(lbl)
   }
   Object.defineProperty(wrap, "value", {
-    get: () => checkboxes.filter(c => c.checked).map(c => c.value).join(", "),
+    get: () =>
+      checkboxes
+        .filter((c) => c.checked)
+        .map((c) => c.value)
+        .join(", "),
     set: (val: string) => {
       const set = parseMultiEnumValue(val)
       for (const cb of checkboxes) cb.checked = set.has(cb.value)
@@ -515,7 +523,10 @@ function createMultiEnumWidget(enumValues: string[], initial: string): HTMLDivEl
 
 // ── Tag helpers ──
 
-const tagTableCache = new Map<string, { data: Map<number, { label: string; icon: string; color: string }>; timestamp: number }>()
+const tagTableCache = new Map<
+  string,
+  { data: Map<number, { label: string; icon: string; color: string }>; timestamp: number }
+>()
 const tagTableInflight = new Map<string, Promise<Map<number, { label: string; icon: string; color: string }>>>()
 
 async function getTagOptions(tableName: string): Promise<Map<number, { label: string; icon: string; color: string }>> {
@@ -604,7 +615,7 @@ async function getLookupOptions(tableName: string, displayColumn?: string): Prom
       if (displayColumn && fields[displayColumn] != null && fields[displayColumn] !== "") {
         display = fields[displayColumn]
       } else {
-        display = Object.values(fields).find(v => typeof v === "string" && v !== "") ?? String(r.id)
+        display = Object.values(fields).find((v) => typeof v === "string" && v !== "") ?? String(r.id)
       }
       result.set(r.id, String(display))
     }
@@ -636,7 +647,9 @@ async function getUserList(): Promise<{ username: string; display_name: string }
   })()
 
   userListInflight = promise
-  promise.finally(() => { userListInflight = null })
+  promise.finally(() => {
+    userListInflight = null
+  })
   return promise
 }
 
@@ -655,7 +668,7 @@ function createOverlaySelectKeyed(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const sel = document.createElement("select")
@@ -684,7 +697,9 @@ function createOverlaySelectKeyed(
     sel.appendChild(opt)
   }
 
-  const cleanup = () => { if (sel.parentNode) sel.remove() }
+  const cleanup = () => {
+    if (sel.parentNode) sel.remove()
+  }
 
   sel.addEventListener("change", () => {
     opts.onSave(sel.value)
@@ -735,13 +750,13 @@ function createOverlayColorPicker(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const wrap = document.createElement("div")
   wrap.style.position = "fixed"
   wrap.style.left = rect.left + "px"
-  wrap.style.top = (rect.bottom + 2) + "px"
+  wrap.style.top = rect.bottom + 2 + "px"
   wrap.style.zIndex = "10000"
   wrap.style.background = "var(--gw-color-bg)"
   wrap.style.border = "2px solid var(--gw-color-link)"
@@ -758,7 +773,9 @@ function createOverlayColorPicker(
   grid.style.marginBottom = "6px"
 
   let saved = false
-  const cleanup = () => { if (wrap.parentNode) wrap.remove() }
+  const cleanup = () => {
+    if (wrap.parentNode) wrap.remove()
+  }
 
   for (const c of colorPresets) {
     const swatch = document.createElement("div")
@@ -827,8 +844,18 @@ function createOverlayColorPicker(
     cleanup()
   })
   textInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(textInput.value || colorInput.value); cleanup() }
-    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup() }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      saved = true
+      opts.onSave(textInput.value || colorInput.value)
+      cleanup()
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      saved = true
+      opts.onCancel()
+      cleanup()
+    }
   })
 
   wrap.appendChild(customRow)
@@ -837,7 +864,10 @@ function createOverlayColorPicker(
   const onOutside = (e: MouseEvent) => {
     if (!wrap.contains(e.target as Node)) {
       document.removeEventListener("mousedown", onOutside, true)
-      if (!saved) { saved = true; opts.onCancel() }
+      if (!saved) {
+        saved = true
+        opts.onCancel()
+      }
       cleanup()
     }
   }
@@ -858,7 +888,7 @@ function createOverlayInput(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const input = document.createElement("input")
@@ -879,15 +909,32 @@ function createOverlayInput(
   input.style.background = "var(--gw-color-bg)"
 
   let saved = false
-  const cleanup = () => { if (input.parentNode) input.remove() }
+  const cleanup = () => {
+    if (input.parentNode) input.remove()
+  }
 
   input.addEventListener("blur", () => {
-    if (!saved) { saved = true; opts.onSave(input.value) }
+    if (!saved) {
+      saved = true
+      opts.onSave(input.value)
+    }
     cleanup()
   })
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(input.value); cleanup(); input.blur() }
-    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup(); input.blur() }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      saved = true
+      opts.onSave(input.value)
+      cleanup()
+      input.blur()
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      saved = true
+      opts.onCancel()
+      cleanup()
+      input.blur()
+    }
   })
 
   document.body.appendChild(input)
@@ -904,7 +951,7 @@ function createOverlaySelect(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const sel = document.createElement("select")
@@ -933,7 +980,9 @@ function createOverlaySelect(
     sel.appendChild(opt)
   }
 
-  const cleanup = () => { if (sel.parentNode) sel.remove() }
+  const cleanup = () => {
+    if (sel.parentNode) sel.remove()
+  }
 
   sel.addEventListener("change", () => {
     opts.onSave(sel.value)
@@ -958,14 +1007,14 @@ function createOverlayMultiEnum(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const pop = document.createElement("div")
   pop.tabIndex = -1
   pop.style.position = "fixed"
   pop.style.left = rect.left + "px"
-  pop.style.top = (rect.bottom + 2) + "px"
+  pop.style.top = rect.bottom + 2 + "px"
   pop.style.minWidth = rect.width + "px"
   pop.style.maxWidth = "560px"
   pop.style.padding = "8px 10px"
@@ -981,7 +1030,9 @@ function createOverlayMultiEnum(
   pop.appendChild(widget)
 
   let saved = false
-  const cleanup = () => { if (pop.parentNode) pop.remove() }
+  const cleanup = () => {
+    if (pop.parentNode) pop.remove()
+  }
 
   pop.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -1019,7 +1070,7 @@ function createOverlayImageInput(
     value: string
     onSave: (newValue: string) => void
     onCancel: () => void
-  },
+  }
 ) {
   const rect = anchor.getBoundingClientRect()
   const wrap = document.createElement("div")
@@ -1060,28 +1111,49 @@ function createOverlayImageInput(
   wrap.appendChild(btn)
 
   let saved = false
-  const cleanup = () => { if (wrap.parentNode) wrap.remove() }
+  const cleanup = () => {
+    if (wrap.parentNode) wrap.remove()
+  }
 
   btn.addEventListener("click", (e) => {
     e.stopPropagation()
     const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
-    openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
-      input.value = insertedPath
-      saved = true
-      opts.onSave(input.value)
-      cleanup()
-    })
+    openMediaManager(
+      ns,
+      () => {},
+      (_type: string, entry: any) => {
+        const insertedPath = entry.path
+        input.value = insertedPath
+        saved = true
+        opts.onSave(input.value)
+        cleanup()
+      }
+    )
   })
 
   input.addEventListener("blur", () => {
     // Delay to allow browse button click to fire first.
     setTimeout(() => {
-      if (!saved && wrap.parentNode) { saved = true; opts.onSave(input.value); cleanup() }
+      if (!saved && wrap.parentNode) {
+        saved = true
+        opts.onSave(input.value)
+        cleanup()
+      }
     }, 150)
   })
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); saved = true; opts.onSave(input.value); cleanup() }
-    if (e.key === "Escape") { e.preventDefault(); saved = true; opts.onCancel(); cleanup() }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      saved = true
+      opts.onSave(input.value)
+      cleanup()
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      saved = true
+      opts.onCancel()
+      cleanup()
+    }
   })
 
   document.body.appendChild(wrap)
@@ -1112,7 +1184,7 @@ class DatabaseQueryNodeView {
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
-    this.currentSort = node.attrs.sort === "id" ? "__title__" : (node.attrs.sort || "")
+    this.currentSort = node.attrs.sort === "id" ? "__title__" : node.attrs.sort || ""
     this.currentOrder = node.attrs.order || "asc"
     this.initialLimit = parseInt(node.attrs.limit) || 20
     this.displayLimit = this.initialLimit
@@ -1151,9 +1223,17 @@ class DatabaseQueryNodeView {
 
   private isPivotMode(): boolean {
     const a = this.node.attrs
-    return !!(a.pivot_rows || a.pivot_cols || a.pivot_cell || a.pivot_agg ||
-      a.pivot_empty || a.pivot_cols_sort || a.pivot_cols_max ||
-      a.pivot_rows_labels || a.pivot_cols_labels)
+    return !!(
+      a.pivot_rows ||
+      a.pivot_cols ||
+      a.pivot_cell ||
+      a.pivot_agg ||
+      a.pivot_empty ||
+      a.pivot_cols_sort ||
+      a.pivot_cols_max ||
+      a.pivot_rows_labels ||
+      a.pivot_cols_labels
+    )
   }
 
   private async fetchData() {
@@ -1339,7 +1419,10 @@ class DatabaseQueryNodeView {
     let fields: any[]
     let hasExplicitTitle = false
     if (fieldsAttr) {
-      const colNames = fieldsAttr.split(",").map((c: string) => c.trim()).filter((c: string) => c)
+      const colNames = fieldsAttr
+        .split(",")
+        .map((c: string) => c.trim())
+        .filter((c: string) => c)
       fields = []
       for (const col of colNames) {
         if (col === "%title%") {
@@ -1348,9 +1431,8 @@ class DatabaseQueryNodeView {
         } else {
           // Match by field name or label (case-insensitive).
           const lower = col.toLowerCase()
-          const f = allFields.find((f: any) =>
-            f.name === col || f.name === lower ||
-            (f.label && f.label.toLowerCase() === lower)
+          const f = allFields.find(
+            (f: any) => f.name === col || f.name === lower || (f.label && f.label.toLowerCase() === lower)
           )
           if (f && !fields.some((ef: any) => ef.name === f.name)) {
             fields.push(f)
@@ -1420,7 +1502,7 @@ class DatabaseQueryNodeView {
         } else if (f.type === "tag" && f.foreign_key) {
           if (val && Number(val) !== 0) {
             td.textContent = "..."
-            getTagOptions(f.foreign_key).then(tags => {
+            getTagOptions(f.foreign_key).then((tags) => {
               td.textContent = ""
               const tag = tags.get(Number(val))
               if (tag) td.appendChild(renderTagBadge(tag))
@@ -1430,13 +1512,13 @@ class DatabaseQueryNodeView {
         } else if (f.type === "lookup" && f.foreign_key) {
           if (val && Number(val) !== 0) {
             td.textContent = "..."
-            getLookupOptions(f.foreign_key, f.display_column).then(opts => {
+            getLookupOptions(f.foreign_key, f.display_column).then((opts) => {
               td.textContent = opts.get(Number(val)) || String(val)
             })
           }
         } else if (f.type === "user" && val) {
           td.textContent = String(val)
-          fetchUserInfo(String(val)).then(info => {
+          fetchUserInfo(String(val)).then((info) => {
             if (info.label) td.textContent = info.label
           })
         } else if ((f.type === "date" || f.type === "datetime") && val) {
@@ -1486,7 +1568,13 @@ class DatabaseQueryNodeView {
     }
   }
 
-  private async saveInlineEdit(tableName: string, rowId: number, fieldName: string, newVal: string, force = false): Promise<boolean> {
+  private async saveInlineEdit(
+    tableName: string,
+    rowId: number,
+    fieldName: string,
+    newVal: string,
+    force = false
+  ): Promise<boolean> {
     const key = `${tableName}:${rowId}:${fieldName}`
     if (inflightSaveKeys.has(key)) return false // another PUT for this key is already in flight
     inflightSaveKeys.add(key)
@@ -1512,12 +1600,17 @@ class DatabaseQueryNodeView {
         // they can invalidate any cached read of the row-bound page.
         let pagePath = ""
         try {
-          const body = await resp.clone().json().catch(() => ({}))
+          const body = await resp
+            .clone()
+            .json()
+            .catch(() => ({}))
           pagePath = (body as any)?.page_path || ""
         } catch {}
-        document.dispatchEvent(new CustomEvent(DATABASE_ROW_UPDATED, {
-          detail: { table: tableName, rowId, fieldName, pagePath },
-        }))
+        document.dispatchEvent(
+          new CustomEvent(DATABASE_ROW_UPDATED, {
+            detail: { table: tableName, rowId, fieldName, pagePath },
+          })
+        )
       }
       return resp.ok
     } finally {
@@ -1528,14 +1621,29 @@ class DatabaseQueryNodeView {
   // Saves an inline edit and, on success, updates the cached value stashed on
   // the cell so the next dblclick opens with the fresh data instead of the
   // original render-time closure value.
-  private async saveInlineEditAndCache(td: HTMLElement, tableName: string, rowId: number, fieldName: string, newVal: any): Promise<boolean> {
-    const ok = await this.saveInlineEdit(tableName, rowId, fieldName, typeof newVal === "string" ? newVal : String(newVal))
+  private async saveInlineEditAndCache(
+    td: HTMLElement,
+    tableName: string,
+    rowId: number,
+    fieldName: string,
+    newVal: any
+  ): Promise<boolean> {
+    const ok = await this.saveInlineEdit(
+      tableName,
+      rowId,
+      fieldName,
+      typeof newVal === "string" ? newVal : String(newVal)
+    )
     if (ok) (td as any).__gwVal = newVal
     return ok
   }
 
   private inlineEditCell(td: HTMLElement, tableName: string, rowId: number, field: any, currentValue: any) {
-    const displayValue = Array.isArray(currentValue) ? currentValue.join(", ") : (currentValue != null ? String(currentValue) : "")
+    const displayValue = Array.isArray(currentValue)
+      ? currentValue.join(", ")
+      : currentValue != null
+        ? String(currentValue)
+        : ""
 
     if (field.type === "enum") {
       createOverlaySelect(td, {
@@ -1544,7 +1652,9 @@ class DatabaseQueryNodeView {
         onSave: async (newVal) => {
           td.textContent = newVal
           const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
-          if (!ok) { td.textContent = displayValue }
+          if (!ok) {
+            td.textContent = displayValue
+          }
         },
         onCancel: () => {},
       })
@@ -1555,14 +1665,16 @@ class DatabaseQueryNodeView {
         onSave: async (newVal) => {
           td.textContent = newVal
           const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
-          if (!ok) { td.textContent = displayValue }
+          if (!ok) {
+            td.textContent = displayValue
+          }
         },
         onCancel: () => {},
       })
     } else if (field.type === "boolean") {
       const newVal = currentValue === true || currentValue === "true" ? "false" : "true"
       td.textContent = newVal
-      this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal).then(ok => {
+      this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal).then((ok) => {
         if (!ok) td.textContent = displayValue
       })
     } else if (field.type === "color") {
@@ -1581,7 +1693,7 @@ class DatabaseQueryNodeView {
         onCancel: () => {},
       })
     } else if (field.type === "tag" && field.foreign_key) {
-      getTagOptions(field.foreign_key).then(tags => {
+      getTagOptions(field.foreign_key).then((tags) => {
         const options: { value: string; label: string }[] = []
         tags.forEach((t, id) => options.push({ value: String(id), label: t.label || String(id) }))
         createOverlaySelectKeyed(td, {
@@ -1605,7 +1717,7 @@ class DatabaseQueryNodeView {
         })
       })
     } else if (field.type === "lookup" && field.foreign_key) {
-      getLookupOptions(field.foreign_key, field.display_column).then(opts => {
+      getLookupOptions(field.foreign_key, field.display_column).then((opts) => {
         const options: { value: string; label: string }[] = []
         opts.forEach((label, id) => options.push({ value: String(id), label }))
         createOverlaySelectKeyed(td, {
@@ -1621,18 +1733,18 @@ class DatabaseQueryNodeView {
         })
       })
     } else if (field.type === "user") {
-      getUserList().then(users => {
-        const options = users.map(u => ({ value: u.username, label: u.display_name || u.username }))
+      getUserList().then((users) => {
+        const options = users.map((u) => ({ value: u.username, label: u.display_name || u.username }))
         createOverlaySelectKeyed(td, {
           options,
           value: displayValue,
           onSave: async (newVal) => {
-            const u = users.find(u => u.username === newVal)
+            const u = users.find((u) => u.username === newVal)
             td.textContent = u?.display_name || newVal
             td.className = "gowiki-database-editable-value"
             const ok = await this.saveInlineEditAndCache(td, tableName, rowId, field.name, newVal)
             if (!ok) {
-              const old = users.find(u => u.username === displayValue)
+              const old = users.find((u) => u.username === displayValue)
               td.textContent = old?.display_name || displayValue
             }
           },
@@ -1675,7 +1787,9 @@ class DatabaseQueryNodeView {
           if (!ok) {
             td.textContent = displayValue
             td.style.color = "var(--gw-color-error)"
-            setTimeout(() => { td.style.color = "" }, 2000)
+            setTimeout(() => {
+              td.style.color = ""
+            }, 2000)
           }
         },
         onCancel: () => {},
@@ -1702,12 +1816,14 @@ class DatabaseQueryNodeView {
       node.attrs.pivot_cols_max !== this.node.attrs.pivot_cols_max ||
       node.attrs.pivot_rows_labels !== this.node.attrs.pivot_rows_labels ||
       node.attrs.pivot_cols_labels !== this.node.attrs.pivot_cols_labels
-    if (node.attrs.table !== this.node.attrs.table ||
-        node.attrs.fields !== this.node.attrs.fields ||
-        node.attrs.filter !== this.node.attrs.filter ||
-        pivotChanged) {
+    if (
+      node.attrs.table !== this.node.attrs.table ||
+      node.attrs.fields !== this.node.attrs.fields ||
+      node.attrs.filter !== this.node.attrs.filter ||
+      pivotChanged
+    ) {
       this.node = node
-      this.currentSort = node.attrs.sort === "id" ? "__title__" : (node.attrs.sort || "")
+      this.currentSort = node.attrs.sort === "id" ? "__title__" : node.attrs.sort || ""
       this.currentOrder = node.attrs.order || "asc"
       this.initialLimit = parseInt(node.attrs.limit) || 20
       this.displayLimit = this.initialLimit
@@ -1727,7 +1843,9 @@ class DatabaseQueryNodeView {
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return true
     return false
   }
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
   destroy() {
     if (this.refreshHandler) {
       document.removeEventListener(DATABASE_ROW_CREATED, this.refreshHandler)
@@ -1810,14 +1928,21 @@ class DatabaseNewRowNodeView {
         btn.textContent = "Browse"
         btn.addEventListener("click", () => {
           const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
-          openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
-            inp.value = insertedPath
-          })
+          openMediaManager(
+            ns,
+            () => {},
+            (_type: string, entry: any) => {
+              const insertedPath = entry.path
+              inp.value = insertedPath
+            }
+          )
         })
         wrap.appendChild(btn)
         Object.defineProperty(wrap, "value", {
           get: () => inp.value,
-          set: (v: string) => { inp.value = v },
+          set: (v: string) => {
+            inp.value = v
+          },
         })
         inputs.set(f.name, wrap)
         row.appendChild(wrap)
@@ -1827,7 +1952,7 @@ class DatabaseNewRowNodeView {
         empty.value = ""
         empty.textContent = "-- Select --"
         sel.appendChild(empty)
-        for (const v of (f.enum_values || [])) {
+        for (const v of f.enum_values || []) {
           const opt = document.createElement("option")
           opt.value = v
           opt.textContent = v
@@ -1854,7 +1979,7 @@ class DatabaseNewRowNodeView {
         inputs.set(f.name, sel)
         row.appendChild(sel)
         // Populate async.
-        getTagOptions(f.foreign_key).then(tags => {
+        getTagOptions(f.foreign_key).then((tags) => {
           tags.forEach((t, id) => {
             const opt = document.createElement("option")
             opt.value = String(id)
@@ -1870,7 +1995,7 @@ class DatabaseNewRowNodeView {
         sel.appendChild(empty)
         inputs.set(f.name, sel)
         row.appendChild(sel)
-        getLookupOptions(f.foreign_key, f.display_column).then(opts => {
+        getLookupOptions(f.foreign_key, f.display_column).then((opts) => {
           opts.forEach((label, id) => {
             const opt = document.createElement("option")
             opt.value = String(id)
@@ -1886,7 +2011,7 @@ class DatabaseNewRowNodeView {
         sel.appendChild(empty)
         inputs.set(f.name, sel)
         row.appendChild(sel)
-        getUserList().then(users => {
+        getUserList().then((users) => {
           for (const u of users) {
             const opt = document.createElement("option")
             opt.value = u.username
@@ -1910,7 +2035,14 @@ class DatabaseNewRowNodeView {
         row.appendChild(sel)
       } else {
         const inp = document.createElement("input")
-        inp.type = f.type === "date" ? "date" : f.type === "datetime" ? "datetime-local" : f.type === "integer" || f.type === "float" ? "number" : "text"
+        inp.type =
+          f.type === "date"
+            ? "date"
+            : f.type === "datetime"
+              ? "datetime-local"
+              : f.type === "integer" || f.type === "float"
+                ? "number"
+                : "text"
         inp.placeholder = f.placeholder || ""
         if (f.default_value) inp.value = f.default_value
         inputs.set(f.name, inp)
@@ -1947,11 +2079,15 @@ class DatabaseNewRowNodeView {
           statusEl.style.color = "var(--gw-color-success)"
           // Clear form.
           for (const el of inputs.values()) el.value = ""
-          setTimeout(() => { statusEl.textContent = "" }, 3000)
+          setTimeout(() => {
+            statusEl.textContent = ""
+          }, 3000)
           // Notify query NodeViews on the same page to refresh.
-          document.dispatchEvent(new CustomEvent(DATABASE_ROW_CREATED, {
-            detail: { table: this.node.attrs.table },
-          }))
+          document.dispatchEvent(
+            new CustomEvent(DATABASE_ROW_CREATED, {
+              detail: { table: this.node.attrs.table },
+            })
+          )
         } else {
           const err = await resp.json().catch(() => ({}))
           statusEl.textContent = err.error || "Failed"
@@ -1987,8 +2123,12 @@ class DatabaseNewRowNodeView {
     return true
   }
 
-  stopEvent(): boolean { return true }
-  ignoreMutation(): boolean { return true }
+  stopEvent(): boolean {
+    return true
+  }
+  ignoreMutation(): boolean {
+    return true
+  }
   destroy() {}
 }
 
@@ -2038,7 +2178,9 @@ class DatabaseRowNodeView {
         const schema = await resp.json()
         this.schemaFields = (schema.fields || []).filter((f: any) => !f.archived_at)
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     if (this.view.editable) {
       this.renderEditMode()
@@ -2069,7 +2211,7 @@ class DatabaseRowNodeView {
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = isGhost ? `${key} (removed)` : (f?.label || key)
+      tdKey.textContent = isGhost ? `${key} (removed)` : f?.label || key
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
@@ -2139,25 +2281,33 @@ class DatabaseRowNodeView {
       isolateInput(btn)
       btn.addEventListener("click", () => {
         const ns = window.location.pathname.replace(/^\/+/, "").replace(/\/[^/]*$/, "") || ""
-        openMediaManager(ns, () => {}, (_type: string, entry: any) => { const insertedPath = entry.path;
-          inp.value = insertedPath
-          inp.dispatchEvent(new Event("change"))
-          // Update or add preview.
-          const existing = wrap.querySelector(".db-image-preview")
-          if (existing) { (existing as HTMLImageElement).src = insertedPath }
-          else {
-            const img = document.createElement("img")
-            img.src = insertedPath
-            img.className = "db-image-preview"
-            wrap.insertBefore(img, btn)
+        openMediaManager(
+          ns,
+          () => {},
+          (_type: string, entry: any) => {
+            const insertedPath = entry.path
+            inp.value = insertedPath
+            inp.dispatchEvent(new Event("change"))
+            // Update or add preview.
+            const existing = wrap.querySelector(".db-image-preview")
+            if (existing) {
+              ;(existing as HTMLImageElement).src = insertedPath
+            } else {
+              const img = document.createElement("img")
+              img.src = insertedPath
+              img.className = "db-image-preview"
+              wrap.insertBefore(img, btn)
+            }
           }
-        })
+        )
       })
       wrap.appendChild(btn)
       // Expose .value on the wrapper for the commitChange handler.
       Object.defineProperty(wrap, "value", {
         get: () => inp.value,
-        set: (v: string) => { inp.value = v },
+        set: (v: string) => {
+          inp.value = v
+        },
       })
       return wrap
     }
@@ -2183,7 +2333,7 @@ class DatabaseRowNodeView {
       sel.appendChild(emptyOpt)
       isolateInput(sel)
       // Populate async.
-      getTagOptions(f.foreign_key).then(tags => {
+      getTagOptions(f.foreign_key).then((tags) => {
         tags.forEach((t, id) => {
           const opt = document.createElement("option")
           opt.value = String(id)
@@ -2203,7 +2353,7 @@ class DatabaseRowNodeView {
       emptyOpt.textContent = "-- Select --"
       sel.appendChild(emptyOpt)
       isolateInput(sel)
-      getLookupOptions(f.foreign_key, f.display_column).then(opts => {
+      getLookupOptions(f.foreign_key, f.display_column).then((opts) => {
         opts.forEach((label, id) => {
           const opt = document.createElement("option")
           opt.value = String(id)
@@ -2223,7 +2373,7 @@ class DatabaseRowNodeView {
       emptyOpt.textContent = "-- Select --"
       sel.appendChild(emptyOpt)
       isolateInput(sel)
-      getUserList().then(users => {
+      getUserList().then((users) => {
         for (const u of users) {
           const opt = document.createElement("option")
           opt.value = u.username
@@ -2245,7 +2395,7 @@ class DatabaseRowNodeView {
       emptyOpt.value = ""
       emptyOpt.textContent = "-- Select --"
       sel.appendChild(emptyOpt)
-      for (const v of (f.enum_values || [])) {
+      for (const v of f.enum_values || []) {
         const opt = document.createElement("option")
         opt.value = v
         opt.textContent = v
@@ -2278,8 +2428,14 @@ class DatabaseRowNodeView {
     inp.style.boxSizing = "border-box"
     inp.style.padding = "2px 4px"
     inp.style.fontSize = "inherit"
-    inp.type = f?.type === "date" ? "date" : f?.type === "datetime" ? "datetime-local"
-      : f?.type === "integer" || f?.type === "float" ? "number" : "text"
+    inp.type =
+      f?.type === "date"
+        ? "date"
+        : f?.type === "datetime"
+          ? "datetime-local"
+          : f?.type === "integer" || f?.type === "float"
+            ? "number"
+            : "text"
     inp.value = value
     isolateInput(inp)
     return inp
@@ -2315,7 +2471,7 @@ class DatabaseRowNodeView {
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = isGhost ? `${key} (removed)` : (f?.label || key)
+      tdKey.textContent = isGhost ? `${key} (removed)` : f?.label || key
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
@@ -2329,7 +2485,7 @@ class DatabaseRowNodeView {
       } else if (f && f.type === "tag" && f.foreign_key) {
         if (val && Number(val) !== 0) {
           tdVal.textContent = "..."
-          getTagOptions(f.foreign_key).then(tags => {
+          getTagOptions(f.foreign_key).then((tags) => {
             tdVal.textContent = ""
             const tag = tags.get(Number(val))
             if (tag) tdVal.appendChild(renderTagBadge(tag))
@@ -2339,13 +2495,13 @@ class DatabaseRowNodeView {
       } else if (f && f.type === "lookup" && f.foreign_key) {
         if (val && Number(val) !== 0) {
           tdVal.textContent = "..."
-          getLookupOptions(f.foreign_key, f.display_column).then(opts => {
+          getLookupOptions(f.foreign_key, f.display_column).then((opts) => {
             tdVal.textContent = opts.get(Number(val)) || String(val)
           })
         }
       } else if (f && f.type === "user" && val) {
         tdVal.textContent = String(val)
-        fetchUserInfo(String(val)).then(info => {
+        fetchUserInfo(String(val)).then((info) => {
           if (info.label) tdVal.textContent = info.label
         })
       } else {
@@ -2410,14 +2566,18 @@ class DatabaseRowNodeView {
         }
         if (!resp.ok) {
           td.style.color = "var(--gw-color-error)"
-          setTimeout(() => { td.style.color = "" }, 2000)
+          setTimeout(() => {
+            td.style.color = ""
+          }, 2000)
           return false
         }
         this.syncFieldToState(fieldName, newValue)
         return true
       } catch {
         td.style.color = "var(--gw-color-error)"
-        setTimeout(() => { td.style.color = "" }, 2000)
+        setTimeout(() => {
+          td.style.color = ""
+        }, 2000)
         return false
       }
     }
@@ -2448,7 +2608,9 @@ class DatabaseRowNodeView {
       const newVal = currentValue === "true" ? "false" : "true"
       td.textContent = newVal
       const ok = await saveToApi(newVal)
-      if (!ok) { td.textContent = currentValue }
+      if (!ok) {
+        td.textContent = currentValue
+      }
     } else if (fieldDef && fieldDef.type === "color") {
       createOverlayColorPicker(td, {
         value: currentValue || "#adb5bd",
@@ -2469,7 +2631,7 @@ class DatabaseRowNodeView {
         },
       })
     } else if (fieldDef && fieldDef.type === "tag" && fieldDef.foreign_key) {
-      getTagOptions(fieldDef.foreign_key).then(tags => {
+      getTagOptions(fieldDef.foreign_key).then((tags) => {
         const options: { value: string; label: string }[] = []
         tags.forEach((t, id) => options.push({ value: String(id), label: t.label || String(id) }))
         createOverlaySelectKeyed(td, {
@@ -2487,7 +2649,7 @@ class DatabaseRowNodeView {
         })
       })
     } else if (fieldDef && fieldDef.type === "lookup" && fieldDef.foreign_key) {
-      getLookupOptions(fieldDef.foreign_key, fieldDef.display_column).then(opts => {
+      getLookupOptions(fieldDef.foreign_key, fieldDef.display_column).then((opts) => {
         const options: { value: string; label: string }[] = []
         opts.forEach((label, id) => options.push({ value: String(id), label }))
         createOverlaySelectKeyed(td, {
@@ -2502,13 +2664,13 @@ class DatabaseRowNodeView {
         })
       })
     } else if (fieldDef && fieldDef.type === "user") {
-      getUserList().then(users => {
-        const options = users.map(u => ({ value: u.username, label: u.display_name || u.username }))
+      getUserList().then((users) => {
+        const options = users.map((u) => ({ value: u.username, label: u.display_name || u.username }))
         createOverlaySelectKeyed(td, {
           options,
           value: currentValue,
           onSave: async (newVal) => {
-            const u = users.find(u => u.username === newVal)
+            const u = users.find((u) => u.username === newVal)
             td.textContent = u?.display_name || newVal
             td.className = "gowiki-database-editable-value"
             await saveToApi(newVal)
@@ -2532,20 +2694,30 @@ class DatabaseRowNodeView {
         onSave: async (newVal) => {
           restoreImage(newVal)
           const ok = await saveToApi(newVal)
-          if (!ok) { restoreImage(currentValue) }
+          if (!ok) {
+            restoreImage(currentValue)
+          }
         },
-        onCancel: () => { restoreImage(currentValue) },
+        onCancel: () => {
+          restoreImage(currentValue)
+        },
       })
     } else {
       createOverlayInput(td, {
-        type: fieldDef?.type === "date" ? "date"
-          : fieldDef?.type === "integer" || fieldDef?.type === "float" ? "number" : "text",
+        type:
+          fieldDef?.type === "date"
+            ? "date"
+            : fieldDef?.type === "integer" || fieldDef?.type === "float"
+              ? "number"
+              : "text",
         value: currentValue,
         onSave: async (newVal) => {
           td.textContent = newVal
           td.className = "gowiki-database-editable-value"
           const ok = await saveToApi(newVal)
-          if (!ok) { td.textContent = currentValue }
+          if (!ok) {
+            td.textContent = currentValue
+          }
         },
         onCancel: () => {
           td.textContent = currentValue
@@ -2577,7 +2749,9 @@ class DatabaseRowNodeView {
     return false
   }
 
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
   destroy() {}
 }
 
@@ -2605,7 +2779,9 @@ async function fetchUserInfo(username: string): Promise<{ display_name: string; 
         return userInfoCache[username]
       }
     }
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
   return { display_name: username, email: "", label: username }
 }
 
@@ -2639,24 +2815,33 @@ function resolveGlobalVar(name: string, view: EditorView): string | null | undef
 
   switch (name) {
     // Page variables
-    case "ID":    return ctx.pagePath || ""
-    case "PATH":  return ctx.pageNamespace || ""
-    case "PAGE":  return ctx.pageName || ""
-    case "TITLE": return extractTitle(view)
+    case "ID":
+      return ctx.pagePath || ""
+    case "PATH":
+      return ctx.pageNamespace || ""
+    case "PAGE":
+      return ctx.pageName || ""
+    case "TITLE":
+      return extractTitle(view)
 
     // Link variables
-    case "EXTID":   return `${window.location.origin}${ctx.pagePath || ""}`
-    case "EXTPATH": return `${window.location.origin}${ctx.pageNamespace || ""}${ctx.pageNamespace?.endsWith("/") ? "" : "/"}`
-    case "SERVER":  return window.location.hostname
+    case "EXTID":
+      return `${window.location.origin}${ctx.pagePath || ""}`
+    case "EXTPATH":
+      return `${window.location.origin}${ctx.pageNamespace || ""}${ctx.pageNamespace?.endsWith("/") ? "" : "/"}`
+    case "SERVER":
+      return window.location.hostname
 
     // Version variables
-    case "VERSION":     return meta?.version != null ? String(meta.version) : ""
+    case "VERSION":
+      return meta?.version != null ? String(meta.version) : ""
     case "VERSIONDATE": {
       if (!meta?.updated_at) return ""
       const d = new Date(meta.updated_at)
       return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10)
     }
-    case "VERSIONTAG": return meta?.version_tag || ""
+    case "VERSIONTAG":
+      return meta?.version_tag || ""
     case "YEAR": {
       if (!meta?.updated_at) return ""
       const d = new Date(meta.updated_at)
@@ -2691,16 +2876,24 @@ function resolveGlobalVar(name: string, view: EditorView): string | null | undef
     }
 
     // Author variables (sync: return username, trigger async display name fetch)
-    case "AUTHOR":         return meta?.created_by || ""
-    case "AUTHORNAME":     return userInfoCache[meta?.created_by]?.display_name || meta?.created_by || ""
-    case "AUTHORMAIL":     return userInfoCache[meta?.created_by]?.email || ""
-    case "LASTAUTHOR":     return meta?.author || ""
-    case "LASTAUTHORNAME": return userInfoCache[meta?.author]?.display_name || meta?.author || ""
-    case "LASTAUTHORMAIL": return userInfoCache[meta?.author]?.email || ""
+    case "AUTHOR":
+      return meta?.created_by || ""
+    case "AUTHORNAME":
+      return userInfoCache[meta?.created_by]?.display_name || meta?.created_by || ""
+    case "AUTHORMAIL":
+      return userInfoCache[meta?.created_by]?.email || ""
+    case "LASTAUTHOR":
+      return meta?.author || ""
+    case "LASTAUTHORNAME":
+      return userInfoCache[meta?.author]?.display_name || meta?.author || ""
+    case "LASTAUTHORMAIL":
+      return userInfoCache[meta?.author]?.email || ""
 
     // Wiki variables
-    case "WIKI":        return ctx.siteTitle || ""
-    case "WIKIVERSION": return ctx.siteVersion || ""
+    case "WIKI":
+      return ctx.siteTitle || ""
+    case "WIKIVERSION":
+      return ctx.siteVersion || ""
   }
 
   return undefined // ALL_CAPS but not a recognized global variable → ERROR
@@ -2718,12 +2911,14 @@ async function getFieldTypes(tableName: string): Promise<Map<string, string>> {
     if (!resp.ok) return new Map()
     const schema = await resp.json()
     const types = new Map<string, string>()
-    for (const f of (schema.fields || [])) {
+    for (const f of schema.fields || []) {
       if (!f.archived_at) types.set(f.name, f.type)
     }
     tableFieldTypeCache.set(tableName, types)
     return types
-  } catch { return new Map() }
+  } catch {
+    return new Map()
+  }
 }
 
 function resolveTemplateFields(state: EditorState): { fields: Record<string, string>; table: string } {
@@ -2820,9 +3015,9 @@ class TemplateVarNodeView {
 
   private resolveUserFieldAsync(table: string, fieldName: string, username: string) {
     if (!table || !username) return
-    getFieldTypes(table).then(types => {
+    getFieldTypes(table).then((types) => {
       if (types.get(fieldName) !== "user") return
-      fetchUserInfo(username).then(info => {
+      fetchUserInfo(username).then((info) => {
         if (info.label && info.label !== username) {
           this.dom.textContent = info.label
         }
@@ -2859,7 +3054,9 @@ class TemplateVarNodeView {
     return true
   }
 
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
   destroy() {}
 }
 
@@ -3016,69 +3213,73 @@ export const databasePlugin: WikiPlugin = {
     // ── Markdown-it plugin for {database-row ...} + table ──
 
     reg.registerMarkdownItPlugin((md: any) => {
-      md.block.ruler.before("table", "database_row_block", (state: any, startLine: number, endLine: number, silent: boolean) => {
-        const start = state.bMarks[startLine] + state.tShift[startLine]
-        const max = state.eMarks[startLine]
-        const line = state.src.slice(start, max).trim()
+      md.block.ruler.before(
+        "table",
+        "database_row_block",
+        (state: any, startLine: number, endLine: number, silent: boolean) => {
+          const start = state.bMarks[startLine] + state.tShift[startLine]
+          const max = state.eMarks[startLine]
+          const line = state.src.slice(start, max).trim()
 
-        // Match {database-row table=...} or bare {database-row} (template placeholder)
-        const fullMatch = line.match(/^\{database-row\s+table=(?:"([^"]+)"|'([^']+)'|(\S+?))\s*\}$/)
-        const bareMatch = !fullMatch && /^\{database-row\s*\}$/.test(line)
-        if (!fullMatch && !bareMatch) return false
-        if (silent) return true
+          // Match {database-row table=...} or bare {database-row} (template placeholder)
+          const fullMatch = line.match(/^\{database-row\s+table=(?:"([^"]+)"|'([^']+)'|(\S+?))\s*\}$/)
+          const bareMatch = !fullMatch && /^\{database-row\s*\}$/.test(line)
+          if (!fullMatch && !bareMatch) return false
+          if (silent) return true
 
-        const tableName = fullMatch ? (fullMatch[1] || fullMatch[2] || fullMatch[3]) : ""
+          const tableName = fullMatch ? fullMatch[1] || fullMatch[2] || fullMatch[3] : ""
 
-        // Bare placeholder — just emit the node, don't consume a following table.
-        if (bareMatch) {
+          // Bare placeholder — just emit the node, don't consume a following table.
+          if (bareMatch) {
+            const token = state.push("database_row_block", "", 0)
+            token.block = true
+            token.map = [startLine, startLine + 1]
+            token.meta = { tableName: "", fields: {} }
+            state.line = startLine + 1
+            return true
+          }
+
+          // Look ahead for a 2-column table (Field | Value).
+          let nextLine = startLine + 1
+          // Skip blank lines.
+          while (nextLine < endLine && state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]).trim() === "") {
+            nextLine++
+          }
+
+          const fields: Record<string, string> = {}
+          const tableRowRe = /^\s*\|(.+)\|(.+)\|\s*$/
+          const tableSepRe = /^\s*\|[\s:|-]+\|\s*$/
+
+          // Try to parse header row.
+          if (nextLine < endLine && tableRowRe.test(state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]))) {
+            nextLine++ // skip header
+          }
+          // Try to parse separator row.
+          if (nextLine < endLine && tableSepRe.test(state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]))) {
+            nextLine++ // skip separator
+          }
+          // Parse data rows.
+          while (nextLine < endLine) {
+            const rowLine = state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine])
+            const rowMatch = tableRowRe.exec(rowLine)
+            if (!rowMatch) break
+            const key = rowMatch[1].trim()
+            const val = rowMatch[2].trim()
+            if (key && key !== "---" && key !== "Field") {
+              fields[key] = val
+            }
+            nextLine++
+          }
+
           const token = state.push("database_row_block", "", 0)
           token.block = true
-          token.map = [startLine, startLine + 1]
-          token.meta = { tableName: "", fields: {} }
-          state.line = startLine + 1
+          token.map = [startLine, nextLine]
+          token.meta = { tableName, fields }
+
+          state.line = nextLine
           return true
         }
-
-        // Look ahead for a 2-column table (Field | Value).
-        let nextLine = startLine + 1
-        // Skip blank lines.
-        while (nextLine < endLine && state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]).trim() === "") {
-          nextLine++
-        }
-
-        const fields: Record<string, string> = {}
-        const tableRowRe = /^\s*\|(.+)\|(.+)\|\s*$/
-        const tableSepRe = /^\s*\|[\s:|-]+\|\s*$/
-
-        // Try to parse header row.
-        if (nextLine < endLine && tableRowRe.test(state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]))) {
-          nextLine++ // skip header
-        }
-        // Try to parse separator row.
-        if (nextLine < endLine && tableSepRe.test(state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine]))) {
-          nextLine++ // skip separator
-        }
-        // Parse data rows.
-        while (nextLine < endLine) {
-          const rowLine = state.src.slice(state.bMarks[nextLine], state.eMarks[nextLine])
-          const rowMatch = tableRowRe.exec(rowLine)
-          if (!rowMatch) break
-          const key = rowMatch[1].trim()
-          const val = rowMatch[2].trim()
-          if (key && key !== "---" && key !== "Field") {
-            fields[key] = val
-          }
-          nextLine++
-        }
-
-        const token = state.push("database_row_block", "", 0)
-        token.block = true
-        token.map = [startLine, nextLine]
-        token.meta = { tableName, fields }
-
-        state.line = nextLine
-        return true
-      })
+      )
     })
 
     // ── Markdown → PM: handle synthetic tokens ──
@@ -3168,8 +3369,10 @@ export const databasePlugin: WikiPlugin = {
         if (node.attrs.pivot_cols_sort) parts.push(`pivot_cols_sort=${quoteIfNeeded(node.attrs.pivot_cols_sort)}`)
         if (node.attrs.pivot_cols_max) parts.push(`pivot_cols_max=${node.attrs.pivot_cols_max}`)
         // Label maps are JSON blobs; always quote to preserve braces/colons.
-        if (node.attrs.pivot_rows_labels) parts.push(`pivot_rows_labels="${String(node.attrs.pivot_rows_labels).replace(/"/g, '\\"')}"`)
-        if (node.attrs.pivot_cols_labels) parts.push(`pivot_cols_labels="${String(node.attrs.pivot_cols_labels).replace(/"/g, '\\"')}"`)
+        if (node.attrs.pivot_rows_labels)
+          parts.push(`pivot_rows_labels="${String(node.attrs.pivot_rows_labels).replace(/"/g, '\\"')}"`)
+        if (node.attrs.pivot_cols_labels)
+          parts.push(`pivot_cols_labels="${String(node.attrs.pivot_cols_labels).replace(/"/g, '\\"')}"`)
         return `{database-query ${parts.join(" ")}}\n\n`
       },
     })
@@ -3220,11 +3423,15 @@ export const databasePlugin: WikiPlugin = {
         filterTransaction(tr, state) {
           if (!tr.docChanged) return true
           let oldBound = 0
-          state.doc.descendants(n => { if (n.type.name === "database_row" && n.attrs.table) oldBound++ })
+          state.doc.descendants((n) => {
+            if (n.type.name === "database_row" && n.attrs.table) oldBound++
+          })
           if (oldBound === 0) return true
           // A bound row can become a placeholder (table cleared), but must not be deleted.
           let newTotal = 0
-          tr.doc.descendants(n => { if (n.type.name === "database_row") newTotal++ })
+          tr.doc.descendants((n) => {
+            if (n.type.name === "database_row") newTotal++
+          })
           return newTotal >= oldBound
         },
         props: {
@@ -3255,7 +3462,8 @@ export const databasePlugin: WikiPlugin = {
           return {
             update(view: EditorView) {
               const { fields, table } = resolveTemplateFields(view.state)
-              const changed = Object.keys(fields).length !== Object.keys(lastFields).length ||
+              const changed =
+                Object.keys(fields).length !== Object.keys(lastFields).length ||
                 Object.entries(fields).some(([k, v]) => lastFields[k] !== v)
               if (!changed) return
               lastFields = fields
@@ -3304,9 +3512,9 @@ export const databasePlugin: WikiPlugin = {
                       domNode.title = `{{${name}}}`
                       // Resolve user fields to display label
                       if (table && resolved) {
-                        getFieldTypes(table).then(types => {
+                        getFieldTypes(table).then((types) => {
                           if (types.get(name) !== "user") return
-                          fetchUserInfo(resolved).then(info => {
+                          fetchUserInfo(resolved).then((info) => {
                             if (info.label && info.label !== resolved) {
                               domNode.textContent = info.label
                             }
@@ -3342,16 +3550,12 @@ export const databasePlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === type && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === type && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -3372,16 +3576,12 @@ export const databasePlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === type && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === type && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -3398,7 +3598,7 @@ export const databasePlugin: WikiPlugin = {
       if (!type) return false
       // Disallow if a bound database_row (with table attr) already exists.
       let hasBoundRow = false
-      state.doc.descendants(n => {
+      state.doc.descendants((n) => {
         if (n.type.name === "database_row" && n.attrs.table) hasBoundRow = true
       })
       if (hasBoundRow) return false
@@ -3408,16 +3608,12 @@ export const databasePlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === type && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === type && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -3439,19 +3635,15 @@ export const databasePlugin: WikiPlugin = {
         // Find the freshly inserted node: it has name="" which is unique to a new insert.
         let insertedAt: number | null = null
         let bestDist = Infinity
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 10),
-          Math.min(tr.doc.content.size, approxPos + 10),
-          (n, pos) => {
-            if (n.type === type && n.attrs.name === "") {
-              const dist = Math.abs(pos - approxPos)
-              if (dist < bestDist) {
-                bestDist = dist
-                insertedAt = pos
-              }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 10), Math.min(tr.doc.content.size, approxPos + 10), (n, pos) => {
+          if (n.type === type && n.attrs.name === "") {
+            const dist = Math.abs(pos - approxPos)
+            if (dist < bestDist) {
+              bestDist = dist
+              insertedAt = pos
             }
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))

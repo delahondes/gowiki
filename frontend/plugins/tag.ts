@@ -53,7 +53,8 @@ const tagQueryProperties = [
     label: "Group by",
     default: "",
     parse: (raw: string) => raw.trim(),
-    helpText: "Currently only \"folder\" — groups pages by their immediate subfolder under `path`. Pages sitting directly under `path` appear in an unlabelled section at the top. Future: `field~regex` for grouping on any field.",
+    helpText:
+      'Currently only "folder" — groups pages by their immediate subfolder under `path`. Pages sitting directly under `path` appear in an unlabelled section at the top. Future: `field~regex` for grouping on any field.',
     options: [
       { value: "", label: "No grouping" },
       { value: "folder", label: "By subfolder" },
@@ -546,21 +547,19 @@ export const tagPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === tagType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === tagType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }
@@ -577,21 +576,19 @@ export const tagPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === queryType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === queryType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

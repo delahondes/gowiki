@@ -386,11 +386,11 @@ func dokuURLDecode(s string) string {
 //
 // DokuWiki uses colon as namespace separator:
 //
-//	*              -> .* (all pages, root)
-//	ns:*           -> ns/.* (all pages under ns/)
-//	ns:page        -> ns/page (exact page)
-//	ns:sub:*       -> ns/sub/.* (all pages under ns/sub/)
-//	ns:%USER%-*    -> ns/%USER%-.* (per-user wildcard)
+//   - -> .* (all pages, root)
+//     ns:*           -> ns/.* (all pages under ns/)
+//     ns:page        -> ns/page (exact page)
+//     ns:sub:*       -> ns/sub/.* (all pages under ns/sub/)
+//     ns:%USER%-*    -> ns/%USER%-.* (per-user wildcard)
 func dokuACLPathToPattern(dokuPath string) string {
 	// Replace colon separators with slashes.
 	p := strings.ReplaceAll(dokuPath, ":", "/")

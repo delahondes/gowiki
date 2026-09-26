@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -25,7 +24,6 @@ type Service struct {
 	crossrefLimiter *rate.Limiter
 	group           singleflight.Group
 	serverURL       string
-	mu              sync.Mutex
 }
 
 // NewService builds a bibliography service.

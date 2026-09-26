@@ -104,9 +104,9 @@ func (s *Server) handleDatabaseQueryRows(w http.ResponseWriter, r *http.Request)
 			var perr *database.PivotError
 			if errors.As(err, &perr) {
 				writeJSON(w, http.StatusBadRequest, map[string]any{
-					"error":   perr.Message,
-					"kind":    perr.Kind,
-					"field":   perr.Field,
+					"error": perr.Message,
+					"kind":  perr.Kind,
+					"field": perr.Field,
 				})
 				return
 			}
@@ -222,11 +222,11 @@ func (s *Server) handleDatabaseInsertRow(w http.ResponseWriter, r *http.Request)
 // buildDatabaseRowBlock generates the {database-row table=...} block with field/value table.
 func (s *Server) buildDatabaseRowBlock(table *database.TableDef, row *database.Row) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{database-row table=%s}\n", table.Name))
+	fmt.Fprintf(&sb, "{database-row table=%s}\n", table.Name)
 	sb.WriteString("| Field | Value |\n")
 	sb.WriteString("| --- | --- |\n")
 	// Include the system id column so {{id}} template variables resolve.
-	sb.WriteString(fmt.Sprintf("| id | %d |\n", row.ID))
+	fmt.Fprintf(&sb, "| id | %d |\n", row.ID)
 	for _, f := range table.Fields {
 		if f.ArchivedAt != nil {
 			continue
@@ -235,7 +235,7 @@ func (s *Server) buildDatabaseRowBlock(table *database.TableDef, row *database.R
 		if v, ok := row.Fields[f.Name]; ok && v != nil {
 			val = formatFieldValue(v, f.Type)
 		}
-		sb.WriteString(fmt.Sprintf("| %s | %s |\n", f.Name, val))
+		fmt.Fprintf(&sb, "| %s | %s |\n", f.Name, val)
 	}
 	sb.WriteString("\n")
 	return sb.String()
@@ -685,8 +685,8 @@ func (s *Server) handleDatabaseExportCSV(w http.ResponseWriter, r *http.Request)
 			if !ok || v == nil {
 				vals = append(vals, "")
 			} else {
-				vals = append(vals, csvEscape(strings.TrimSpace(strings.Replace(strings.Replace(
-					formatValue(v), "\n", " ", -1), "\r", "", -1))))
+				vals = append(vals, csvEscape(strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(
+					formatValue(v), "\n", " "), "\r", ""))))
 			}
 		}
 		w.Write([]byte(strings.Join(vals, ",") + "\n"))
@@ -707,15 +707,15 @@ func formatValue(v any) string {
 	case []any:
 		var parts []string
 		for _, item := range val {
-			parts = append(parts, strings.TrimSpace(strings.Replace(strings.Replace(
-				formatValue(item), "\n", " ", -1), "\r", "", -1)))
+			parts = append(parts, strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(
+				formatValue(item), "\n", " "), "\r", "")))
 		}
 		return strings.Join(parts, "; ")
 	default:
-		return strings.TrimSpace(strings.Replace(strings.Replace(
-			strings.Replace(strings.Replace(
-				jsonString(val), "\n", " ", -1), "\r", "", -1),
-			`"`, "", -1), `\`, "", -1))
+		return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(
+			strings.ReplaceAll(strings.ReplaceAll(
+				jsonString(val), "\n", " "), "\r", ""),
+			`"`, ""), `\`, ""))
 	}
 }
 

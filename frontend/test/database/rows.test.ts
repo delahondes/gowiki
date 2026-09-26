@@ -12,7 +12,7 @@ import { roundTrip, countNodes } from "../helpers"
 // Find the first database_row node and return its attrs.
 function firstRow(doc: PMNode): { table: string; fields: Record<string, string> } | null {
   let found: { table: string; fields: Record<string, string> } | null = null
-  doc.descendants(n => {
+  doc.descendants((n) => {
     if (found === null && n.type.name === "database_row") {
       found = { table: n.attrs.table || "", fields: { ...(n.attrs._fields || {}) } }
       return false
@@ -36,11 +36,7 @@ describe("database-row: placeholder", () => {
 describe("database-row: bound rows across every field type", () => {
   it("text field", () => {
     const rt = roundTrip(
-      "{database-row table=customers}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| name | Alice |\n" +
-      "\n",
+      "{database-row table=customers}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| name | Alice |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     const row = firstRow(rt.doc)
@@ -50,11 +46,7 @@ describe("database-row: bound rows across every field type", () => {
 
   it("number field", () => {
     const rt = roundTrip(
-      "{database-row table=orders}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| amount | 42 |\n" +
-      "\n",
+      "{database-row table=orders}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| amount | 42 |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.amount).toBe("42")
@@ -62,11 +54,7 @@ describe("database-row: bound rows across every field type", () => {
 
   it("enum field", () => {
     const rt = roundTrip(
-      "{database-row table=orders}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| status | shipped |\n" +
-      "\n",
+      "{database-row table=orders}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| status | shipped |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.status).toBe("shipped")
@@ -75,10 +63,10 @@ describe("database-row: bound rows across every field type", () => {
   it("multi_enum field (comma-separated)", () => {
     const rt = roundTrip(
       "{database-row table=customers}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| countries | France, Belgium, Switzerland |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| countries | France, Belgium, Switzerland |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.countries).toBe("France, Belgium, Switzerland")
@@ -86,11 +74,7 @@ describe("database-row: bound rows across every field type", () => {
 
   it("tag field", () => {
     const rt = roundTrip(
-      "{database-row table=projects}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| tags | urgent |\n" +
-      "\n",
+      "{database-row table=projects}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| tags | urgent |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.tags).toBe("urgent")
@@ -98,11 +82,7 @@ describe("database-row: bound rows across every field type", () => {
 
   it("user field", () => {
     const rt = roundTrip(
-      "{database-row table=projects}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| owner | alice |\n" +
-      "\n",
+      "{database-row table=projects}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| owner | alice |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.owner).toBe("alice")
@@ -110,11 +90,7 @@ describe("database-row: bound rows across every field type", () => {
 
   it("lookup field (bare row id)", () => {
     const rt = roundTrip(
-      "{database-row table=orders}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| customer | 17 |\n" +
-      "\n",
+      "{database-row table=orders}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| customer | 17 |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.customer).toBe("17")
@@ -123,10 +99,10 @@ describe("database-row: bound rows across every field type", () => {
   it("image field (attachment path)", () => {
     const rt = roundTrip(
       "{database-row table=products}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| photo | /media/products/sku42.jpg |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| photo | /media/products/sku42.jpg |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.photo).toBe("/media/products/sku42.jpg")
@@ -135,10 +111,10 @@ describe("database-row: bound rows across every field type", () => {
   it("date field (ISO)", () => {
     const rt = roundTrip(
       "{database-row table=orders}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| placed_on | 2026-09-26 |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| placed_on | 2026-09-26 |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.placed_on).toBe("2026-09-26")
@@ -149,13 +125,13 @@ describe("database-row: multi-field rows", () => {
   it("keeps every field in its original position", () => {
     const rt = roundTrip(
       "{database-row table=customers}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| name | Alice |\n" +
-      "| email | alice@example.com |\n" +
-      "| country | France |\n" +
-      "| active | yes |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| name | Alice |\n" +
+        "| email | alice@example.com |\n" +
+        "| country | France |\n" +
+        "| active | yes |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     const row = firstRow(rt.doc)
@@ -172,11 +148,11 @@ describe("database-row: value quoting and special characters", () => {
   it("empty-string value survives round-trip", () => {
     const rt = roundTrip(
       "{database-row table=customers}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| name | Alice |\n" +
-      "| middle |  |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| name | Alice |\n" +
+        "| middle |  |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     const row = firstRow(rt.doc)
@@ -186,11 +162,11 @@ describe("database-row: value quoting and special characters", () => {
   it("value with unicode (French letters)", () => {
     const rt = roundTrip(
       "{database-row table=customers}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| name | Éléonore |\n" +
-      "| city | Aix-en-Provence |\n" +
-      "\n",
+        "| Field | Value |\n" +
+        "| --- | --- |\n" +
+        "| name | Éléonore |\n" +
+        "| city | Aix-en-Provence |\n" +
+        "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.fields.name).toBe("Éléonore")
@@ -200,11 +176,7 @@ describe("database-row: value quoting and special characters", () => {
 describe("database-row: table-name quoting variants", () => {
   it("bare identifier", () => {
     const rt = roundTrip(
-      "{database-row table=orders}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| id | 1 |\n" +
-      "\n",
+      "{database-row table=orders}\n" + "| Field | Value |\n" + "| --- | --- |\n" + "| id | 1 |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.table).toBe("orders")
@@ -215,11 +187,7 @@ describe("database-row: table-name quoting variants", () => {
   // the parse recognises both, and the second pass is stable.
   it("double-quoted table name parses (canonicalises on serialize)", () => {
     const rt = roundTrip(
-      "{database-row table=\"orders\"}\n" +
-      "| Field | Value |\n" +
-      "| --- | --- |\n" +
-      "| id | 1 |\n" +
-      "\n",
+      '{database-row table="orders"}\n' + "| Field | Value |\n" + "| --- | --- |\n" + "| id | 1 |\n" + "\n"
     )
     expect(rt.isStable).toBe(true)
     expect(firstRow(rt.doc)?.table).toBe("orders")

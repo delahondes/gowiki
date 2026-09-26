@@ -15,11 +15,7 @@ import { slugify } from "./slugify"
  * not HOW compilation works.
  */
 export function registerCoreNodes(reg: Registry) {
-  const baseNodes = addListNodes(
-    basicSchema.spec.nodes,
-    "paragraph block*",
-    "block"
-  )
+  const baseNodes = addListNodes(basicSchema.spec.nodes, "paragraph block*", "block")
 
   const nodes: Record<string, NodeSpec> = {}
   baseNodes.forEach((name: string, spec: NodeSpec) => {
@@ -55,9 +51,7 @@ export function registerCoreNodes(reg: Registry) {
   if (marks.link) {
     const baseLink = marks.link
     const baseToDOM =
-      typeof baseLink.toDOM === "function"
-        ? baseLink.toDOM
-        : (node: any, _inline: boolean) => ["a", node.attrs, 0]
+      typeof baseLink.toDOM === "function" ? baseLink.toDOM : (node: any, _inline: boolean) => ["a", node.attrs, 0]
     marks.link = {
       ...baseLink,
       attrs: {
@@ -68,24 +62,17 @@ export function registerCoreNodes(reg: Registry) {
         const spec = baseToDOM(node, true)
         if (!Array.isArray(spec)) return spec
         const [tag, maybeAttrs, ...rest] = spec
-        const hasAttrs =
-          maybeAttrs &&
-          typeof maybeAttrs === "object" &&
-          !Array.isArray(maybeAttrs)
+        const hasAttrs = maybeAttrs && typeof maybeAttrs === "object" && !Array.isArray(maybeAttrs)
         const attrs = hasAttrs ? { ...maybeAttrs } : {}
         const href = String(node.attrs.href ?? "")
         if (/^https?:\/\//i.test(href)) {
           attrs.target = "_blank"
           attrs.rel = "noopener noreferrer"
           const prevClass = attrs.class ? String(attrs.class) : ""
-          attrs.class = prevClass
-            ? `${prevClass} gowiki-external-link`
-            : "gowiki-external-link"
+          attrs.class = prevClass ? `${prevClass} gowiki-external-link` : "gowiki-external-link"
         } else if (/^mailto:/i.test(href)) {
           const prevClass = attrs.class ? String(attrs.class) : ""
-          attrs.class = prevClass
-            ? `${prevClass} gowiki-mailto-link`
-            : "gowiki-mailto-link"
+          attrs.class = prevClass ? `${prevClass} gowiki-mailto-link` : "gowiki-mailto-link"
         }
         const children = hasAttrs ? rest : [maybeAttrs, ...rest]
         return [tag, attrs, ...children]
@@ -96,23 +83,31 @@ export function registerCoreNodes(reg: Registry) {
   // Extra marks: underline, strikethrough, subscript, superscript
   marks.underline = {
     parseDOM: [{ tag: "u" }, { style: "text-decoration=underline" }],
-    toDOM() { return ["u", 0] },
+    toDOM() {
+      return ["u", 0]
+    },
   } as MarkSpec
 
   marks.strikethrough = {
     parseDOM: [{ tag: "s" }, { tag: "del" }, { style: "text-decoration=line-through" }],
-    toDOM() { return ["s", 0] },
+    toDOM() {
+      return ["s", 0]
+    },
   } as MarkSpec
 
   marks.subscript = {
     parseDOM: [{ tag: "sub" }],
-    toDOM() { return ["sub", 0] },
+    toDOM() {
+      return ["sub", 0]
+    },
     excludes: "superscript",
   } as MarkSpec
 
   marks.superscript = {
     parseDOM: [{ tag: "sup" }],
-    toDOM() { return ["sup", 0] },
+    toDOM() {
+      return ["sup", 0]
+    },
     excludes: "subscript",
   } as MarkSpec
 
@@ -120,7 +115,9 @@ export function registerCoreNodes(reg: Registry) {
   // Syntax: @`text with {{VAR}}`
   marks.code_expand = {
     parseDOM: [{ tag: "code.gowiki-code-expand" }],
-    toDOM() { return ["code", { class: "gowiki-code-expand" }, 0] },
+    toDOM() {
+      return ["code", { class: "gowiki-code-expand" }, 0]
+    },
     excludes: "code",
   } as MarkSpec
 
@@ -208,10 +205,12 @@ function registerAnchorAutoText(reg: Registry) {
               if (display) {
                 // Replace the placeholder text visually with a widget.
                 // Hide the original text node and show the display text instead.
-                decorations.push(Decoration.inline(pos, pos + node.nodeSize, {
-                  class: "gowiki-anchor-autotext",
-                  "data-display": display,
-                }))
+                decorations.push(
+                  Decoration.inline(pos, pos + node.nodeSize, {
+                    class: "gowiki-anchor-autotext",
+                    "data-display": display,
+                  })
+                )
               }
             }
           }
@@ -240,9 +239,11 @@ function registerAnchorAutoText(reg: Registry) {
       // Add selection highlight for the anchor link the cursor is on.
       for (const r of anchorRanges) {
         if (selFrom >= r.from && selFrom <= r.to) {
-          decos.push(Decoration.inline(r.from, r.to, {
-            class: "gowiki-anchor-autotext-selected",
-          }))
+          decos.push(
+            Decoration.inline(r.from, r.to, {
+              class: "gowiki-anchor-autotext-selected",
+            })
+          )
           break
         }
       }
@@ -280,9 +281,7 @@ function registerAnchorAutoText(reg: Registry) {
             if (from >= r.from && from <= r.to) {
               const target = event.key === "ArrowRight" ? r.to : r.from
               if (target !== from) {
-                view.dispatch(view.state.tr.setSelection(
-                  TextSelection.create(view.state.doc, target)
-                ))
+                view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, target)))
                 return true
               }
             }
@@ -293,7 +292,9 @@ function registerAnchorAutoText(reg: Registry) {
     })
   })
 
-  reg.registerStyle("anchorAutoText", `
+  reg.registerStyle(
+    "anchorAutoText",
+    `
     .gowiki-anchor-autotext {
       font-size: 0;
       line-height: 0;
@@ -310,7 +311,8 @@ function registerAnchorAutoText(reg: Registry) {
       border-radius: 2px;
       background: rgba(255, 212, 59, 0.15);
     }
-  `)
+  `
+  )
 }
 
 /* --------------------------------------------------
@@ -353,8 +355,7 @@ function registerParagraph(reg: Registry) {
       const inParagraph = ctx.currentNodeName() === "paragraph"
       const topLevelParagraph = ctx.openDepth() === 1
       const inListItem = ctx.hasOpenNode("list_item")
-      const inTableCell =
-        ctx.hasOpenNode("table_cell") || ctx.hasOpenNode("table_header")
+      const inTableCell = ctx.hasOpenNode("table_cell") || ctx.hasOpenNode("table_header")
 
       // Hard-break in all three carriers of hard breaks in this dialect:
       // top-level paragraphs, list items (where a wrapped source line
@@ -459,17 +460,20 @@ function registerEmphasis(reg: Registry) {
     md.inline.ruler.push("gowiki_subscript", (state: any, silent: boolean) => {
       const src = state.src
       const start = state.pos
-      if (src.charCodeAt(start) !== 0x7E) return false
+      if (src.charCodeAt(start) !== 0x7e) return false
       // Must be a lone ~ (not followed by another ~)
-      if (start + 1 < state.posMax && src.charCodeAt(start + 1) === 0x7E) return false
+      if (start + 1 < state.posMax && src.charCodeAt(start + 1) === 0x7e) return false
       // Find closing single ~ (skip tilde runs of 2+)
       let end = -1
       for (let i = start + 1; i < state.posMax; i++) {
-        if (src.charCodeAt(i) !== 0x7E) continue
+        if (src.charCodeAt(i) !== 0x7e) continue
         // Count tilde run length at this position
         let runEnd = i
-        while (runEnd + 1 < state.posMax && src.charCodeAt(runEnd + 1) === 0x7E) runEnd++
-        if (runEnd === i) { end = i; break } // single ~ → valid close
+        while (runEnd + 1 < state.posMax && src.charCodeAt(runEnd + 1) === 0x7e) runEnd++
+        if (runEnd === i) {
+          end = i
+          break
+        } // single ~ → valid close
         i = runEnd // skip past the run
       }
       if (end === -1) return false
@@ -492,17 +496,17 @@ function registerEmphasis(reg: Registry) {
     md.inline.ruler.push("gowiki_strikethrough", (state: any, silent: boolean) => {
       const src = state.src
       const start = state.pos
-      if (src.charCodeAt(start) !== 0x7E || src.charCodeAt(start + 1) !== 0x7E) return false
+      if (src.charCodeAt(start) !== 0x7e || src.charCodeAt(start + 1) !== 0x7e) return false
       // Opening must be exactly ~~ (reject ~~~ at start)
-      if (start + 2 < state.posMax && src.charCodeAt(start + 2) === 0x7E) return false
+      if (start + 2 < state.posMax && src.charCodeAt(start + 2) === 0x7e) return false
       // Also reject if preceded by ~ (tail of a longer run)
-      if (start > 0 && src.charCodeAt(start - 1) === 0x7E) return false
+      if (start > 0 && src.charCodeAt(start - 1) === 0x7e) return false
       // Find closing ~~ (not preceded by ~; what follows is irrelevant)
       let closePos = -1
       for (let i = start + 2; i < state.posMax - 1; i++) {
-        if (src.charCodeAt(i) !== 0x7E) continue
-        if (src.charCodeAt(i + 1) !== 0x7E) continue // single ~, skip
-        if (i > 0 && src.charCodeAt(i - 1) === 0x7E) continue // preceded by ~, skip
+        if (src.charCodeAt(i) !== 0x7e) continue
+        if (src.charCodeAt(i + 1) !== 0x7e) continue // single ~, skip
+        if (i > 0 && src.charCodeAt(i - 1) === 0x7e) continue // preceded by ~, skip
         closePos = i
         break
       }
@@ -530,7 +534,7 @@ function registerEmphasis(reg: Registry) {
     md.inline.ruler.push("gowiki_superscript", (state: any, silent: boolean) => {
       const src = state.src
       const start = state.pos
-      if (src.charCodeAt(start) !== 0x5E /* ^ */) return false
+      if (src.charCodeAt(start) !== 0x5e /* ^ */) return false
       const end = src.indexOf("^", start + 1)
       if (end === -1 || end === start + 1) return false
       // No spaces or newlines inside superscript
@@ -799,10 +803,7 @@ function registerCodeBlocks(reg: Registry) {
     ...spec,
     attrs: { ...(spec.attrs ?? {}), language: { default: "" } },
     toDOM(node: any) {
-      return [
-        "pre",
-        ["code", { class: node.attrs.language ? "language-" + node.attrs.language : "" }, 0],
-      ]
+      return ["pre", ["code", { class: node.attrs.language ? "language-" + node.attrs.language : "" }, 0]]
     },
     parseDOM: [
       {
@@ -880,10 +881,7 @@ function registerHorizontalRule(reg: Registry) {
 function registerMarkdownPrinters(reg: Registry) {
   // Text: handled centrally in pm_to_markdown.ts
 
-  function renderListItemText(
-    itemNode: any,
-    recurse: (node: any) => string
-  ): string {
+  function renderListItemText(itemNode: any, recurse: (node: any) => string): string {
     const parts: { text: string; type: string }[] = []
 
     itemNode.content.forEach((child: any) => {
@@ -937,10 +935,7 @@ function registerMarkdownPrinters(reg: Registry) {
     return ""
   }
 
-  function printStandaloneImage(
-    image: PMNode,
-    recurse: (node: PMNode) => string
-  ): string {
+  function printStandaloneImage(image: PMNode, recurse: (node: PMNode) => string): string {
     const body = recurse(image)
     const dir = imageDirectiveStr(image)
     if (dir) {
@@ -949,10 +944,7 @@ function registerMarkdownPrinters(reg: Registry) {
     return body + "\n\n"
   }
 
-  function printInlineImage(
-    image: PMNode,
-    recurse: (node: PMNode) => string
-  ): string {
+  function printInlineImage(image: PMNode, recurse: (node: PMNode) => string): string {
     const body = recurse(image)
     const dir = imageDirectiveStr(image)
     if (dir) {
@@ -966,7 +958,7 @@ function registerMarkdownPrinters(reg: Registry) {
   // when adjacent text nodes share the same highlight mark.
   function serializeInline(content: Fragment, recurse: (node: PMNode) => string): string {
     const nodes: PMNode[] = []
-    content.forEach(n => nodes.push(n))
+    content.forEach((n) => nodes.push(n))
 
     let out = ""
     // Stored outermost-first (reversed from PM's inner-first order).
@@ -1005,8 +997,7 @@ function registerMarkdownPrinters(reg: Registry) {
 
       // Common prefix — marks that are already open and stay open.
       let common = 0
-      while (common < active.length && common < marks.length &&
-             active[common].eq(marks[common])) common++
+      while (common < active.length && common < marks.length && active[common].eq(marks[common])) common++
 
       // Close marks that changed (innermost = end of array first).
       for (let i = active.length - 1; i >= common; i--) out += getClose(active[i])
@@ -1047,7 +1038,12 @@ function registerMarkdownPrinters(reg: Registry) {
       node.content.forEach((child) => {
         if (
           child.type.name === "image" &&
-          (child.attrs.size || child.attrs.version || child.attrs.align || child.attrs.wrap || child.attrs.caption || child.attrs.label)
+          (child.attrs.size ||
+            child.attrs.version ||
+            child.attrs.align ||
+            child.attrs.wrap ||
+            child.attrs.caption ||
+            child.attrs.label)
         ) {
           hasSizedImage = true
         }
@@ -1137,8 +1133,8 @@ function registerMarkdownPrinters(reg: Registry) {
   reg.registerPMMark("subscript", { open: "~", close: "~" })
   reg.registerPMMark("superscript", { open: "^", close: "^" })
   reg.registerPMMark("link", {
-    open: mark => (mark.attrs.autoText ? "" : "["),
-    close: mark => {
+    open: (mark) => (mark.attrs.autoText ? "" : "["),
+    close: (mark) => {
       const href = mark.attrs.href ?? ""
       const title = mark.attrs.title
       if (mark.attrs.autoText) {
@@ -1236,7 +1232,7 @@ export const INCLUDE_HEADING_META = "includeHeadingUpdate"
 
 type HeadingNumberState = {
   decorations: DecorationSet
-  includeCounts: Map<number, number[]>  // pos → final counter state of that include
+  includeCounts: Map<number, number[]> // pos → final counter state of that include
 }
 
 function registerHeadingNumbers(reg: Registry) {
@@ -1277,7 +1273,7 @@ function registerHeadingNumbers(reg: Registry) {
 export function computeHeadingNumbers(
   doc: any,
   initialCounters?: number[],
-  includeCounts?: Map<number, number[]>,
+  includeCounts?: Map<number, number[]>
 ): DecorationSet {
   const counters = initialCounters ? [...initialCounters] : [0, 0, 0, 0, 0, 0]
   const decorations: Decoration[] = []
@@ -1351,7 +1347,9 @@ function resolveInternalHref(href: string, pageNamespace: string): string | null
   if (!href || /^https?:\/\//i.test(href) || /^mailto:/i.test(href)) return null
   if (href.startsWith("#")) return href // anchor link — resolved locally
   // Decode percent-encoded characters (match backend resolve.go)
-  try { href = decodeURIComponent(href) } catch {}
+  try {
+    href = decodeURIComponent(href)
+  } catch {}
   let resolved: string
   if (href.startsWith("/")) {
     resolved = href
@@ -1395,11 +1393,7 @@ function collectLinkRanges(
   return { ranges, paths: Array.from(pathSet) }
 }
 
-function buildLinkDecorations(
-  doc: any,
-  pageNamespace: string,
-  statusMap: Map<string, boolean>
-): DecorationSet {
+function buildLinkDecorations(doc: any, pageNamespace: string, statusMap: Map<string, boolean>): DecorationSet {
   // Collect heading slugs for anchor link validation.
   const headingSlugs = new Set<string>()
   const slugCounts = new Map<string, number>()
@@ -1442,24 +1436,32 @@ function registerCodeExpand(reg: Registry) {
     if (!ctx) return fallback || `{{${name}}}`
     const meta = ctx.pageMeta
     switch (name) {
-      case "SERVER": return window.location.hostname
-      case "ID": return ctx.pagePath || fallback
-      case "PATH": return ctx.pageNamespace || fallback
-      case "PAGE": return ctx.pageName || fallback
-      case "TITLE": return meta?.title || fallback
-      case "VERSION": return meta?.version != null ? String(meta.version) : fallback
+      case "SERVER":
+        return window.location.hostname
+      case "ID":
+        return ctx.pagePath || fallback
+      case "PATH":
+        return ctx.pageNamespace || fallback
+      case "PAGE":
+        return ctx.pageName || fallback
+      case "TITLE":
+        return meta?.title || fallback
+      case "VERSION":
+        return meta?.version != null ? String(meta.version) : fallback
       case "VERSIONDATE": {
         if (!meta?.updated_at) return fallback
         const d = new Date(meta.updated_at)
         return isNaN(d.getTime()) ? fallback : d.toISOString().slice(0, 10)
       }
-      case "AUTHOR": return meta?.author || fallback
+      case "AUTHOR":
+        return meta?.author || fallback
       case "CREATED": {
         if (!meta?.created_at) return fallback
         const d = new Date(meta.created_at)
         return isNaN(d.getTime()) ? fallback : d.toISOString().slice(0, 10)
       }
-      default: return fallback || `{{${name}}}`
+      default:
+        return fallback || `{{${name}}}`
     }
   }
 
@@ -1480,7 +1482,7 @@ function registerCodeExpand(reg: Registry) {
           const varPattern = /\{\{([a-zA-Z_][a-zA-Z0-9_.]*)(?::([^}]*))?\}\}/g
           state.doc.descendants((node, pos) => {
             if (!node.isText) return
-            if (!node.marks.some(m => m.type.name === "code_expand")) return
+            if (!node.marks.some((m) => m.type.name === "code_expand")) return
             const text = node.text ?? ""
             let m: RegExpExecArray | null
             while ((m = varPattern.exec(text)) !== null) {
@@ -1489,16 +1491,24 @@ function registerCodeExpand(reg: Registry) {
               const from = pos + m.index
               const to = from + m[0].length
               // Hide the {{VAR}} text
-              decos.push(Decoration.inline(from, to, {
-                class: "gowiki-code-expand-hidden",
-              }))
+              decos.push(
+                Decoration.inline(from, to, {
+                  class: "gowiki-code-expand-hidden",
+                })
+              )
               // Insert resolved value as a widget right before the hidden text
-              decos.push(Decoration.widget(from, () => {
-                const span = document.createElement("span")
-                span.className = "gowiki-code-expand-resolved"
-                span.textContent = resolved
-                return span
-              }, { side: -1 }))
+              decos.push(
+                Decoration.widget(
+                  from,
+                  () => {
+                    const span = document.createElement("span")
+                    span.className = "gowiki-code-expand-resolved"
+                    span.textContent = resolved
+                    return span
+                  },
+                  { side: -1 }
+                )
+              )
             }
           })
           return decos.length > 0 ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
@@ -1507,14 +1517,17 @@ function registerCodeExpand(reg: Registry) {
     })
   })
 
-  reg.registerStyle("code-expand", `
+  reg.registerStyle(
+    "code-expand",
+    `
     .gowiki-code-expand-hidden {
       display: none;
     }
     .gowiki-code-expand-resolved {
       /* inherits code styling from parent <code> element */
     }
-  `)
+  `
+  )
 }
 
 function registerLinkStatus(reg: Registry) {
@@ -1569,10 +1582,13 @@ function registerLinkStatus(reg: Registry) {
 
     function scheduleCheck(doc: any, immediate?: boolean) {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        timer = null
-        checkLinks(doc)
-      }, immediate ? 0 : 500)
+      timer = setTimeout(
+        () => {
+          timer = null
+          checkLinks(doc)
+        },
+        immediate ? 0 : 500
+      )
     }
 
     return new PMPlugin({

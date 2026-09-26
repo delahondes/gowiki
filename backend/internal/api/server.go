@@ -23,12 +23,12 @@ import (
 
 	"gowiki/backend/internal/aiassistant"
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/bibliography"
 	"gowiki/backend/internal/collab"
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
-	"gowiki/backend/internal/bibliography"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
@@ -127,8 +127,8 @@ type Server struct {
 	dbPool            *database.Pool
 	schemaStore       *database.SchemaStore
 	dataStore         *database.DataStore
-	backlinkProvider    BacklinkProvider
-	tagIndex            *storage.TagIndex
+	backlinkProvider  BacklinkProvider
+	tagIndex          *storage.TagIndex
 	// Persistent browser context for PDF export (nil if Chrome not available).
 	browserAllocCtx    context.Context
 	browserAllocCancel context.CancelFunc
@@ -156,39 +156,39 @@ type Server struct {
 
 func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service, oauthServer *auth.OAuthServer) http.Handler {
 	s := &Server{
-		store:             store,
-		mediaStore:        mediaStore,
-		orphanDetector:    orphanDetector,
-		searchStore:       searchStore,
-		atticStore:        atticStore,
-		draftManager:      draftManager,
-		logoResolver:      logoResolver,
-		mediaAtticStore:   mediaAtticStore,
-		mediaVersionStore: mediaVersionStore,
-		configStore:       configStore,
-		userStore:         userStore,
-		groupStore:        groupStore,
-		sessionStore:      sessionStore,
-		aclStore:          aclStore,
-		changelog:         changelog,
-		backlinkProvider:   backlinkProvider,
-		tagIndex:           tagIndex,
-		browserAllocCtx:    browserAllocCtx,
-		browserAllocCancel: browserAllocCancel,
-		dbPool:      dbPool,
-		todoService:       todoService,
-		reviewflowService: reviewflowService,
-		commentService:    commentService,
+		store:               store,
+		mediaStore:          mediaStore,
+		orphanDetector:      orphanDetector,
+		searchStore:         searchStore,
+		atticStore:          atticStore,
+		draftManager:        draftManager,
+		logoResolver:        logoResolver,
+		mediaAtticStore:     mediaAtticStore,
+		mediaVersionStore:   mediaVersionStore,
+		configStore:         configStore,
+		userStore:           userStore,
+		groupStore:          groupStore,
+		sessionStore:        sessionStore,
+		aclStore:            aclStore,
+		changelog:           changelog,
+		backlinkProvider:    backlinkProvider,
+		tagIndex:            tagIndex,
+		browserAllocCtx:     browserAllocCtx,
+		browserAllocCancel:  browserAllocCancel,
+		dbPool:              dbPool,
+		todoService:         todoService,
+		reviewflowService:   reviewflowService,
+		commentService:      commentService,
 		bibliographyService: bibliographyService,
-		tokenStore:        tokenStore,
-		oauthServer:       oauthServer,
-		caStore:           caStore,
-		certStore:         certStore,
-		presenceHub:       collab.NewHub(),
-		collabRelay:       collab.NewRelay(),
-		rateLimiter:       NewRateLimiter(),
-		serveWeb:          serveWeb,
-		webDirPath:  webDirPath,
+		tokenStore:          tokenStore,
+		oauthServer:         oauthServer,
+		caStore:             caStore,
+		certStore:           certStore,
+		presenceHub:         collab.NewHub(),
+		collabRelay:         collab.NewRelay(),
+		rateLimiter:         NewRateLimiter(),
+		serveWeb:            serveWeb,
+		webDirPath:          webDirPath,
 	}
 
 	// If database pool is already connected, initialize stores.
@@ -875,7 +875,7 @@ func (s *Server) handleDeleteMedia(w http.ResponseWriter, r *http.Request) {
 	// not carry one, so add it here.
 	if pages := s.orphanDetector.GetReferencingPages("/" + mediaPath); len(pages) > 0 {
 		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":            "media is still referenced",
+			"error":             "media is still referenced",
 			"referencing_pages": pages,
 		})
 		return
@@ -1075,12 +1075,12 @@ func (s *Server) handleSiteInfo(w http.ResponseWriter, _ *http.Request) {
 		themeDefault = "auto"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"title":               cfg.Site.Title,
-		"version":             Version,
-		"toc_max_level":       cfg.Site.TOCMaxLevel,
-		"user_display":        cfg.Site.UserDisplay,
-		"code_theme":          cfg.Site.CodeTheme,
-		"code_theme_dark":     cfg.Site.CodeThemeDark,
+		"title":                cfg.Site.Title,
+		"version":              Version,
+		"toc_max_level":        cfg.Site.TOCMaxLevel,
+		"user_display":         cfg.Site.UserDisplay,
+		"code_theme":           cfg.Site.CodeTheme,
+		"code_theme_dark":      cfg.Site.CodeThemeDark,
 		"ai_assistant_enabled": cfg.AIAssistant.Enabled,
 		"theme": map[string]any{
 			"default":             themeDefault,

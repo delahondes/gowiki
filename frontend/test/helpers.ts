@@ -42,9 +42,9 @@ export function roundTrip(source: string): RoundTripResult {
 // Walk every text node in the doc; call visitor with (text, marks).
 export function forEachTextNode(
   doc: PMNode,
-  visit: (text: string, marks: readonly Mark[], node: PMNode) => void,
+  visit: (text: string, marks: readonly Mark[], node: PMNode) => void
 ): void {
-  doc.descendants(n => {
+  doc.descendants((n) => {
     if (n.isText) visit(n.text ?? "", n.marks, n)
   })
 }
@@ -55,7 +55,7 @@ export function marksOnText(doc: PMNode, target: string): string[] | null {
   let found: string[] | null = null
   forEachTextNode(doc, (text, marks) => {
     if (found === null && text === target) {
-      found = marks.map(m => m.type.name)
+      found = marks.map((m) => m.type.name)
     }
   })
   return found
@@ -64,23 +64,16 @@ export function marksOnText(doc: PMNode, target: string): string[] | null {
 // Convenience assertion for the common shape: `sourceHas` a marked
 // fragment of `expectedText` — assert that after parsing, some text node
 // exactly `expectedText` carries `markName`.
-export function assertMarkOnText(
-  doc: PMNode,
-  markName: string,
-  expectedText: string,
-): void {
+export function assertMarkOnText(doc: PMNode, markName: string, expectedText: string): void {
   const marks = marksOnText(doc, expectedText)
   if (marks === null) {
     throw new Error(
       `Expected a text node "${expectedText}" carrying mark "${markName}", ` +
-      `but no text node with that exact content was found.`,
+        `but no text node with that exact content was found.`
     )
   }
   if (!marks.includes(markName)) {
-    throw new Error(
-      `Text node "${expectedText}" is missing mark "${markName}" — ` +
-      `has: [${marks.join(", ")}]`,
-    )
+    throw new Error(`Text node "${expectedText}" is missing mark "${markName}" — ` + `has: [${marks.join(", ")}]`)
   }
 }
 
@@ -88,7 +81,7 @@ export function assertMarkOnText(
 // "code_block") anywhere in the doc.
 export function countNodes(doc: PMNode, typeName: string): number {
   let n = 0
-  doc.descendants(node => {
+  doc.descendants((node) => {
     if (node.type.name === typeName) n++
   })
   return n

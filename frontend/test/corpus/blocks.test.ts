@@ -99,7 +99,7 @@ describe("code blocks", () => {
     expect(rt.isStable).toBe(true)
     // Text content should contain the internal newline.
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "code_block") text = n.textContent
     })
     expect(text).toContain("\n")
@@ -118,8 +118,8 @@ describe("code blocks", () => {
     // No strong/underline marks should have been created — everything is
     // literal text inside the code block.
     let foundMark = false
-    rt.doc.descendants(n => {
-      if (n.isText && n.marks.some(m => m.type.name === "strong" || m.type.name === "underline")) {
+    rt.doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === "strong" || m.type.name === "underline")) {
         foundMark = true
       }
     })

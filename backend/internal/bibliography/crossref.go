@@ -19,23 +19,23 @@ type crossrefResponse struct {
 }
 
 type crossrefWork struct {
-	Title           []string            `json:"title"`
-	ContainerTitle  []string            `json:"container-title"`
-	Volume          string              `json:"volume"`
-	Issue           string              `json:"issue"`
-	Page            string              `json:"page"`
-	URL             string              `json:"URL"`
-	Author          []crossrefAuthor    `json:"author"`
-	Issued          crossrefDateParts   `json:"issued"`
-	Created         crossrefDateParts   `json:"created"`
-	Published       crossrefDateParts   `json:"published"`
-	PublishedOnline crossrefDateParts   `json:"published-online"`
-	PublishedPrint  crossrefDateParts   `json:"published-print"`
+	Title           []string          `json:"title"`
+	ContainerTitle  []string          `json:"container-title"`
+	Volume          string            `json:"volume"`
+	Issue           string            `json:"issue"`
+	Page            string            `json:"page"`
+	URL             string            `json:"URL"`
+	Author          []crossrefAuthor  `json:"author"`
+	Issued          crossrefDateParts `json:"issued"`
+	Created         crossrefDateParts `json:"created"`
+	Published       crossrefDateParts `json:"published"`
+	PublishedOnline crossrefDateParts `json:"published-online"`
+	PublishedPrint  crossrefDateParts `json:"published-print"`
 }
 
 type crossrefAuthor struct {
 	Family string `json:"family"`
-	Given  string `json:"given"`
+	Given  string `json:"given,omitempty"`
 }
 
 type crossrefDateParts struct {
@@ -105,7 +105,7 @@ func (s *Service) fetchDOI(ctx context.Context, doi string) (*Entry, error) {
 		Source:         "crossref",
 	}
 	for _, a := range work.Author {
-		entry.Authors = append(entry.Authors, Author{Family: a.Family, Given: a.Given})
+		entry.Authors = append(entry.Authors, Author(a))
 	}
 	entry.Year = firstNonZero(
 		work.Issued.Year(),

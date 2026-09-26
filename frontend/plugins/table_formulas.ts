@@ -1,13 +1,7 @@
 import { Node, Schema } from "prosemirror-model"
 import { Plugin as PMPlugin, Transaction } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
-import {
-  getCellText,
-  evaluateColorRules,
-  parseColorRules,
-  resolveColumnProps,
-  type ColumnProps,
-} from "./table"
+import { getCellText, evaluateColorRules, parseColorRules, resolveColumnProps, type ColumnProps } from "./table"
 
 // ─── Cell reference parsing ─────────────────────────────
 
@@ -180,10 +174,7 @@ class Parser {
 
   private parseComparison(): ASTNode {
     let left = this.parseAddSub()
-    while (
-      this.peek()?.type === "op" &&
-      ["=", "!=", ">", "<", ">=", "<="].includes(this.peek()!.value as string)
-    ) {
+    while (this.peek()?.type === "op" && ["=", "!=", ">", "<", ">=", "<="].includes(this.peek()!.value as string)) {
       const op = this.consume().value as string
       const right = this.parseAddSub()
       left = { kind: "binop", op, left, right }
@@ -193,10 +184,7 @@ class Parser {
 
   private parseAddSub(): ASTNode {
     let left = this.parseMulDiv()
-    while (
-      this.peek()?.type === "op" &&
-      (this.peek()!.value === "+" || this.peek()!.value === "-")
-    ) {
+    while (this.peek()?.type === "op" && (this.peek()!.value === "+" || this.peek()!.value === "-")) {
       const op = this.consume().value as string
       const right = this.parseMulDiv()
       left = { kind: "binop", op, left, right }
@@ -206,10 +194,7 @@ class Parser {
 
   private parseMulDiv(): ASTNode {
     let left = this.parseUnary()
-    while (
-      this.peek()?.type === "op" &&
-      (this.peek()!.value === "*" || this.peek()!.value === "/")
-    ) {
+    while (this.peek()?.type === "op" && (this.peek()!.value === "*" || this.peek()!.value === "/")) {
       const op = this.consume().value as string
       const right = this.parseUnary()
       left = { kind: "binop", op, left, right }
@@ -218,10 +203,7 @@ class Parser {
   }
 
   private parseUnary(): ASTNode {
-    if (
-      this.peek()?.type === "op" &&
-      this.peek()!.value === "-"
-    ) {
+    if (this.peek()?.type === "op" && this.peek()!.value === "-") {
       this.consume()
       const operand = this.parsePrimary()
       return { kind: "unary", op: "-", operand }
@@ -389,7 +371,7 @@ function expandRelatives(
       return {
         kind: "call",
         func: ast.func,
-        args: ast.args.map(a => expandRelatives(a, cellRow, cellCol, dataRowStart, dataColStart)),
+        args: ast.args.map((a) => expandRelatives(a, cellRow, cellCol, dataRowStart, dataColStart)),
       }
     default:
       return ast
@@ -400,10 +382,7 @@ function expandRelatives(
 
 type CellValueGetter = (col: number, row: number) => number | string
 
-function evaluateAST(
-  ast: ASTNode,
-  getValue: CellValueGetter
-): number | string {
+function evaluateAST(ast: ASTNode, getValue: CellValueGetter): number | string {
   switch (ast.kind) {
     case "number":
       return ast.value
@@ -455,17 +434,17 @@ function evaluateAST(
           if (rNum === 0) return "#DIV/0"
           return lNum / rNum
         case ">":
-          return (lNum > rNum ? 1 : 0)
+          return lNum > rNum ? 1 : 0
         case ">=":
-          return (lNum >= rNum ? 1 : 0)
+          return lNum >= rNum ? 1 : 0
         case "<":
-          return (lNum < rNum ? 1 : 0)
+          return lNum < rNum ? 1 : 0
         case "<=":
-          return (lNum <= rNum ? 1 : 0)
+          return lNum <= rNum ? 1 : 0
         case "=":
-          return (left === right ? 1 : 0)
+          return left === right ? 1 : 0
         case "!=":
-          return (left !== right ? 1 : 0)
+          return left !== right ? 1 : 0
         default:
           return "#ERR"
       }
@@ -476,10 +455,7 @@ function evaluateAST(
   }
 }
 
-function resolveRangeValues(
-  args: ASTNode[],
-  getValue: CellValueGetter
-): (number | string)[] {
+function resolveRangeValues(args: ASTNode[], getValue: CellValueGetter): (number | string)[] {
   const values: (number | string)[] = []
   for (const arg of args) {
     if (arg.kind === "range") {
@@ -512,11 +488,7 @@ function toNumbers(values: (number | string)[]): number[] | string {
   return nums
 }
 
-function evaluateFunc(
-  name: string,
-  args: ASTNode[],
-  getValue: CellValueGetter
-): number | string {
+function evaluateFunc(name: string, args: ASTNode[], getValue: CellValueGetter): number | string {
   switch (name) {
     case "SUM": {
       const values = resolveRangeValues(args, getValue)
@@ -551,7 +523,7 @@ function evaluateFunc(
 
     case "COUNT": {
       const values = resolveRangeValues(args, getValue)
-      return values.filter(v => {
+      return values.filter((v) => {
         if (typeof v === "string") return v !== ""
         return true
       }).length
@@ -561,8 +533,7 @@ function evaluateFunc(
       if (args.length < 2 || args.length > 3) return "#ERR"
       const cond = evaluateAST(args[0], getValue)
       if (typeof cond === "string" && cond.startsWith("#")) return cond
-      const truthy =
-        typeof cond === "number" ? cond !== 0 : cond !== "" && cond !== "0"
+      const truthy = typeof cond === "number" ? cond !== 0 : cond !== "" && cond !== "0"
       if (truthy) {
         return evaluateAST(args[1], getValue)
       }
@@ -679,7 +650,7 @@ function evaluateTableFormulas(
 
     evaluating.add(key)
 
-    const fc = formulaCells.find(f => f.cell === cell)
+    const fc = formulaCells.find((f) => f.cell === cell)
     if (!fc) {
       evaluating.delete(key)
       evaluated.add(key)
@@ -716,10 +687,7 @@ function evaluateTableFormulas(
 function formatResult(result: number | string): string {
   if (typeof result === "number") {
     if (Number.isInteger(result)) return String(result)
-    return result
-      .toFixed(4)
-      .replace(/0+$/, "")
-      .replace(/\.$/, "")
+    return result.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")
   }
   return String(result)
 }
@@ -745,12 +713,18 @@ function getDataBoundaries(headers: string): { dataRowStart: number; dataColStar
   }
   // Legacy fallback
   switch (headers) {
-    case "1st_row": return { dataRowStart: 1, dataColStart: 0 }
-    case "2_rows": return { dataRowStart: 2, dataColStart: 0 }
-    case "1st_col": return { dataRowStart: 0, dataColStart: 1 }
-    case "2_cols": return { dataRowStart: 0, dataColStart: 2 }
-    case "both": return { dataRowStart: 1, dataColStart: 1 }
-    default: return { dataRowStart: 1, dataColStart: 0 }
+    case "1st_row":
+      return { dataRowStart: 1, dataColStart: 0 }
+    case "2_rows":
+      return { dataRowStart: 2, dataColStart: 0 }
+    case "1st_col":
+      return { dataRowStart: 0, dataColStart: 1 }
+    case "2_cols":
+      return { dataRowStart: 0, dataColStart: 2 }
+    case "both":
+      return { dataRowStart: 1, dataColStart: 1 }
+    default:
+      return { dataRowStart: 1, dataColStart: 0 }
   }
 }
 
@@ -767,7 +741,7 @@ function runFormulaSync(state: any, schema: Schema): Transaction | null {
     if (tableNode.type !== schema.nodes.table) return true
 
     const { cells } = collectTableCells(tableNode, tablePos, schema)
-    const hasFormulas = cells.some(c => c.formula != null)
+    const hasFormulas = cells.some((c) => c.formula != null)
 
     const { dataRowStart, dataColStart } = hasFormulas
       ? getDataBoundaries(tableNode.attrs.headers ?? "1st_row")

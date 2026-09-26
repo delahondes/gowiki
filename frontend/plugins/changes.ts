@@ -132,9 +132,7 @@ function humanizePagePath(pagePath: string): string {
   // Get last segment, replace dashes/underscores with spaces, title case.
   const segments = pagePath.split("/").filter(Boolean)
   const last = segments[segments.length - 1] || pagePath
-  return last
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase())
+  return last.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function relativeTime(timestamp: string): string {
@@ -270,7 +268,6 @@ class ChangesNodeView {
   ignoreMutation(): boolean {
     return true
   }
-
 }
 
 export const changesPlugin: WikiPlugin = {
@@ -376,21 +373,19 @@ export const changesPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === changesType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === changesType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

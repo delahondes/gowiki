@@ -45,9 +45,12 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
           cache-dependency-path: backend/go.sum
-      - name: go vet
-        working-directory: backend
-        run: go vet ./...
+      - name: golangci-lint (includes gofmt + govet + staticcheck + unused + ineffassign)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.14.0
+          working-directory: backend
+          args: --timeout=5m
       - name: go build
         working-directory: backend
         run: go build ./...
@@ -79,6 +82,12 @@ jobs:
           else
             npm install
           fi
+      - name: eslint
+        working-directory: frontend
+        run: npm run lint
+      - name: prettier --check
+        working-directory: frontend
+        run: npm run format:check
       - name: vite build
         working-directory: frontend
         run: npx vite build

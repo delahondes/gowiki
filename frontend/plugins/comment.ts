@@ -3,12 +3,7 @@ import { Plugin as PMPlugin, PluginKey } from "prosemirror-state"
 import { Decoration, DecorationSet } from "prosemirror-view"
 import type { EditorView } from "prosemirror-view"
 import type { Node as PMNode } from "prosemirror-model"
-import {
-  type AnchorRange,
-  rangeFromPm,
-  resolveRangeInPm,
-  domSelectionToPmRange,
-} from "../compiler/anchor"
+import { type AnchorRange, rangeFromPm, resolveRangeInPm, domSelectionToPmRange } from "../compiler/anchor"
 
 const API_BASE = "/api/plugin/comment/v1"
 
@@ -83,26 +78,34 @@ function resolveCommentToRange(doc: PMNode, c: CommentEntry): { from: number; to
   return null
 }
 
-function buildDecorationState(doc: PMNode, comments: CommentEntry[], temp: { from: number; to: number } | null): DecorationState {
+function buildDecorationState(
+  doc: PMNode,
+  comments: CommentEntry[],
+  temp: { from: number; to: number } | null
+): DecorationState {
   const decos: Decoration[] = []
   const orphanedIds = new Set<string>()
   for (const c of comments) {
     if (c.resolved || c.parent_id) continue // replies don't get their own highlight
     const range = resolveCommentToRange(doc, c)
     if (range && range.to > range.from) {
-      decos.push(Decoration.inline(range.from, range.to, {
-        class: "comment-highlight",
-        "data-comment-id": c.id,
-      }))
+      decos.push(
+        Decoration.inline(range.from, range.to, {
+          class: "comment-highlight",
+          "data-comment-id": c.id,
+        })
+      )
     } else {
       orphanedIds.add(c.id)
     }
   }
   if (temp && temp.to > temp.from) {
-    decos.push(Decoration.inline(temp.from, temp.to, {
-      class: "comment-highlight",
-      "data-comment-id": TEMP_COMMENT_ID,
-    }))
+    decos.push(
+      Decoration.inline(temp.from, temp.to, {
+        class: "comment-highlight",
+        "data-comment-id": TEMP_COMMENT_ID,
+      })
+    )
   }
   return { decos: DecorationSet.create(doc, decos), orphanedIds }
 }
@@ -137,7 +140,7 @@ function refreshDecorations(): Set<string> {
 }
 
 function getOrphanedIds(): Set<string> {
-  if (!activeView) return new Set(currentComments.map(c => c.id))
+  if (!activeView) return new Set(currentComments.map((c) => c.id))
   return COMMENT_KEY.getState(activeView.state)?.orphanedIds || new Set()
 }
 
@@ -223,7 +226,7 @@ function showCollapsedToggle() {
   collapsedToggle.className = "comment-collapsed-toggle"
   collapsedToggle.title = "Show comments"
 
-  const n = currentComments.filter(c => !c.resolved).length
+  const n = currentComments.filter((c) => !c.resolved).length
   const arrow = document.createElement("span")
   arrow.className = "comment-header-arrow"
   arrow.textContent = "▶"
@@ -277,7 +280,7 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
 
   const title = document.createElement("span")
   // Header count tracks unresolved top-level threads (replies don't count separately).
-  const unresolvedCount = comments.filter(c => !c.resolved && !c.parent_id).length
+  const unresolvedCount = comments.filter((c) => !c.resolved && !c.parent_id).length
   title.textContent = ` Comments (${unresolvedCount})`
   header.appendChild(title)
 
@@ -289,10 +292,10 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
   sidebar.appendChild(header)
 
   const replies = groupReplies(comments)
-  const tops = comments.filter(c => !c.parent_id)
-  const anchored = tops.filter(c => !c.resolved && !orphanedIds.has(c.id)).slice()
-  const orphaned = tops.filter(c => !c.resolved && orphanedIds.has(c.id))
-  const resolved = tops.filter(c => c.resolved)
+  const tops = comments.filter((c) => !c.parent_id)
+  const anchored = tops.filter((c) => !c.resolved && !orphanedIds.has(c.id)).slice()
+  const orphaned = tops.filter((c) => !c.resolved && orphanedIds.has(c.id))
+  const resolved = tops.filter((c) => c.resolved)
 
   anchored.sort((a, b) => {
     const spanA = findHighlightSpan(a.id)
@@ -325,7 +328,8 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
     let expanded = false
     const resolvedContainer = document.createElement("div")
     resolvedContainer.style.display = "none"
-    for (const c of resolved) resolvedContainer.appendChild(renderCommentBox(c, orphanedIds.has(c.id), replies.get(c.id) || []))
+    for (const c of resolved)
+      resolvedContainer.appendChild(renderCommentBox(c, orphanedIds.has(c.id), replies.get(c.id) || []))
     toggle.addEventListener("click", () => {
       expanded = !expanded
       resolvedContainer.style.display = expanded ? "block" : "none"
@@ -340,7 +344,11 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
 
 function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEntry[] = []): HTMLDivElement {
   const box = document.createElement("div")
-  box.className = "comment-box" + (c.resolved ? " comment-resolved" : "") + (orphaned ? " comment-orphaned" : "") + (c.ai ? " comment-ai" : "")
+  box.className =
+    "comment-box" +
+    (c.resolved ? " comment-resolved" : "") +
+    (orphaned ? " comment-orphaned" : "") +
+    (c.ai ? " comment-ai" : "")
 
   const tooltip = document.createElement("div")
   tooltip.className = "comment-tooltip"
@@ -365,11 +373,11 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEn
   })
 
   box.addEventListener("mouseenter", () => {
-    findAllHighlightSpans(c.id).forEach(el => el.classList.add("comment-highlight-active"))
+    findAllHighlightSpans(c.id).forEach((el) => el.classList.add("comment-highlight-active"))
     box.classList.add("comment-box-active")
   })
   box.addEventListener("mouseleave", () => {
-    findAllHighlightSpans(c.id).forEach(el => el.classList.remove("comment-highlight-active"))
+    findAllHighlightSpans(c.id).forEach((el) => el.classList.remove("comment-highlight-active"))
     box.classList.remove("comment-box-active")
   })
 
@@ -392,22 +400,33 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEn
     const resolveBtn = document.createElement("button")
     resolveBtn.className = "comment-action-btn"
     resolveBtn.textContent = c.resolved ? "Unresolve" : "Resolve"
-    resolveBtn.addEventListener("click", async (e) => { e.stopPropagation(); await resolveComment(c.id) })
+    resolveBtn.addEventListener("click", async (e) => {
+      e.stopPropagation()
+      await resolveComment(c.id)
+    })
     actions.appendChild(resolveBtn)
 
     if (!c.resolved) {
       const replyBtn = document.createElement("button")
       replyBtn.className = "comment-action-btn"
       replyBtn.textContent = "Reply"
-      replyBtn.addEventListener("click", (e) => { e.stopPropagation(); startReplyForm(box, c.id) })
+      replyBtn.addEventListener("click", (e) => {
+        e.stopPropagation()
+        startReplyForm(box, c.id)
+      })
       actions.appendChild(replyBtn)
     }
 
     const toggleAIBtn = document.createElement("button")
     toggleAIBtn.className = "comment-action-btn"
     toggleAIBtn.textContent = c.ai ? "Keep on publish" : "Mark as AI"
-    toggleAIBtn.title = c.ai ? "Convert to regular comment (will survive publish)" : "Mark as AI comment (will be stripped on publish)"
-    toggleAIBtn.addEventListener("click", async (e) => { e.stopPropagation(); await toggleAIComment(c.id) })
+    toggleAIBtn.title = c.ai
+      ? "Convert to regular comment (will survive publish)"
+      : "Mark as AI comment (will be stripped on publish)"
+    toggleAIBtn.addEventListener("click", async (e) => {
+      e.stopPropagation()
+      await toggleAIComment(c.id)
+    })
     actions.appendChild(toggleAIBtn)
   }
 
@@ -415,7 +434,10 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEn
     const editBtn = document.createElement("button")
     editBtn.className = "comment-action-btn"
     editBtn.textContent = "Edit"
-    editBtn.addEventListener("click", (e) => { e.stopPropagation(); startEditComment(box, c) })
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      startEditComment(box, c)
+    })
     actions.appendChild(editBtn)
 
     const deleteBtn = document.createElement("button")
@@ -423,9 +445,10 @@ function renderCommentBox(c: CommentEntry, orphaned: boolean, replies: CommentEn
     deleteBtn.textContent = "Delete"
     deleteBtn.addEventListener("click", async (e) => {
       e.stopPropagation()
-      const msg = replies.length > 0
-        ? `Delete this comment and its ${replies.length} repl${replies.length === 1 ? "y" : "ies"}?`
-        : "Delete this comment?"
+      const msg =
+        replies.length > 0
+          ? `Delete this comment and its ${replies.length} repl${replies.length === 1 ? "y" : "ies"}?`
+          : "Delete this comment?"
       if (confirm(msg)) await deleteComment(c.id)
     })
     actions.appendChild(deleteBtn)
@@ -474,7 +497,10 @@ function renderReplyEntry(r: CommentEntry): HTMLDivElement {
     const editBtn = document.createElement("button")
     editBtn.className = "comment-action-btn"
     editBtn.textContent = "Edit"
-    editBtn.addEventListener("click", (e) => { e.stopPropagation(); startEditComment(entry, r) })
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      startEditComment(entry, r)
+    })
     actions.appendChild(editBtn)
     const deleteBtn = document.createElement("button")
     deleteBtn.className = "comment-action-btn comment-action-delete"
@@ -584,7 +610,9 @@ function positionComments() {
   const boxes = Array.from(sidebarEl.querySelectorAll<HTMLDivElement>(".comment-box"))
   if (boxes.length === 0) return
 
-  boxes.forEach(b => { b.style.marginTop = "" })
+  boxes.forEach((b) => {
+    b.style.marginTop = ""
+  })
 
   const header = sidebarEl.querySelector(".comment-sidebar-header")
   const MIN_GAP = 4
@@ -595,7 +623,10 @@ function positionComments() {
     const commentId = box.dataset.commentId
     if (!commentId) continue
     const anchorEl = findHighlightSpan(commentId)
-    if (!anchorEl) { lastBottom = box.getBoundingClientRect().bottom + MIN_GAP; continue }
+    if (!anchorEl) {
+      lastBottom = box.getBoundingClientRect().bottom + MIN_GAP
+      continue
+    }
 
     const desiredTop = anchorEl.getBoundingClientRect().top
     const currentTop = box.getBoundingClientRect().top
@@ -747,7 +778,10 @@ function showCreateForm() {
       const cid = box.dataset.commentId
       if (!cid || cid === TEMP_COMMENT_ID) continue
       const cAnchor = findHighlightSpan(cid)
-      if (cAnchor && cAnchor.getBoundingClientRect().top > anchorTop) { insertBefore = box; break }
+      if (cAnchor && cAnchor.getBoundingClientRect().top > anchorTop) {
+        insertBefore = box
+        break
+      }
     }
     if (insertBefore) sidebar.insertBefore(form, insertBefore)
     else {
@@ -828,51 +862,66 @@ async function createReply(parentId: string, text: string) {
 
 async function updateComment(commentId: string, newText: string) {
   if (!currentAuthFetch) return
-  const resp = await currentAuthFetch(
-    `${API_BASE}/${commentId}?page=${encodePagePath(currentPagePath)}`,
-    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: newText }) }
-  )
-  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to update comment"); return }
+  const resp = await currentAuthFetch(`${API_BASE}/${commentId}?page=${encodePagePath(currentPagePath)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: newText }),
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to update comment")
+    return
+  }
   await refreshComments()
 }
 
 async function resolveComment(commentId: string) {
   if (!currentAuthFetch) return
-  const resp = await currentAuthFetch(
-    `${API_BASE}/${commentId}/resolve?page=${encodePagePath(currentPagePath)}`,
-    { method: "PATCH" }
-  )
-  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to resolve comment"); return }
+  const resp = await currentAuthFetch(`${API_BASE}/${commentId}/resolve?page=${encodePagePath(currentPagePath)}`, {
+    method: "PATCH",
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to resolve comment")
+    return
+  }
   await refreshComments()
 }
 
 async function deleteComment(commentId: string) {
   if (!currentAuthFetch) return
-  const resp = await currentAuthFetch(
-    `${API_BASE}/${commentId}?page=${encodePagePath(currentPagePath)}`,
-    { method: "DELETE" }
-  )
-  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to delete comment"); return }
+  const resp = await currentAuthFetch(`${API_BASE}/${commentId}?page=${encodePagePath(currentPagePath)}`, {
+    method: "DELETE",
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to delete comment")
+    return
+  }
   await refreshComments()
 }
 
 async function toggleAIComment(commentId: string) {
   if (!currentAuthFetch) return
-  const resp = await currentAuthFetch(
-    `${API_BASE}/${commentId}/toggle-ai?page=${encodePagePath(currentPagePath)}`,
-    { method: "PATCH" }
-  )
-  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to toggle AI flag"); return }
+  const resp = await currentAuthFetch(`${API_BASE}/${commentId}/toggle-ai?page=${encodePagePath(currentPagePath)}`, {
+    method: "PATCH",
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to toggle AI flag")
+    return
+  }
   await refreshComments()
 }
 
 async function clearAIComments() {
   if (!currentAuthFetch) return
-  const resp = await currentAuthFetch(
-    `${API_BASE}/?page=${encodePagePath(currentPagePath)}`,
-    { method: "DELETE" }
-  )
-  if (!resp.ok) { const err = await resp.json().catch(() => ({})); alert((err as any).error || "Failed to clear AI comments"); return }
+  const resp = await currentAuthFetch(`${API_BASE}/?page=${encodePagePath(currentPagePath)}`, { method: "DELETE" })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}))
+    alert((err as any).error || "Failed to clear AI comments")
+    return
+  }
   await refreshComments()
 }
 
@@ -923,7 +972,9 @@ export function destroyComments() {
   currentComments = []
   pendingTempRange = null
   if (activeView) {
-    try { refreshDecorations() } catch {}
+    try {
+      refreshDecorations()
+    } catch {}
   }
   activeView = null
   removeSidebar()
@@ -947,7 +998,12 @@ export function getCommentCount(): number {
 
 export { clearAIComments }
 
-export async function createAIComment(selectedText: string, beforeContext: string, afterContext: string, commentText: string): Promise<boolean> {
+export async function createAIComment(
+  selectedText: string,
+  beforeContext: string,
+  afterContext: string,
+  commentText: string
+): Promise<boolean> {
   if (!currentAuthFetch || !currentPagePath) return false
   // AI-created comments use text-quote only (the AI doesn't have a structural address).
   const resp = await currentAuthFetch(`${API_BASE}${encodePagePath(currentPagePath)}`, {
@@ -959,7 +1015,10 @@ export async function createAIComment(selectedText: string, beforeContext: strin
       ai: true,
     }),
   })
-  if (resp.ok) { await refreshComments(); return true }
+  if (resp.ok) {
+    await refreshComments()
+    return true
+  }
   return false
 }
 

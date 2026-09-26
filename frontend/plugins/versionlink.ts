@@ -98,7 +98,7 @@ class VersionLinkNodeView {
     // Page label
     const label = document.createElement("span")
     label.className = "gowiki-vl-label"
-    label.textContent = isLocal ? (this.pageTitle || "this page") : (this.pageTitle || pagePath)
+    label.textContent = isLocal ? this.pageTitle || "this page" : this.pageTitle || pagePath
     a.appendChild(label)
 
     // Meta: author + date
@@ -144,7 +144,7 @@ class VersionLinkNodeView {
 
       const histData = await histResp.json()
       const entries: AtticEntry[] = histData.entries || []
-      const match = entries.find(e => e.version === vNum)
+      const match = entries.find((e) => e.version === vNum)
 
       if (!match) {
         this.loading = false
@@ -162,7 +162,9 @@ class VersionLinkNodeView {
           const pageData = await metaResp.json()
           if (pageData.title) this.pageTitle = pageData.title
         }
-      } catch { /* use path as fallback */ }
+      } catch {
+        /* use path as fallback */
+      }
 
       this.loading = false
       this.render()
@@ -175,9 +177,7 @@ class VersionLinkNodeView {
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
-    const changed =
-      node.attrs.version !== this.node.attrs.version ||
-      node.attrs.page !== this.node.attrs.page
+    const changed = node.attrs.version !== this.node.attrs.version || node.attrs.page !== this.node.attrs.page
     this.node = node
     if (changed) {
       this.loading = true
@@ -334,9 +334,7 @@ export const versionLinkPlugin: WikiPlugin = {
         if (node.attrs.page) {
           parts.push(`page=${node.attrs.page}`)
         }
-        return parts.length
-          ? `{version-link ${parts.join(" ")}}`
-          : `{version-link}`
+        return parts.length ? `{version-link ${parts.join(" ")}}` : `{version-link}`
       },
     })
 
@@ -365,7 +363,9 @@ export const versionLinkPlugin: WikiPlugin = {
         try {
           tr = tr.setSelection(NodeSelection.create(tr.doc, from))
           tr = enablePropertiesPanel(tr)
-        } catch { /* leave default selection */ }
+        } catch {
+          /* leave default selection */
+        }
         dispatch(tr.scrollIntoView())
       }
       return true

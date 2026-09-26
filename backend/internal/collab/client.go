@@ -65,8 +65,8 @@ func (c *Client) Run() {
 type clientMessage struct {
 	Type    string `json:"type"` // "join", "leave", "mode"
 	Page    string `json:"page,omitempty"`
-	Mode    string `json:"mode,omitempty"`    // "view" or "edit"
-	Offset  int    `json:"offset,omitempty"`  // cursor offset in markdown (-1 = unknown)
+	Mode    string `json:"mode,omitempty"`     // "view" or "edit"
+	Offset  int    `json:"offset,omitempty"`   // cursor offset in markdown (-1 = unknown)
 	IsOwner bool   `json:"is_owner,omitempty"` // true if this user owns the draft/lock
 }
 
@@ -158,4 +158,3 @@ func (c *Client) writePump() {
 		}
 	}
 }
-

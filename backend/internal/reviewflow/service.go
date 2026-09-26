@@ -32,15 +32,15 @@ type TodoIntegrator interface {
 
 // Service implements reviewflow business logic.
 type Service struct {
-	store            *Store
-	attic            *storage.Attic
-	configStore      *config.Store
-	pageReader       PageReader
-	todo             TodoIntegrator
-	signingVerifier  *SigningVerifier
-	certStore        *CertStore
-	caStore          *CAStore
-	groupResolver    func(username string) []string
+	store           *Store
+	attic           *storage.Attic
+	configStore     *config.Store
+	pageReader      PageReader
+	todo            TodoIntegrator
+	signingVerifier *SigningVerifier
+	certStore       *CertStore
+	caStore         *CAStore
+	groupResolver   func(username string) []string
 }
 
 // SetSigningVerifier sets the signing verifier for cryptographic confirmations.

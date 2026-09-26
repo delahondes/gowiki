@@ -289,10 +289,10 @@ func renderReviewflowDirective(args map[string]string) string {
 
 // MergeReviewflowArgs computes the final {reviewflow} args for a created
 // document. Precedence (highest first):
-//   1. create-action overrides (from the dialog / MCP tool call)
-//   2. {template-reviewflow} args in the template's payload
-//   3. the template's own {reviewflow} directive (its actors)
-//   4. defaults: version = "1.0"
+//  1. create-action overrides (from the dialog / MCP tool call)
+//  2. {template-reviewflow} args in the template's payload
+//  3. the template's own {reviewflow} directive (its actors)
+//  4. defaults: version = "1.0"
 //
 // A caller can force a key to empty by passing "" in overrides — that keeps
 // the merge deterministic. Unknown keys pass through untouched.

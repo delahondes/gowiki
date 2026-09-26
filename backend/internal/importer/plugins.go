@@ -71,10 +71,10 @@ var (
 	reSlider = regexp.MustCompile(`(?i)^<slider\s+([^>]+)>`)
 
 	// Code block: <code lang>...</code>
-	reCodeOpen      = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_-]*)>`)
-	reCodeClose     = regexp.MustCompile(`(?i)^</code>\s*$`)
-	reCodeOpenInline = regexp.MustCompile(`(?i)<code\s*([a-z0-9_-]*)>`)   // unanchored, for mid-line detection
-	reCodeCloseInline = regexp.MustCompile(`(?i)</code>`)                  // unanchored
+	reCodeOpen        = regexp.MustCompile(`(?i)^<code\s*([a-z0-9_-]*)>`)
+	reCodeClose       = regexp.MustCompile(`(?i)^</code>\s*$`)
+	reCodeOpenInline  = regexp.MustCompile(`(?i)<code\s*([a-z0-9_-]*)>`) // unanchored, for mid-line detection
+	reCodeCloseInline = regexp.MustCompile(`(?i)</code>`)                // unanchored
 
 	// File block: <file lang filename>...</file>
 	reFileOpen  = regexp.MustCompile(`(?i)^<file\s*([^>]*)>`)

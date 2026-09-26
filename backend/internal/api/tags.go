@@ -7,8 +7,8 @@ import (
 )
 
 type tagQueryResult struct {
-	Tag   string           `json:"tag"`
-	Pages []tagQueryPage   `json:"pages"`
+	Tag   string         `json:"tag"`
+	Pages []tagQueryPage `json:"pages"`
 }
 
 type tagQueryPage struct {

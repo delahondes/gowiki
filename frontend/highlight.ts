@@ -120,9 +120,10 @@ function buildDecorations(state: any): DecorationSet {
     const lang = node.attrs.language || ""
     let result
     try {
-      result = lang && hljs.getLanguage(lang)
-        ? hljs.highlight(text, { language: lang, ignoreIllegals: true })
-        : hljs.highlightAuto(text)
+      result =
+        lang && hljs.getLanguage(lang)
+          ? hljs.highlight(text, { language: lang, ignoreIllegals: true })
+          : hljs.highlightAuto(text)
     } catch {
       return // unknown language or hljs error
     }

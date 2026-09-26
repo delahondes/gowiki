@@ -54,13 +54,13 @@ func ConvertPage(content string, pagePath string, pagesDir string) *ConvertResul
 	var state blockState
 	var blockBuf []string
 	var blockLang string // for code blocks
-	inFold := false // true when inside a fold/spoiler block
+	inFold := false      // true when inside a fold/spoiler block
 	var tableLines []string
 	var wrapStack []WrapBlock
 	wrapDepth := 0
 	var wrapBuf []string
-	nbFirstLine := ""  // first line content after NB:: marker
-	noteType := ""     // type from <note important> tag
+	nbFirstLine := "" // first line content after NB:: marker
+	noteType := ""    // type from <note important> tag
 
 	flushTable := func() {
 		if len(tableLines) == 0 {

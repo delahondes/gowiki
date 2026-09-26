@@ -121,17 +121,17 @@ func (p *AnthropicProvider) readSSE(body io.ReadCloser, ch chan<- ChatEvent) {
 		data := strings.TrimPrefix(line, "data: ")
 
 		var event struct {
-			Type    string `json:"type"`
-			Index   int    `json:"index"`
-			Delta   struct {
+			Type  string `json:"type"`
+			Index int    `json:"index"`
+			Delta struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
 			} `json:"delta"`
 			ContentBlock struct {
-				Type  string `json:"type"`
-				ID    string `json:"id"`
-				Name  string `json:"name"`
+				Type  string          `json:"type"`
+				ID    string          `json:"id"`
+				Name  string          `json:"name"`
 				Input json.RawMessage `json:"input"`
 			} `json:"content_block"`
 			Message struct {

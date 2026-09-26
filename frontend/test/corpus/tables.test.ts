@@ -1,13 +1,7 @@
 // Tables: pipe syntax, directives, cell attributes, formulas, merging,
 // backticks-protection.
 import { describe, it, expect } from "vitest"
-import {
-  roundTrip,
-  countNodes,
-  assertStrongMark,
-  assertUnderlineMark,
-  assertCodeMark,
-} from "../helpers"
+import { roundTrip, countNodes, assertStrongMark, assertUnderlineMark, assertCodeMark } from "../helpers"
 
 describe("basic tables", () => {
   it("2x2 pipe table", () => {
@@ -26,9 +20,7 @@ describe("basic tables", () => {
   })
 
   it("wider table with 3 columns and 2 body rows", () => {
-    const rt = roundTrip(
-      "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n",
-    )
+    const rt = roundTrip("| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n")
     expect(rt.isStable).toBe(true)
     expect(countNodes(rt.doc, "table_row")).toBe(3)
   })
@@ -46,7 +38,7 @@ describe("cell directives", () => {
     expect(rt.isStable).toBe(true)
     // The directive should be absorbed into cell attrs.
     let hasColor = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.cellColor === "yellow") hasColor = true
     })
     expect(hasColor).toBe(true)
@@ -73,30 +65,24 @@ describe("cell directives", () => {
   })
 
   it("multiple cell directive keys combined", () => {
-    const rt = roundTrip(
-      "| head |\n| --- |\n| {color=green align=right}text |\n",
-    )
+    const rt = roundTrip("| head |\n| --- |\n| {color=green align=right}text |\n")
     expect(rt.isStable).toBe(true)
   })
 })
 
 describe("table directive line", () => {
   it("{table headers=none}", () => {
-    const rt = roundTrip(
-      "{table headers=none}\n| a | b |\n| --- | --- |\n| c | d |\n",
-    )
+    const rt = roundTrip("{table headers=none}\n| a | b |\n| --- | --- |\n| c | d |\n")
     expect(rt.isStable).toBe(true)
     let hv = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table") hv = n.attrs.headers
     })
     expect(hv).toBe("none")
   })
 
   it("{table caption=...}", () => {
-    const rt = roundTrip(
-      "{table caption=\"My caption\"}\n| a | b |\n| --- | --- |\n| c | d |\n",
-    )
+    const rt = roundTrip('{table caption="My caption"}\n| a | b |\n| --- | --- |\n| c | d |\n')
     expect(rt.isStable).toBe(true)
   })
 })
@@ -106,19 +92,17 @@ describe("formulas", () => {
     const rt = roundTrip("| a | b |\n| --- | --- |\n| 2 | =2+3 |\n")
     expect(rt.isStable).toBe(true)
     let hasFormula = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.formula) hasFormula = true
     })
     expect(hasFormula).toBe(true)
   })
 
   it("formula referencing a range =SUM(A1:A2)", () => {
-    const rt = roundTrip(
-      "| n |\n| --- |\n| 1 |\n| 2 |\n| =SUM(A1:A2) |\n",
-    )
+    const rt = roundTrip("| n |\n| --- |\n| 1 |\n| 2 |\n| =SUM(A1:A2) |\n")
     expect(rt.isStable).toBe(true)
     let hasFormula = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.formula) hasFormula = true
     })
     expect(hasFormula).toBe(true)
@@ -128,7 +112,7 @@ describe("formulas", () => {
     const rt = roundTrip("| a | b |\n| --- | --- |\n| 3 | =A1*2 |\n")
     expect(rt.isStable).toBe(true)
     let formula = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.formula) formula = n.attrs.formula
     })
     expect(formula).toBe("A1*2")
@@ -141,7 +125,7 @@ describe("backticks protect cells from directive/formula parsing", () => {
     expect(rt.isStable).toBe(true)
     // Must NOT have been turned into a formula attribute.
     let hasFormula = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.formula) hasFormula = true
     })
     expect(hasFormula).toBe(false)
@@ -153,7 +137,7 @@ describe("backticks protect cells from directive/formula parsing", () => {
     expect(rt.isStable).toBe(true)
     // Cell color must not have been set from the code-span content.
     let hasColor = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "table_cell" && n.attrs.cellColor) hasColor = true
     })
     expect(hasColor).toBe(false)

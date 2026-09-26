@@ -9,11 +9,11 @@ import (
 
 func TestApplyEdits(t *testing.T) {
 	tests := []struct {
-		name     string
-		content  string
-		edits    []editSpec
-		want     string
-		wantErr  string // substring to expect in the error; empty = no error
+		name    string
+		content string
+		edits   []editSpec
+		want    string
+		wantErr string // substring to expect in the error; empty = no error
 	}{
 		{
 			name:    "single unique match — replaces once",
@@ -64,7 +64,7 @@ func TestApplyEdits(t *testing.T) {
 			name:    "second edit fails — first edit not applied (atomicity)",
 			content: "foo bar",
 			edits: []editSpec{
-				{Old: "foo", New: "baz"}, // would succeed if applied
+				{Old: "foo", New: "baz"},   // would succeed if applied
 				{Old: "missing", New: "x"}, // will fail
 			},
 			wantErr: "edit 1",

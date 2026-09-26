@@ -13,7 +13,7 @@ import { roundTrip, countNodes } from "../helpers"
 
 function firstTagQuery(doc: PMNode): Record<string, any> | null {
   let found: Record<string, any> | null = null
-  doc.descendants(n => {
+  doc.descendants((n) => {
     if (found === null && n.type.name === "tag_query") {
       found = { ...n.attrs }
       return false
@@ -25,7 +25,7 @@ function firstTagQuery(doc: PMNode): Record<string, any> | null {
 
 function firstTagNode(doc: PMNode): Record<string, any> | null {
   let found: Record<string, any> | null = null
-  doc.descendants(n => {
+  doc.descendants((n) => {
     if (found === null && n.type.name === "tag") {
       found = { ...n.attrs }
       return false
@@ -104,9 +104,7 @@ describe("{tag-query} — every attr the plugin surfaces", () => {
   })
 
   it("all attrs at once, non-default values", () => {
-    const rt = roundTrip(
-      "{tag-query tag=docs exclude=draft,archived path=/manual render=list groupby=folder}\n"
-    )
+    const rt = roundTrip("{tag-query tag=docs exclude=draft,archived path=/manual render=list groupby=folder}\n")
     expect(rt.isStable).toBe(true)
     const q = firstTagQuery(rt.doc)!
     expect(q.tag).toBe("docs")

@@ -41,7 +41,8 @@ function test(label: string, md: string) {
 }
 
 function diffLines(a: string, b: string) {
-  const la = a.split("\n"), lb = b.split("\n")
+  const la = a.split("\n"),
+    lb = b.split("\n")
   const max = Math.max(la.length, lb.length)
   for (let i = 0; i < max; i++) {
     if (la[i] !== lb[i]) {
@@ -78,11 +79,12 @@ test("highlight color with mixed marks", "=={color=#ccffcc}before *italic* after
 
 console.log("\n=== Table cell highlight tests ===\n")
 
-test("highlight in table cell",
-  "{table headers=1c}\n| Col1 | Col2 |\n| --- | --- |\n| ==[*placeholder*]== | text |")
+test("highlight in table cell", "{table headers=1c}\n| Col1 | Col2 |\n| --- | --- |\n| ==[*placeholder*]== | text |")
 
-test("highlight with escaped star in table",
-  "{table headers=1c}\n| Col1 | Col2 |\n| --- | --- |\n| ==\\*literal\\*== | text |")
+test(
+  "highlight with escaped star in table",
+  "{table headers=1c}\n| Col1 | Col2 |\n| --- | --- |\n| ==\\*literal\\*== | text |"
+)
 
 console.log("\n=== Basic mark tests ===\n")
 
@@ -99,7 +101,6 @@ console.log("\n=== Paragraph tests ===\n")
 
 test("two paragraphs", "First paragraph\n\nSecond paragraph")
 test("heading + paragraph", "# Heading\n\nParagraph")
-test("ordered list with highlight",
-  "1. un\n2. =={color=#ccffcc}\\{\\}**deux**==\n3. trois")
+test("ordered list with highlight", "1. un\n2. =={color=#ccffcc}\\{\\}**deux**==\n3. trois")
 
 console.log("")

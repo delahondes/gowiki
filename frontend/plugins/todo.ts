@@ -10,11 +10,14 @@ const todoUserDisplayCache: Record<string, string> = {}
 
 async function resolveAssigneeLabels(raw: string): Promise<string> {
   if (!raw) return ""
-  const parts = raw.split(",").map(s => s.trim()).filter(Boolean)
-  const userParts = parts.filter(p => !p.startsWith("group:"))
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const userParts = parts.filter((p) => !p.startsWith("group:"))
 
   // Resolve user display names if needed.
-  const unknown = userParts.filter(u => !(u in todoUserDisplayCache))
+  const unknown = userParts.filter((u) => !(u in todoUserDisplayCache))
   if (unknown.length > 0) {
     try {
       const resp = await fetch(`/api/users/display?users=${encodeURIComponent(unknown.join(","))}`)
@@ -24,29 +27,38 @@ async function resolveAssigneeLabels(raw: string): Promise<string> {
           todoUserDisplayCache[name] = (info as any).label || name
         }
       }
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   // Build display string.
-  return parts.map(p => {
-    if (p.startsWith("group:")) {
-      // Capitalize group name: "group:editors" → "Editors"
-      const name = p.substring(6)
-      return name.charAt(0).toUpperCase() + name.slice(1)
-    }
-    return todoUserDisplayCache[p] || p
-  }).join(", ")
+  return parts
+    .map((p) => {
+      if (p.startsWith("group:")) {
+        // Capitalize group name: "group:editors" → "Editors"
+        const name = p.substring(6)
+        return name.charAt(0).toUpperCase() + name.slice(1)
+      }
+      return todoUserDisplayCache[p] || p
+    })
+    .join(", ")
 }
 
 function formatAssigneeSync(raw: string): string {
   if (!raw) return ""
-  return raw.split(",").map(s => s.trim()).filter(Boolean).map(p => {
-    if (p.startsWith("group:")) {
-      const name = p.substring(6)
-      return name.charAt(0).toUpperCase() + name.slice(1)
-    }
-    return todoUserDisplayCache[p] || p
-  }).join(", ")
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((p) => {
+      if (p.startsWith("group:")) {
+        const name = p.substring(6)
+        return name.charAt(0).toUpperCase() + name.slice(1)
+      }
+      return todoUserDisplayCache[p] || p
+    })
+    .join(", ")
 }
 
 // --- Properties ---
@@ -233,7 +245,9 @@ const gate = {
       const handler = (e: MessageEvent) => {
         try {
           onEvent(JSON.parse(e.data))
-        } catch { /* ignore parse errors */ }
+        } catch {
+          /* ignore parse errors */
+        }
       }
       es.addEventListener("task.created", handler)
       es.addEventListener("task.updated", handler)
@@ -249,9 +263,9 @@ const gate = {
 // --- Priority colors ---
 
 const PRIORITY_COLORS: Record<string, { bg: string; fg: string }> = {
-  low:    { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
+  low: { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
   normal: { bg: "var(--gw-color-info-bg)", fg: "var(--gw-color-info)" },
-  high:   { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
+  high: { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
   urgent: { bg: "var(--gw-color-error-bg)", fg: "var(--gw-color-error)" },
 }
 
@@ -306,7 +320,7 @@ class TodoNodeView {
     cb.checked = status === "done"
     // Disable checkbox if no task ID, inactive (page review pending),
     // or if a wiki action is set and user is not admin.
-    const hasWikiAction = !!(node.attrs.action)
+    const hasWikiAction = !!node.attrs.action
     const user = (window as any).__gowikiCurrentUser
     const isAdmin = user?.is_admin === true
     cb.disabled = !this.taskId || this.taskInactive || (hasWikiAction && !isAdmin)
@@ -320,15 +334,25 @@ class TodoNodeView {
       e.stopPropagation()
       if (this.taskId) {
         if (cb.checked) {
-          gate.complete(this.taskId).then((t) => {
-            this.taskStatus = t.status
-            this.render()
-          }).catch(() => { cb.checked = false })
+          gate
+            .complete(this.taskId)
+            .then((t) => {
+              this.taskStatus = t.status
+              this.render()
+            })
+            .catch(() => {
+              cb.checked = false
+            })
         } else {
-          gate.reopen(this.taskId).then((t) => {
-            this.taskStatus = t.status
-            this.render()
-          }).catch(() => { cb.checked = true })
+          gate
+            .reopen(this.taskId)
+            .then((t) => {
+              this.taskStatus = t.status
+              this.render()
+            })
+            .catch(() => {
+              cb.checked = true
+            })
         }
       }
     })
@@ -348,7 +372,9 @@ class TodoNodeView {
       badge.className = "gowiki-todo-assignee"
       badge.textContent = formatAssigneeSync(assign)
       // Resolve display names asynchronously and update.
-      resolveAssigneeLabels(assign).then(label => { badge.textContent = label })
+      resolveAssigneeLabels(assign).then((label) => {
+        badge.textContent = label
+      })
       chip.appendChild(badge)
     }
 
@@ -542,7 +568,7 @@ const todoListProperties = [
     default: "20",
     parse: (raw: string) => {
       const n = parseInt(raw.trim(), 10)
-      return (isNaN(n) || n < 1) ? "20" : n > 100 ? "100" : String(n)
+      return isNaN(n) || n < 1 ? "20" : n > 100 ? "100" : String(n)
     },
     serialize: (value: string | null) => String(value ?? "20"),
   },
@@ -592,7 +618,8 @@ class TodoListNodeView {
       // Plugin unavailable — show message
       this.dom.innerHTML = ""
       const msg = document.createElement("div")
-      msg.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
+      msg.style.cssText =
+        "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
       msg.textContent = "Todo list: requires a database connection"
       this.dom.appendChild(msg)
     }
@@ -679,7 +706,9 @@ class TodoListNodeView {
       const assignTarget = task.assignee?.target || ""
       tdAssign.textContent = formatAssigneeSync(assignTarget)
       if (assignTarget) {
-        resolveAssigneeLabels(assignTarget).then(label => { tdAssign.textContent = label })
+        resolveAssigneeLabels(assignTarget).then((label) => {
+          tdAssign.textContent = label
+        })
       }
       tr.appendChild(tdAssign)
 
@@ -813,14 +842,15 @@ class TodoCalendarNodeView {
     } catch {
       this.dom.innerHTML = ""
       const msg = document.createElement("div")
-      msg.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
+      msg.style.cssText =
+        "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#e65100;font-size:13px"
       msg.textContent = "Todo calendar: requires a database connection"
       this.dom.appendChild(msg)
       return
     }
 
     // Filter to only tasks with due dates.
-    const tasks = allTasks.filter(t => t.due_date)
+    const tasks = allTasks.filter((t) => t.due_date)
 
     // Group by page, then by month.
     const pageMonthMap = new Map<string, Map<number, TodoTask[]>>()
@@ -837,14 +867,18 @@ class TodoCalendarNodeView {
     const nsClean = ns.replace(/\/+$/, "")
     const pages = Array.from(pageMonthMap.keys()).sort()
 
-    interface FolderNode { label: string; pages: string[]; children: Map<string, FolderNode> }
+    interface FolderNode {
+      label: string
+      pages: string[]
+      children: Map<string, FolderNode>
+    }
     const root: FolderNode = { label: "", pages: [], children: new Map() }
 
     for (const page of pages) {
       const rel = page.startsWith(nsClean) ? page.slice(nsClean.length) : page
       const parts = rel.replace(/^\/+/, "").split("/")
 
-      let maxParts = depth > 0 ? depth : parts.length
+      const maxParts = depth > 0 ? depth : parts.length
       const folderParts = parts.slice(0, Math.min(maxParts, parts.length - 1))
       let current = root
       for (const part of folderParts) {
@@ -862,7 +896,7 @@ class TodoCalendarNodeView {
   private renderCalendar(
     root: { label: string; pages: string[]; children: Map<string, any> },
     pageMonthMap: Map<string, Map<number, TodoTask[]>>,
-    nsClean: string,
+    nsClean: string
   ) {
     this.dom.innerHTML = ""
 
@@ -871,13 +905,19 @@ class TodoCalendarNodeView {
     nav.className = "gowiki-todo-cal-nav"
     const prevBtn = document.createElement("button")
     prevBtn.textContent = "◀"
-    prevBtn.addEventListener("click", () => { this.currentYear--; this.fetchAndRender() })
+    prevBtn.addEventListener("click", () => {
+      this.currentYear--
+      this.fetchAndRender()
+    })
     const yearLabel = document.createElement("span")
     yearLabel.className = "gowiki-todo-cal-year"
     yearLabel.textContent = String(this.currentYear)
     const nextBtn = document.createElement("button")
     nextBtn.textContent = "▶"
-    nextBtn.addEventListener("click", () => { this.currentYear++; this.fetchAndRender() })
+    nextBtn.addEventListener("click", () => {
+      this.currentYear++
+      this.fetchAndRender()
+    })
     nav.appendChild(prevBtn)
     nav.appendChild(yearLabel)
     nav.appendChild(nextBtn)
@@ -922,7 +962,7 @@ class TodoCalendarNodeView {
       // Page cell.
       const tdPage = document.createElement("td")
       tdPage.className = "gowiki-todo-cal-page-cell"
-      tdPage.style.paddingLeft = (8 + indentLevel * 16) + "px"
+      tdPage.style.paddingLeft = 8 + indentLevel * 16 + "px"
       const pageLink = document.createElement("a")
       const displayPath = page.startsWith(nsClean) ? page.slice(nsClean.length) : page
       pageLink.textContent = displayPath.replace(/^\/+/, "") || page
@@ -944,13 +984,13 @@ class TodoCalendarNodeView {
           for (const t of cellTasks) {
             const chip = document.createElement("div")
             chip.className = "gowiki-todo-cal-chip"
-            const overdue = (t.status === "open" || t.status === "in_progress") &&
-              t.due_date && t.due_date.slice(0, 10) < today
+            const overdue =
+              (t.status === "open" || t.status === "in_progress") && t.due_date && t.due_date.slice(0, 10) < today
             if (overdue) chip.classList.add("gowiki-todo-cal-chip-overdue")
             if (t.status === "done") chip.classList.add("gowiki-todo-cal-chip-done")
             const icon = document.createElement("span")
             icon.textContent = STATUS_ICONS[t.status] || "○"
-            icon.style.color = overdue ? "var(--gw-color-error)" : (STATUS_COLORS[t.status] || "#666")
+            icon.style.color = overdue ? "var(--gw-color-error)" : STATUS_COLORS[t.status] || "#666"
             chip.appendChild(icon)
             const label = document.createElement("span")
             label.className = "gowiki-todo-cal-chip-label"
@@ -959,7 +999,7 @@ class TodoCalendarNodeView {
             const assignee = formatAssigneeSync(t.assignee?.target || "")
             chip.title = `${t.title} (${t.status})\n${assignee}`
             if (t.assignee?.target) {
-              resolveAssigneeLabels(t.assignee.target).then(resolved => {
+              resolveAssigneeLabels(t.assignee.target).then((resolved) => {
                 chip.title = `${t.title} (${t.status})\n${resolved}`
               })
             }
@@ -972,12 +1012,15 @@ class TodoCalendarNodeView {
       tbody.appendChild(tr)
     }
 
-    const renderFolder = (folder: { label: string; pages: string[]; children: Map<string, any> }, indentLevel: number) => {
+    const renderFolder = (
+      folder: { label: string; pages: string[]; children: Map<string, any> },
+      indentLevel: number
+    ) => {
       const sortedPages = folder.pages.slice().sort()
       // Pages ending with a trailing slash are the folder's own index —
       // render them first inside the folder.
-      const indexPages = sortedPages.filter(p => p.endsWith("/"))
-      const leafPages = sortedPages.filter(p => !p.endsWith("/"))
+      const indexPages = sortedPages.filter((p) => p.endsWith("/"))
+      const leafPages = sortedPages.filter((p) => !p.endsWith("/"))
 
       for (const page of indexPages) {
         renderPageRow(page, indentLevel)
@@ -990,7 +1033,7 @@ class TodoCalendarNodeView {
       const sortedChildren = Array.from(folder.children.entries()).sort(([a], [b]) => a.localeCompare(b))
 
       for (const [childName, child] of sortedChildren) {
-        const eponym = leafPages.find(p => {
+        const eponym = leafPages.find((p) => {
           const segs = p.replace(/\/+$/, "").split("/")
           return segs[segs.length - 1] === childName
         })
@@ -1003,7 +1046,7 @@ class TodoCalendarNodeView {
         folderRow.className = "gowiki-todo-cal-folder-row"
         const folderTd = document.createElement("td")
         folderTd.colSpan = 13
-        folderTd.style.paddingLeft = (8 + indentLevel * 16) + "px"
+        folderTd.style.paddingLeft = 8 + indentLevel * 16 + "px"
         folderTd.textContent = "📁 " + child.label
         folderRow.appendChild(folderTd)
         tbody.appendChild(folderRow)
@@ -1039,7 +1082,9 @@ class TodoCalendarNodeView {
     return true
   }
 
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
 
   destroy() {}
 }
@@ -1530,16 +1575,12 @@ export const todoPlugin: WikiPlugin = {
         // We search backward because replaceSelectionWith places the cursor after
         // the inserted node, so the todo is just before approxPos.
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 200),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === todoType) {
-              // Keep updating — we want the LAST (closest to approxPos) todo, not the first
-              insertedAt = pos
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 200), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === todoType) {
+            // Keep updating — we want the LAST (closest to approxPos) todo, not the first
+            insertedAt = pos
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
@@ -1644,18 +1685,16 @@ export const todoPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 200),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === listType) insertedAt = pos
-          }
-        )
+        tr.doc.nodesBetween(Math.max(0, approxPos - 200), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === listType) insertedAt = pos
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }
@@ -1703,11 +1742,7 @@ export const todoPlugin: WikiPlugin = {
           },
           toDOM(node: PMNode) {
             const ns = node.attrs.namespace || "/"
-            return [
-              "div",
-              { class: "gowiki-todo-calendar", "data-namespace": ns },
-              `Todo Calendar (${ns})`,
-            ]
+            return ["div", { class: "gowiki-todo-calendar", "data-namespace": ns }, `Todo Calendar (${ns})`]
           },
           parseDOM: [
             {
@@ -1771,18 +1806,16 @@ export const todoPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 200),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === calType) insertedAt = pos
-          }
-        )
+        tr.doc.nodesBetween(Math.max(0, approxPos - 200), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === calType) insertedAt = pos
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

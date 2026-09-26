@@ -106,15 +106,16 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var toContent []byte
-	if to == 0 {
-		// to=0 means current published version
+	switch to {
+	case 0:
+		// to=0 means current published version.
 		page, err := s.store.Get(pagePath)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "page not found")
 			return
 		}
 		toContent = []byte(page.Markdown)
-	} else if to == -1 {
+	case -1:
 		// to=-1 means draft content — requires auth + ownership.
 		username := UsernameFromContext(r.Context())
 		if username == "" {
@@ -132,7 +133,7 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		toContent = []byte(draftContent)
-	} else {
+	default:
 		toContent, err = s.atticStore.ReadVersion(pagePath, to)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "to version not found")

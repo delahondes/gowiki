@@ -276,10 +276,10 @@ func importTable(ctx context.Context, schemaStore *database.SchemaStore, dataSto
 				continue
 			}
 
-			val := convertCSVValue(raw, fm.gowikiType, fm.dwCol)
-			if val != nil {
-				rowFields[fm.gowikiName] = val
-			}
+			// convertCSVValue never returns a nil interface value, so
+			// the previous `if val != nil` guard was dead. Any raw that
+			// makes it past the empty check above becomes a stored field.
+			rowFields[fm.gowikiName] = convertCSVValue(raw, fm.gowikiType, fm.dwCol)
 		}
 
 		row := &database.Row{

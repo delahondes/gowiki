@@ -427,4 +427,3 @@ func registerDiscardEditDraftTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}), nil
 	})
 }
-

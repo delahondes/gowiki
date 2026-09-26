@@ -47,7 +47,11 @@ function notify(key: string) {
   const subs = resolverSubscribers.get(key)
   if (!subs) return
   for (const cb of subs) {
-    try { cb() } catch { /* ignore */ }
+    try {
+      cb()
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -58,7 +62,9 @@ function subscribe(key: string, cb: () => void): () => void {
     resolverSubscribers.set(key, subs)
   }
   subs.add(cb)
-  return () => { subs?.delete(cb) }
+  return () => {
+    subs?.delete(cb)
+  }
 }
 
 async function doFetch(type: "pmid" | "doi", id: string): Promise<void> {
@@ -115,9 +121,13 @@ function formatInline(entry: PublicationEntry): string {
 
 function formatFullAuthors(authors: Author[] | undefined): string {
   if (!authors || authors.length === 0) return ""
-  const parts = authors.slice(0, 6).map(a => {
+  const parts = authors.slice(0, 6).map((a) => {
     const fam = a.family || ""
-    const initials = (a.given || "").split(/\s+/).filter(Boolean).map(s => s[0]).join("")
+    const initials = (a.given || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((s) => s[0])
+      .join("")
     return initials ? `${fam} ${initials}` : fam
   })
   if (authors.length > 6) parts.push("et al.")
@@ -254,18 +264,23 @@ class PublicationNodeView {
     const popup = popupContent(entry)
     popup.classList.add("gowiki-cite-popup-hidden")
     this.dom.appendChild(popup)
-    a.addEventListener("mouseenter", () => { popup.classList.remove("gowiki-cite-popup-hidden") })
-    a.addEventListener("mouseleave", () => { popup.classList.add("gowiki-cite-popup-hidden") })
+    a.addEventListener("mouseenter", () => {
+      popup.classList.remove("gowiki-cite-popup-hidden")
+    })
+    a.addEventListener("mouseleave", () => {
+      popup.classList.add("gowiki-cite-popup-hidden")
+    })
   }
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
-    const changed =
-      node.attrs.pmid !== this.node.attrs.pmid ||
-      node.attrs.doi !== this.node.attrs.doi
+    const changed = node.attrs.pmid !== this.node.attrs.pmid || node.attrs.doi !== this.node.attrs.doi
     this.node = node
     if (changed) {
-      if (this.unsubscribe) { this.unsubscribe(); this.unsubscribe = null }
+      if (this.unsubscribe) {
+        this.unsubscribe()
+        this.unsubscribe = null
+      }
       this.render()
       this.subscribe()
     }
@@ -278,7 +293,9 @@ class PublicationNodeView {
     return true
   }
 
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
 
   destroy() {
     if (this.unsubscribe) this.unsubscribe()
@@ -410,7 +427,9 @@ class ReferencesNodeView {
     return true
   }
 
-  ignoreMutation(): boolean { return true }
+  ignoreMutation(): boolean {
+    return true
+  }
 
   destroy() {
     for (const d of this.disposers) d()
@@ -469,7 +488,9 @@ class AutoReferencesController {
     return out
   }
 
-  update() { this.render() }
+  update() {
+    this.render()
+  }
 
   private render() {
     // Clean up subscriptions from the previous render pass.
@@ -918,7 +939,9 @@ export const bibliographyPlugin: WikiPlugin = {
         try {
           tr = tr.setSelection(NodeSelection.create(tr.doc, from))
           tr = enablePropertiesPanel(tr)
-        } catch { /* keep default */ }
+        } catch {
+          /* keep default */
+        }
         dispatch(tr.scrollIntoView())
       }
       return true
@@ -932,16 +955,16 @@ export const bibliographyPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 200),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => { if (n.type === nodeType) insertedAt = pos }
-        )
+        tr.doc.nodesBetween(Math.max(0, approxPos - 200), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === nodeType) insertedAt = pos
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* keep default */ }
+          } catch {
+            /* keep default */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

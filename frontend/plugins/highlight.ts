@@ -53,17 +53,17 @@ export const highlightPlugin: WikiPlugin = {
       md.inline.ruler.push("gowiki_highlight", (state: any, silent: boolean) => {
         const src = state.src
         const start = state.pos
-        if (src.charCodeAt(start) !== 0x3D || src.charCodeAt(start + 1) !== 0x3D) return false // ==
+        if (src.charCodeAt(start) !== 0x3d || src.charCodeAt(start + 1) !== 0x3d) return false // ==
         // Reject === (triple equals at the open position)
-        if (start + 2 < state.posMax && src.charCodeAt(start + 2) === 0x3D) return false
+        if (start + 2 < state.posMax && src.charCodeAt(start + 2) === 0x3d) return false
 
         // Find closing ==
         let closePos = -1
         for (let i = start + 2; i < state.posMax - 1; i++) {
-          if (src.charCodeAt(i) !== 0x3D) continue
-          if (src.charCodeAt(i + 1) !== 0x3D) continue
+          if (src.charCodeAt(i) !== 0x3d) continue
+          if (src.charCodeAt(i + 1) !== 0x3d) continue
           // Skip === (triple-or-more equals runs) in close search
-          if (i + 2 < state.posMax && src.charCodeAt(i + 2) === 0x3D) continue
+          if (i + 2 < state.posMax && src.charCodeAt(i + 2) === 0x3d) continue
           closePos = i
           break
         }
@@ -73,7 +73,8 @@ export const highlightPlugin: WikiPlugin = {
           // Check for optional {color=VALUE} prefix after ==
           let color = DEFAULT_COLOR
           let contentStart = start + 2
-          if (src.charCodeAt(contentStart) === 0x7B) { // {
+          if (src.charCodeAt(contentStart) === 0x7b) {
+            // {
             const braceEnd = src.indexOf("}", contentStart + 1)
             if (braceEnd !== -1 && braceEnd < closePos) {
               const inner = src.slice(contentStart + 1, braceEnd).trim()

@@ -9,8 +9,8 @@ describe("escaping", () => {
     expect(rt.isStable).toBe(true)
     // The underscores are escaped — no underline mark should exist.
     let found = false
-    rt.doc.descendants(n => {
-      if (n.isText && n.marks.some(m => m.type.name === "underline")) found = true
+    rt.doc.descendants((n) => {
+      if (n.isText && n.marks.some((m) => m.type.name === "underline")) found = true
     })
     expect(found).toBe(false)
   })
@@ -31,7 +31,7 @@ describe("unicode", () => {
     const rt = roundTrip("Élève naïve étude\n")
     expect(rt.isStable).toBe(true)
     let found = false
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText && n.text?.includes("Élève")) found = true
     })
     expect(found).toBe(true)
@@ -71,7 +71,7 @@ describe("HTML entities are NOT interpreted (dialect invariant)", () => {
     const rt = roundTrip("Fish &amp; chips\n")
     expect(rt.isStable).toBe(true)
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText) text += n.text
     })
     expect(text).toContain("&amp;")
@@ -81,7 +81,7 @@ describe("HTML entities are NOT interpreted (dialect invariant)", () => {
     const rt = roundTrip("Compare &lt; and &gt;\n")
     expect(rt.isStable).toBe(true)
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText) text += n.text
     })
     expect(text).toContain("&lt;")
@@ -92,7 +92,7 @@ describe("HTML entities are NOT interpreted (dialect invariant)", () => {
     const rt = roundTrip("The escape sequence &#123; is inert\n")
     expect(rt.isStable).toBe(true)
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText) text += n.text
     })
     expect(text).toContain("&#123;")
@@ -102,7 +102,7 @@ describe("HTML entities are NOT interpreted (dialect invariant)", () => {
     const rt = roundTrip("Snowman escape: &#x2603;\n")
     expect(rt.isStable).toBe(true)
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText) text += n.text
     })
     expect(text).toContain("&#x2603;")
@@ -113,7 +113,7 @@ describe("HTML entities are NOT interpreted (dialect invariant)", () => {
     const rt = roundTrip("| head |\n| --- |\n| Fish &amp; chips |\n")
     expect(rt.isStable).toBe(true)
     let text = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.isText) text += n.text
     })
     expect(text).toContain("&amp;")
@@ -160,16 +160,14 @@ describe("images", () => {
     const rt = roundTrip("{image size=400px}\n![alt](/media/pic.png)\n")
     expect(rt.isStable).toBe(true)
     let size = ""
-    rt.doc.descendants(n => {
+    rt.doc.descendants((n) => {
       if (n.type.name === "image") size = n.attrs.size ?? ""
     })
     expect(size).toBe("400px")
   })
 
   it("image with caption + label", () => {
-    const rt = roundTrip(
-      "{image caption=\"A picture\" label=fig1}\n![alt](/media/pic.png)\n",
-    )
+    const rt = roundTrip('{image caption="A picture" label=fig1}\n![alt](/media/pic.png)\n')
     expect(rt.isStable).toBe(true)
   })
 })

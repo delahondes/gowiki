@@ -6,7 +6,9 @@ const VALID_ALIGNS = ["left", "center", "right"]
 const VALID_WRAPS = ["left", "right"]
 
 function normalizeBlockquoteWidth(raw: string): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase()
   if (!value) return null
   const pct = value.match(/^(\d+)%$/)
   if (pct) {
@@ -127,17 +129,19 @@ const blockquoteProperties: NodePropertySpec[] = [
     label: "Image bg (dark mode)",
     default: null,
     parse: (raw: string) => {
-      const v = String(raw ?? "").trim().toLowerCase()
+      const v = String(raw ?? "")
+        .trim()
+        .toLowerCase()
       if (!v || v === "auto") return null
       if (v === "light" || v === "invert" || v === "none") return v
       throw new Error(`Invalid image-bg "${raw}". Expected "auto", "light", "invert", or "none".`)
     },
     serialize: (value: string | null) => String(value ?? ""),
     options: [
-      { value: "",       label: "Auto (per-image or detect)" },
+      { value: "", label: "Auto (per-image or detect)" },
       { value: "invert", label: "Invert — flip all images" },
-      { value: "light",  label: "Light — frame all in cream" },
-      { value: "none",   label: "None — render all as-is" },
+      { value: "light", label: "Light — frame all in cream" },
+      { value: "none", label: "None — render all as-is" },
     ],
   },
   {
@@ -323,7 +327,7 @@ html[data-theme="dark"] .ProseMirror blockquote.gowiki-bq-custom {
 export const blockquotePlugin: WikiPlugin = {
   register(reg) {
     // Extend blockquote schema node with class + custom attrs
-    reg.extendSchemaNode("blockquote", spec => ({
+    reg.extendSchemaNode("blockquote", (spec) => ({
       ...spec,
       attrs: {
         ...(spec.attrs ?? {}),
@@ -435,7 +439,6 @@ export const blockquotePlugin: WikiPlugin = {
       properties: blockquoteProperties,
     })
 
-
     // Pre-process blockquote content: convert extra blank > lines into trailing
     // \n markers on the preceding content line, preserving visual spacing.
     // For non-nested lines (> content), 1 blank = normal, 2+ = extra.
@@ -500,9 +503,7 @@ export const blockquotePlugin: WikiPlugin = {
           const val = node.attrs[prop.name] ?? null
           const def = prop.default ?? null
           if (val !== def) {
-            const rendered = prop.serialize
-              ? prop.serialize(val)
-              : String(val)
+            const rendered = prop.serialize ? prop.serialize(val) : String(val)
             parts.push(`${prop.name}=${rendered}`)
           }
         }

@@ -723,4 +723,3 @@ func registerDeleteAttachmentTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}), nil
 	})
 }
-

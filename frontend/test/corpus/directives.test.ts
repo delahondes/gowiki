@@ -73,7 +73,7 @@ describe("changes and favorites", () => {
 
 describe("todos", () => {
   it("{todo title=... assign=...}", () => {
-    const rt = roundTrip("{todo title=\"What to do\" assign=alice}\n")
+    const rt = roundTrip('{todo title="What to do" assign=alice}\n')
     expect(rt.isStable).toBe(true)
     expect(countNodes(rt.doc, "todo")).toBe(1)
   })

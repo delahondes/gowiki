@@ -14,15 +14,50 @@ import { buildRegistry } from "./compiler/build_registry.ts"
 import { isPropertiesPanelEnabled, setPropertiesPanelEditable } from "./compiler/core_ui.ts"
 import { openMediaManager } from "./media_manager.js"
 import { slugify } from "./compiler/slugify.ts"
-import { computeContentAddress, computePmContentAddress, resolveContentAddress, resolveRawContentAddress, pointFromPm, pointFromRaw, resolvePointInPm, resolvePointInRaw } from "./compiler/anchor.ts"
+import {
+  computeContentAddress,
+  computePmContentAddress,
+  resolveContentAddress,
+  resolveRawContentAddress,
+  pointFromPm,
+  pointFromRaw,
+  resolvePointInPm,
+  resolvePointInRaw,
+} from "./compiler/anchor.ts"
 import { highlightCodeBlocks } from "./highlight.ts"
 import { adjustFormula } from "./plugins/table.ts"
 import { HIGHLIGHT_COLORS } from "./plugins/highlight.ts"
-import { initComments, destroyComments, addComment, getCommentCount, createAIComment, clearAIComments, commentPmPlugin } from "./plugins/comment.ts"
-import { generateKeypair, hasKey as signingHasKey, getCertificatePEM, importCertificate, clearCertificate, deleteKey as signingDeleteKey, getPublicKeySPKI, getKeyCreatedAt } from "./signing/keystore.ts"
+import {
+  initComments,
+  destroyComments,
+  addComment,
+  getCommentCount,
+  createAIComment,
+  clearAIComments,
+  commentPmPlugin,
+} from "./plugins/comment.ts"
+import {
+  generateKeypair,
+  hasKey as signingHasKey,
+  getCertificatePEM,
+  importCertificate,
+  clearCertificate,
+  deleteKey as signingDeleteKey,
+  getPublicKeySPKI,
+  getKeyCreatedAt,
+} from "./signing/keystore.ts"
 const HLJS_THEMES = [
-  "github", "atom-one-light", "vs", "xcode", "idea",
-  "github-dark", "atom-one-dark", "monokai", "nord", "vs2015", "tokyo-night-dark",
+  "github",
+  "atom-one-light",
+  "vs",
+  "xcode",
+  "idea",
+  "github-dark",
+  "atom-one-dark",
+  "monokai",
+  "nord",
+  "vs2015",
+  "tokyo-night-dark",
 ]
 
 // Separate light/dark picks. The one applied at any moment depends on the
@@ -86,7 +121,9 @@ const urlIsNamespaceIndex = (() => {
   return raw.endsWith("/") || raw.endsWith("/index")
 })()
 let pageNamespace = urlIsNamespaceIndex
-  ? (pagePath === "index" ? "" : pagePath)
+  ? pagePath === "index"
+    ? ""
+    : pagePath
   : pagePath.includes("/")
     ? pagePath.split("/").slice(0, -1).join("/")
     : ""
@@ -114,7 +151,7 @@ let currentPageMeta = null // full meta object from API: { version, author, crea
 
 // Global media version cache: maps relative media paths (as in node attrs) to their max version.
 window.__gowikiMediaVersions = new Map()
-window.__gowikiUpdateMediaVersionCache = function(absPath, version) {
+window.__gowikiUpdateMediaVersionCache = function (absPath, version) {
   const relPath = buildMediaReferencePath(pageNamespace, absPath)
   window.__gowikiMediaVersions.set(relPath, version)
 }
@@ -330,7 +367,7 @@ registry.onCommand((namespace, name, cmd) => {
 })
 
 function findLinkMarkInMarks(marks, linkType) {
-  return marks.find(mark => mark.type === linkType) ?? null
+  return marks.find((mark) => mark.type === linkType) ?? null
 }
 
 // findMarkRangeAround returns the contiguous [from, to] range around $pos
@@ -414,8 +451,7 @@ function classifyLinkTarget(rawTarget) {
   }
   return {
     ok: false,
-    error:
-      "Use http://, https://, #anchor, or an internal path starting with '/', './', or '../'.",
+    error: "Use http://, https://, #anchor, or an internal path starting with '/', './', or '../'.",
   }
 }
 
@@ -424,13 +460,20 @@ function defaultLinkTextForTarget(target) {
   if (/^mailto:/i.test(target)) return target.replace(/^mailto:/i, "")
   const pathOnly = target.split(/[?#]/)[0]
   const clean = pathOnly.replace(/\/+$/, "")
-  const parts = clean.split("/").filter(Boolean).filter(p => p !== "." && p !== "..")
+  const parts = clean
+    .split("/")
+    .filter(Boolean)
+    .filter((p) => p !== "." && p !== "..")
   const raw = parts[parts.length - 1] ?? "index"
-  try { return decodeURIComponent(raw) } catch { return raw }
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 function promptLinkForm(initialTarget, initialText) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const overlay = document.createElement("div")
     overlay.className = "gowiki-link-modal-overlay"
 
@@ -490,7 +533,7 @@ function promptLinkForm(initialTarget, initialText) {
         const item = document.createElement("div")
         item.className = "gowiki-link-search-item"
         const isAnchor = r.path.startsWith("#")
-        const displayPath = isAnchor ? r.path : (r.path.startsWith("/") ? r.path : "/" + r.path)
+        const displayPath = isAnchor ? r.path : r.path.startsWith("/") ? r.path : "/" + r.path
         const titleSpan = document.createElement("span")
         titleSpan.className = "gowiki-link-search-title"
         titleSpan.textContent = r.title || displayPath
@@ -538,7 +581,7 @@ function promptLinkForm(initialTarget, initialText) {
       })
       // Deduplicate slugs (same logic as heading ID decoration).
       const counts = new Map()
-      return headings.map(h => {
+      return headings.map((h) => {
         const count = counts.get(h.slug) ?? 0
         counts.set(h.slug, count + 1)
         const id = count === 0 ? h.slug : `${h.slug}-${count}`
@@ -547,26 +590,37 @@ function promptLinkForm(initialTarget, initialText) {
     }
 
     async function doLinkSearch(query) {
-      if (!query || query.length < 1) { renderLinkSearchResults([]); return }
+      if (!query || query.length < 1) {
+        renderLinkSearchResults([])
+        return
+      }
       // Anchor search: # prefix shows document headings.
       if (query.startsWith("#")) {
         const filter = query.slice(1).toLowerCase()
         const headings = getDocumentHeadings()
-        const matches = headings.filter(h =>
-          h.title.toLowerCase().includes(filter) || h.path.toLowerCase().includes(filter)
+        const matches = headings.filter(
+          (h) => h.title.toLowerCase().includes(filter) || h.path.toLowerCase().includes(filter)
         )
         renderLinkSearchResults(matches)
         return
       }
-      if (query.length < 2) { renderLinkSearchResults([]); return }
+      if (query.length < 2) {
+        renderLinkSearchResults([])
+        return
+      }
       // Don't search if it looks like a URL
-      if (/^https?:\/\//i.test(query) || /^mailto:/i.test(query)) { renderLinkSearchResults([]); return }
+      if (/^https?:\/\//i.test(query) || /^mailto:/i.test(query)) {
+        renderLinkSearchResults([])
+        return
+      }
       try {
         const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
         if (!resp.ok) return
         const data = await resp.json()
         renderLinkSearchResults(data.results || [])
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     targetInput.addEventListener("input", () => {
@@ -611,10 +665,10 @@ function promptLinkForm(initialTarget, initialText) {
 
     cancelBtn.addEventListener("click", () => close(null))
     okBtn.addEventListener("click", submit)
-    overlay.addEventListener("click", event => {
+    overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close(null)
     })
-    targetInput.addEventListener("keydown", event => {
+    targetInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault()
         if (searchActiveIndex >= 0 && searchItems[searchActiveIndex]) {
@@ -638,7 +692,7 @@ function promptLinkForm(initialTarget, initialText) {
         highlightSearchItem(Math.max(searchActiveIndex - 1, 0))
       }
     })
-    textInput.addEventListener("keydown", event => {
+    textInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault()
         submit()
@@ -665,7 +719,12 @@ function promptLinkForm(initialTarget, initialText) {
     targetInput.select()
 
     // If there's an initial target that looks like a search term, trigger search.
-    if (initialTarget && !initialTarget.startsWith("http") && !initialTarget.startsWith("/") && !initialTarget.startsWith("./")) {
+    if (
+      initialTarget &&
+      !initialTarget.startsWith("http") &&
+      !initialTarget.startsWith("/") &&
+      !initialTarget.startsWith("./")
+    ) {
       doLinkSearch(initialTarget)
     }
   })
@@ -746,7 +805,7 @@ function findWordRangeAtCursor(state) {
   const $from = state.selection.$from
   const parent = $from.parent
   const parentStart = $from.start()
-  const isWordChar = ch => /[A-Za-z0-9_]/.test(ch)
+  const isWordChar = (ch) => /[A-Za-z0-9_]/.test(ch)
 
   let childInfo = parent.childAfter($from.parentOffset)
   if (!childInfo.node && $from.parentOffset > 0) {
@@ -784,11 +843,7 @@ function setExternalLinkCommand() {
     if (linkForSelection) {
       target = { from: linkForSelection.from, to: linkForSelection.to }
       currentHref = linkForSelection.mark.attrs.href ?? ""
-      currentText = state.doc.textBetween(
-        linkForSelection.from,
-        linkForSelection.to,
-        ""
-      )
+      currentText = state.doc.textBetween(linkForSelection.from, linkForSelection.to, "")
     } else if (!state.selection.empty) {
       target = { from: state.selection.from, to: state.selection.to }
       currentText = state.doc.textBetween(state.selection.from, state.selection.to, "")
@@ -801,7 +856,7 @@ function setExternalLinkCommand() {
     }
 
     const promptSeed = currentHref || "https://"
-    void promptLinkForm(promptSeed, currentText).then(form => {
+    void promptLinkForm(promptSeed, currentText).then((form) => {
       if (form === null) return
       const activeState = view.state
       const activeDispatch = view.dispatch
@@ -826,9 +881,7 @@ function setExternalLinkCommand() {
 
       const normalized = form.target
       const isAutoText = form.text.trim().length === 0
-      const displayText = isAutoText
-        ? defaultLinkTextForTarget(normalized)
-        : form.text
+      const displayText = isAutoText ? defaultLinkTextForTarget(normalized) : form.text
 
       const tr = activeState.tr
       const linkMark = activeLinkType.create({
@@ -877,7 +930,7 @@ function encodePagePath(path) {
   return path
     .split("/")
     .filter(Boolean)
-    .map(part => encodeURIComponent(part))
+    .map((part) => encodeURIComponent(part))
     .join("/")
 }
 
@@ -908,7 +961,10 @@ function applyImageAutoFrame(img) {
   if (img.closest && img.closest("blockquote[data-image-bg]")) return
   // Skip if we've already decided for this URL.
   const cached = imageBgCache.get(img.src)
-  if (cached === "invert") { img.classList.add("gowiki-img-auto-invert"); return }
+  if (cached === "invert") {
+    img.classList.add("gowiki-img-auto-invert")
+    return
+  }
   if (cached === "skip") return
   // Need the image loaded and same-origin for canvas sampling.
   if (!img.complete || img.naturalWidth === 0) {
@@ -1012,7 +1068,9 @@ function resolveTheme(pref, adminDefault) {
   if (p === "light" || p === "dark") return p
   try {
     return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-  } catch { return "light" }
+  } catch {
+    return "light"
+  }
 }
 
 // applyTheme writes the effective theme to <html> and notifies plugins that
@@ -1021,15 +1079,22 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme
   try {
     window.dispatchEvent(new CustomEvent("gowiki:theme-changed", { detail: { theme } }))
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // setThemePreference saves the user's pref and immediately applies the
 // resolved theme. Writes localStorage + the backend when authenticated.
 async function setThemePreference(pref) {
   currentUserThemePref = pref
-  try { localStorage.setItem("gowiki-theme", pref) } catch { /* ignore */ }
-  const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+  try {
+    localStorage.setItem("gowiki-theme", pref)
+  } catch {
+    /* ignore */
+  }
+  const adminDefault =
+    (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
   applyTheme(resolveTheme(pref, adminDefault))
   if (currentUser) {
     try {
@@ -1038,20 +1103,25 @@ async function setThemePreference(pref) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ theme_preference: pref }),
       })
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 }
 
 // Keep "auto" tracking the OS preference in real time.
 try {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    const pref = currentUserThemePref || (localStorage.getItem("gowiki-theme") || "auto")
+    const pref = currentUserThemePref || localStorage.getItem("gowiki-theme") || "auto"
     if (pref === "auto" || !pref) {
-      const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+      const adminDefault =
+        (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
       applyTheme(resolveTheme(pref, adminDefault))
     }
   })
-} catch { /* ignore on unsupported browsers */ }
+} catch {
+  /* ignore on unsupported browsers */
+}
 
 // waitForQuietDOM resolves once the given root has been visually stable for
 // `quietMs`. "Stable" means: every <img> is loaded (or has failed), and no
@@ -1065,27 +1135,31 @@ async function waitForQuietDOM(root, quietMs = 750, maxWaitMs = 20000) {
 
   // Wait for all images inside the root to finish loading.
   const imgs = Array.from(root.querySelectorAll("img"))
-  await Promise.all(imgs.map(img => {
-    if (img.complete) return Promise.resolve()
-    return new Promise(resolve => {
-      const finish = () => {
-        img.removeEventListener("load", finish)
-        img.removeEventListener("error", finish)
-        resolve()
-      }
-      img.addEventListener("load", finish)
-      img.addEventListener("error", finish)
+  await Promise.all(
+    imgs.map((img) => {
+      if (img.complete) return Promise.resolve()
+      return new Promise((resolve) => {
+        const finish = () => {
+          img.removeEventListener("load", finish)
+          img.removeEventListener("error", finish)
+          resolve()
+        }
+        img.addEventListener("load", finish)
+        img.addEventListener("error", finish)
+      })
     })
-  }))
+  )
 
   // Then watch for DOM activity; declare "quiet" after quietMs of stillness.
   let lastActivity = Date.now()
-  const observer = new MutationObserver(() => { lastActivity = Date.now() })
+  const observer = new MutationObserver(() => {
+    lastActivity = Date.now()
+  })
   observer.observe(root, { childList: true, subtree: true, attributes: true, characterData: true })
 
   try {
     while (Date.now() - start < maxWaitMs) {
-      await new Promise(r => setTimeout(r, 100))
+      await new Promise((r) => setTimeout(r, 100))
       if (Date.now() - lastActivity >= quietMs) return
     }
   } finally {
@@ -1114,7 +1188,7 @@ async function selectTemplateForNewPage(pagePath) {
   if (templates.length === 0) return null
   if (templates.length === 1) return templates[0].markdown || null
 
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const overlay = document.createElement("div")
     overlay.className = "gowiki-login-overlay gowiki-template-picker-overlay"
 
@@ -1160,17 +1234,21 @@ async function selectTemplateForNewPage(pagePath) {
 
     for (const tmpl of templates) {
       const suffix = tmpl.constrained ? " (" + tmpl.slug + "*)" : ""
-      list.appendChild(makeRow({
-        label: tmpl.label + suffix,
-        hint: tmpl.template_path,
-        markdown: tmpl.markdown || "",
-      }))
+      list.appendChild(
+        makeRow({
+          label: tmpl.label + suffix,
+          hint: tmpl.template_path,
+          markdown: tmpl.markdown || "",
+        })
+      )
     }
-    list.appendChild(makeRow({
-      label: "Blank page",
-      hint: "Start from an empty page",
-      markdown: null,
-    }))
+    list.appendChild(
+      makeRow({
+        label: "Blank page",
+        hint: "Start from an empty page",
+        markdown: null,
+      })
+    )
 
     dialog.appendChild(list)
     overlay.appendChild(dialog)
@@ -1193,7 +1271,7 @@ function splitPathParts(raw) {
 }
 
 function encodePathSegments(segments) {
-  return segments.map(s => encodeURIComponent(s)).join("/")
+  return segments.map((s) => encodeURIComponent(s)).join("/")
 }
 
 function buildMediaReferencePath(currentNamespace, mediaPath) {
@@ -1224,7 +1302,11 @@ function appendMediaVersion(target, version) {
 function mediaLabelFromPath(mediaPath) {
   const parts = splitPathParts(mediaPath)
   const raw = parts[parts.length - 1] ?? "file"
-  try { return decodeURIComponent(raw) } catch { return raw }
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 function rawInsertMediaReference(kind, mediaEntry) {
@@ -1254,7 +1336,7 @@ function insertMediaReference(kind, mediaEntry) {
 
   const basePath = buildMediaReferencePath(pageNamespace, mediaEntry.path)
   const label = mediaLabelFromPath(mediaEntry.path)
-  const version = (mediaEntry.version && mediaEntry.version > 1) ? String(mediaEntry.version) : null
+  const version = mediaEntry.version && mediaEntry.version > 1 ? String(mediaEntry.version) : null
 
   // Update media version cache so the property panel dropdown knows the max version.
   if (mediaEntry.version > 0) {
@@ -1397,13 +1479,14 @@ function buildMediaApiUrl(namespacePath) {
 function generatePasteFilename(originalName) {
   const ext = (originalName.match(/\.([^.]+)$/) ?? [])[1] ?? "png"
   const now = new Date()
-  const ts = now.getFullYear().toString()
-    + String(now.getMonth() + 1).padStart(2, "0")
-    + String(now.getDate()).padStart(2, "0")
-    + "-"
-    + String(now.getHours()).padStart(2, "0")
-    + String(now.getMinutes()).padStart(2, "0")
-    + String(now.getSeconds()).padStart(2, "0")
+  const ts =
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0") +
+    "-" +
+    String(now.getHours()).padStart(2, "0") +
+    String(now.getMinutes()).padStart(2, "0") +
+    String(now.getSeconds()).padStart(2, "0")
   const rand = Math.random().toString(36).slice(2, 6)
   return `paste-${ts}-${rand}.${ext}`
 }
@@ -1444,7 +1527,7 @@ function extractImageFiles(clipboardData) {
   // Fallback to files
   const files = clipboardData.files
   if (files && files.length > 0) {
-    return Array.from(files).filter(f => /^image\//.test(f.type))
+    return Array.from(files).filter((f) => /^image\//.test(f.type))
   }
   return []
 }
@@ -1454,7 +1537,7 @@ async function handleImageFilePaste(view, imageFiles) {
     try {
       const entry = await uploadMediaFile(file)
       const basePath = buildMediaReferencePath(pageNamespace, entry.path)
-      const version = (entry.version && entry.version > 1) ? String(entry.version) : null
+      const version = entry.version && entry.version > 1 ? String(entry.version) : null
       const label = mediaLabelFromPath(entry.path)
       if (entry.version > 0) {
         window.__gowikiMediaVersions.set(basePath, entry.version)
@@ -1508,7 +1591,7 @@ function fetchImageAsBlob(url) {
         canvas.height = img.naturalHeight
         const ctx = canvas.getContext("2d")
         ctx.drawImage(img, 0, 0)
-        canvas.toBlob(blob => {
+        canvas.toBlob((blob) => {
           if (blob) resolve(blob)
           else reject(new Error("Canvas toBlob failed"))
         }, "image/png")
@@ -1523,14 +1606,13 @@ function fetchImageAsBlob(url) {
 
 // Upload a single image from its URL (data:, file://, http(s)://) and return wiki path
 async function uploadImageFromUrl(url) {
-  let blob
   if (url.startsWith("data:")) {
     const file = dataUrlToFile(url, "pasted-image-" + Date.now())
     const entry = await uploadMediaFile(file)
     return appendMediaVersion(buildMediaReferencePath(pageNamespace, entry.path), entry.version)
   }
   // For file://, blob://, http(s):// — try to load via canvas
-  blob = await fetchImageAsBlob(url)
+  const blob = await fetchImageAsBlob(url)
   const ext = blob.type?.split("/")[1] ?? "png"
   const file = new File([blob], "pasted-image-" + Date.now() + "." + ext, { type: blob.type })
   const entry = await uploadMediaFile(file)
@@ -1570,9 +1652,7 @@ async function handleNonLocalImagePaste(view, md, slice, plainText) {
       openStart = Math.min(slice.openStart, 1)
       openEnd = Math.min(slice.openEnd, 1)
     }
-    const tr = view.state.tr.replaceSelection(
-      new Slice(cleanDoc.content, openStart, openEnd)
-    )
+    const tr = view.state.tr.replaceSelection(new Slice(cleanDoc.content, openStart, openEnd))
     view.dispatch(tr)
     if (uploadedCount > 0) {
       setStatus(`Uploaded ${uploadedCount} pasted image${uploadedCount > 1 ? "s" : ""}`)
@@ -1662,7 +1742,10 @@ function extractDatabaseRowBlocks(markdown) {
   const sepRe = /^\|[\s-]+\|[\s-]+\|$/
   let inCode = false
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trimStart().startsWith("```")) { inCode = !inCode; continue }
+    if (lines[i].trimStart().startsWith("```")) {
+      inCode = !inCode
+      continue
+    }
     if (inCode) continue
     const m = lines[i].trim().match(directiveRe)
     if (!m) continue
@@ -1707,12 +1790,14 @@ async function validateDatabaseRows(markdown) {
 
   // On non-row-bound pages, reject any bound database-row block
   if (baselineBlocks.length === 0 && currentBlocks.length > 0) {
-    errors.push("Cannot add a bound database-row block to a non-row-bound page — only the {database-row} placeholder is allowed here")
+    errors.push(
+      "Cannot add a bound database-row block to a non-row-bound page — only the {database-row} placeholder is allowed here"
+    )
   }
 
   // Check that every baseline block still exists
   for (const base of baselineBlocks) {
-    const match = currentBlocks.find(b => b.table === base.table)
+    const match = currentBlocks.find((b) => b.table === base.table)
     if (!match) {
       errors.push(`Cannot remove database-row block (table: ${base.table})`)
       continue
@@ -1734,7 +1819,9 @@ async function validateDatabaseRows(markdown) {
       const value = block.fields[field.name]
       if (field.type === "enum" && field.enum_values) {
         if (value !== "" && !field.enum_values.includes(value)) {
-          errors.push(`Invalid value '${value}' for enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
+          errors.push(
+            `Invalid value '${value}' for enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`
+          )
         }
       } else if (field.type === "multi_enum" && field.enum_values) {
         // Strip legacy bracket wrapping (e.g. "[France]" from older buggy
@@ -1742,10 +1829,15 @@ async function validateDatabaseRows(markdown) {
         // real culprits rather than the brackets.
         const cleaned = String(value).replace(/^\s*\[(.*)\]\s*$/, "$1")
         if (cleaned !== "") {
-          const tokens = cleaned.split(",").map(t => t.trim()).filter(Boolean)
+          const tokens = cleaned
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
           for (const token of tokens) {
             if (!field.enum_values.includes(token)) {
-              errors.push(`Invalid value '${token}' in multi-enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`)
+              errors.push(
+                `Invalid value '${token}' in multi-enum field '${field.name}' (table: ${block.table}). Allowed: ${field.enum_values.join(", ")}`
+              )
             }
           }
         }
@@ -1781,7 +1873,9 @@ function applyNormalizedEditState(normalized) {
 let statusToastEl = null
 let statusToastTimer = null
 
-window.__gowikiSetStatus = function(text, isError) { setStatus(text, isError) }
+window.__gowikiSetStatus = function (text, isError) {
+  setStatus(text, isError)
+}
 
 function setStatus(text, isError, details) {
   statusText = text
@@ -1807,7 +1901,9 @@ function setStatus(text, isError, details) {
     const dismissBtn = document.createElement("button")
     dismissBtn.textContent = "\u2715"
     dismissBtn.className = "gowiki-toast-dismiss"
-    dismissBtn.addEventListener("click", () => statusToastEl.classList.remove("visible", "gowiki-toast-error", "gowiki-toast-with-details"))
+    dismissBtn.addEventListener("click", () =>
+      statusToastEl.classList.remove("visible", "gowiki-toast-error", "gowiki-toast-with-details")
+    )
     row.appendChild(dismissBtn)
     statusToastEl.appendChild(row)
     if (details) {
@@ -1979,7 +2075,9 @@ function restoreCursorFromLocalStorage() {
 /** Clear stored cursor context (on publish/discard). */
 function clearCursorLocalStorage() {
   if (pagePath) {
-    try { localStorage.removeItem("gowiki:cursor:" + pagePath) } catch {}
+    try {
+      localStorage.removeItem("gowiki:cursor:" + pagePath)
+    } catch {}
   }
 }
 
@@ -2000,27 +2098,28 @@ function showCursorBeacon(screenX, screenY) {
  * roughly. Used for context matching across raw/visual mode switch.
  */
 function stripMarkdownForContext(text) {
-  return text
-    // Links: [text](url) → text
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    // Images: ![alt](url) → alt
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-    // Bold: **text** → text
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    // Italic: *text* → text
-    .replace(/\*([^*]+)\*/g, "$1")
-    // Underline: _text_ → text
-    .replace(/_([^_]+)_/g, "$1")
-    // Strikethrough: ~~text~~ → text
-    .replace(/~~([^~]+)~~/g, "$1")
-    // Inline code: `text` → text
-    .replace(/`([^`]+)`/g, "$1")
-    // Heading markers
-    .replace(/^#{1,6}\s+/gm, "")
-    // Directives on their own line
-    .replace(/^\{[^}]+\}\s*$/gm, "")
+  return (
+    text
+      // Links: [text](url) → text
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      // Images: ![alt](url) → alt
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      // Bold: **text** → text
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      // Italic: *text* → text
+      .replace(/\*([^*]+)\*/g, "$1")
+      // Underline: _text_ → text
+      .replace(/_([^_]+)_/g, "$1")
+      // Strikethrough: ~~text~~ → text
+      .replace(/~~([^~]+)~~/g, "$1")
+      // Inline code: `text` → text
+      .replace(/`([^`]+)`/g, "$1")
+      // Heading markers
+      .replace(/^#{1,6}\s+/gm, "")
+      // Directives on their own line
+      .replace(/^\{[^}]+\}\s*$/gm, "")
+  )
 }
-
 
 /**
  * Extract the full text content from a PM doc with position mapping,
@@ -2039,7 +2138,7 @@ function pmDocTextWithPositions(doc) {
       textLen += 1
     }
   })
-  const fullText = chunks.map(c => c.text).join("")
+  const fullText = chunks.map((c) => c.text).join("")
   return { fullText, chunks }
 }
 
@@ -2130,7 +2229,9 @@ async function setEditMode(nextEditMode) {
           const $pos = editorView.state.doc.resolve(clampedPos)
           const sel = TextSelection.near($pos)
           editorView.dispatch(editorView.state.tr.setSelection(sel).scrollIntoView())
-        } catch { /* position out of range, cursor stays at default */ }
+        } catch {
+          /* position out of range, cursor stays at default */
+        }
         const scrollToCenter = (showBeacon) => {
           try {
             const coords = editorView.coordsAtPos(clampedPos)
@@ -2225,7 +2326,7 @@ function collectTargetLineStarts(text, from, to, empty) {
     if (text.charCodeAt(i) === 10) starts.push(i + 1)
   }
 
-  const lineStartAt = pos => {
+  const lineStartAt = (pos) => {
     let lo = 0
     let hi = starts.length - 1
     while (lo <= hi) {
@@ -2243,7 +2344,7 @@ function collectTargetLineStarts(text, from, to, empty) {
   const effectiveTo = to > from && text.charCodeAt(to - 1) === 10 ? to - 1 : to
   const first = lineStartAt(from)
   const last = lineStartAt(effectiveTo)
-  return starts.filter(pos => pos >= first && pos <= last)
+  return starts.filter((pos) => pos >= first && pos <= last)
 }
 
 function remapPos(pos, changes) {
@@ -2296,15 +2397,9 @@ function applyCodeBlockIndent(direction) {
     const mappedFrom = remapPos(info.from, changes)
     const mappedTo = remapPos(info.to, changes)
 
-    let tr = state.tr.insertText(
-      nextText,
-      info.blockStart,
-      info.blockStart + info.text.length
-    )
+    let tr = state.tr.insertText(nextText, info.blockStart, info.blockStart + info.text.length)
 
-    tr = tr.setSelection(
-      TextSelection.create(tr.doc, info.blockStart + mappedFrom, info.blockStart + mappedTo)
-    )
+    tr = tr.setSelection(TextSelection.create(tr.doc, info.blockStart + mappedFrom, info.blockStart + mappedTo))
 
     dispatch(tr.scrollIntoView())
     return true
@@ -2331,7 +2426,8 @@ function tabKeyCommand(direction) {
       const newLevel = direction === "in" ? Math.min(level + 1, 6) : Math.max(level - 1, 1)
       if (newLevel !== level) {
         return setBlockType(state.schema.nodes.heading, {
-          level: newLevel, numbered: node.attrs.numbered,
+          level: newLevel,
+          numbered: node.attrs.numbered,
         })(state, dispatch)
       }
       return true
@@ -2347,7 +2443,6 @@ function tabKeyCommand(direction) {
     return true
   }
 }
-
 
 function backspaceEmptyListItemCommand() {
   return (state, dispatch) => {
@@ -2390,11 +2485,7 @@ function insertHardBreakCommand() {
     const hardBreak = state.schema.nodes.hard_break
     if (!hardBreak) return false
     if (!dispatch) return true
-    dispatch(
-      state.tr
-        .replaceSelectionWith(hardBreak.create())
-        .scrollIntoView()
-    )
+    dispatch(state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView())
     return true
   }
 }
@@ -2435,11 +2526,12 @@ function scrollSelectionIntoContentView(view) {
   return true
 }
 
-const COPY_ICON = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
+const COPY_ICON =
+  '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
 const CHECK_ICON = '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>'
 
 function addCodeCopyButtons(container) {
-  container.querySelectorAll("pre").forEach(pre => {
+  container.querySelectorAll("pre").forEach((pre) => {
     const btn = document.createElement("button")
     btn.className = "gowiki-code-copy-btn"
     btn.title = "Copy code"
@@ -2469,11 +2561,16 @@ function mountReadOnlyView(container, markdown, className, extraPlugins = []) {
   } catch (err) {
     console.error("Rendering failed:", err)
     const errorDiv = document.createElement("div")
-    errorDiv.style.cssText = "background:#fce4ec;border:1px solid #ef9a9a;border-radius:6px;padding:16px;margin:12px 0;color:#b71c1c;font-family:monospace;font-size:13px;white-space:pre-wrap"
-    errorDiv.textContent = "⚠ Rendering error: " + (err.message || err) + "\n\nThe raw markdown is shown below. Use raw edit mode (Shift+click Edit) to fix this page."
+    errorDiv.style.cssText =
+      "background:#fce4ec;border:1px solid #ef9a9a;border-radius:6px;padding:16px;margin:12px 0;color:#b71c1c;font-family:monospace;font-size:13px;white-space:pre-wrap"
+    errorDiv.textContent =
+      "⚠ Rendering error: " +
+      (err.message || err) +
+      "\n\nThe raw markdown is shown below. Use raw edit mode (Shift+click Edit) to fix this page."
     container.appendChild(errorDiv)
     const pre = document.createElement("pre")
-    pre.style.cssText = "background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:12px;margin:8px 0;font-size:12px;overflow-x:auto;white-space:pre-wrap"
+    pre.style.cssText =
+      "background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:12px;margin:8px 0;font-size:12px;overflow-x:auto;white-space:pre-wrap"
     pre.textContent = markdown
     container.appendChild(pre)
     return null
@@ -2505,7 +2602,7 @@ function mountReadOnlyView(container, markdown, className, extraPlugins = []) {
   highlightCodeBlocks(wrapper)
   addCodeCopyButtons(wrapper)
   // Fold spoilers by default in view mode
-  wrapper.querySelectorAll("details.gowiki-spoiler[open]").forEach(d => d.removeAttribute("open"))
+  wrapper.querySelectorAll("details.gowiki-spoiler[open]").forEach((d) => d.removeAttribute("open"))
   view.dom.removeAttribute("contenteditable")
   if (view.domObserver && view.domObserver.stop) view.domObserver.stop()
   // ProseMirror registers copy/cut/paste handlers on view.dom that call
@@ -2562,7 +2659,7 @@ function buildTOC(container) {
   title.textContent = "Contents"
   toc.appendChild(title)
 
-  const minLevel = Math.min(...Array.from(headings, h => parseInt(h.tagName.slice(1), 10)))
+  const minLevel = Math.min(...Array.from(headings, (h) => parseInt(h.tagName.slice(1), 10)))
 
   const list = document.createElement("ul")
   for (const h of headings) {
@@ -2575,7 +2672,7 @@ function buildTOC(container) {
     a.href = `#${id}`
     const num = h.getAttribute("data-heading-number")
     a.textContent = (num ? num + " " : "") + h.textContent
-    a.addEventListener("click", e => {
+    a.addEventListener("click", (e) => {
       e.preventDefault()
       const target = document.getElementById(id)
       if (target) {
@@ -2726,7 +2823,9 @@ async function checkReadAck(path, currentVersion, container) {
       btn.textContent = "Acknowledge"
       btn.disabled = true
 
-      checkbox.addEventListener("change", () => { btn.disabled = !checkbox.checked })
+      checkbox.addEventListener("change", () => {
+        btn.disabled = !checkbox.checked
+      })
       btn.addEventListener("click", async () => {
         btn.disabled = true
         btn.textContent = "Acknowledging…"
@@ -2840,9 +2939,10 @@ function updateRawOverlay(overlay, text) {
     out += escapeOverlay(src.slice(last, m.index))
     const ch = m[0]
     const code = ch.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()
-    const cls = ch.charCodeAt(0) === 0x00A0 || ch.charCodeAt(0) === 0x202F
-      ? "gowiki-raw-invisible gowiki-raw-invisible-nbsp"
-      : "gowiki-raw-invisible"
+    const cls =
+      ch.charCodeAt(0) === 0x00a0 || ch.charCodeAt(0) === 0x202f
+        ? "gowiki-raw-invisible gowiki-raw-invisible-nbsp"
+        : "gowiki-raw-invisible"
     out += `<span class="${cls}" title="U+${code}">${escapeOverlay(ch)}</span>`
     last = m.index + ch.length
   }
@@ -2851,7 +2951,7 @@ function updateRawOverlay(overlay, text) {
 }
 
 function escapeOverlay(s) {
-  return s.replace(/[&<>]/g, c => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;")
+  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"))
 }
 
 function rawInsertText(textarea, text) {
@@ -2920,9 +3020,7 @@ function rawToggleLinePrefix(textarea, prefix) {
   const val = textarea.value
 
   // Check if all lines already have the prefix
-  const allHavePrefix = ranges.every(r =>
-    val.substring(r.lineStart, r.lineStart + prefix.length) === prefix
-  )
+  const allHavePrefix = ranges.every((r) => val.substring(r.lineStart, r.lineStart + prefix.length) === prefix)
 
   textarea.focus()
 
@@ -2996,9 +3094,7 @@ async function rawInsertLink(textarea) {
   const form = await promptLinkForm("https://", selectedText)
   if (!form) return
 
-  const displayText = form.text.trim().length === 0
-    ? defaultLinkTextForTarget(form.target)
-    : form.text
+  const displayText = form.text.trim().length === 0 ? defaultLinkTextForTarget(form.target) : form.text
   const md = `[${displayText}](${form.target})`
 
   textarea.focus()
@@ -3199,7 +3295,7 @@ function rawHandleEnterInList(textarea) {
   let nextMarker = info.marker
   const orderedMatch = info.marker.match(/^(\d+)\. $/)
   if (orderedMatch) {
-    nextMarker = (Number(orderedMatch[1]) + 1) + ". "
+    nextMarker = Number(orderedMatch[1]) + 1 + ". "
   }
   const insertion = "\n" + info.indent + nextMarker
 
@@ -3219,7 +3315,7 @@ function rawListIndentWidth(line) {
 function rawHandleTabInList(textarea, direction) {
   const ranges = rawGetSelectedLineRanges(textarea)
   const val = textarea.value
-  const listLines = ranges.filter(r => rawListRe.test(val.substring(r.lineStart, r.lineEnd)))
+  const listLines = ranges.filter((r) => rawListRe.test(val.substring(r.lineStart, r.lineEnd)))
   if (listLines.length === 0) return false
 
   // Expand each selected root line to include its sub-items (deeper-indented lines below it).
@@ -3239,7 +3335,7 @@ function rawHandleTabInList(textarea, direction) {
   // you can't sublevel the first item since there's no sibling above it.
   let effectiveRoots = listLines
   if (direction === "in") {
-    effectiveRoots = listLines.filter(root => {
+    effectiveRoots = listLines.filter((root) => {
       const rootLine = val.substring(root.lineStart, root.lineEnd)
       const rootIndent = rootLine.match(/^(\s*)/)[1].length
       const rootIsOrdered = /^\s*\d+\. /.test(rootLine)
@@ -3247,7 +3343,10 @@ function rawHandleTabInList(textarea, direction) {
       // Find this root's index in allRanges and scan backward
       let rootIdx = -1
       for (let i = 0; i < allRanges.length; i++) {
-        if (allRanges[i].lineStart === root.lineStart) { rootIdx = i; break }
+        if (allRanges[i].lineStart === root.lineStart) {
+          rootIdx = i
+          break
+        }
       }
       if (rootIdx <= 0) return false // first line of file, definitely first item
 
@@ -3278,7 +3377,10 @@ function rawHandleTabInList(textarea, direction) {
     // Find this root's index in allRanges
     let rootIdx = -1
     for (let i = 0; i < allRanges.length; i++) {
-      if (allRanges[i].lineStart === root.lineStart) { rootIdx = i; break }
+      if (allRanges[i].lineStart === root.lineStart) {
+        rootIdx = i
+        break
+      }
     }
     if (rootIdx === -1) continue
 
@@ -3303,7 +3405,7 @@ function rawHandleTabInList(textarea, direction) {
   // (they were speculatively included while scanning)
 
   // Build the final sorted list of line ranges to process
-  const processRanges = allRanges.filter(r => linesToProcess.has(r.lineStart))
+  const processRanges = allRanges.filter((r) => linesToProcess.has(r.lineStart))
 
   const origStart = textarea.selectionStart
   const origEnd = textarea.selectionEnd
@@ -3390,7 +3492,10 @@ function rawGetTableContext(textarea) {
   let offset = 0
   let curLineIdx = -1
   for (let i = 0; i < lines.length; i++) {
-    if (offset === lineStart) { curLineIdx = i; break }
+    if (offset === lineStart) {
+      curLineIdx = i
+      break
+    }
     offset += lines[i].length + 1
   }
   if (curLineIdx < 0) return null
@@ -3410,7 +3515,7 @@ function rawParsePipeRow(line) {
   const trimmed = line.trim()
   if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
   const inner = trimmed.slice(1, -1)
-  return inner.split("|").map(c => c.trim())
+  return inner.split("|").map((c) => c.trim())
 }
 
 function rawBuildPipeRow(cells) {
@@ -3422,7 +3527,7 @@ function rawIsSeparatorRow(line) {
   if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return false
   const cells = trimmed.slice(1, -1).split("|")
   // Every cell must contain at least one dash
-  return cells.length > 0 && cells.every(c => /^\s*:?-+:?\s*$/.test(c))
+  return cells.length > 0 && cells.every((c) => /^\s*:?-+:?\s*$/.test(c))
 }
 
 // Convert a table line index to a 0-based formula row (skipping separator)
@@ -3482,8 +3587,8 @@ function rawAdjustColumnSpecs(ctx, changeType, changeIndex) {
 
       if (rangeStart !== undefined) {
         // Range: col3-8.prop
-        let start = parseInt(rangeStart)
-        let end = parseInt(rangeEnd)
+        const start = parseInt(rangeStart)
+        const end = parseInt(rangeEnd)
         let newStart = start
         let newEnd = end
         if (isInsert) {
@@ -3552,6 +3657,7 @@ function rawAdjustColumnSpecs(ctx, changeType, changeIndex) {
   )
 
   // Remove sentinel-marked specs and clean up (handles both unquoted and quoted values)
+  // eslint-disable-next-line no-control-regex -- NUL bytes are the sentinel used to mark specs slated for removal; they cannot appear in normal directive text so they're safe as a marker.
   let cleaned = adjusted.replace(/\s*\x00REMOVE\x00=(?:"[^"]*"|\S+)/g, "")
   // If directive is now empty (only "{table }"), remove the line
   if (/^\s*\{table\s*\}\s*$/.test(cleaned)) {
@@ -3581,7 +3687,10 @@ function rawGetCellCoords(textarea, ctx) {
   const pipes = rawFindPipes(val, lineStart, lineEnd)
   let col = 0
   for (let i = 0; i < pipes.length - 1; i++) {
-    if (pos >= pipes[i] && pos <= pipes[i + 1]) { col = i; break }
+    if (pos >= pipes[i] && pos <= pipes[i + 1]) {
+      col = i
+      break
+    }
   }
   return { row: ctx.curLineIdx, col }
 }
@@ -3637,7 +3746,7 @@ function rawReplaceLines(textarea, ctx, origTableLastLine) {
 
 function rawInsertTable(textarea) {
   const row1 = "| Header 1 | Header 2 | Header 3 |"
-  const sep  = "| --- | --- | --- |"
+  const sep = "| --- | --- | --- |"
   const row2 = "|  |  |  |"
   const snippet = row1 + "\n" + sep + "\n" + row2
 
@@ -3825,7 +3934,10 @@ function rawHandleTabInTable(textarea, direction) {
   // Find which cell the cursor is in
   let cellIdx = -1
   for (let i = 0; i < pipes.length - 1; i++) {
-    if (pos >= pipes[i] && pos <= pipes[i + 1]) { cellIdx = i; break }
+    if (pos >= pipes[i] && pos <= pipes[i + 1]) {
+      cellIdx = i
+      break
+    }
   }
   if (cellIdx === -1) cellIdx = 0
 
@@ -3942,7 +4054,7 @@ function rawInsertProperty(textarea) {
   if (/!\[.*\]\(.*\)/.test(line)) {
     // Image line — check if a {image ...} directive already exists above
     if (lineStart > 0) {
-      let prevEnd = lineStart - 1
+      const prevEnd = lineStart - 1
       let prevStart = prevEnd
       while (prevStart > 0 && val[prevStart - 1] !== "\n") prevStart--
       const prevLine = val.substring(prevStart, prevEnd)
@@ -3974,7 +4086,7 @@ function rawInsertProperty(textarea) {
       }
     }
     if (tableStart > 0) {
-      let prevEnd = tableStart - 1
+      const prevEnd = tableStart - 1
       let prevStart = prevEnd
       while (prevStart > 0 && val[prevStart - 1] !== "\n") prevStart--
       const prevLine = val.substring(prevStart, prevEnd)
@@ -4197,7 +4309,7 @@ function buildSymbolPanel() {
 
     if (q) {
       // Flat filtered list
-      const matches = symbolCatalogue.filter(s => {
+      const matches = symbolCatalogue.filter((s) => {
         const hay = (s.label + " " + s.aliases + " " + s.cat).toLowerCase()
         return hay.includes(q)
       })
@@ -4254,7 +4366,7 @@ function buildSymbolPanel() {
     item.className = "gowiki-symbol-item"
     item.textContent = sym.char
     item.title = sym.label
-    item.addEventListener("mousedown", e => {
+    item.addEventListener("mousedown", (e) => {
       e.preventDefault()
       closeSymbolPanel()
       insertSymbolChar(sym.char)
@@ -4277,7 +4389,7 @@ function buildSymbolPanel() {
   }
 
   search.addEventListener("input", () => renderSymbols(search.value))
-  search.addEventListener("keydown", e => {
+  search.addEventListener("keydown", (e) => {
     const cols = 8 // grid columns
     if (e.key === "ArrowDown") {
       e.preventDefault()
@@ -4337,7 +4449,7 @@ function openSymbolPanel(anchor) {
   panel.style.top = Math.min(rect.top + 4, window.innerHeight - 400) + "px"
 
   // Dismiss on click outside. Capture phase so we fire before focus steal.
-  symbolPanelOutsideHandler = e => {
+  symbolPanelOutsideHandler = (e) => {
     if (!symbolPanelEl) return
     if (symbolPanelEl.contains(e.target)) return
     if (symbolToolbarAnchor && symbolToolbarAnchor.contains(e.target)) return
@@ -4383,9 +4495,7 @@ function openAIPanel() {
   aiPanelEl = document.createElement("div")
   aiPanelEl.id = "ai-panel"
   const isEditing = mode === "edit"
-  const placeholder = isEditing
-    ? "Ask AI to modify this page..."
-    : "Ask a question about this page or the wiki..."
+  const placeholder = isEditing ? "Ask AI to modify this page..." : "Ask a question about this page or the wiki..."
   aiPanelEl.innerHTML = `
     <div class="ai-panel-header">
       <span class="ai-panel-title">AI Assistant</span>
@@ -4426,7 +4536,7 @@ function openAIPanel() {
   const defaultMode = isEditing ? "action" : "question"
   sendBtn.addEventListener("click", () => aiSend(defaultMode))
   if (reviewBtn) reviewBtn.addEventListener("click", () => aiSend("review"))
-  input.addEventListener("keydown", e => {
+  input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       aiSend(defaultMode)
@@ -4493,14 +4603,15 @@ async function aiSend(sendMode = "action") {
       aiMsg.innerHTML = renderAIMarkdown(fullText)
     } else {
       // Use backend-verified proposals if available, otherwise parse from text.
-      const proposals = (markers && markers.proposals && markers.proposals.length > 0)
-        ? markers.proposals
-        : parseReviewProposals(fullText)
+      const proposals =
+        markers && markers.proposals && markers.proposals.length > 0
+          ? markers.proposals
+          : parseReviewProposals(fullText)
 
       // Validate proposals against current document content.
       // Strip marker fields — we don't insert markers into the document.
       const markdown = getCurrentMarkdown()
-      proposals.forEach(p => {
+      proposals.forEach((p) => {
         delete p.marker
         p._verified = markdown.includes(p.original)
       })
@@ -4530,7 +4641,6 @@ async function aiSend(sendMode = "action") {
       usageEl.textContent = `Tokens: ${usage.input_tokens || 0} in, ${usage.output_tokens || 0} out`
       aiMsg.appendChild(usageEl)
     }
-
   } catch (err) {
     aiMsg.textContent = `Error: ${err.message}`
     aiMsg.classList.add("ai-msg-error")
@@ -4593,9 +4703,8 @@ async function aiStreamRequest(message, sendMode, aiMsg) {
           } else {
             // Action/review: don't show raw JSON, show progress instead.
             const count = (fullText.match(/"original"/g) || []).length
-            aiMsg.textContent = count > 0
-              ? `Analyzing... ${count} proposal${count > 1 ? "s" : ""} so far`
-              : "Analyzing..."
+            aiMsg.textContent =
+              count > 0 ? `Analyzing... ${count} proposal${count > 1 ? "s" : ""} so far` : "Analyzing..."
           }
           const messagesEl = aiPanelEl?.querySelector(".ai-panel-messages")
           if (messagesEl) aiScrollIfNeeded(messagesEl)
@@ -4642,14 +4751,17 @@ function parseReviewProposals(text) {
   try {
     const arr = JSON.parse(jsonMatch[0])
     if (!Array.isArray(arr)) return []
-    return arr.filter(p => p.original && p.proposed)
-  } catch { return [] }
+    return arr.filter((p) => p.original && p.proposed)
+  } catch {
+    return []
+  }
 }
 
 // Character-level inline diff for review display.
 function charDiffHtml(oldStr, newStr) {
   // Simple LCS-based char diff.
-  const m = oldStr.length, n = newStr.length
+  const m = oldStr.length,
+    n = newStr.length
   // For very long strings, fall back to no highlighting.
   if (m > 2000 || n > 2000) {
     return {
@@ -4672,24 +4784,35 @@ function charDiffHtml(oldStr, newStr) {
   }
   // Backtrack.
   const ops = []
-  let i = m, j = n
+  let i = m,
+    j = n
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && oldStr[i - 1] === newStr[j - 1]) {
-      ops.push({ type: "=", ch: oldStr[i - 1] }); i--; j--
+      ops.push({ type: "=", ch: oldStr[i - 1] })
+      i--
+      j--
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      ops.push({ type: "+", ch: newStr[j - 1] }); j--
+      ops.push({ type: "+", ch: newStr[j - 1] })
+      j--
     } else {
-      ops.push({ type: "-", ch: oldStr[i - 1] }); i--
+      ops.push({ type: "-", ch: oldStr[i - 1] })
+      i--
     }
   }
   ops.reverse()
   // Build HTML.
-  let oldHtml = "", newHtml = ""
+  let oldHtml = "",
+    newHtml = ""
   for (const op of ops) {
     const esc = escapeHtml(op.ch)
-    if (op.type === "=") { oldHtml += esc; newHtml += esc }
-    else if (op.type === "-") { oldHtml += `<del>${esc}</del>` }
-    else { newHtml += `<ins>${esc}</ins>` }
+    if (op.type === "=") {
+      oldHtml += esc
+      newHtml += esc
+    } else if (op.type === "-") {
+      oldHtml += `<del>${esc}</del>`
+    } else {
+      newHtml += `<ins>${esc}</ins>`
+    }
   }
   return { oldHtml, newHtml }
 }
@@ -4699,10 +4822,10 @@ function renderReviewPanel(container, proposals) {
 
   // Validate each proposal against the actual document content.
   const markdown = getCurrentMarkdown()
-  proposals.forEach(p => {
+  proposals.forEach((p) => {
     p._verified = markdown.includes(p.original)
   })
-  const verified = proposals.filter(p => p._verified).length
+  const verified = proposals.filter((p) => p._verified).length
 
   const header = document.createElement("div")
   header.className = "ai-review-header"
@@ -4713,7 +4836,7 @@ function renderReviewPanel(container, proposals) {
   list.className = "ai-review-list"
   container.appendChild(list)
 
-  const states = proposals.map(p => ({
+  const states = proposals.map((p) => ({
     status: p._verified ? "pending" : "rejected",
     clarification: "",
   }))
@@ -4723,7 +4846,10 @@ function renderReviewPanel(container, proposals) {
   let autoAdvance = true
 
   function removeFloatingPanel() {
-    if (floatingPanel) { floatingPanel.remove(); floatingPanel = null }
+    if (floatingPanel) {
+      floatingPanel.remove()
+      floatingPanel = null
+    }
   }
 
   // Advance to the next proposal after an action.
@@ -4803,7 +4929,9 @@ function renderReviewPanel(container, proposals) {
         let anchorTop
         try {
           anchorTop = editorView.coordsAtPos(clampedPos).top
-        } catch { return }
+        } catch {
+          return
+        }
 
         const diff = charDiffHtml(p.original, p.proposed)
         const warningHtml = p._verified ? "" : `<div class="ai-review-warning">Original text not found</div>`
@@ -4846,7 +4974,15 @@ function renderReviewPanel(container, proposals) {
           const item = list.children[i]
           if (!item) return
           const s = states[i].status
-          item.className = "ai-review-item" + (s === "accepted" ? " ai-review-item-accepted" : s === "rejected" ? " ai-review-item-rejected" : s === "clarify" ? " ai-review-item-clarify" : "")
+          item.className =
+            "ai-review-item" +
+            (s === "accepted"
+              ? " ai-review-item-accepted"
+              : s === "rejected"
+                ? " ai-review-item-rejected"
+                : s === "clarify"
+                  ? " ai-review-item-clarify"
+                  : "")
         }
 
         if (p._verified) {
@@ -4871,7 +5007,10 @@ function renderReviewPanel(container, proposals) {
           states[i].clarification = clarifyInput.value
         })
         const autoCb = floatingPanel.querySelector(".ai-review-auto-cb")
-        if (autoCb) autoCb.addEventListener("change", () => { autoAdvance = autoCb.checked })
+        if (autoCb)
+          autoCb.addEventListener("change", () => {
+            autoAdvance = autoCb.checked
+          })
       })
     })
   }
@@ -5063,12 +5202,15 @@ async function applyAcceptedProposals(proposals, states) {
   let markdown = getCurrentMarkdown()
   let applied = 0
   const failed = []
-  const hasMarkers = accepted.some(p => p.marker)
+  const hasMarkers = accepted.some((p) => p.marker)
 
   if (hasMarkers) {
     // Marker-based replacement.
     for (const p of accepted) {
-      if (!p.marker) { failed.push(`#${p.number || "?"}: no marker`); continue }
+      if (!p.marker) {
+        failed.push(`#${p.number || "?"}: no marker`)
+        continue
+      }
       const openTag = `{#${p.marker}}`
       const closeTag = `{#/${p.marker}}`
       const openIdx = markdown.indexOf(openTag)
@@ -5090,8 +5232,14 @@ async function applyAcceptedProposals(proposals, states) {
     const positioned = []
     for (const p of accepted) {
       const idx = markdown.indexOf(p.original)
-      if (idx < 0) { failed.push(`#${p.number || "?"}: not found`); continue }
-      if (markdown.indexOf(p.original, idx + 1) >= 0) { failed.push(`#${p.number || "?"}: ambiguous`); continue }
+      if (idx < 0) {
+        failed.push(`#${p.number || "?"}: not found`)
+        continue
+      }
+      if (markdown.indexOf(p.original, idx + 1) >= 0) {
+        failed.push(`#${p.number || "?"}: ambiguous`)
+        continue
+      }
       positioned.push({ ...p, idx })
     }
     positioned.sort((a, b) => b.idx - a.idx)
@@ -5155,7 +5303,8 @@ async function refineClarifications(proposals, states, container) {
   const refineMsg = aiAddMessage("assistant", "Refining clarified proposals...")
 
   try {
-    const message = "The user has provided clarifications on the following proposals. " +
+    const message =
+      "The user has provided clarifications on the following proposals. " +
       "Please revise only these proposals based on the user's feedback. " +
       "Return a JSON array with the same format.\n\n" +
       JSON.stringify(clarified, null, 2)
@@ -5209,7 +5358,7 @@ function buildMenubar() {
     btn.className = "gowiki-raw-menuitem"
     btn.textContent = label
     btn.title = title
-    btn.addEventListener("mousedown", e => {
+    btn.addEventListener("mousedown", (e) => {
       e.preventDefault()
       onClick()
     })
@@ -5224,14 +5373,14 @@ function buildMenubar() {
     btn.title = title
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
     svg.setAttribute("viewBox", `0 0 ${iconData.width} ${iconData.height}`)
-    svg.style.width = (iconData.width / iconData.height) + "em"
+    svg.style.width = iconData.width / iconData.height + "em"
     svg.style.height = "1em"
     svg.style.verticalAlign = "middle"
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
     path.setAttribute("d", iconData.path)
     svg.appendChild(path)
     btn.appendChild(svg)
-    btn.addEventListener("mousedown", e => {
+    btn.addEventListener("mousedown", (e) => {
       e.preventDefault()
       onClick()
     })
@@ -5252,7 +5401,7 @@ function buildMenubar() {
     img.className = "gowiki-menu-icon"
     img.style.verticalAlign = "middle"
     btn.appendChild(img)
-    btn.addEventListener("mousedown", e => {
+    btn.addEventListener("mousedown", (e) => {
       e.preventDefault()
       onClick()
     })
@@ -5268,14 +5417,19 @@ function buildMenubar() {
   }
 
   // Properties
-  addImgButton("/icons/tools.svg", "Toggle properties", () => {
-    if (editMode === "visual" && editorView) {
-      if (togglePropertiesCommand) togglePropertiesCommand(editorView.state, editorView.dispatch, editorView)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawInsertProperty(rawEditor)
-    }
-  }, "properties")
+  addImgButton(
+    "/icons/tools.svg",
+    "Toggle properties",
+    () => {
+      if (editMode === "visual" && editorView) {
+        if (togglePropertiesCommand) togglePropertiesCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawInsertProperty(rawEditor)
+      }
+    },
+    "properties"
+  )
 
   // Heading dropdown
   const headingWrap = document.createElement("span")
@@ -5291,7 +5445,7 @@ function buildMenubar() {
   paraItem.className = "gowiki-raw-dropdown-item"
   paraItem.textContent = "Paragraph"
   paraItem.style.fontStyle = "italic"
-  paraItem.addEventListener("mousedown", e => {
+  paraItem.addEventListener("mousedown", (e) => {
     e.preventDefault()
     headingMenu.style.display = "none"
     if (editMode === "visual" && editorView) {
@@ -5313,7 +5467,7 @@ function buildMenubar() {
     item.className = "gowiki-raw-dropdown-item"
     item.textContent = `H${level}`
     item.dataset.level = String(level)
-    item.addEventListener("mousedown", e => {
+    item.addEventListener("mousedown", (e) => {
       e.preventDefault()
       headingMenu.style.display = "none"
       const numbered = e.shiftKey
@@ -5338,17 +5492,21 @@ function buildMenubar() {
       item.textContent = shift ? `H${level} numbered` : `H${level}`
     }
   }
-  headingMenu.addEventListener("keydown", e => { if (e.key === "Shift") updateHeadingMenuShift(true) })
-  headingMenu.addEventListener("keyup", e => { if (e.key === "Shift") updateHeadingMenuShift(false) })
-  document.addEventListener("keydown", e => {
+  headingMenu.addEventListener("keydown", (e) => {
+    if (e.key === "Shift") updateHeadingMenuShift(true)
+  })
+  headingMenu.addEventListener("keyup", (e) => {
+    if (e.key === "Shift") updateHeadingMenuShift(false)
+  })
+  document.addEventListener("keydown", (e) => {
     if (e.key === "Shift" && headingMenu.style.display === "block") updateHeadingMenuShift(true)
   })
-  document.addEventListener("keyup", e => {
+  document.addEventListener("keyup", (e) => {
     if (e.key === "Shift" && headingMenu.style.display === "block") updateHeadingMenuShift(false)
   })
 
   headingWrap.appendChild(headingMenu)
-  headingWrap.addEventListener("mousedown", e => {
+  headingWrap.addEventListener("mousedown", (e) => {
     e.preventDefault()
     const isOpen = headingMenu.style.display === "block"
     headingMenu.style.display = isOpen ? "none" : "block"
@@ -5356,7 +5514,7 @@ function buildMenubar() {
   })
   bar.appendChild(headingWrap)
 
-  document.addEventListener("mousedown", e => {
+  document.addEventListener("mousedown", (e) => {
     if (!headingWrap.contains(e.target)) {
       headingMenu.style.display = "none"
     }
@@ -5380,66 +5538,96 @@ function buildMenubar() {
   addSeparator()
 
   // Bold
-  addButton("B", shortcutHint("Bold", "B"), () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.strong)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "**", "**")
-    }
-  }, "bold").style.fontWeight = "700"
+  addButton(
+    "B",
+    shortcutHint("Bold", "B"),
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.strong)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "**", "**")
+      }
+    },
+    "bold"
+  ).style.fontWeight = "700"
 
   // Italic
-  addButton("I", shortcutHint("Italic", "I"), () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.em)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "*", "*")
-    }
-  }, "italic").style.fontStyle = "italic"
+  addButton(
+    "I",
+    shortcutHint("Italic", "I"),
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.em)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "*", "*")
+      }
+    },
+    "italic"
+  ).style.fontStyle = "italic"
 
   // Underline
-  const uBtn = addButton("U", shortcutHint("Underline", "U"), () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.underline)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "_", "_")
-    }
-  }, "underline")
+  const uBtn = addButton(
+    "U",
+    shortcutHint("Underline", "U"),
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.underline)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "_", "_")
+      }
+    },
+    "underline"
+  )
   uBtn.style.textDecoration = "underline"
 
   // Strikethrough
-  const sBtn = addButton("S", shortcutHint("Strikethrough", "Shift-X"), () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.strikethrough)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "~~", "~~")
-    }
-  }, "strikethrough")
+  const sBtn = addButton(
+    "S",
+    shortcutHint("Strikethrough", "Shift-X"),
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.strikethrough)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "~~", "~~")
+      }
+    },
+    "strikethrough"
+  )
   sBtn.style.textDecoration = "line-through"
 
   // Subscript
-  addButton("x\u2082", "Subscript", () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.subscript)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "~", "~")
-    }
-  }, "subscript")
+  addButton(
+    "x\u2082",
+    "Subscript",
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.subscript)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "~", "~")
+      }
+    },
+    "subscript"
+  )
 
   // Superscript
-  addButton("x\u00B2", "Superscript", () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.superscript)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "^", "^")
-    }
-  }, "superscript")
+  addButton(
+    "x\u00B2",
+    "Superscript",
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.superscript)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "^", "^")
+      }
+    },
+    "superscript"
+  )
 
   // Highlight with color dropdown
   if (schema.marks.highlight) {
@@ -5454,7 +5642,7 @@ function buildMenubar() {
     hlBtn.style.background = "linear-gradient(to top, yellow 40%, transparent 40%)"
     hlBtn.style.borderRadius = "3px 0 0 3px"
     hlBtn.style.paddingRight = "2px"
-    hlBtn.addEventListener("mousedown", e => {
+    hlBtn.addEventListener("mousedown", (e) => {
       e.preventDefault()
       if (editMode === "visual" && editorView) {
         const state = editorView.state
@@ -5505,22 +5693,29 @@ function buildMenubar() {
 
     let hlDropdown = null
     function closeHlDropdown() {
-      if (hlDropdown) { hlDropdown.remove(); hlDropdown = null }
+      if (hlDropdown) {
+        hlDropdown.remove()
+        hlDropdown = null
+      }
       document.removeEventListener("mousedown", hlOutsideClick)
     }
     function hlOutsideClick(e) {
       if (hlDropdown && !hlDropdown.contains(e.target) && e.target !== hlArrow) closeHlDropdown()
     }
-    hlArrow.addEventListener("mousedown", e => {
+    hlArrow.addEventListener("mousedown", (e) => {
       e.preventDefault()
-      if (hlDropdown) { closeHlDropdown(); return }
+      if (hlDropdown) {
+        closeHlDropdown()
+        return
+      }
       hlDropdown = document.createElement("div")
-      hlDropdown.style.cssText = "position:absolute;top:100%;left:0;z-index:999;background:#fff;border:1px solid #ccc;border-radius:4px;padding:4px;display:flex;gap:3px;box-shadow:0 2px 8px rgba(0,0,0,.15)"
+      hlDropdown.style.cssText =
+        "position:absolute;top:100%;left:0;z-index:999;background:#fff;border:1px solid #ccc;border-radius:4px;padding:4px;display:flex;gap:3px;box-shadow:0 2px 8px rgba(0,0,0,.15)"
       for (const c of HIGHLIGHT_COLORS) {
         const swatch = document.createElement("span")
         swatch.title = c.name
         swatch.style.cssText = `display:inline-block;width:20px;height:20px;border-radius:3px;cursor:pointer;border:1px solid #ccc;background:${c.value}`
-        swatch.addEventListener("mousedown", ev => {
+        swatch.addEventListener("mousedown", (ev) => {
           ev.preventDefault()
           closeHlDropdown()
           if (editMode === "visual" && editorView) {
@@ -5531,7 +5726,7 @@ function buildMenubar() {
             editorView.focus()
           } else if (editMode === "raw" && rawEditor) {
             // Strip existing ==...== highlight wrapper if present, then re-wrap.
-            let sel = rawEditor.value.substring(rawEditor.selectionStart, rawEditor.selectionEnd)
+            const sel = rawEditor.value.substring(rawEditor.selectionStart, rawEditor.selectionEnd)
             const hlMatch = sel.match(/^==(?:\{[^}]*\})?([\s\S]*)==$/)
             if (hlMatch) {
               // Selection includes delimiters — strip and re-wrap.
@@ -5582,14 +5777,19 @@ function buildMenubar() {
   }
 
   // Inline code
-  addButton("</>", shortcutHint("Inline code", "E"), () => {
-    if (editMode === "visual" && editorView) {
-      toggleMark(schema.marks.code)(editorView.state, editorView.dispatch)
-      editorView.focus()
-    } else if (editMode === "raw" && rawEditor) {
-      rawWrapSelection(rawEditor, "`", "`")
-    }
-  }, "code")
+  addButton(
+    "</>",
+    shortcutHint("Inline code", "E"),
+    () => {
+      if (editMode === "visual" && editorView) {
+        toggleMark(schema.marks.code)(editorView.state, editorView.dispatch)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        rawWrapSelection(rawEditor, "`", "`")
+      }
+    },
+    "code"
+  )
 
   // Symbol picker toolbar button
   {
@@ -5601,7 +5801,7 @@ function buildMenubar() {
     }
     symWrap.textContent = "\u03A9"
     symbolToolbarAnchor = symWrap
-    symWrap.addEventListener("mousedown", e => {
+    symWrap.addEventListener("mousedown", (e) => {
       e.preventDefault()
       e.stopPropagation()
       if (symbolPanelEl && symbolPanelAnchor === "toolbar") {
@@ -5692,7 +5892,7 @@ function buildMenubar() {
     item.className = "gowiki-raw-dropdown-item"
     item.textContent = action.label
     if (visualOnlyActions.has(action.name)) item.dataset.visualOnly = "1"
-    item.addEventListener("mousedown", e => {
+    item.addEventListener("mousedown", (e) => {
       e.preventDefault()
       if (item.classList.contains("gowiki-raw-dropdown-item--disabled")) return
       tableDropMenu.style.display = "none"
@@ -5708,7 +5908,7 @@ function buildMenubar() {
     tableDropMenu.appendChild(item)
   }
   tableWrap.appendChild(tableDropMenu)
-  tableWrap.addEventListener("mousedown", e => {
+  tableWrap.addEventListener("mousedown", (e) => {
     e.preventDefault()
     const isOpen = tableDropMenu.style.display === "block"
     if (!isOpen) {
@@ -5719,7 +5919,7 @@ function buildMenubar() {
     tableDropMenu.style.display = isOpen ? "none" : "block"
   })
   bar.appendChild(tableWrap)
-  document.addEventListener("mousedown", e => {
+  document.addEventListener("mousedown", (e) => {
     if (!tableWrap.contains(e.target)) {
       tableDropMenu.style.display = "none"
     }
@@ -5800,7 +6000,8 @@ function buildMenubar() {
         mermaidInsertCommand(editorView.state, editorView.dispatch, editorView)
         editorView.focus()
       } else if (editMode === "raw" && rawEditor) {
-        const snippet = "```mermaid\ngraph TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Result 1]\n    B -->|No| D[Result 2]\n```"
+        const snippet =
+          "```mermaid\ngraph TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[Result 1]\n    B -->|No| D[Result 2]\n```"
         rawInsertText(rawEditor, snippet)
       }
     })
@@ -6154,10 +6355,30 @@ function buildMenubar() {
   // sharing a common page-with-folded-corner base so they read as one
   // group at a glance instead of four indistinguishable text buttons.
   const templateGroup = [
-    { cmd: templateInsertCommand, icon: "template.svg", title: "Template marker (payload separator)", snippet: "{template}" },
-    { cmd: templateTitleInsertCommand, icon: "template-title.svg", title: "Template title (prefix a heading)", snippet: "{template-title}" },
-    { cmd: templateStampInsertCommand, icon: "template-stamp.svg", title: "Template stamp (frozen origin sentence at creation)", snippet: "{template-stamp}" },
-    { cmd: templateReviewflowInsertCommand, icon: "template-reviewflow.svg", title: "Template reviewflow (resolved to {reviewflow} at creation)", snippet: "{template-reviewflow}" },
+    {
+      cmd: templateInsertCommand,
+      icon: "template.svg",
+      title: "Template marker (payload separator)",
+      snippet: "{template}",
+    },
+    {
+      cmd: templateTitleInsertCommand,
+      icon: "template-title.svg",
+      title: "Template title (prefix a heading)",
+      snippet: "{template-title}",
+    },
+    {
+      cmd: templateStampInsertCommand,
+      icon: "template-stamp.svg",
+      title: "Template stamp (frozen origin sentence at creation)",
+      snippet: "{template-stamp}",
+    },
+    {
+      cmd: templateReviewflowInsertCommand,
+      icon: "template-reviewflow.svg",
+      title: "Template reviewflow (resolved to {reviewflow} at creation)",
+      snippet: "{template-reviewflow}",
+    },
   ]
   let templateGroupHasAny = false
   for (const entry of templateGroup) {
@@ -6220,7 +6441,7 @@ function renderEdit(nextEditMode) {
     editorEl.value = currentMarkdown
     updateRawOverlay(overlay, editorEl.value)
 
-    editorEl.addEventListener("keydown", e => {
+    editorEl.addEventListener("keydown", (e) => {
       const isMod = e.metaKey || e.ctrlKey
       // Save/publish shortcuts
       if ((e.key === "s" || e.key === "S") && isMod) {
@@ -6300,7 +6521,7 @@ function renderEdit(nextEditMode) {
       updateRawOverlay(overlay, editorEl.value)
     })
 
-    editorEl.addEventListener("paste", e => {
+    editorEl.addEventListener("paste", (e) => {
       const imageFiles = extractImageFiles(e.clipboardData)
       if (imageFiles.length === 0) return
       e.preventDefault()
@@ -6334,7 +6555,7 @@ function renderEdit(nextEditMode) {
       } catch {
         // Keep invalid in-progress raw text unchanged.
       }
-      validateDatabaseRows(editorEl.value).then(result => {
+      validateDatabaseRows(editorEl.value).then((result) => {
         if (!result.valid) setStatus(result.errors.join("; "))
       })
     })
@@ -6370,9 +6591,11 @@ function renderEdit(nextEditMode) {
   const menubarStatePlugin = new Plugin({
     view() {
       return {
-        update(view) { updateMenubarState(view.state, menubarRefs) }
+        update(view) {
+          updateMenubarState(view.state, menubarRefs)
+        },
       }
-    }
+    },
   })
 
   const listKeymap = keymap({
@@ -6456,7 +6679,7 @@ function renderEdit(nextEditMode) {
               }, 100)
             }
           }
-        }
+        },
       }
     },
   })
@@ -6464,7 +6687,9 @@ function renderEdit(nextEditMode) {
   // Plugin that renders colored block indicators for remote users' cursor positions.
   const remoteBlockPlugin = new Plugin({
     state: {
-      init() { return DecorationSet.empty },
+      init() {
+        return DecorationSet.empty
+      },
       apply(tr, decos) {
         if (!tr.getMeta("remoteBlocksUpdate") && !tr.docChanged) return decos
         // Rebuild decorations from remoteBlockUsers.
@@ -6479,25 +6704,32 @@ function renderEdit(nextEditMode) {
           const node = doc.content.child(u.block)
           const color = presenceColor(u.username)
           // Widget decoration: a small colored bar before the block.
-          const widget = Decoration.widget(pos, () => {
-            const bar = document.createElement("div")
-            bar.className = "gowiki-remote-indicator"
-            bar.style.cssText = `border-left:3px solid ${color};position:absolute;left:0;top:0;bottom:0;pointer-events:none`
-            const label = document.createElement("div")
-            label.className = "gowiki-remote-label"
-            label.style.cssText = `position:absolute;left:6px;top:-10px;font-size:9px;color:${color};font-weight:600;white-space:nowrap;pointer-events:none;opacity:0.8`
-            label.textContent = u.displayName
-            const wrapper = document.createElement("div")
-            wrapper.style.cssText = "position:absolute;left:0;top:0;bottom:0;width:0;overflow:visible;pointer-events:none"
-            wrapper.appendChild(bar)
-            wrapper.appendChild(label)
-            return wrapper
-          }, { side: -1, key: "remote-" + u.username })
+          const widget = Decoration.widget(
+            pos,
+            () => {
+              const bar = document.createElement("div")
+              bar.className = "gowiki-remote-indicator"
+              bar.style.cssText = `border-left:3px solid ${color};position:absolute;left:0;top:0;bottom:0;pointer-events:none`
+              const label = document.createElement("div")
+              label.className = "gowiki-remote-label"
+              label.style.cssText = `position:absolute;left:6px;top:-10px;font-size:9px;color:${color};font-weight:600;white-space:nowrap;pointer-events:none;opacity:0.8`
+              label.textContent = u.displayName
+              const wrapper = document.createElement("div")
+              wrapper.style.cssText =
+                "position:absolute;left:0;top:0;bottom:0;width:0;overflow:visible;pointer-events:none"
+              wrapper.appendChild(bar)
+              wrapper.appendChild(label)
+              return wrapper
+            },
+            { side: -1, key: "remote-" + u.username }
+          )
           decorations.push(widget)
           // Also add a node decoration for the background tint.
-          decorations.push(Decoration.node(pos, pos + node.nodeSize, {
-            style: `background:${color}11;border-left:3px solid ${color};padding-left:8px`,
-          }))
+          decorations.push(
+            Decoration.node(pos, pos + node.nodeSize, {
+              style: `background:${color}11;border-left:3px solid ${color};padding-left:8px`,
+            })
+          )
         }
         return DecorationSet.create(doc, decorations)
       },
@@ -6548,7 +6780,7 @@ function renderEdit(nextEditMode) {
       const { $from } = view.state.selection
       if (isInTableCell(view.state)) {
         let hasTableContent = false
-        slice.content.forEach(node => {
+        slice.content.forEach((node) => {
           if (node.type.name === "table" || node.type.name === "table_row") hasTableContent = true
         })
         if (hasTableContent) return false
@@ -6605,9 +6837,7 @@ function renderEdit(nextEditMode) {
           openStart = Math.min(slice.openStart, 1)
           openEnd = Math.min(slice.openEnd, 1)
         }
-        const tr = view.state.tr.replaceSelection(
-          new Slice(cleanDoc.content, openStart, openEnd)
-        )
+        const tr = view.state.tr.replaceSelection(new Slice(cleanDoc.content, openStart, openEnd))
         view.dispatch(tr)
       } catch {
         // Parse failed — insert as plain text
@@ -6640,9 +6870,7 @@ function renderEdit(nextEditMode) {
           openStart = Math.min(slice.openStart, 1)
           openEnd = Math.min(slice.openEnd, 1)
         }
-        const tr = view.state.tr.replaceSelection(
-          new Slice(cleanDoc.content, openStart, openEnd)
-        )
+        const tr = view.state.tr.replaceSelection(new Slice(cleanDoc.content, openStart, openEnd))
         view.dispatch(tr)
       } catch {
         view.dispatch(view.state.tr.insertText(plainText))
@@ -6670,7 +6898,10 @@ function renderEdit(nextEditMode) {
         const $pos = view.state.selection.$from
         let inTable = false
         for (let d = $pos.depth; d > 0; d--) {
-          if ($pos.node(d).type.name === "table") { inTable = true; break }
+          if ($pos.node(d).type.name === "table") {
+            inTable = true
+            break
+          }
         }
         if (!inTable) return false
         event.preventDefault()
@@ -6790,7 +7021,8 @@ const actionIcons = {
   // File with plus
   newPage: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M12 18v-6m-3 3h6",
   // Tree/sitemap
-  siteMap: "M6 9H4.5a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7a2 2 0 0 1-2 2H6Zm0 0v3m0 0c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2m-8 0c0 1.1-.9 2-2 2H4.5a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h3a2 2 0 0 0 2-2v-1.5a2 2 0 0 0-2-2H6m8-2.5v3.5a2 2 0 0 0 2 2h1.5a2 2 0 0 0 2-2V17a2 2 0 0 0-2-2h-1.5a2 2 0 0 0-2 2Z",
+  siteMap:
+    "M6 9H4.5a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2V7a2 2 0 0 1-2 2H6Zm0 0v3m0 0c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2m-8 0c0 1.1-.9 2-2 2H4.5a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h3a2 2 0 0 0 2-2v-1.5a2 2 0 0 0-2-2H6m8-2.5v3.5a2 2 0 0 0 2 2h1.5a2 2 0 0 0 2-2V17a2 2 0 0 0-2-2h-1.5a2 2 0 0 0-2 2Z",
   // File arrow down
   exportPdf: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M12 18v-6m-3 3 3 3 3-3",
   // Chat bubble
@@ -6802,7 +7034,8 @@ const actionIcons = {
   // Trash
   delete: "M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6Z",
   // Image/photo
-  media: "M21 3H3a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Zm-3 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM2 20l5.5-7L11 17l3.5-4.5L22 20Z",
+  media:
+    "M21 3H3a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Zm-3 5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM2 20l5.5-7L11 17l3.5-4.5L22 20Z",
   // Code brackets
   switchRaw: "M16 18l6-6-6-6M8 6l-6 6 6 6",
   // Eye
@@ -6819,7 +7052,8 @@ const actionIcons = {
   // X circle
   cancel: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm3.54 6.46L9.46 14.54m0-6.08 6.08 6.08",
   // Hourglass (main, shifted up-left) + small trash (nudged down-right)
-  discard: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 10h8M17 10V8.5a1.5 1.5 0 0 1 3 0V10m2.5 0v8.5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5V10Z",
+  discard:
+    "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 10h8M17 10V8.5a1.5 1.5 0 0 1 3 0V10m2.5 0v8.5a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5V10Z",
   // Expand arrows
   fullscreen: "M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3",
   // Contract arrows
@@ -6827,7 +7061,8 @@ const actionIcons = {
   // Lock
   lock: "M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2ZM7 11V7a5 5 0 0 1 10 0v4",
   // Hourglass (main, shifted up-left) + small floppy (nudged down-right)
-  saveDraft: "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
+  saveDraft:
+    "M2 1h10M2 17h10M7 9l2.5-3.5V2H4.5v3.5L7 9Zm0 0-2.5 3.5V16h5v-3.5L7 9ZM14 12h6.5l3.5 3.5v5a1.5 1.5 0 0 1-1.5 1.5h-7a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5ZM20.5 12v3.5H24M15 22v-4h5v4M15 12v3h4",
   // Five-point star (outlined by stroke; filled state via CSS)
   star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2Z",
   ai: null, // text-only button, no SVG path
@@ -6874,7 +7109,7 @@ function makeContentButton(label, onClick) {
 }
 
 function promptNewPage() {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const overlay = document.createElement("div")
     overlay.className = "gowiki-link-modal-overlay"
 
@@ -6916,7 +7151,7 @@ function promptNewPage() {
     }
 
     function submit() {
-      let raw = pathInput.value.trim()
+      const raw = pathInput.value.trim()
       if (!raw) {
         warning.textContent = "Path cannot be empty."
         pathInput.focus()
@@ -6945,10 +7180,10 @@ function promptNewPage() {
 
     cancelBtn.addEventListener("click", () => close(null))
     okBtn.addEventListener("click", submit)
-    overlay.addEventListener("click", event => {
+    overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close(null)
     })
-    pathInput.addEventListener("keydown", event => {
+    pathInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault()
         submit()
@@ -6968,7 +7203,7 @@ function promptNewPage() {
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
     pathInput.focus()
-  }).then(pagePath => {
+  }).then((pagePath) => {
     if (pagePath) {
       window.location.href = "/" + pagePath + "?action=create"
     }
@@ -7018,19 +7253,21 @@ function renderActions() {
 
   if (mode === "edit") {
     // ── Edit mode actions ──
-    actionsRoot.appendChild(makeActionIconBtn("media", "Media manager", () => {
-      openMediaManager(
-        pageNamespace,
-        text => setStatus(text),
-        (kind, entry) => {
-          if (editMode === "raw") {
-            rawInsertMediaReference(kind, entry)
-          } else {
-            insertMediaReference(kind, entry)
+    actionsRoot.appendChild(
+      makeActionIconBtn("media", "Media manager", () => {
+        openMediaManager(
+          pageNamespace,
+          (text) => setStatus(text),
+          (kind, entry) => {
+            if (editMode === "raw") {
+              rawInsertMediaReference(kind, entry)
+            } else {
+              insertMediaReference(kind, entry)
+            }
           }
-        }
-      )
-    }))
+        )
+      })
+    )
 
     if (editMode === "visual") {
       actionsRoot.appendChild(makeActionIconBtn("switchRaw", "Switch to raw", () => setEditMode("raw")))
@@ -7045,7 +7282,9 @@ function renderActions() {
       actionsRoot.appendChild(makeActionIconBtn("cancel", "Leave session (Esc)", () => cancelEdit()))
     } else {
       const saveHint = isMac ? "\u2318S" : "Ctrl+S"
-      actionsRoot.appendChild(makeActionIconBtn("save", `Save & continue (${saveHint})`, () => void saveDraftExplicit()))
+      actionsRoot.appendChild(
+        makeActionIconBtn("save", `Save & continue (${saveHint})`, () => void saveDraftExplicit())
+      )
       actionsRoot.appendChild(makeActionIconBtn("saveDraft", "Save to draft", () => void saveDraftAndExit()))
 
       const pubHint = isMac ? "\u21E7\u2318S" : "Ctrl+Shift+S"
@@ -7053,7 +7292,9 @@ function renderActions() {
 
       actionsRoot.appendChild(makeActionSep())
       actionsRoot.appendChild(makeActionIconBtn("cancel", "Cancel editing", () => cancelEdit()))
-      actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
+      actionsRoot.appendChild(
+        makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete")
+      )
     }
 
     actionsRoot.appendChild(makeActionSep())
@@ -7063,24 +7304,42 @@ function renderActions() {
       actionsRoot.appendChild(makeActionSep())
       actionsRoot.appendChild(makeActionIconBtn("ai", "AI Assistant (Ctrl+L)", () => toggleAIPanel()))
     }
-
   } else {
     // ── View mode actions ──
 
     // Edit button — varies by lock/draft state
     if (pageLockInfo && pageLockInfo.is_draft && pageLockInfo.locked_by === currentUser?.username) {
-      const editBtn = makeActionIconBtn("edit", "Resume editing \u2014 unpublished draft (Shift+click: raw mode)", (e) => { if (e?.shiftKey) editMode = "raw"; void enterEditMode(true) })
+      const editBtn = makeActionIconBtn(
+        "edit",
+        "Resume editing \u2014 unpublished draft (Shift+click: raw mode)",
+        (e) => {
+          if (e?.shiftKey) editMode = "raw"
+          void enterEditMode(true)
+        }
+      )
       const dot = document.createElement("span")
       dot.className = "gowiki-action-draft-dot"
       editBtn.appendChild(dot)
       actionsRoot.appendChild(editBtn)
       actionsRoot.appendChild(makeActionIconBtn("publish", "Publish draft", () => void publishFromView()))
-      actionsRoot.appendChild(makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete"))
+      actionsRoot.appendChild(
+        makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete")
+      )
     } else if (pageLockInfo && pageLockInfo.locked_by && pageLockInfo.locked_by !== currentUser?.username) {
-      actionsRoot.appendChild(makeActionIconBtn("edit", `Join ${pageLockInfo.locked_by}'s session`, (e) => { if (e?.shiftKey) editMode = "raw"; void joinCollabSession(pageLockInfo.locked_by) }))
+      actionsRoot.appendChild(
+        makeActionIconBtn("edit", `Join ${pageLockInfo.locked_by}'s session`, (e) => {
+          if (e?.shiftKey) editMode = "raw"
+          void joinCollabSession(pageLockInfo.locked_by)
+        })
+      )
     } else {
       const editHint = isMac ? "\u2318E" : "Ctrl+E"
-      actionsRoot.appendChild(makeActionIconBtn("edit", `Edit (${editHint}, Shift+click: raw mode)`, (e) => { if (e?.shiftKey) editMode = "raw"; void enterEditMode(false) }))
+      actionsRoot.appendChild(
+        makeActionIconBtn("edit", `Edit (${editHint}, Shift+click: raw mode)`, (e) => {
+          if (e?.shiftKey) editMode = "raw"
+          void enterEditMode(false)
+        })
+      )
     }
 
     actionsRoot.appendChild(makeActionSep())
@@ -7096,22 +7355,26 @@ function renderActions() {
       const starBtn = makeActionIconBtn(
         "star",
         favored ? "Remove from favorites" : "Add to favorites",
-        () => void toggleFavoriteCurrent(),
+        () => void toggleFavoriteCurrent()
       )
       starBtn.setAttribute("data-gowiki-star", "1")
       if (favored) starBtn.classList.add("gowiki-action-btn--filled")
       actionsRoot.appendChild(starBtn)
     }
     actionsRoot.appendChild(makeActionIconBtn("newPage", "New page", () => void promptNewPage()))
-    actionsRoot.appendChild(makeActionIconBtn("siteMap", "Site map", () => {
-      // Hand the sitemap the current path so it can auto-expand ancestor
-      // namespaces. Falls back to a fully-collapsed tree when the param is
-      // absent (direct navigation from the URL bar).
-      const from = pagePath ? "/" + pagePath.replace(/^\/+/, "") : ""
-      const qs = from ? `?from=${encodeURIComponent(from)}` : ""
-      window.location.href = `/_sitemap${qs}`
-    }))
-    actionsRoot.appendChild(makeActionIconBtn("exportPdf", "Export PDF", () => window.open(`/api/export/pdf/${pagePath}`, "_blank")))
+    actionsRoot.appendChild(
+      makeActionIconBtn("siteMap", "Site map", () => {
+        // Hand the sitemap the current path so it can auto-expand ancestor
+        // namespaces. Falls back to a fully-collapsed tree when the param is
+        // absent (direct navigation from the URL bar).
+        const from = pagePath ? "/" + pagePath.replace(/^\/+/, "") : ""
+        const qs = from ? `?from=${encodeURIComponent(from)}` : ""
+        window.location.href = `/_sitemap${qs}`
+      })
+    )
+    actionsRoot.appendChild(
+      makeActionIconBtn("exportPdf", "Export PDF", () => window.open(`/api/export/pdf/${pagePath}`, "_blank"))
+    )
 
     if (currentUser && !isNewPage) {
       actionsRoot.appendChild(makeActionSep())
@@ -7137,11 +7400,17 @@ function renderActions() {
       actionsRoot.appendChild(commentBtn)
       actionsRoot.appendChild(makeActionIconBtn("move", "Move page", () => void movePage()))
       if (isNamespaceIndex) {
-        actionsRoot.appendChild(makeActionIconBtn("convert", "Convert to regular page", () => void convertPageType("to_regular_page")))
+        actionsRoot.appendChild(
+          makeActionIconBtn("convert", "Convert to regular page", () => void convertPageType("to_regular_page"))
+        )
       } else {
-        actionsRoot.appendChild(makeActionIconBtn("convert", "Convert to namespace", () => void convertPageType("to_namespace_index")))
+        actionsRoot.appendChild(
+          makeActionIconBtn("convert", "Convert to namespace", () => void convertPageType("to_namespace_index"))
+        )
       }
-      actionsRoot.appendChild(makeActionIconBtn("delete", "Delete page", () => void deletePage(), "gowiki-action-delete"))
+      actionsRoot.appendChild(
+        makeActionIconBtn("delete", "Delete page", () => void deletePage(), "gowiki-action-delete")
+      )
     }
 
     actionsRoot.appendChild(makeActionSep())
@@ -7185,9 +7454,7 @@ async function deletePage() {
   }
 
   // Navigate to parent namespace or root.
-  const parent = pagePath.includes("/")
-    ? "/" + pagePath.split("/").slice(0, -1).join("/")
-    : "/"
+  const parent = pagePath.includes("/") ? "/" + pagePath.split("/").slice(0, -1).join("/") : "/"
   setStatus("Page deleted.")
   window.location.href = parent
 }
@@ -7223,8 +7490,8 @@ async function movePage() {
   if (hasAffectedPages) {
     updateLinks = confirm(
       `${preview.affected_pages.length} page(s) contain links to this page:\n\n` +
-      preview.affected_pages.map(p => `  - ${p}`).join("\n") +
-      "\n\nUpdate their links to point to the new location?"
+        preview.affected_pages.map((p) => `  - ${p}`).join("\n") +
+        "\n\nUpdate their links to point to the new location?"
     )
   }
 
@@ -7232,8 +7499,8 @@ async function movePage() {
   if (hasMedia) {
     moveMedia = confirm(
       `${preview.media_to_move.length} media file(s) are exclusively referenced by this page:\n\n` +
-      preview.media_to_move.map(m => `  - ${m}`).join("\n") +
-      "\n\nMove them alongside the page?"
+        preview.media_to_move.map((m) => `  - ${m}`).join("\n") +
+        "\n\nMove them alongside the page?"
     )
   }
 
@@ -7273,9 +7540,7 @@ async function movePage() {
 }
 
 async function convertPageType(flag) {
-  const label = flag === "to_namespace_index"
-    ? "Convert to namespace index?"
-    : "Convert to regular page?"
+  const label = flag === "to_namespace_index" ? "Convert to namespace index?" : "Convert to regular page?"
 
   if (!confirm(label)) return
 
@@ -7392,7 +7657,7 @@ function renderBacklinksPage(backlinks) {
       const href = entry.path.startsWith("/") ? entry.path : "/" + entry.path
       link.href = href
       link.textContent = entry.path
-      link.addEventListener("click", e => {
+      link.addEventListener("click", (e) => {
         e.preventDefault()
         window.location.href = href
       })
@@ -7633,7 +7898,10 @@ function resolveMediaSrc(src) {
     const resolved = [...nsParts]
     for (const part of refParts) {
       if (part === ".") continue
-      if (part === "..") { resolved.pop(); continue }
+      if (part === "..") {
+        resolved.pop()
+        continue
+      }
       resolved.push(part)
     }
     return resolved.join("/")
@@ -7768,7 +8036,7 @@ function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRef
     } else {
       // Compact view: show only changes with context lines
       // Mark which hunks are within CONTEXT_LINES of a change
-      const isChange = hunks.map(h => h.op !== "equal")
+      const isChange = hunks.map((h) => h.op !== "equal")
       const visible = new Array(hunks.length).fill(false)
 
       for (let i = 0; i < hunks.length; i++) {
@@ -8012,14 +8280,16 @@ function cancelEdit() {
     if (currentUser) {
       pageLockInfo = { locked_by: currentUser.username, is_draft: true }
     }
-    setStatus(draftSavedThisSession
-      ? "Draft preserved, exiting edit mode"
-      : "Unsaved changes discarded — draft preserved")
+    setStatus(
+      draftSavedThisSession ? "Draft preserved, exiting edit mode" : "Unsaved changes discarded — draft preserved"
+    )
   } else {
     // No preexisting draft and nothing was saved — the draft is just a
     // copy of published content, so discarding it costs the user nothing.
     if (editToken) {
-      authFetch(`/api/draft/${encodePagePath(pagePath)}?edit_token=${encodeURIComponent(editToken)}`, { method: "DELETE" }).catch(() => {})
+      authFetch(`/api/draft/${encodePagePath(pagePath)}?edit_token=${encodeURIComponent(editToken)}`, {
+        method: "DELETE",
+      }).catch(() => {})
     }
     editToken = null
     stashedEditorState = null
@@ -8067,11 +8337,16 @@ async function resolveSiteInfo() {
         themeAllowUserOverride = data.theme.allow_user_override !== false
         // Re-resolve in case the admin default differs from what the
         // no-flash script assumed (the script only has access to OS / cookie).
-        const pref = currentUserThemePref || (typeof localStorage !== "undefined" ? localStorage.getItem("gowiki-theme") : "") || ""
+        const pref =
+          currentUserThemePref ||
+          (typeof localStorage !== "undefined" ? localStorage.getItem("gowiki-theme") : "") ||
+          ""
         applyTheme(resolveTheme(pref, data.theme.default))
       }
     }
-  } catch { /* keep default */ }
+  } catch {
+    /* keep default */
+  }
 }
 
 function updatePageTitle() {
@@ -8092,7 +8367,9 @@ async function resolveLogo() {
         document.getElementById("banner-logo-img").src = "/media/" + data.path
       }
     }
-  } catch { /* keep default */ }
+  } catch {
+    /* keep default */
+  }
 }
 
 // ── Banner: search ──────────────────────────────────
@@ -8111,7 +8388,10 @@ function initSearch() {
   input.addEventListener("input", () => {
     clearTimeout(debounceTimer)
     const query = input.value.trim()
-    if (!query) { hideResults(); return }
+    if (!query) {
+      hideResults()
+      return
+    }
     debounceTimer = setTimeout(() => runSearch(query), 200)
   })
 
@@ -8172,7 +8452,9 @@ function initSearch() {
       currentResults = results
       activeIndex = -1
       renderSearchResults(currentResults)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   function renderSearchResults(results) {
@@ -8282,12 +8564,11 @@ async function fetchTagResults(tag, rest, limit) {
   let pages = Array.isArray(data?.pages) ? data.pages : []
   if (rest) {
     const needle = rest.toLowerCase()
-    pages = pages.filter(p =>
-      (p.title || "").toLowerCase().includes(needle) ||
-      (p.path || "").toLowerCase().includes(needle)
+    pages = pages.filter(
+      (p) => (p.title || "").toLowerCase().includes(needle) || (p.path || "").toLowerCase().includes(needle)
     )
   }
-  return pages.slice(0, limit).map(p => ({
+  return pages.slice(0, limit).map((p) => ({
     path: p.path,
     title: p.title,
     snippet: "",
@@ -8322,10 +8603,18 @@ async function checkAuth() {
         // persisted a preference for this user, keep whatever localStorage
         // holds so we don't clobber a client-only choice.
         let localPref = ""
-        try { localPref = localStorage.getItem("gowiki-theme") || "" } catch { /* ignore */ }
+        try {
+          localPref = localStorage.getItem("gowiki-theme") || ""
+        } catch {
+          /* ignore */
+        }
         currentUserThemePref = serverPref || localPref
         if (serverPref) {
-          try { localStorage.setItem("gowiki-theme", serverPref) } catch { /* ignore */ }
+          try {
+            localStorage.setItem("gowiki-theme", serverPref)
+          } catch {
+            /* ignore */
+          }
         } else if (localPref) {
           // Backfill the server with the client-only pref so future loads
           // are consistent across devices.
@@ -8335,12 +8624,17 @@ async function checkAuth() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ theme_preference: localPref }),
             })
-          } catch { /* best effort */ }
+          } catch {
+            /* best effort */
+          }
         }
-        const adminDefault = (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
+        const adminDefault =
+          (window.__gowikiSiteInfo && window.__gowikiSiteInfo.theme && window.__gowikiSiteInfo.theme.default) || "auto"
         applyTheme(resolveTheme(currentUserThemePref, adminDefault))
       }
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
 
     // Prime the favorites set — the star button and any {favorites} view
     // read from this. A network hiccup leaves the set empty, which is fine.
@@ -8353,7 +8647,9 @@ async function checkAuth() {
           if (f && f.path) currentFavorites.add(f.path)
         }
       }
-    } catch { /* best effort */ }
+    } catch {
+      /* best effort */
+    }
   }
 
   renderBannerUser()
@@ -8390,7 +8686,9 @@ async function toggleFavoriteCurrent() {
       btn.classList.toggle("gowiki-action-btn--filled", currentFavorites.has(p))
       btn.title = currentFavorites.has(p) ? "Remove from favorites" : "Add to favorites"
     }
-  } catch { /* best effort */ }
+  } catch {
+    /* best effort */
+  }
 }
 
 function renderBannerUser() {
@@ -8449,8 +8747,8 @@ function renderBannerUser() {
 
       const options = [
         { value: "light", label: "Light" },
-        { value: "dark",  label: "Dark"  },
-        { value: "auto",  label: "Auto"  },
+        { value: "dark", label: "Dark" },
+        { value: "auto", label: "Auto" },
       ]
       // Resolve the "current" highlight from the strongest source available:
       // server-stored pref → localStorage (last client choice) → auto.
@@ -8459,7 +8757,11 @@ function renderBannerUser() {
       // reflects what theme is actually active.
       let current = currentUserThemePref
       if (!current) {
-        try { current = localStorage.getItem("gowiki-theme") || "" } catch { /* ignore */ }
+        try {
+          current = localStorage.getItem("gowiki-theme") || ""
+        } catch {
+          /* ignore */
+        }
       }
       if (!current) current = "auto"
       const seg = document.createElement("div")
@@ -8536,7 +8838,10 @@ async function showMyTokensModal() {
     content.innerHTML = "Loading..."
     try {
       const resp = await authFetch("/api/tokens")
-      if (!resp.ok) { content.textContent = "Failed to load tokens."; return }
+      if (!resp.ok) {
+        content.textContent = "Failed to load tokens."
+        return
+      }
       const data = await resp.json()
       content.innerHTML = ""
 
@@ -8552,14 +8857,18 @@ async function showMyTokensModal() {
           row.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #eee"
           const info = document.createElement("span")
           info.style.flex = "1"
-          info.innerHTML = "<b>" + (token.name || "unnamed") + "</b><br><small style='color:#888'>" +
-            (token.last_used_at ? "Last used: " + new Date(token.last_used_at).toLocaleString() : "Never used") + "</small>"
+          info.innerHTML =
+            "<b>" +
+            (token.name || "unnamed") +
+            "</b><br><small style='color:#888'>" +
+            (token.last_used_at ? "Last used: " + new Date(token.last_used_at).toLocaleString() : "Never used") +
+            "</small>"
           row.appendChild(info)
           const del = document.createElement("button")
           del.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
           del.textContent = "Revoke"
           del.addEventListener("click", async () => {
-            if (!confirm("Revoke token \"" + token.name + "\"?")) return
+            if (!confirm('Revoke token "' + token.name + '"?')) return
             const r = await authFetch("/api/tokens/" + token.id, { method: "DELETE" })
             if (r.ok) loadTokens()
             else alert("Failed to revoke token.")
@@ -8590,10 +8899,12 @@ async function showMyTokensModal() {
         const result = await r.json()
         // Show the plaintext token
         const tokenDisplay = document.createElement("div")
-        tokenDisplay.style.cssText = "margin-top:12px;padding:12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px"
+        tokenDisplay.style.cssText =
+          "margin-top:12px;padding:12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px"
         tokenDisplay.innerHTML = "<b>Token created! Copy it now — it will not be shown again:</b>"
         const code = document.createElement("code")
-        code.style.cssText = "display:block;margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;word-break:break-all;font-size:13px;user-select:all"
+        code.style.cssText =
+          "display:block;margin-top:8px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;word-break:break-all;font-size:13px;user-select:all"
         code.textContent = result.token
         tokenDisplay.appendChild(code)
         content.appendChild(tokenDisplay)
@@ -8618,7 +8929,9 @@ async function showMyTokensModal() {
   dialog.appendChild(closeBtn)
 
   overlay.appendChild(dialog)
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove() })
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove()
+  })
   document.body.appendChild(overlay)
 }
 
@@ -8680,8 +8993,8 @@ async function showSigningKeyModal() {
     // cert was revoked, and now just needs a signature on it. In that
     // case the revocation message would be misleading: the current key
     // was never the one that got revoked.
-    const localKeyIsFresh = keyCreatedAt && serverRevokedAt &&
-      new Date(keyCreatedAt).getTime() > new Date(serverRevokedAt).getTime()
+    const localKeyIsFresh =
+      keyCreatedAt && serverRevokedAt && new Date(keyCreatedAt).getTime() > new Date(serverRevokedAt).getTime()
 
     // Purge a stale revoked cert from IndexedDB when the local key is
     // fresh. An earlier version of this refresh code auto-imported the
@@ -8695,17 +9008,23 @@ async function showSigningKeyModal() {
 
     // Status
     const statusDiv = document.createElement("div")
-    statusDiv.style.cssText = "margin-bottom:12px;padding:8px;background:var(--gw-color-surface);border:1px solid var(--gw-color-border);border-radius:6px;font-size:13px;color:var(--gw-color-text)"
+    statusDiv.style.cssText =
+      "margin-bottom:12px;padding:8px;background:var(--gw-color-surface);border:1px solid var(--gw-color-border);border-radius:6px;font-size:13px;color:var(--gw-color-text)"
     if (!has) {
       statusDiv.innerHTML = "<b>No signing key.</b> Generate one to enable cryptographic confirmations."
     } else if (serverRevoked && localKeyIsFresh) {
-      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Your previous certificate was revoked; download the public key below and have your admin sign it."
+      statusDiv.innerHTML =
+        "<b>Key generated</b> — awaiting certificate. Your previous certificate was revoked; download the public key below and have your admin sign it."
     } else if (serverRevoked) {
       const when = serverRevokedAt ? new Date(serverRevokedAt).toLocaleString() : ""
-      statusDiv.innerHTML = "<b>Certificate revoked" + (when ? " on " + when : "") + ".</b> Signing is refused until a new certificate is issued. Ask your admin to sign a fresh public key (or delete the local key and generate a new one)."
+      statusDiv.innerHTML =
+        "<b>Certificate revoked" +
+        (when ? " on " + when : "") +
+        ".</b> Signing is refused until a new certificate is issued. Ask your admin to sign a fresh public key (or delete the local key and generate a new one)."
       statusDiv.style.background = "#fdecea"
     } else if (!certPEM) {
-      statusDiv.innerHTML = "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it."
+      statusDiv.innerHTML =
+        "<b>Key generated</b> — awaiting certificate. Download the public key and have your admin sign it."
     } else {
       statusDiv.innerHTML = "<b>Key + Certificate ready.</b> You can sign reviewflow confirmations."
       statusDiv.style.background = "#e8f5e9"
@@ -8741,8 +9060,12 @@ async function showSigningKeyModal() {
         dlBtn.textContent = "Download Public Key (SPKI)"
         dlBtn.addEventListener("click", async () => {
           const spki = await getPublicKeySPKI(username)
-          if (!spki) { alert("No public key found"); return }
-          const pem = "-----BEGIN PUBLIC KEY-----\n" + spki.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n"
+          if (!spki) {
+            alert("No public key found")
+            return
+          }
+          const pem =
+            "-----BEGIN PUBLIC KEY-----\n" + spki.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----\n"
           const blob = new Blob([pem], { type: "application/x-pem-file" })
           const a = document.createElement("a")
           a.href = URL.createObjectURL(blob)
@@ -8802,7 +9125,8 @@ async function showSigningKeyModal() {
       // Show certificate info if available
       if (certPEM) {
         const certInfo = document.createElement("div")
-        certInfo.style.cssText = "font-size:12px;color:#666;font-family:monospace;white-space:pre-wrap;max-height:100px;overflow:auto;background:#f5f5f5;padding:6px;border-radius:4px"
+        certInfo.style.cssText =
+          "font-size:12px;color:#666;font-family:monospace;white-space:pre-wrap;max-height:100px;overflow:auto;background:#f5f5f5;padding:6px;border-radius:4px"
         certInfo.textContent = certPEM.substring(0, 200) + (certPEM.length > 200 ? "..." : "")
         content.appendChild(certInfo)
       }
@@ -8819,12 +9143,14 @@ async function showSigningKeyModal() {
   dialog.appendChild(closeBtn)
 
   overlay.appendChild(dialog)
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove() })
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) overlay.remove()
+  })
   document.body.appendChild(overlay)
 }
 
 function showLoginDialog(onSuccess) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const overlay = document.createElement("div")
     overlay.className = "gowiki-login-overlay"
 
@@ -8896,9 +9222,15 @@ function showLoginDialog(onSuccess) {
 
     cancelBtn.addEventListener("click", () => close(false))
     loginBtn.addEventListener("click", submit)
-    passInput.addEventListener("keydown", e => { if (e.key === "Enter") submit() })
-    userInput.addEventListener("keydown", e => { if (e.key === "Enter") passInput.focus() })
-    overlay.addEventListener("click", e => { if (e.target === overlay) close(false) })
+    passInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit()
+    })
+    userInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") passInput.focus()
+    })
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close(false)
+    })
 
     actions.append(cancelBtn, loginBtn)
     dialog.append(title, errorEl, userLabel, userInput, passLabel, passInput, actions)
@@ -8906,28 +9238,33 @@ function showLoginDialog(onSuccess) {
     document.body.appendChild(overlay)
 
     // Fetch OAuth providers and add buttons if available.
-    fetch("/api/auth/providers").then(r => r.json()).then(data => {
-      if (data.providers && data.providers.length > 0) {
-        const oauthSection = document.createElement("div")
-        oauthSection.className = "gowiki-login-oauth"
-        for (const provider of data.providers) {
-          const btn = document.createElement("button")
-          btn.className = "gowiki-login-oauth-btn"
-          btn.textContent = "Sign in with " + provider.label
-          btn.addEventListener("click", () => {
-            const returnTo = encodeURIComponent(window.location.pathname)
-            window.location.href = "/api/auth/oauth/login?return_to=" + returnTo
-          })
-          oauthSection.appendChild(btn)
+    fetch("/api/auth/providers")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.providers && data.providers.length > 0) {
+          const oauthSection = document.createElement("div")
+          oauthSection.className = "gowiki-login-oauth"
+          for (const provider of data.providers) {
+            const btn = document.createElement("button")
+            btn.className = "gowiki-login-oauth-btn"
+            btn.textContent = "Sign in with " + provider.label
+            btn.addEventListener("click", () => {
+              const returnTo = encodeURIComponent(window.location.pathname)
+              window.location.href = "/api/auth/oauth/login?return_to=" + returnTo
+            })
+            oauthSection.appendChild(btn)
+          }
+          const divider = document.createElement("div")
+          divider.className = "gowiki-login-divider"
+          divider.textContent = "or sign in with username"
+          // Insert OAuth buttons before the local login form.
+          dialog.insertBefore(oauthSection, errorEl)
+          dialog.insertBefore(divider, errorEl)
         }
-        const divider = document.createElement("div")
-        divider.className = "gowiki-login-divider"
-        divider.textContent = "or sign in with username"
-        // Insert OAuth buttons before the local login form.
-        dialog.insertBefore(oauthSection, errorEl)
-        dialog.insertBefore(divider, errorEl)
-      }
-    }).catch(() => { /* OAuth not available, local-only login */ })
+      })
+      .catch(() => {
+        /* OAuth not available, local-only login */
+      })
 
     userInput.focus()
   })
@@ -9078,7 +9415,7 @@ async function joinCollabSession(lockOwner) {
   // Check if the owner is actually online. If not, offer to reclaim after 3s.
   setTimeout(() => {
     if (!isCollabGuest) return // already promoted
-    const ownerOnline = currentPresenceUsers.some(u => u.username === lockOwner && u.mode === "edit")
+    const ownerOnline = currentPresenceUsers.some((u) => u.username === lockOwner && u.mode === "edit")
     if (!ownerOnline) {
       handleOwnerLeft(lockOwner)
     }
@@ -9102,7 +9439,10 @@ async function enterEditMode(force, asNamespaceIndex = false) {
   // "resumed" like "saved this session" so it never silently discards a
   // draft the user only opened to peek at.
   const willResumePreexistingDraft = !!(
-    pageLockInfo && pageLockInfo.is_draft && currentUser && pageLockInfo.locked_by === currentUser.username
+    pageLockInfo &&
+    pageLockInfo.is_draft &&
+    currentUser &&
+    pageLockInfo.locked_by === currentUser.username
   )
 
   // If we still have a valid edit token (saved-to-draft without exiting the session),
@@ -9160,8 +9500,8 @@ async function enterEditMode(force, asNamespaceIndex = false) {
     if (body.error === "namespace_conflict" && body.conflicting_page) {
       const convertOk = confirm(
         `Cannot create this page: "${body.conflicting_page}" exists as a regular page and blocks this namespace.\n\n` +
-        `Convert "${body.conflicting_page}" to a namespace index?\n` +
-        `(The page content will be preserved, only its internal path changes.)`
+          `Convert "${body.conflicting_page}" to a namespace index?\n` +
+          `(The page content will be preserved, only its internal path changes.)`
       )
       if (convertOk) {
         const moveResp = await authFetch(`/api/move/${encodePagePath(body.conflicting_page)}`, {
@@ -9243,7 +9583,7 @@ function getCurrentMarkdown() {
 // Shows a modal when the edit session has been superseded by another tab.
 // Returns "force" if the user wants to retake editing, "discard" otherwise.
 function promptSupersededDialog() {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const overlay = document.createElement("div")
     overlay.className = "gowiki-link-modal-overlay"
 
@@ -9278,7 +9618,7 @@ function promptSupersededDialog() {
 
     forceBtn.addEventListener("click", () => close("force"))
     discardBtn.addEventListener("click", () => close("discard"))
-    overlay.addEventListener("click", event => {
+    overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close("discard")
     })
 
@@ -9416,13 +9756,12 @@ async function publishDraft() {
     return
   }
   if (normalized.roundTripError) {
-    const lineRef = normalized.roundTripFirstDiffLine > 0
-      ? ` (first diff at line ${normalized.roundTripFirstDiffLine})`
-      : ""
+    const lineRef =
+      normalized.roundTripFirstDiffLine > 0 ? ` (first diff at line ${normalized.roundTripFirstDiffLine})` : ""
     setStatus(
       "Document failed round-trip validation — cannot publish" + lineRef + ".",
       true,
-      normalized.roundTripDiagnostics || "(no diagnostic captured)",
+      normalized.roundTripDiagnostics || "(no diagnostic captured)"
     )
     return
   }
@@ -9529,14 +9868,20 @@ async function publishDraft() {
 }
 
 function refreshZones() {
-  if (sidebarView) { sidebarView.destroy(); sidebarView = null }
+  if (sidebarView) {
+    sidebarView.destroy()
+    sidebarView = null
+  }
   sidebarRoot.innerHTML = ""
-  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
     sidebarView = v
   })
-  if (footerView) { footerView.destroy(); footerView = null }
+  if (footerView) {
+    footerView.destroy()
+    footerView = null
+  }
   footerRoot.innerHTML = ""
-  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
     footerView = v
   })
 }
@@ -9612,9 +9957,10 @@ async function publishDraftFromHistory() {
 }
 
 async function discardDraftFromHistory(hasChanges) {
-  const msg = hasChanges === false
-    ? "The draft has no changes from the published version. Discard?"
-    : "Discard draft and lose all unpublished changes?"
+  const msg =
+    hasChanges === false
+      ? "The draft has no changes from the published version. Discard?"
+      : "Discard draft and lose all unpublished changes?"
   if (!confirm(msg)) return
 
   const tokenParam = editToken ? `?edit_token=${encodeURIComponent(editToken)}` : ""
@@ -9662,7 +10008,9 @@ async function saveDraftAndExit() {
   // reassuring — the page is theirs now (locked) but nothing here is
   // visible to anyone else until they hit Publish. The bare status
   // otherwise reads as if the save were the final act.
-  setStatus(`Draft saved ${new Date().toLocaleTimeString()} — page locked to you; changes stay private until you click Publish draft.`)
+  setStatus(
+    `Draft saved ${new Date().toLocaleTimeString()} — page locked to you; changes stay private until you click Publish draft.`
+  )
   // Stash editor state so undo survives resume.
   stashEditorState()
   // Keep editToken — we'll reuse it on resume.
@@ -9761,7 +10109,7 @@ async function renderSitemapPage() {
         const isRoot = node.path === "/"
 
         // Check if this namespace has an index page among its children.
-        const nsIndex = hasChildren ? node.children.find(c => c.is_namespace_index) : null
+        const nsIndex = hasChildren ? node.children.find((c) => c.is_namespace_index) : null
         // If the namespace has an index page, treat the namespace as having a page.
         const effectiveHasPage = node.has_page || !!nsIndex
 
@@ -9803,7 +10151,7 @@ async function renderSitemapPage() {
           a.href = url
           a.className = "gowiki-sitemap-path gowiki-link-exists"
           a.textContent = label
-          a.addEventListener("click", e => {
+          a.addEventListener("click", (e) => {
             e.preventDefault()
             window.location.href = url
           })
@@ -9811,7 +10159,7 @@ async function renderSitemapPage() {
           row.appendChild(a)
         }
 
-        const displayTitle = nsIndex ? (nsIndex.title || node.title || "") : (node.title || "")
+        const displayTitle = nsIndex ? nsIndex.title || node.title || "" : node.title || ""
         if (effectiveHasPage && displayTitle) {
           const titleSpan = document.createElement("span")
           titleSpan.className = "gowiki-sitemap-title"
@@ -9840,7 +10188,7 @@ async function renderSitemapPage() {
       if (pathElements.length > 0) {
         let maxLen = 0
         for (const el of pathElements) maxLen = Math.max(maxLen, el.textContent.length)
-        parentUl.style.setProperty("--path-width", (maxLen + 2) + "ch")
+        parentUl.style.setProperty("--path-width", maxLen + 2 + "ch")
       }
     }
 
@@ -9861,7 +10209,11 @@ function renderAdminPage() {
   contentRoot.innerHTML = ""
   actionsRoot.innerHTML = ""
 
-  actionsRoot.appendChild(makeActionIconBtn("backlinks", "Back to Wiki", () => { window.location.href = "/" }))
+  actionsRoot.appendChild(
+    makeActionIconBtn("backlinks", "Back to Wiki", () => {
+      window.location.href = "/"
+    })
+  )
 
   // Tab bar
   const tabBar = document.createElement("div")
@@ -9893,15 +10245,33 @@ function renderAdminPage() {
   function loadTab(name) {
     tabContent.innerHTML = ""
     switch (name) {
-      case "Users": renderAdminUsersTab(tabContent); break
-      case "Groups": renderAdminGroupsTab(tabContent); break
-      case "ACL": renderAdminACLTab(tabContent); break
-      case "Locks": renderAdminLocksTab(tabContent); break
-      case "Tokens": renderAdminTokensTab(tabContent); break
-      case "Certificates": renderAdminCertsTab(tabContent); break
-      case "Configuration": renderAdminConfigTab(tabContent); break
-      case "Database": renderAdminDatabaseTab(tabContent); break
-      case "Todo": renderAdminTodoTab(tabContent); break
+      case "Users":
+        renderAdminUsersTab(tabContent)
+        break
+      case "Groups":
+        renderAdminGroupsTab(tabContent)
+        break
+      case "ACL":
+        renderAdminACLTab(tabContent)
+        break
+      case "Locks":
+        renderAdminLocksTab(tabContent)
+        break
+      case "Tokens":
+        renderAdminTokensTab(tabContent)
+        break
+      case "Certificates":
+        renderAdminCertsTab(tabContent)
+        break
+      case "Configuration":
+        renderAdminConfigTab(tabContent)
+        break
+      case "Database":
+        renderAdminDatabaseTab(tabContent)
+        break
+      case "Todo":
+        renderAdminTodoTab(tabContent)
+        break
     }
   }
 
@@ -9947,7 +10317,9 @@ function showAdminModal(title, buildContent) {
     buildContent(body, close, showError)
 
     overlay.appendChild(dialog)
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(null) })
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close(null)
+    })
     document.addEventListener("keydown", function handler(e) {
       if (e.key === "Escape") {
         document.removeEventListener("keydown", handler)
@@ -10071,7 +10443,7 @@ async function renderAdminUsersTab(container) {
       const oauthGroups = user.oauth_groups || []
       const allGroupParts = []
       if (localGroups.length > 0) allGroupParts.push(localGroups.join(", "))
-      if (oauthGroups.length > 0) allGroupParts.push(oauthGroups.map(g => g + " (Azure)").join(", "))
+      if (oauthGroups.length > 0) allGroupParts.push(oauthGroups.map((g) => g + " (Azure)").join(", "))
       tdGroups.textContent = allGroupParts.join(", ") || ""
       tr.appendChild(tdGroups)
 
@@ -10112,7 +10484,7 @@ async function renderAdminUsersTab(container) {
         delBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
         delBtn.textContent = "Delete"
         delBtn.addEventListener("click", async () => {
-          if (confirm("Delete user \"" + user.username + "\"? This cannot be undone.")) {
+          if (confirm('Delete user "' + user.username + '"? This cannot be undone.')) {
             const r = await authFetch("/api/admin/users/" + encodeURIComponent(user.username), { method: "DELETE" })
             if (r.ok) renderAdminUsersTab(container)
             else alert("Failed to delete user.")
@@ -10126,7 +10498,6 @@ async function renderAdminUsersTab(container) {
     }
     table.appendChild(tbody)
     container.appendChild(table)
-
   } catch (err) {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load users.</div>'
   }
@@ -10140,36 +10511,44 @@ async function showCreateUserModal() {
     const displayInput = adminFormField(body, "Display Name", "text")
     const groupsInput = adminFormField(body, "Groups (comma-separated)", "text")
 
-    adminModalActions(body, () => close(null), async () => {
-      const username = usernameInput.value.trim()
-      const password = passwordInput.value
-      if (!username || !password) {
-        showError("Username and password are required.")
-        return
-      }
-      const groups = groupsInput.value.split(",").map(s => s.trim()).filter(Boolean)
-      try {
-        const resp = await authFetch("/api/admin/users", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username,
-            password,
-            email: emailInput.value.trim(),
-            display_name: displayInput.value.trim(),
-            groups,
-          }),
-        })
-        if (resp.ok) {
-          close(true)
-        } else {
-          const err = await resp.json().catch(() => ({}))
-          showError(err.error || "Failed to create user.")
+    adminModalActions(
+      body,
+      () => close(null),
+      async () => {
+        const username = usernameInput.value.trim()
+        const password = passwordInput.value
+        if (!username || !password) {
+          showError("Username and password are required.")
+          return
         }
-      } catch {
-        showError("Network error.")
-      }
-    }, "Create")
+        const groups = groupsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+        try {
+          const resp = await authFetch("/api/admin/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username,
+              password,
+              email: emailInput.value.trim(),
+              display_name: displayInput.value.trim(),
+              groups,
+            }),
+          })
+          if (resp.ok) {
+            close(true)
+          } else {
+            const err = await resp.json().catch(() => ({}))
+            showError(err.error || "Failed to create user.")
+          }
+        } catch {
+          showError("Network error.")
+        }
+      },
+      "Create"
+    )
   })
 }
 
@@ -10195,29 +10574,37 @@ async function showEditUserModal(user) {
     disabledLabel.appendChild(document.createTextNode(" Disabled"))
     body.appendChild(disabledLabel)
 
-    adminModalActions(body, () => close(null), async () => {
-      const groups = groupsInput.value.split(",").map(s => s.trim()).filter(Boolean)
-      try {
-        const resp = await authFetch("/api/admin/users/" + encodeURIComponent(user.username), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: emailInput.value.trim(),
-            display_name: displayInput.value.trim(),
-            groups,
-            disabled: disabledCheck.checked,
-          }),
-        })
-        if (resp.ok) {
-          close(true)
-        } else {
-          const err = await resp.json().catch(() => ({}))
-          showError(err.error || "Failed to update user.")
+    adminModalActions(
+      body,
+      () => close(null),
+      async () => {
+        const groups = groupsInput.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+        try {
+          const resp = await authFetch("/api/admin/users/" + encodeURIComponent(user.username), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: emailInput.value.trim(),
+              display_name: displayInput.value.trim(),
+              groups,
+              disabled: disabledCheck.checked,
+            }),
+          })
+          if (resp.ok) {
+            close(true)
+          } else {
+            const err = await resp.json().catch(() => ({}))
+            showError(err.error || "Failed to update user.")
+          }
+        } catch {
+          showError("Network error.")
         }
-      } catch {
-        showError("Network error.")
-      }
-    }, "Save")
+      },
+      "Save"
+    )
   })
 }
 
@@ -10226,32 +10613,37 @@ async function showSetPasswordModal(username) {
     const passwordInput = adminFormField(body, "New Password", "password")
     const confirmInput = adminFormField(body, "Confirm Password", "password")
 
-    adminModalActions(body, () => close(null), async () => {
-      const password = passwordInput.value
-      if (!password) {
-        showError("Password is required.")
-        return
-      }
-      if (password !== confirmInput.value) {
-        showError("Passwords do not match.")
-        return
-      }
-      try {
-        const resp = await authFetch("/api/admin/users/" + encodeURIComponent(username) + "/password", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
-        })
-        if (resp.ok) {
-          close(true)
-        } else {
-          const err = await resp.json().catch(() => ({}))
-          showError(err.error || "Failed to set password.")
+    adminModalActions(
+      body,
+      () => close(null),
+      async () => {
+        const password = passwordInput.value
+        if (!password) {
+          showError("Password is required.")
+          return
         }
-      } catch {
-        showError("Network error.")
-      }
-    }, "Set Password")
+        if (password !== confirmInput.value) {
+          showError("Passwords do not match.")
+          return
+        }
+        try {
+          const resp = await authFetch("/api/admin/users/" + encodeURIComponent(username) + "/password", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password }),
+          })
+          if (resp.ok) {
+            close(true)
+          } else {
+            const err = await resp.json().catch(() => ({}))
+            showError(err.error || "Failed to set password.")
+          }
+        } catch {
+          showError("Network error.")
+        }
+      },
+      "Set Password"
+    )
   })
 }
 
@@ -10334,7 +10726,7 @@ async function renderAdminGroupsTab(container) {
         delBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
         delBtn.textContent = "Delete"
         delBtn.addEventListener("click", async () => {
-          if (confirm("Delete group \"" + group.name + "\"? This cannot be undone.")) {
+          if (confirm('Delete group "' + group.name + '"? This cannot be undone.')) {
             const r = await authFetch("/api/admin/groups/" + encodeURIComponent(group.name), { method: "DELETE" })
             if (r.ok) renderAdminGroupsTab(container)
             else alert("Failed to delete group.")
@@ -10348,7 +10740,6 @@ async function renderAdminGroupsTab(container) {
     }
     table.appendChild(tbody)
     container.appendChild(table)
-
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load groups.</div>'
   }
@@ -10359,28 +10750,33 @@ async function showCreateGroupModal() {
     const nameInput = adminFormField(body, "Name", "text")
     const descInput = adminFormField(body, "Description", "text")
 
-    adminModalActions(body, () => close(null), async () => {
-      const name = nameInput.value.trim()
-      if (!name) {
-        showError("Group name is required.")
-        return
-      }
-      try {
-        const resp = await authFetch("/api/admin/groups", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, description: descInput.value.trim() }),
-        })
-        if (resp.ok) {
-          close(true)
-        } else {
-          const err = await resp.json().catch(() => ({}))
-          showError(err.error || "Failed to create group.")
+    adminModalActions(
+      body,
+      () => close(null),
+      async () => {
+        const name = nameInput.value.trim()
+        if (!name) {
+          showError("Group name is required.")
+          return
         }
-      } catch {
-        showError("Network error.")
-      }
-    }, "Create")
+        try {
+          const resp = await authFetch("/api/admin/groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, description: descInput.value.trim() }),
+          })
+          if (resp.ok) {
+            close(true)
+          } else {
+            const err = await resp.json().catch(() => ({}))
+            showError(err.error || "Failed to create group.")
+          }
+        } catch {
+          showError("Network error.")
+        }
+      },
+      "Create"
+    )
   })
 }
 
@@ -10388,23 +10784,28 @@ async function showEditGroupModal(group) {
   return showAdminModal("Edit Group: " + group.name, (body, close, showError) => {
     const descInput = adminFormField(body, "Description", "text", group.description || "")
 
-    adminModalActions(body, () => close(null), async () => {
-      try {
-        const resp = await authFetch("/api/admin/groups/" + encodeURIComponent(group.name), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ description: descInput.value.trim() }),
-        })
-        if (resp.ok) {
-          close(true)
-        } else {
-          const err = await resp.json().catch(() => ({}))
-          showError(err.error || "Failed to update group.")
+    adminModalActions(
+      body,
+      () => close(null),
+      async () => {
+        try {
+          const resp = await authFetch("/api/admin/groups/" + encodeURIComponent(group.name), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: descInput.value.trim() }),
+          })
+          if (resp.ok) {
+            close(true)
+          } else {
+            const err = await resp.json().catch(() => ({}))
+            showError(err.error || "Failed to update group.")
+          }
+        } catch {
+          showError("Network error.")
         }
-      } catch {
-        showError("Network error.")
-      }
-    }, "Save")
+      },
+      "Save"
+    )
   })
 }
 
@@ -10464,7 +10865,9 @@ async function renderAdminACLTab(container) {
           statusMsg.textContent = "ACL saved."
           statusMsg.style.color = "#155724"
           statusMsg.style.display = "inline"
-          setTimeout(() => { statusMsg.style.display = "none" }, 3000)
+          setTimeout(() => {
+            statusMsg.style.display = "none"
+          }, 3000)
         } else {
           const err = await r.json().catch(() => ({}))
           statusMsg.textContent = err.error || "Failed to save ACL."
@@ -10608,7 +11011,6 @@ async function renderAdminACLTab(container) {
     }
 
     renderRules()
-
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load ACL rules.</div>'
   }
@@ -10689,12 +11091,19 @@ async function renderAdminLocksTab(container) {
       viewBtn.className = "gowiki-admin-btn-small"
       viewBtn.textContent = "View"
       viewBtn.addEventListener("click", async () => {
-        const r = await authFetch("/api/admin/drafts/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner))
-        if (!r.ok) { alert("Failed to read draft."); return }
+        const r = await authFetch(
+          "/api/admin/drafts/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner)
+        )
+        if (!r.ok) {
+          alert("Failed to read draft.")
+          return
+        }
         const d = await r.json()
         const modal = document.createElement("div")
         modal.className = "gowiki-admin-modal-overlay"
-        modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove() })
+        modal.addEventListener("click", (e) => {
+          if (e.target === modal) modal.remove()
+        })
         const dialog = document.createElement("div")
         dialog.className = "gowiki-admin-modal"
         dialog.style.maxWidth = "800px"
@@ -10702,7 +11111,8 @@ async function renderAdminLocksTab(container) {
         title.textContent = "Draft: " + draft.page + " (by " + draft.owner + ")"
         dialog.appendChild(title)
         const pre = document.createElement("pre")
-        pre.style.cssText = "background:var(--gw-color-code-bg);color:var(--gw-color-code-text);border:1px solid var(--gw-color-border);border-radius:var(--gw-radius-sm);padding:12px;max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"
+        pre.style.cssText =
+          "background:var(--gw-color-code-bg);color:var(--gw-color-code-text);border:1px solid var(--gw-color-border);border-radius:var(--gw-radius-sm);padding:12px;max-height:60vh;overflow:auto;font-size:12px;white-space:pre-wrap"
         if (d.markdown && d.markdown.length > 0) {
           pre.textContent = d.markdown
         } else {
@@ -10727,8 +11137,20 @@ async function renderAdminLocksTab(container) {
       reclaimBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-primary"
       reclaimBtn.textContent = "Reclaim"
       reclaimBtn.addEventListener("click", async () => {
-        if (!confirm("Reclaim draft for \"" + draft.page + "\" from " + draft.owner + "?\n\nThe draft will become yours and you can edit/publish it.")) return
-        const r = await authFetch("/api/admin/drafts/reclaim/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner), { method: "POST" })
+        if (
+          !confirm(
+            'Reclaim draft for "' +
+              draft.page +
+              '" from ' +
+              draft.owner +
+              "?\n\nThe draft will become yours and you can edit/publish it."
+          )
+        )
+          return
+        const r = await authFetch(
+          "/api/admin/drafts/reclaim/" + encodePagePath(draft.page) + "?owner=" + encodeURIComponent(draft.owner),
+          { method: "POST" }
+        )
         if (r.ok) {
           renderAdminLocksTab(container)
         } else {
@@ -10742,7 +11164,8 @@ async function renderAdminLocksTab(container) {
       discardBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
       discardBtn.textContent = "Discard"
       discardBtn.addEventListener("click", async () => {
-        if (!confirm("Discard draft for \"" + draft.page + "\" owned by " + draft.owner + "?\n\nThis cannot be undone.")) return
+        if (!confirm('Discard draft for "' + draft.page + '" owned by ' + draft.owner + "?\n\nThis cannot be undone."))
+          return
         const r = await authFetch("/api/admin/drafts/" + encodePagePath(draft.page), { method: "DELETE" })
         if (r.ok) {
           renderAdminLocksTab(container)
@@ -10757,7 +11180,6 @@ async function renderAdminLocksTab(container) {
     }
     table.appendChild(tbody)
     container.appendChild(table)
-
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load drafts.</div>'
   }
@@ -10830,7 +11252,7 @@ async function renderAdminTokensTab(container) {
       revokeBtn.className = "gowiki-admin-btn-small gowiki-admin-btn-danger"
       revokeBtn.textContent = "Revoke"
       revokeBtn.addEventListener("click", async () => {
-        if (confirm("Revoke token \"" + token.name + "\" for user " + token.user + "?")) {
+        if (confirm('Revoke token "' + token.name + '" for user ' + token.user + "?")) {
           const r = await authFetch("/api/admin/tokens/" + token.id, { method: "DELETE" })
           if (r.ok) {
             renderAdminTokensTab(container)
@@ -10846,7 +11268,6 @@ async function renderAdminTokensTab(container) {
     }
     table.appendChild(tbody)
     container.appendChild(table)
-
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load tokens.</div>'
   }
@@ -10875,7 +11296,8 @@ async function renderAdminCertsTab(container) {
 
     if (caData.has_ca) {
       const status = document.createElement("div")
-      status.style.cssText = "padding:8px 12px;background:var(--gw-color-success-bg);border:1px solid var(--gw-color-success);border-radius:6px;color:var(--gw-color-success);font-size:13px;margin-bottom:12px"
+      status.style.cssText =
+        "padding:8px 12px;background:var(--gw-color-success-bg);border:1px solid var(--gw-color-success);border-radius:6px;color:var(--gw-color-success);font-size:13px;margin-bottom:12px"
       status.textContent = "Company CA is configured."
       container.appendChild(status)
 
@@ -10893,7 +11315,8 @@ async function renderAdminCertsTab(container) {
       container.appendChild(dlBtn)
     } else {
       const status = document.createElement("div")
-      status.style.cssText = "padding:8px 12px;background:var(--gw-color-warning-bg);border:1px solid var(--gw-color-warning);border-radius:6px;color:var(--gw-color-warning);font-size:13px;margin-bottom:12px"
+      status.style.cssText =
+        "padding:8px 12px;background:var(--gw-color-warning-bg);border:1px solid var(--gw-color-warning);border-radius:6px;color:var(--gw-color-warning);font-size:13px;margin-bottom:12px"
       status.textContent = "No company CA. Generate one to enable Level 2 (admin-signed) certificates."
       container.appendChild(status)
 
@@ -10960,7 +11383,10 @@ async function renderAdminCertsTab(container) {
       signBtn.textContent = "Sign & Issue Certificate"
       signBtn.style.alignSelf = "flex-start"
       signBtn.addEventListener("click", async () => {
-        if (!userInput.value || !spkiInput.value) { alert("Username and public key are required"); return }
+        if (!userInput.value || !spkiInput.value) {
+          alert("Username and public key are required")
+          return
+        }
         signBtn.disabled = true
         const resp = await authFetch("/api/plugin/reviewflow/v1/ca/sign", {
           method: "POST",
@@ -10987,10 +11413,13 @@ async function renderAdminCertsTab(container) {
           resultDiv.style.cssText = "padding:12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:6px"
           resultDiv.innerHTML = `<b>Certificate issued for ${userInput.value}!</b><br>The certificate has been saved on the server. The user can also import it manually:`
           const code = document.createElement("textarea")
-          code.style.cssText = "display:block;margin-top:8px;width:100%;height:120px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:11px"
+          code.style.cssText =
+            "display:block;margin-top:8px;width:100%;height:120px;padding:8px;background:#fff;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:11px"
           code.value = data.certificate_pem
           code.readOnly = true
-          code.addEventListener("click", () => { code.select() })
+          code.addEventListener("click", () => {
+            code.select()
+          })
           resultDiv.appendChild(code)
 
           const dlBtn = document.createElement("button")
@@ -11034,7 +11463,8 @@ async function renderAdminCertsTab(container) {
       const table = document.createElement("table")
       table.className = "gowiki-admin-table"
       const thead = document.createElement("thead")
-      thead.innerHTML = "<tr><th>User</th><th>Subject</th><th>Issuer</th><th>Expires</th><th>Fingerprint</th><th>Actions</th></tr>"
+      thead.innerHTML =
+        "<tr><th>User</th><th>Subject</th><th>Issuer</th><th>Expires</th><th>Fingerprint</th><th>Actions</th></tr>"
       table.appendChild(thead)
       const tbody = document.createElement("tbody")
       for (const cert of certs) {
@@ -11056,7 +11486,8 @@ async function renderAdminCertsTab(container) {
         if (cert.revoked) {
           const badge = document.createElement("span")
           badge.style.cssText = "color:var(--gw-color-error);font-size:12px;font-weight:600"
-          badge.textContent = "Revoked" + (cert.revoked_at ? " (" + new Date(cert.revoked_at).toLocaleDateString() + ")" : "")
+          badge.textContent =
+            "Revoked" + (cert.revoked_at ? " (" + new Date(cert.revoked_at).toLocaleDateString() + ")" : "")
           tdActions.appendChild(badge)
         } else {
           const revokeBtn = document.createElement("button")
@@ -11064,7 +11495,12 @@ async function renderAdminCertsTab(container) {
           revokeBtn.style.cssText = "background:#c62828;color:#fff;border:none"
           revokeBtn.textContent = "Revoke"
           revokeBtn.addEventListener("click", async () => {
-            if (!confirm(`Revoke certificate for ${cert.username}?\n\nThis will prevent new signatures. Existing signatures made before revocation remain valid.`)) return
+            if (
+              !confirm(
+                `Revoke certificate for ${cert.username}?\n\nThis will prevent new signatures. Existing signatures made before revocation remain valid.`
+              )
+            )
+              return
             revokeBtn.disabled = true
             revokeBtn.textContent = "Revoking..."
             const resp = await authFetch(`/api/plugin/reviewflow/v1/ca/revoke/${cert.username}`, { method: "POST" })
@@ -11119,18 +11555,33 @@ async function renderAdminConfigTab(container) {
     form.appendChild(siteHeading)
 
     const titleInput = adminFormField(form, "Site Title", "text", (config.site && config.site.title) || "")
-    const baseUrlInput = adminFormField(form, "Base URL (e.g. https://wiki.example.com)", "text", (config.site && config.site.base_url) || "")
+    const baseUrlInput = adminFormField(
+      form,
+      "Base URL (e.g. https://wiki.example.com)",
+      "text",
+      (config.site && config.site.base_url) || ""
+    )
     const sidebarInput = adminFormField(form, "Sidebar Page", "text", (config.site && config.site.sidebar_page) || "")
     const footerInput = adminFormField(form, "Footer Page", "text", (config.site && config.site.footer_page) || "")
-    const tocMaxLevelInput = adminFormField(form, "TOC max heading level (0 = disabled, 1-6)", "number", String((config.site && config.site.toc_max_level) ?? 3))
+    const tocMaxLevelInput = adminFormField(
+      form,
+      "TOC max heading level (0 = disabled, 1-6)",
+      "number",
+      String((config.site && config.site.toc_max_level) ?? 3)
+    )
     tocMaxLevelInput.min = "0"
     tocMaxLevelInput.max = "6"
-    const userDisplaySelect = adminFormSelect(form, "User display format", [
-      { value: "", label: "Login (default)" },
-      { value: "login", label: "Login" },
-      { value: "fullname", label: "Full name" },
-      { value: "email", label: "Email" },
-    ], (config.site && config.site.user_display) || "")
+    const userDisplaySelect = adminFormSelect(
+      form,
+      "User display format",
+      [
+        { value: "", label: "Login (default)" },
+        { value: "login", label: "Login" },
+        { value: "fullname", label: "Full name" },
+        { value: "email", label: "Email" },
+      ],
+      (config.site && config.site.user_display) || ""
+    )
 
     const codeThemeOptions = [
       { value: "github", label: "GitHub (light)" },
@@ -11145,8 +11596,18 @@ async function renderAdminConfigTab(container) {
       { value: "vs2015", label: "VS 2015 (dark)" },
       { value: "tokyo-night-dark", label: "Tokyo Night (dark)" },
     ]
-    const codeThemeSelect = adminFormSelect(form, "Code theme (light mode)", codeThemeOptions, (config.site && config.site.code_theme) || "github")
-    const codeThemeDarkSelect = adminFormSelect(form, "Code theme (dark mode)", codeThemeOptions, (config.site && config.site.code_theme_dark) || "github-dark")
+    const codeThemeSelect = adminFormSelect(
+      form,
+      "Code theme (light mode)",
+      codeThemeOptions,
+      (config.site && config.site.code_theme) || "github"
+    )
+    const codeThemeDarkSelect = adminFormSelect(
+      form,
+      "Code theme (dark mode)",
+      codeThemeOptions,
+      (config.site && config.site.code_theme_dark) || "github-dark"
+    )
 
     codeThemeSelect.addEventListener("change", () => {
       setHighlightThemes(codeThemeSelect.value, codeThemeDarkSelect.value)
@@ -11160,7 +11621,12 @@ async function renderAdminConfigTab(container) {
     authHeading.textContent = "Authentication"
     form.appendChild(authHeading)
 
-    const sessionTtlInput = adminFormField(form, "Session TTL (e.g. 24h, 168h)", "text", (config.auth && config.auth.session_ttl) || "")
+    const sessionTtlInput = adminFormField(
+      form,
+      "Session TTL (e.g. 24h, 168h)",
+      "text",
+      (config.auth && config.auth.session_ttl) || ""
+    )
 
     // OAuth section
     const oauthHeading = document.createElement("h3")
@@ -11168,10 +11634,15 @@ async function renderAdminConfigTab(container) {
     form.appendChild(oauthHeading)
 
     const oauth = (config.auth && config.auth.oauth) || {}
-    const oauthProviderSelect = adminFormSelect(form, "Provider", [
-      { value: "", label: "(disabled)" },
-      { value: "azure", label: "Azure AD / Microsoft 365" },
-    ], oauth.provider || "")
+    const oauthProviderSelect = adminFormSelect(
+      form,
+      "Provider",
+      [
+        { value: "", label: "(disabled)" },
+        { value: "azure", label: "Azure AD / Microsoft 365" },
+      ],
+      oauth.provider || ""
+    )
     const oauthTenantInput = adminFormField(form, "Tenant ID", "text", oauth.tenant_id || "")
     const oauthClientIdInput = adminFormField(form, "Client ID", "text", oauth.client_id || "")
     const oauthClientSecretInput = adminFormField(form, "Client Secret", "password", oauth.client_secret || "")
@@ -11186,15 +11657,30 @@ async function renderAdminConfigTab(container) {
     oauthAutoCreateLabel.appendChild(oauthAutoCreateCheckbox)
     oauthAutoCreateLabel.appendChild(document.createTextNode("Auto-create users on first OAuth login"))
     form.appendChild(oauthAutoCreateLabel)
-    const oauthDefaultGroupsInput = adminFormField(form, "Default groups for auto-created users (comma-separated)", "text", (oauth.default_groups || []).join(", "))
+    const oauthDefaultGroupsInput = adminFormField(
+      form,
+      "Default groups for auto-created users (comma-separated)",
+      "text",
+      (oauth.default_groups || []).join(", ")
+    )
 
     // Drafts section
     const draftsHeading = document.createElement("h3")
     draftsHeading.textContent = "Drafts"
     form.appendChild(draftsHeading)
 
-    const autoSaveInput = adminFormField(form, "Auto Save Interval (e.g. 30s, 1m)", "text", (config.drafts && config.drafts.auto_save_interval) || "")
-    const staleLockInput = adminFormField(form, "Stale Lock Timeout (e.g. 30m, 1h)", "text", (config.drafts && config.drafts.stale_lock_timeout) || "")
+    const autoSaveInput = adminFormField(
+      form,
+      "Auto Save Interval (e.g. 30s, 1m)",
+      "text",
+      (config.drafts && config.drafts.auto_save_interval) || ""
+    )
+    const staleLockInput = adminFormField(
+      form,
+      "Stale Lock Timeout (e.g. 30m, 1h)",
+      "text",
+      (config.drafts && config.drafts.stale_lock_timeout) || ""
+    )
 
     // Todo section
     const todoHeading = document.createElement("h3")
@@ -11222,8 +11708,12 @@ async function renderAdminConfigTab(container) {
     todoNote.textContent = "Todo is active when a database is connected and this box is unchecked."
     form.appendChild(todoNote)
 
-    const reminderHoursInput = adminFormField(form, "Reminder hours before due date (comma-separated, e.g. 24, 48, 168)", "text",
-      (todoConfig.reminder_hours || []).join(", "))
+    const reminderHoursInput = adminFormField(
+      form,
+      "Reminder hours before due date (comma-separated, e.g. 24, 48, 168)",
+      "text",
+      (todoConfig.reminder_hours || []).join(", ")
+    )
 
     // SMTP / Email Notifications section
     const smtpHeading = document.createElement("h3")
@@ -11311,7 +11801,7 @@ async function renderAdminConfigTab(container) {
 
     function rebuildWebhooks() {
       webhookContainer.innerHTML = ""
-      const current = webhookEntries.map(e => ({
+      const current = webhookEntries.map((e) => ({
         enabled: e.enabledCb.checked,
         name: e.nameInput.value,
         url: e.urlInput.value,
@@ -11358,11 +11848,26 @@ async function renderAdminConfigTab(container) {
     aiEnabledLabel.appendChild(document.createTextNode("Enable AI Content API (token-based access for AI assistants)"))
     form.appendChild(aiEnabledLabel)
 
-    const aiRateLimitReadInput = adminFormField(form, "Read rate limit (requests/minute per token)", "number", String(aiConfig.rate_limit_read ?? 120))
+    const aiRateLimitReadInput = adminFormField(
+      form,
+      "Read rate limit (requests/minute per token)",
+      "number",
+      String(aiConfig.rate_limit_read ?? 120)
+    )
     aiRateLimitReadInput.min = "1"
-    const aiRateLimitWriteInput = adminFormField(form, "Write rate limit (requests/minute per token)", "number", String(aiConfig.rate_limit_write ?? 30))
+    const aiRateLimitWriteInput = adminFormField(
+      form,
+      "Write rate limit (requests/minute per token)",
+      "number",
+      String(aiConfig.rate_limit_write ?? 30)
+    )
     aiRateLimitWriteInput.min = "1"
-    const aiMaxTokensInput = adminFormField(form, "Max tokens per user", "number", String(aiConfig.max_tokens_per_user ?? 5))
+    const aiMaxTokensInput = adminFormField(
+      form,
+      "Max tokens per user",
+      "number",
+      String(aiConfig.max_tokens_per_user ?? 5)
+    )
     aiMaxTokensInput.min = "1"
 
     const aiRequireSummaryCheckbox = document.createElement("input")
@@ -11394,16 +11899,31 @@ async function renderAdminConfigTab(container) {
     aiaEnabledLabel.style.gap = "8px"
     aiaEnabledLabel.style.margin = "8px 0"
     aiaEnabledLabel.appendChild(aiaEnabledCheckbox)
-    aiaEnabledLabel.appendChild(document.createTextNode("Enable integrated AI assistant (browser-based, server-side LLM proxy)"))
+    aiaEnabledLabel.appendChild(
+      document.createTextNode("Enable integrated AI assistant (browser-based, server-side LLM proxy)")
+    )
     form.appendChild(aiaEnabledLabel)
 
-    const aiaProviderSelect = adminFormSelect(form, "Provider", [
-      { value: "anthropic", label: "Anthropic (Claude)" },
-    ], aiaConfig.provider || "anthropic")
+    const aiaProviderSelect = adminFormSelect(
+      form,
+      "Provider",
+      [{ value: "anthropic", label: "Anthropic (Claude)" }],
+      aiaConfig.provider || "anthropic"
+    )
 
-    const aiaApiKeyInput = adminFormField(form, "API key (or set AI_ASSISTANT_API_KEY env var)", "password", aiaConfig.api_key || "")
+    const aiaApiKeyInput = adminFormField(
+      form,
+      "API key (or set AI_ASSISTANT_API_KEY env var)",
+      "password",
+      aiaConfig.api_key || ""
+    )
     const aiaModelInput = adminFormField(form, "Model", "text", aiaConfig.model || "claude-sonnet-4-20250514")
-    const aiaMaxTokensInput = adminFormField(form, "Max response tokens per request", "number", String(aiaConfig.max_tokens ?? 4096))
+    const aiaMaxTokensInput = adminFormField(
+      form,
+      "Max response tokens per request",
+      "number",
+      String(aiaConfig.max_tokens ?? 4096)
+    )
     aiaMaxTokensInput.min = "256"
 
     const aiaGroupsNote = document.createElement("div")
@@ -11417,11 +11937,26 @@ async function renderAdminConfigTab(container) {
     aiaCostHeading.style.margin = "12px 0 4px 0"
     form.appendChild(aiaCostHeading)
 
-    const aiaRateLimitInput = adminFormField(form, "Hourly rate limit per user (0 = unlimited)", "number", String(aiaCosts.rate_limit_per_user ?? 30))
+    const aiaRateLimitInput = adminFormField(
+      form,
+      "Hourly rate limit per user (0 = unlimited)",
+      "number",
+      String(aiaCosts.rate_limit_per_user ?? 30)
+    )
     aiaRateLimitInput.min = "0"
-    const aiaDailyLimitInput = adminFormField(form, "Daily limit per user (0 = unlimited)", "number", String(aiaCosts.daily_limit_per_user ?? 100))
+    const aiaDailyLimitInput = adminFormField(
+      form,
+      "Daily limit per user (0 = unlimited)",
+      "number",
+      String(aiaCosts.daily_limit_per_user ?? 100)
+    )
     aiaDailyLimitInput.min = "0"
-    const aiaMonthlyBudgetInput = adminFormField(form, "Monthly budget USD (0 = unlimited)", "number", String(aiaCosts.monthly_budget ?? 0))
+    const aiaMonthlyBudgetInput = adminFormField(
+      form,
+      "Monthly budget USD (0 = unlimited)",
+      "number",
+      String(aiaCosts.monthly_budget ?? 0)
+    )
     aiaMonthlyBudgetInput.min = "0"
     aiaMonthlyBudgetInput.step = "0.01"
 
@@ -11434,7 +11969,8 @@ async function renderAdminConfigTab(container) {
 
     const tagMutNote = document.createElement("div")
     tagMutNote.style.cssText = "font-size:0.85em;color:#666;margin:0 0 4px 0"
-    tagMutNote.textContent = "Template tag mutations: one per line. \"tpl\" removes the tag, \"draft:review\" replaces \"draft\" with \"review\". Applied when creating pages from templates."
+    tagMutNote.textContent =
+      'Template tag mutations: one per line. "tpl" removes the tag, "draft:review" replaces "draft" with "review". Applied when creating pages from templates.'
     form.appendChild(tagMutNote)
 
     const tagMutInput = document.createElement("textarea")
@@ -11470,7 +12006,8 @@ async function renderAdminConfigTab(container) {
     rfNote.style.fontSize = "0.85em"
     rfNote.style.color = "#666"
     rfNote.style.margin = "0 0 8px 0"
-    rfNote.textContent = "Deadlines: one per line as role=duration (e.g. reviewer=72h, _default=168h). _default applies to roles without a specific deadline."
+    rfNote.textContent =
+      "Deadlines: one per line as role=duration (e.g. reviewer=72h, _default=168h). _default applies to roles without a specific deadline."
     form.appendChild(rfNote)
 
     const rfDeadlinesRaw = rfConfig.deadlines || {}
@@ -11479,7 +12016,9 @@ async function renderAdminConfigTab(container) {
     rfDeadlinesInput.style.width = "100%"
     rfDeadlinesInput.style.fontFamily = "monospace"
     rfDeadlinesInput.style.fontSize = "13px"
-    rfDeadlinesInput.value = Object.entries(rfDeadlinesRaw).map(([k, v]) => `${k}=${v}`).join("\n")
+    rfDeadlinesInput.value = Object.entries(rfDeadlinesRaw)
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n")
     const rfDeadlinesLabel = document.createElement("label")
     rfDeadlinesLabel.style.display = "block"
     rfDeadlinesLabel.style.margin = "8px 0 4px 0"
@@ -11492,7 +12031,8 @@ async function renderAdminConfigTab(container) {
     rfObserversNote.style.fontSize = "0.85em"
     rfObserversNote.style.color = "#666"
     rfObserversNote.style.margin = "12px 0 4px 0"
-    rfObserversNote.textContent = "Observers: users or groups who can view all draft documents (one per line). Use group:name for groups."
+    rfObserversNote.textContent =
+      "Observers: users or groups who can view all draft documents (one per line). Use group:name for groups."
     form.appendChild(rfObserversNote)
 
     const rfObserversInput = document.createElement("textarea")
@@ -11543,7 +12083,8 @@ async function renderAdminConfigTab(container) {
 
     const sigNote = document.createElement("div")
     sigNote.style.cssText = "font-size:0.85em;color:#666;margin:4px 0 0 0"
-    sigNote.textContent = "When enabled, users with a signing key see \"Sign & Confirm\". When required, users without a key cannot confirm at all."
+    sigNote.textContent =
+      'When enabled, users with a signing key see "Sign & Confirm". When required, users without a key cannot confirm at all.'
     form.appendChild(sigNote)
 
     // Themes section
@@ -11553,11 +12094,16 @@ async function renderAdminConfigTab(container) {
 
     const themesConfig = config.themes || {}
 
-    const themeDefaultSelect = adminFormSelect(form, "Default theme (when user has no preference)", [
-      { value: "auto",  label: "Follow system" },
-      { value: "light", label: "Light" },
-      { value: "dark",  label: "Dark" },
-    ], themesConfig.default || "auto")
+    const themeDefaultSelect = adminFormSelect(
+      form,
+      "Default theme (when user has no preference)",
+      [
+        { value: "auto", label: "Follow system" },
+        { value: "light", label: "Light" },
+        { value: "dark", label: "Dark" },
+      ],
+      themesConfig.default || "auto"
+    )
 
     const themeAllowOverrideCb = document.createElement("input")
     themeAllowOverrideCb.type = "checkbox"
@@ -11565,18 +12111,23 @@ async function renderAdminConfigTab(container) {
     const themeAllowOverrideLabel = document.createElement("label")
     themeAllowOverrideLabel.style.cssText = "display:flex;align-items:center;gap:8px;margin:8px 0"
     themeAllowOverrideLabel.appendChild(themeAllowOverrideCb)
-    themeAllowOverrideLabel.appendChild(document.createTextNode("Allow users to override the theme (show Appearance switcher in their profile menu)"))
+    themeAllowOverrideLabel.appendChild(
+      document.createTextNode("Allow users to override the theme (show Appearance switcher in their profile menu)")
+    )
     form.appendChild(themeAllowOverrideLabel)
 
     const themeOverridesNote = document.createElement("div")
     themeOverridesNote.style.cssText = "font-size:0.85em;color:#666;margin:8px 0 4px 0"
-    themeOverridesNote.innerHTML = "Palette overrides applied to the light theme. One <code>key = #hex</code> per line (e.g. <code>primary = #2d5a47</code>). Keys: primary, primary_fg, link, accent, success, warning, error."
+    themeOverridesNote.innerHTML =
+      "Palette overrides applied to the light theme. One <code>key = #hex</code> per line (e.g. <code>primary = #2d5a47</code>). Keys: primary, primary_fg, link, accent, success, warning, error."
     form.appendChild(themeOverridesNote)
     const themeOverridesSerialized = Object.entries(themesConfig.palette_overrides || {})
-      .map(([k, v]) => `${k} = ${v}`).join("\n")
+      .map(([k, v]) => `${k} = ${v}`)
+      .join("\n")
     const themeOverridesInput = document.createElement("textarea")
     themeOverridesInput.rows = 5
-    themeOverridesInput.style.cssText = "width:100%;font-family:monospace;font-size:13px;padding:6px;box-sizing:border-box"
+    themeOverridesInput.style.cssText =
+      "width:100%;font-family:monospace;font-size:13px;padding:6px;box-sizing:border-box"
     themeOverridesInput.placeholder = "primary = #2d5a47\nlink = #1e7a5e"
     themeOverridesInput.value = themeOverridesSerialized
     form.appendChild(themeOverridesInput)
@@ -11594,18 +12145,30 @@ async function renderAdminConfigTab(container) {
     saveBtn.textContent = "Save Configuration"
     saveBtn.addEventListener("click", async () => {
       const defaultGroupsRaw = oauthDefaultGroupsInput.value.trim()
-      const defaultGroups = defaultGroupsRaw ? defaultGroupsRaw.split(",").map(s => s.trim()).filter(Boolean) : []
+      const defaultGroups = defaultGroupsRaw
+        ? defaultGroupsRaw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : []
       const reminderRaw = reminderHoursInput.value.trim()
-      const reminderHours = reminderRaw ? reminderRaw.split(",").map(s => parseInt(s.trim(), 10)).filter(n => n > 0) : []
+      const reminderHours = reminderRaw
+        ? reminderRaw
+            .split(",")
+            .map((s) => parseInt(s.trim(), 10))
+            .filter((n) => n > 0)
+        : []
 
-      const savedWebhooks = webhookEntries.map(e => ({
-        name: e.nameInput.value.trim(),
-        enabled: e.enabledCb.checked,
-        url: e.urlInput.value.trim(),
-        hmac_secret: e.secretInput.value,
-        content_type: "application/json",
-        payload_tmpl: "",
-      })).filter(w => w.url)
+      const savedWebhooks = webhookEntries
+        .map((e) => ({
+          name: e.nameInput.value.trim(),
+          enabled: e.enabledCb.checked,
+          url: e.urlInput.value.trim(),
+          hmac_secret: e.secretInput.value,
+          content_type: "application/json",
+          payload_tmpl: "",
+        }))
+        .filter((w) => w.url)
 
       const payload = {
         data_dir: config.data_dir || "",
@@ -11637,19 +12200,31 @@ async function renderAdminConfigTab(container) {
         },
         database: config.database || {},
         tags: {
-          template_mutations: tagMutInput.value.trim().split("\n").map(s => s.trim()).filter(Boolean),
+          template_mutations: tagMutInput.value
+            .trim()
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean),
         },
         reviewflow: {
           enabled: rfEnabledCheckbox.checked,
           deadlines: (() => {
             const d = {}
-            rfDeadlinesInput.value.trim().split("\n").filter(Boolean).forEach(line => {
-              const eq = line.indexOf("=")
-              if (eq > 0) d[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
-            })
+            rfDeadlinesInput.value
+              .trim()
+              .split("\n")
+              .filter(Boolean)
+              .forEach((line) => {
+                const eq = line.indexOf("=")
+                if (eq > 0) d[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
+              })
             return d
           })(),
-          observers: rfObserversInput.value.trim().split("\n").map(s => s.trim()).filter(Boolean),
+          observers: rfObserversInput.value
+            .trim()
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean),
           signing: {
             enabled: sigEnabledCheckbox.checked,
             required: sigRequiredCheckbox.checked,
@@ -11670,7 +12245,10 @@ async function renderAdminConfigTab(container) {
           api_key: aiaApiKeyInput.value,
           model: aiaModelInput.value.trim(),
           max_tokens: parseInt(aiaMaxTokensInput.value, 10) || 4096,
-          allowed_groups: aiaGroupsInput.value.split(",").map(s => s.trim()).filter(Boolean),
+          allowed_groups: aiaGroupsInput.value
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
           costs: {
             rate_limit_per_user: parseInt(aiaRateLimitInput.value, 10) || 0,
             daily_limit_per_user: parseInt(aiaDailyLimitInput.value, 10) || 0,
@@ -11702,7 +12280,7 @@ async function renderAdminConfigTab(container) {
           allow_user_override: themeAllowOverrideCb.checked,
           palette_overrides: (() => {
             const out = {}
-            themeOverridesInput.value.split("\n").forEach(line => {
+            themeOverridesInput.value.split("\n").forEach((line) => {
               const eq = line.indexOf("=")
               if (eq <= 0) return
               const k = line.slice(0, eq).trim()
@@ -11723,7 +12301,9 @@ async function renderAdminConfigTab(container) {
           statusMsg.textContent = "Configuration saved."
           statusMsg.style.color = "#155724"
           statusMsg.style.display = "inline"
-          setTimeout(() => { statusMsg.style.display = "none" }, 3000)
+          setTimeout(() => {
+            statusMsg.style.display = "none"
+          }, 3000)
         } else {
           const err = await r.json().catch(() => ({}))
           statusMsg.textContent = err.error || "Failed to save configuration."
@@ -11741,7 +12321,6 @@ async function renderAdminConfigTab(container) {
     actions.appendChild(statusMsg)
     form.appendChild(actions)
     container.appendChild(form)
-
   } catch {
     container.innerHTML = '<div class="gowiki-admin-error">Failed to load configuration.</div>'
   }
@@ -11797,12 +12376,18 @@ async function renderAdminDatabaseTab(container) {
 
     if (status.restart_required) {
       const warning = document.createElement("div")
-      warning.style.cssText = "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#b45309;font-size:13px;margin:8px 0"
+      warning.style.cssText =
+        "padding:8px 12px;background:#fff3e0;border:1px solid #ffb74d;border-radius:6px;color:#b45309;font-size:13px;margin:8px 0"
       warning.textContent = status.restart_message || "Server restart required to activate plugins."
       form.appendChild(warning)
     }
 
-    const dsnInput = adminFormField(form, "DSN (e.g. postgres://user:pass@host:5432/db?sslmode=disable)", "text", dbConfig.dsn || "")
+    const dsnInput = adminFormField(
+      form,
+      "DSN (e.g. postgres://user:pass@host:5432/db?sslmode=disable)",
+      "text",
+      dbConfig.dsn || ""
+    )
     dsnInput.style.fontFamily = "monospace"
     dsnInput.style.fontSize = "12px"
 
@@ -12009,39 +12594,62 @@ async function showDatabaseTableModal(existing) {
     const labelInput = adminFormField(body, "Label", "text", existing ? existing.label : "")
     const scopeInput = adminFormField(body, "Scope Regexp", "text", existing ? existing.scope_regexp : ".*")
     const folderInput = adminFormField(body, "Page Folder", "text", existing ? existing.page_folder : "")
-    const sortFieldInput = adminFormField(body, "Default Sort Field", "text", existing ? existing.default_sort_field : "")
-    const sortOrderSelect = adminFormSelect(body, "Default Sort Order", [
-      { value: "asc", label: "Ascending" },
-      { value: "desc", label: "Descending" },
-    ], existing ? existing.default_sort_order : "asc")
-    const templateInput = adminFormField(body, "Page Template Path", "text", existing ? existing.page_template_path : "")
+    const sortFieldInput = adminFormField(
+      body,
+      "Default Sort Field",
+      "text",
+      existing ? existing.default_sort_field : ""
+    )
+    const sortOrderSelect = adminFormSelect(
+      body,
+      "Default Sort Order",
+      [
+        { value: "asc", label: "Ascending" },
+        { value: "desc", label: "Descending" },
+      ],
+      existing ? existing.default_sort_order : "asc"
+    )
+    const templateInput = adminFormField(
+      body,
+      "Page Template Path",
+      "text",
+      existing ? existing.page_template_path : ""
+    )
 
-    adminModalActions(body, close, async () => {
-      const payload = {
-        name: nameInput.value.trim(),
-        label: labelInput.value.trim(),
-        scope_regexp: scopeInput.value.trim() || ".*",
-        page_folder: folderInput.value.trim(),
-        default_sort_field: sortFieldInput.value.trim(),
-        default_sort_order: sortOrderSelect.value,
-        page_template_path: templateInput.value.trim(),
-      }
-      if (!payload.name) { showError("Name is required"); return }
+    adminModalActions(
+      body,
+      close,
+      async () => {
+        const payload = {
+          name: nameInput.value.trim(),
+          label: labelInput.value.trim(),
+          scope_regexp: scopeInput.value.trim() || ".*",
+          page_folder: folderInput.value.trim(),
+          default_sort_field: sortFieldInput.value.trim(),
+          default_sort_order: sortOrderSelect.value,
+          page_template_path: templateInput.value.trim(),
+        }
+        if (!payload.name) {
+          showError("Name is required")
+          return
+        }
 
-      const url = existing ? `/api/admin/database/tables/${existing.id}` : "/api/admin/database/tables"
-      const method = existing ? "PUT" : "POST"
-      const r = await authFetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (r.ok) {
-        close(true)
-      } else {
-        const err = await r.json().catch(() => ({}))
-        showError(err.error || "Failed to save table")
-      }
-    }, existing ? "Save" : "Create")
+        const url = existing ? `/api/admin/database/tables/${existing.id}` : "/api/admin/database/tables"
+        const method = existing ? "PUT" : "POST"
+        const r = await authFetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (r.ok) {
+          close(true)
+        } else {
+          const err = await r.json().catch(() => ({}))
+          showError(err.error || "Failed to save table")
+        }
+      },
+      existing ? "Save" : "Create"
+    )
   })
 }
 
@@ -12060,7 +12668,9 @@ async function showDatabaseFieldsModal(tableId, tableName) {
     try {
       const cr = await authFetch(`/api/admin/database/tables/${tableId}/rows/count`)
       if (cr.ok) rowCount = (await cr.json()).count || 0
-    } catch { /* keep default 0 */ }
+    } catch {
+      /* keep default 0 */
+    }
 
     async function refreshFields() {
       body.innerHTML = ""
@@ -12070,12 +12680,14 @@ async function showDatabaseFieldsModal(tableId, tableName) {
       try {
         const cr = await authFetch(`/api/admin/database/tables/${tableId}/rows/count`)
         if (cr.ok) rowCount = (await cr.json()).count || 0
-      } catch { /* keep last */ }
+      } catch {
+        /* keep last */
+      }
       renderFieldList(t.fields || [])
     }
 
     function renderFieldList(allFields) {
-      const active = allFields.filter(f => !f.archived_at)
+      const active = allFields.filter((f) => !f.archived_at)
       const empty = rowCount === 0
 
       // Status banner telling the admin the mode.
@@ -12130,8 +12742,15 @@ async function showDatabaseFieldsModal(tableId, tableName) {
             deleteBtn.textContent = "Delete"
             deleteBtn.title = "Hard-delete: drops the SQL column and removes the field row."
             deleteBtn.addEventListener("click", async () => {
-              if (!confirm(`Permanently delete field "${f.name}"? The SQL column will be dropped and the field row removed. Any historical row-bound pages will keep the value as a "(removed)" ghost entry.`)) return
-              const r = await authFetch(`/api/admin/database/tables/${tableId}/fields/${f.id}?hard=true`, { method: "DELETE" })
+              if (
+                !confirm(
+                  `Permanently delete field "${f.name}"? The SQL column will be dropped and the field row removed. Any historical row-bound pages will keep the value as a "(removed)" ghost entry.`
+                )
+              )
+                return
+              const r = await authFetch(`/api/admin/database/tables/${tableId}/fields/${f.id}?hard=true`, {
+                method: "DELETE",
+              })
               if (!r.ok) {
                 const err = await r.json().catch(() => ({}))
                 alert(err.error || "Failed to delete field")
@@ -12200,10 +12819,15 @@ async function showDatabaseFieldEditModal(tableId, existing, tableIsEmpty) {
     // Type is immutable on non-empty tables; empty tables allow drop-and-
     // recreate.
     if (existing && !tableIsEmpty) typeSelect.disabled = true
-    const requiredSelect = adminFormSelect(body, "Required", [
-      { value: "false", label: "No" },
-      { value: "true", label: "Yes" },
-    ], existing ? String(existing.required) : "false")
+    const requiredSelect = adminFormSelect(
+      body,
+      "Required",
+      [
+        { value: "false", label: "No" },
+        { value: "true", label: "Yes" },
+      ],
+      existing ? String(existing.required) : "false"
+    )
     const defaultInput = adminFormField(body, "Default Value", "text", existing ? existing.default_value : "")
     const orderInput = adminFormField(body, "Display Order", "number", existing ? String(existing.display_order) : "0")
     const placeholderInput = adminFormField(body, "Placeholder", "text", existing ? existing.placeholder : "")
@@ -12286,58 +12910,72 @@ async function showDatabaseFieldEditModal(tableId, existing, tableIsEmpty) {
 
     function updateEnumVisibility() {
       const t = typeSelect.value
-      enumSection.style.display = (t === "enum" || t === "multi_enum") ? "block" : "none"
+      enumSection.style.display = t === "enum" || t === "multi_enum" ? "block" : "none"
       tagSection.style.display = t === "tag" ? "block" : "none"
       lookupSection.style.display = t === "lookup" ? "block" : "none"
     }
     typeSelect.addEventListener("change", updateEnumVisibility)
     updateEnumVisibility()
 
-    adminModalActions(body, close, async () => {
-      const payload = {
-        name: nameInput.value.trim(),
-        label: labelInput.value.trim(),
-        type: typeSelect.value,
-        required: requiredSelect.value === "true",
-        default_value: defaultInput.value.trim(),
-        display_order: parseInt(orderInput.value) || 0,
-        placeholder: placeholderInput.value.trim(),
-      }
-      if (!payload.name) { showError("Name is required"); return }
+    adminModalActions(
+      body,
+      close,
+      async () => {
+        const payload = {
+          name: nameInput.value.trim(),
+          label: labelInput.value.trim(),
+          type: typeSelect.value,
+          required: requiredSelect.value === "true",
+          default_value: defaultInput.value.trim(),
+          display_order: parseInt(orderInput.value) || 0,
+          placeholder: placeholderInput.value.trim(),
+        }
+        if (!payload.name) {
+          showError("Name is required")
+          return
+        }
 
-      // Add enum values if applicable.
-      if (payload.type === "enum" || payload.type === "multi_enum") {
-        payload.enum_values = enumArea.value.split("\n").map(v => v.trim()).filter(Boolean)
-      }
+        // Add enum values if applicable.
+        if (payload.type === "enum" || payload.type === "multi_enum") {
+          payload.enum_values = enumArea.value
+            .split("\n")
+            .map((v) => v.trim())
+            .filter(Boolean)
+        }
 
-      // Add foreign_key for tag type.
-      if (payload.type === "tag") {
-        payload.foreign_key = tagInput.value.trim()
-      }
+        // Add foreign_key for tag type.
+        if (payload.type === "tag") {
+          payload.foreign_key = tagInput.value.trim()
+        }
 
-      // Add foreign_key + display_column for lookup type.
-      if (payload.type === "lookup") {
-        payload.foreign_key = lookupTableInput.value.trim()
-        payload.display_column = lookupColInput.value.trim()
-        if (!payload.foreign_key) { showError("Target Table is required for lookup fields"); return }
-      }
+        // Add foreign_key + display_column for lookup type.
+        if (payload.type === "lookup") {
+          payload.foreign_key = lookupTableInput.value.trim()
+          payload.display_column = lookupColInput.value.trim()
+          if (!payload.foreign_key) {
+            showError("Target Table is required for lookup fields")
+            return
+          }
+        }
 
-      const url = existing
-        ? `/api/admin/database/tables/${tableId}/fields/${existing.id}`
-        : `/api/admin/database/tables/${tableId}/fields`
-      const method = existing ? "PUT" : "POST"
-      const r = await authFetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (r.ok) {
-        close(true)
-      } else {
-        const err = await r.json().catch(() => ({}))
-        showError(err.error || "Failed to save field")
-      }
-    }, existing ? "Save" : "Add")
+        const url = existing
+          ? `/api/admin/database/tables/${tableId}/fields/${existing.id}`
+          : `/api/admin/database/tables/${tableId}/fields`
+        const method = existing ? "PUT" : "POST"
+        const r = await authFetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+        if (r.ok) {
+          close(true)
+        } else {
+          const err = await r.json().catch(() => ({}))
+          showError(err.error || "Failed to save field")
+        }
+      },
+      existing ? "Save" : "Add"
+    )
   })
 }
 
@@ -12359,9 +12997,11 @@ async function showDatabaseDataBrowser(tableName) {
           return
         }
         const schema = await schemaResp.json()
-        const fields = (schema.fields || []).filter(f => !f.archived_at)
+        const fields = (schema.fields || []).filter((f) => !f.archived_at)
 
-        const resp = await authFetch(`/api/database/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${currentOffset}`)
+        const resp = await authFetch(
+          `/api/database/${encodeURIComponent(tableName)}/rows?limit=${limit}&offset=${currentOffset}`
+        )
         if (!resp.ok) {
           body.innerHTML = '<div class="gowiki-admin-error">Failed to load data.</div>'
           return
@@ -12417,7 +13057,10 @@ async function showDatabaseDataBrowser(tableName) {
                 if (f.type === "date") {
                   td.textContent = val.slice(0, 10)
                 } else {
-                  td.textContent = val.replace("T", " ").replace(/Z$/, "").replace(/\.\d+$/, "")
+                  td.textContent = val
+                    .replace("T", " ")
+                    .replace(/Z$/, "")
+                    .replace(/\.\d+$/, "")
                 }
               } else if (val != null && f.type === "text" && String(val).length > 60) {
                 td.textContent = String(val)
@@ -12435,10 +13078,14 @@ async function showDatabaseDataBrowser(tableName) {
                 })
                 if (resp && resp.ok) {
                   let pagePath = ""
-                  try { pagePath = (await resp.clone().json())?.page_path || "" } catch {}
-                  document.dispatchEvent(new CustomEvent("gowiki-database-row-updated", {
-                    detail: { table: tableName, rowId: row.id, fieldName: f.name, pagePath },
-                  }))
+                  try {
+                    pagePath = (await resp.clone().json())?.page_path || ""
+                  } catch {}
+                  document.dispatchEvent(
+                    new CustomEvent("gowiki-database-row-updated", {
+                      detail: { table: tableName, rowId: row.id, fieldName: f.name, pagePath },
+                    })
+                  )
                 }
               })
               tr.appendChild(td)
@@ -12473,7 +13120,10 @@ async function showDatabaseDataBrowser(tableName) {
           prevBtn.className = "gowiki-admin-btn"
           prevBtn.textContent = "Previous"
           prevBtn.disabled = currentOffset === 0
-          prevBtn.addEventListener("click", () => { currentOffset = Math.max(0, currentOffset - limit); loadData() })
+          prevBtn.addEventListener("click", () => {
+            currentOffset = Math.max(0, currentOffset - limit)
+            loadData()
+          })
           pag.appendChild(prevBtn)
 
           const info = document.createElement("span")
@@ -12484,7 +13134,10 @@ async function showDatabaseDataBrowser(tableName) {
           nextBtn.className = "gowiki-admin-btn"
           nextBtn.textContent = "Next"
           nextBtn.disabled = currentOffset + limit >= total
-          nextBtn.addEventListener("click", () => { currentOffset += limit; loadData() })
+          nextBtn.addEventListener("click", () => {
+            currentOffset += limit
+            loadData()
+          })
           pag.appendChild(nextBtn)
 
           body.appendChild(pag)
@@ -12548,27 +13201,47 @@ async function renderAdminTodoTab(container) {
       const statusSelect = document.createElement("select")
       statusSelect.className = "gowiki-admin-input"
       statusSelect.style.width = "auto"
-      for (const [val, label] of [["", "All statuses"], ["open", "Open"], ["in_progress", "In progress"], ["done", "Done"], ["cancelled", "Cancelled"]]) {
+      for (const [val, label] of [
+        ["", "All statuses"],
+        ["open", "Open"],
+        ["in_progress", "In progress"],
+        ["done", "Done"],
+        ["cancelled", "Cancelled"],
+      ]) {
         const opt = document.createElement("option")
         opt.value = val
         opt.textContent = label
         if (val === filterStatus) opt.selected = true
         statusSelect.appendChild(opt)
       }
-      statusSelect.addEventListener("change", () => { filterStatus = statusSelect.value; cursor = ""; loadAndRender() })
+      statusSelect.addEventListener("change", () => {
+        filterStatus = statusSelect.value
+        cursor = ""
+        loadAndRender()
+      })
       filterBar.appendChild(statusSelect)
 
       const prioritySelect = document.createElement("select")
       prioritySelect.className = "gowiki-admin-input"
       prioritySelect.style.width = "auto"
-      for (const [val, label] of [["", "All priorities"], ["urgent", "Urgent"], ["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
+      for (const [val, label] of [
+        ["", "All priorities"],
+        ["urgent", "Urgent"],
+        ["high", "High"],
+        ["normal", "Normal"],
+        ["low", "Low"],
+      ]) {
         const opt = document.createElement("option")
         opt.value = val
         opt.textContent = label
         if (val === filterPriority) opt.selected = true
         prioritySelect.appendChild(opt)
       }
-      prioritySelect.addEventListener("change", () => { filterPriority = prioritySelect.value; cursor = ""; loadAndRender() })
+      prioritySelect.addEventListener("change", () => {
+        filterPriority = prioritySelect.value
+        cursor = ""
+        loadAndRender()
+      })
       filterBar.appendChild(prioritySelect)
 
       const assigneeInput = document.createElement("input")
@@ -12579,7 +13252,11 @@ async function renderAdminTodoTab(container) {
       let assigneeTimer = null
       assigneeInput.addEventListener("input", () => {
         clearTimeout(assigneeTimer)
-        assigneeTimer = setTimeout(() => { filterAssignee = assigneeInput.value.trim(); cursor = ""; loadAndRender() }, 400)
+        assigneeTimer = setTimeout(() => {
+          filterAssignee = assigneeInput.value.trim()
+          cursor = ""
+          loadAndRender()
+        }, 400)
       })
       filterBar.appendChild(assigneeInput)
 
@@ -12591,14 +13268,21 @@ async function renderAdminTodoTab(container) {
       let pageTimer = null
       pageInput.addEventListener("input", () => {
         clearTimeout(pageTimer)
-        pageTimer = setTimeout(() => { filterPage = pageInput.value.trim(); cursor = ""; loadAndRender() }, 400)
+        pageTimer = setTimeout(() => {
+          filterPage = pageInput.value.trim()
+          cursor = ""
+          loadAndRender()
+        }, 400)
       })
       filterBar.appendChild(pageInput)
 
       const refreshBtn = document.createElement("button")
       refreshBtn.className = "gowiki-admin-btn"
       refreshBtn.textContent = "Refresh"
-      refreshBtn.addEventListener("click", () => { cursor = ""; loadAndRender() })
+      refreshBtn.addEventListener("click", () => {
+        cursor = ""
+        loadAndRender()
+      })
       filterBar.appendChild(refreshBtn)
 
       container.appendChild(filterBar)
@@ -12658,10 +13342,10 @@ async function renderAdminTodoTab(container) {
         statusBadge.textContent = (task.status || "open").replace("_", " ")
         statusBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
         const statusStyles = {
-          open:        { bg: "var(--gw-color-info-bg)",    fg: "var(--gw-color-info)" },
+          open: { bg: "var(--gw-color-info-bg)", fg: "var(--gw-color-info)" },
           in_progress: { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
-          done:        { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
-          cancelled:   { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
+          done: { bg: "var(--gw-color-success-bg)", fg: "var(--gw-color-success)" },
+          cancelled: { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
         }
         const s = statusStyles[task.status] || statusStyles.cancelled
         statusBadge.style.background = s.bg
@@ -12676,9 +13360,9 @@ async function renderAdminTodoTab(container) {
           priBadge.textContent = task.priority
           priBadge.style.cssText = "padding:2px 6px;border-radius:3px;font-size:0.85em;"
           const priStyles = {
-            urgent: { bg: "var(--gw-color-error-bg)",   fg: "var(--gw-color-error)" },
-            high:   { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
-            low:    { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
+            urgent: { bg: "var(--gw-color-error-bg)", fg: "var(--gw-color-error)" },
+            high: { bg: "var(--gw-color-warning-bg)", fg: "var(--gw-color-warning)" },
+            low: { bg: "var(--gw-color-surface-alt)", fg: "var(--gw-color-muted)" },
           }
           const p = priStyles[task.priority] || { bg: "transparent", fg: "inherit" }
           priBadge.style.background = p.bg
@@ -12735,7 +13419,10 @@ async function renderAdminTodoTab(container) {
         const nextBtn = document.createElement("button")
         nextBtn.className = "gowiki-admin-btn"
         nextBtn.textContent = "Load more"
-        nextBtn.addEventListener("click", () => { cursor = nextCursor; loadAndRender() })
+        nextBtn.addEventListener("click", () => {
+          cursor = nextCursor
+          loadAndRender()
+        })
         pager.appendChild(nextBtn)
         container.appendChild(pager)
       }
@@ -12842,7 +13529,7 @@ async function bootstrap() {
   initSearch()
 
   // Global keyboard shortcuts that work even when focus is in a property panel input.
-  document.addEventListener("keydown", e => {
+  document.addEventListener("keydown", (e) => {
     // "/" in view mode: focus search (GitHub-style)
     if (e.key === "/" && mode !== "edit" && !e.metaKey && !e.ctrlKey && !e.altKey) {
       const active = document.activeElement
@@ -12860,7 +13547,12 @@ async function bootstrap() {
       return
     }
     // Escape: context-dependent.
-    if (e.key === "Escape" && !document.querySelector(".gowiki-link-modal-overlay, .gowiki-media-modal-overlay, .gowiki-admin-modal-overlay, .gowiki-login-overlay")) {
+    if (
+      e.key === "Escape" &&
+      !document.querySelector(
+        ".gowiki-link-modal-overlay, .gowiki-media-modal-overlay, .gowiki-admin-modal-overlay, .gowiki-login-overlay"
+      )
+    ) {
       if (isFullscreen) {
         e.preventDefault()
         toggleFullscreen()
@@ -12935,10 +13627,10 @@ async function bootstrap() {
   if (pagePath === "_sitemap") {
     await checkAuth()
     await renderSitemapPage()
-    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
       sidebarView = v
     })
-    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
       footerView = v
     })
     return
@@ -12962,10 +13654,10 @@ async function bootstrap() {
     }
     renderAdminPage()
     // Still mount sidebar and footer
-    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
       sidebarView = v
     })
-    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
       footerView = v
     })
     return
@@ -12980,10 +13672,10 @@ async function bootstrap() {
     if (input) input.value = searchQuery
     await renderSearchResultsPage(searchQuery)
     // Still mount sidebar and footer.
-    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+    fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
       sidebarView = v
     })
-    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+    fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
       footerView = v
     })
     return
@@ -13019,10 +13711,10 @@ async function bootstrap() {
       }
       contentRoot.appendChild(banner)
       // Still mount sidebar and footer.
-      fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+      fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
         sidebarView = v
       })
-      fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+      fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
         footerView = v
       })
       return
@@ -13110,10 +13802,10 @@ async function bootstrap() {
   }
 
   // Fetch and mount sidebar and footer as read-only views (non-blocking)
-  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then(v => {
+  fetchAndMountZone("sidebar", sidebarRoot, "gowiki-sidebar").then((v) => {
     sidebarView = v
   })
-  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then(v => {
+  fetchAndMountZone("footer", footerRoot, "gowiki-footer").then((v) => {
     footerView = v
   })
 
@@ -13130,11 +13822,13 @@ const RECENT_PAGES_MAX = 15
 const RECENT_PAGES_COOKIE = "gowiki_recent"
 
 function getRecentPages() {
-  const cookie = document.cookie.split("; ").find(c => c.startsWith(RECENT_PAGES_COOKIE + "="))
+  const cookie = document.cookie.split("; ").find((c) => c.startsWith(RECENT_PAGES_COOKIE + "="))
   if (!cookie) return []
   try {
     return JSON.parse(decodeURIComponent(cookie.split("=").slice(1).join("=")))
-  } catch { return [] }
+  } catch {
+    return []
+  }
 }
 
 function setRecentPages(pages) {
@@ -13153,7 +13847,7 @@ function trackRecentPage() {
 
   let recent = getRecentPages()
   // Remove duplicate if already in the list.
-  recent = recent.filter(r => r.path !== entry.path)
+  recent = recent.filter((r) => r.path !== entry.path)
   // Add to front.
   recent.unshift(entry)
   // Trim to max.
@@ -13235,7 +13929,7 @@ function applyRemoteDocUpdate(view, newDoc) {
 
   // Find common suffix (unchanged top-level nodes from the end).
   let commonSuffix = 0
-  while (commonSuffix < (oldCount - commonPrefix) && commonSuffix < (newCount - commonPrefix)) {
+  while (commonSuffix < oldCount - commonPrefix && commonSuffix < newCount - commonPrefix) {
     const oldNode = oldDoc.content.child(oldCount - 1 - commonSuffix)
     const newNode = newDoc.content.child(newCount - 1 - commonSuffix)
     if (!oldNode.eq(newNode)) break
@@ -13294,7 +13988,7 @@ function applyRemoteRawUpdate(textarea, newText) {
 
   // Adjust cursor: if cursor was before the change, keep it.
   // If inside or after, shift by the length difference.
-  const delta = (newEnd - start) - (oldEnd - start)
+  const delta = newEnd - start - (oldEnd - start)
   let newCursorPos = cursorPos
   let newCursorEnd = cursorEnd
   if (cursorPos > oldEnd) {
@@ -13330,18 +14024,20 @@ function markdownOffsetToBlock(md, offset) {
 }
 
 function renderRemoteBlockIndicators() {
-  const editingUsers = currentPresenceUsers.filter(u => {
-    if (u.mode !== "edit") return false
-    const block = u.offset ?? u.block ?? -1
-    return block >= 0
-  }).map(u => ({ ...u, _block: u.offset ?? u.block ?? -1 }))
+  const editingUsers = currentPresenceUsers
+    .filter((u) => {
+      if (u.mode !== "edit") return false
+      const block = u.offset ?? u.block ?? -1
+      return block >= 0
+    })
+    .map((u) => ({ ...u, _block: u.offset ?? u.block ?? -1 }))
 
   if (mode !== "edit") return
 
   if (editMode === "visual" && editorView) {
     // Block index maps directly to PM node index.
     const maxNode = editorView.state.doc.content.childCount - 1
-    remoteBlockUsers = editingUsers.map(u => {
+    remoteBlockUsers = editingUsers.map((u) => {
       return {
         block: Math.min(Math.max(0, u._block), maxNode),
         username: u.username,
@@ -13354,7 +14050,7 @@ function renderRemoteBlockIndicators() {
   } else if (editMode === "raw") {
     if (!rawEditor) return
     // Block index used directly.
-    remoteBlockUsers = editingUsers.map(u => ({
+    remoteBlockUsers = editingUsers.map((u) => ({
       block: u._block,
       username: u.username,
       displayName: u.display_name || u.username,
@@ -13369,7 +14065,7 @@ function renderRemoteBlockIndicators() {
  */
 function renderRawRemoteIndicators() {
   // Remove existing indicators.
-  document.querySelectorAll(".gowiki-raw-remote-indicator").forEach(el => el.remove())
+  document.querySelectorAll(".gowiki-raw-remote-indicator").forEach((el) => el.remove())
 
   if (!rawEditor || remoteBlockUsers.length === 0) return
 
@@ -13408,7 +14104,7 @@ function renderRawRemoteIndicators() {
 
     // Get pixel Y for start and end of the block using the mirror div.
     const startCharPos = lineOffsets[range.startLine] || 0
-    const endCharPos = (lineOffsets[range.endLine + 1] || lineOffsets[range.endLine] || startCharPos)
+    const endCharPos = lineOffsets[range.endLine + 1] || lineOffsets[range.endLine] || startCharPos
     const startY = getTextareaCursorOffset(rawEditor, startCharPos)
     const endY = getTextareaCursorOffset(rawEditor, endCharPos)
 
@@ -13473,35 +14169,40 @@ async function handleOwnerLeft(previousOwner) {
 function startCollabSession(initialMarkdown) {
   stopCollabSession() // clean up any previous session
 
-  collabSession = new CollabSession(pagePath, initialMarkdown, {
-    getMarkdown() {
-      if (editMode === "visual" && editorView) {
-        return pmToMarkdown(editorView.state.doc, registry)
-      } else if (editMode === "raw" && rawEditor) {
-        return rawEditor.value
-      }
-      return currentMarkdown
-    },
-    setMarkdown(markdown, source) {
-      if (source !== "remote") return
-      currentMarkdown = markdown
-
-      if (editMode === "visual" && editorView) {
-        try {
-          const newDoc = markdownToPM(markdown, registry)
-          applyRemoteDocUpdate(editorView, newDoc)
-        } catch (err) {
-          console.warn("collab: failed to apply remote change to visual editor", err)
+  collabSession = new CollabSession(
+    pagePath,
+    initialMarkdown,
+    {
+      getMarkdown() {
+        if (editMode === "visual" && editorView) {
+          return pmToMarkdown(editorView.state.doc, registry)
+        } else if (editMode === "raw" && rawEditor) {
+          return rawEditor.value
         }
-      } else if (editMode === "raw" && rawEditor) {
-        // Apply a surgical text diff to preserve cursor position.
-        applyRemoteRawUpdate(rawEditor, markdown)
-      }
+        return currentMarkdown
+      },
+      setMarkdown(markdown, source) {
+        if (source !== "remote") return
+        currentMarkdown = markdown
+
+        if (editMode === "visual" && editorView) {
+          try {
+            const newDoc = markdownToPM(markdown, registry)
+            applyRemoteDocUpdate(editorView, newDoc)
+          } catch (err) {
+            console.warn("collab: failed to apply remote change to visual editor", err)
+          }
+        } else if (editMode === "raw" && rawEditor) {
+          // Apply a surgical text diff to preserve cursor position.
+          applyRemoteRawUpdate(rawEditor, markdown)
+        }
+      },
+      getMode() {
+        return editMode
+      },
     },
-    getMode() {
-      return editMode
-    },
-  }, isCollabGuest)
+    isCollabGuest
+  )
 
   collabSession.connect()
 }
@@ -13539,14 +14240,19 @@ function initPresence() {
         const msg = JSON.parse(event.data)
         if (msg.type === "presence" && msg.page === pagePath) {
           // Filter out self.
-          currentPresenceUsers = (msg.users || []).filter(u => u.username !== currentUser.username)
+          currentPresenceUsers = (msg.users || []).filter((u) => u.username !== currentUser.username)
           renderPresenceBar()
           renderRemoteBlockIndicators()
         }
         if (msg.type === "owner_left" && msg.page === pagePath && isCollabGuest && mode === "edit") {
           handleOwnerLeft(msg.owner)
         }
-        if (msg.type === "draft_reclaimed" && msg.page === pageDisplayPath && msg.previous_owner === currentUser?.username && msg.new_owner !== currentUser?.username) {
+        if (
+          msg.type === "draft_reclaimed" &&
+          msg.page === pageDisplayPath &&
+          msg.previous_owner === currentUser?.username &&
+          msg.new_owner !== currentUser?.username
+        ) {
           // Someone took over our draft. Clear stale state and update UI immediately.
           editToken = null
           stashedEditorState = null
@@ -13554,7 +14260,9 @@ function initPresence() {
           renderActions()
           setStatus(`Your draft was taken over by ${msg.new_owner}. Click "Join" to continue editing.`)
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })
 
     ws.addEventListener("close", () => {
@@ -13610,7 +14318,7 @@ function updateEditOffset() {
     block = idx
   }
 
-  let charOffset = block
+  const charOffset = block
 
   if (charOffset !== currentEditBlock) {
     currentEditBlock = charOffset
@@ -13620,7 +14328,8 @@ function updateEditOffset() {
 
 // Call sendPresenceUpdate when mode changes.
 const _originalSetMode = setMode
-setMode = function(nextMode) {
+// eslint-disable-next-line no-func-assign -- Wrapping the declared function with a side effect. Function declarations are reassignable in JS; a hook system would be cleaner but not worth the refactor cost today.
+setMode = function (nextMode) {
   _originalSetMode(nextMode)
   sendPresenceUpdate()
 }
@@ -13663,9 +14372,18 @@ function renderPresenceBar() {
 }
 
 const presenceColors = [
-  "#e53935", "#d81b60", "#8e24aa", "#5e35b1",
-  "#3949ab", "#1e88e5", "#00897b", "#43a047",
-  "#7cb342", "#f4511e", "#6d4c41", "#546e7a",
+  "#e53935",
+  "#d81b60",
+  "#8e24aa",
+  "#5e35b1",
+  "#3949ab",
+  "#1e88e5",
+  "#00897b",
+  "#43a047",
+  "#7cb342",
+  "#f4511e",
+  "#6d4c41",
+  "#546e7a",
 ]
 
 function presenceColor(username) {
@@ -13676,7 +14394,7 @@ function presenceColor(username) {
   return presenceColors[Math.abs(hash) % presenceColors.length]
 }
 
-bootstrap().catch(err => {
+bootstrap().catch((err) => {
   console.error("Failed to start frontend", err)
   if (err instanceof InvalidPathError) {
     // Show a friendly message for invalid URLs — not a software error.

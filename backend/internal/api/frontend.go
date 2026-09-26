@@ -72,11 +72,7 @@ func canServeAsAttachmentPath(requestPath string) bool {
 		return false
 	}
 	base := path.Base(strings.TrimSpace(requestPath))
-	ext := path.Ext(base)
-	if ext == "" {
-		return false
-	}
-	return true
+	return path.Ext(base) != ""
 }
 
 func (s *Server) handleFilePath(w http.ResponseWriter, r *http.Request) {

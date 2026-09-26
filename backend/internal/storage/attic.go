@@ -15,13 +15,13 @@ import (
 
 // AtticEntry describes one archived version of a page.
 type AtticEntry struct {
-	Version    int64                          `json:"version"`
-	Timestamp  string                         `json:"timestamp"`
-	Author     string                         `json:"author"`
-	MD5        string                         `json:"md5"`
-	Summary    string                         `json:"summary"`
-	MediaRefs  map[string]int64               `json:"media_refs,omitempty"`
-	PluginMeta map[string]json.RawMessage     `json:"plugin_meta,omitempty"`
+	Version    int64                      `json:"version"`
+	Timestamp  string                     `json:"timestamp"`
+	Author     string                     `json:"author"`
+	MD5        string                     `json:"md5"`
+	Summary    string                     `json:"summary"`
+	MediaRefs  map[string]int64           `json:"media_refs,omitempty"`
+	PluginMeta map[string]json.RawMessage `json:"plugin_meta,omitempty"`
 }
 
 // Attic manages the version archive under data/attic/.
@@ -226,7 +226,7 @@ func (a *Attic) MigrateExistingPages(contentRoot, metaRoot string, changelog *Ch
 		metaRel := strings.TrimSuffix(rel, ".md") + ".json"
 		metaPath := filepath.Join(metaRoot, filepath.FromSlash(metaRel))
 		var version int64 = 1
-		var author string = "system"
+		author := "system"
 		if metaData, err := os.ReadFile(metaPath); err == nil {
 			var meta PageMetadata
 			if json.Unmarshal(metaData, &meta) == nil && meta.Version > 0 {

@@ -5,7 +5,9 @@ import type { Plugin as WikiPlugin } from "../compiler/registry"
 import { captionNumberingKey, renderInlineMarkdown } from "./caption"
 
 function normalizeImageVersion(raw: string): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase()
   if (!value) return null
   if (value === "latest") return "latest"
   const n = Number(value)
@@ -47,7 +49,9 @@ const imageProperties = [
     label: "Align",
     default: null,
     parse: (raw: string) => {
-      const v = String(raw ?? "").trim().toLowerCase()
+      const v = String(raw ?? "")
+        .trim()
+        .toLowerCase()
       if (!v) return null
       if (v === "left" || v === "center" || v === "right") return v
       throw new Error(`Invalid align value "${raw}". Expected "left", "center", or "right".`)
@@ -65,7 +69,9 @@ const imageProperties = [
     label: "Wrap",
     default: null,
     parse: (raw: string) => {
-      const v = String(raw ?? "").trim().toLowerCase()
+      const v = String(raw ?? "")
+        .trim()
+        .toLowerCase()
       if (!v) return null
       if (v === "left" || v === "right") return v
       throw new Error(`Invalid wrap value "${raw}". Expected "left" or "right".`)
@@ -99,17 +105,19 @@ const imageProperties = [
     label: "Dark-mode background",
     default: null,
     parse: (raw: string) => {
-      const v = String(raw ?? "").trim().toLowerCase()
+      const v = String(raw ?? "")
+        .trim()
+        .toLowerCase()
       if (!v || v === "auto") return null
       if (v === "light" || v === "invert" || v === "none") return v
       throw new Error(`Invalid bg "${raw}". Expected "auto", "light", "invert", or "none".`)
     },
     serialize: (val: string | null) => String(val ?? ""),
     options: () => [
-      { value: "",       label: "Auto (detect white)" },
-      { value: "light",  label: "Light — frame in cream" },
+      { value: "", label: "Auto (detect white)" },
+      { value: "light", label: "Light — frame in cream" },
       { value: "invert", label: "Invert — flip colours (line art)" },
-      { value: "none",   label: "None — render as-is" },
+      { value: "none", label: "None — render as-is" },
     ],
   },
 ]
@@ -188,7 +196,9 @@ function escapeAltText(raw: string): string {
 }
 
 function normalizeImageSize(raw: string): string | null {
-  const value = String(raw ?? "").trim().toLowerCase()
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase()
   if (!value) return null
 
   const pct = value.match(/^(\d+)%$/)
@@ -213,9 +223,7 @@ function normalizeImageSize(raw: string): string | null {
     throw new Error("Image width and height must be > 0")
   }
 
-  throw new Error(
-    `Invalid image size "${raw}". Expected 50%, 200px, or 200px;100px.`
-  )
+  throw new Error(`Invalid image size "${raw}". Expected 50%, 200px, or 200px;100px.`)
 }
 
 function styleFromImageSize(size: string | null): string | null {
@@ -236,13 +244,10 @@ function styleFromImageSize(size: string | null): string | null {
 function addStyleToDOMSpec(spec: any, style: string | null) {
   if (!style || !Array.isArray(spec)) return spec
   const [tag, maybeAttrs, ...rest] = spec
-  const hasAttrs =
-    maybeAttrs && typeof maybeAttrs === "object" && !Array.isArray(maybeAttrs)
+  const hasAttrs = maybeAttrs && typeof maybeAttrs === "object" && !Array.isArray(maybeAttrs)
   const attrs = hasAttrs ? maybeAttrs : {}
   const existing = attrs.style ? String(attrs.style) : ""
-  const mergedStyle = existing
-    ? `${existing}${existing.trim().endsWith(";") ? " " : "; "}${style}`
-    : style
+  const mergedStyle = existing ? `${existing}${existing.trim().endsWith(";") ? " " : "; "}${style}` : style
   const children = hasAttrs ? rest : [maybeAttrs, ...rest]
   return [tag, { ...attrs, style: mergedStyle }, ...children]
 }
@@ -323,7 +328,11 @@ class ImageNodeView {
       // Returning to auto — re-run the heuristic on this image.
       const runner = (window as any).__gowikiAutoFrameImage
       if (typeof runner === "function") {
-        try { runner(this.imgEl) } catch { /* ignore */ }
+        try {
+          runner(this.imgEl)
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -491,11 +500,8 @@ class ImageNodeView {
 
 export const imagePlugin: WikiPlugin = {
   register(reg) {
-    reg.extendSchemaNode("image", spec => {
-      const baseToDOM =
-        typeof spec.toDOM === "function"
-          ? spec.toDOM
-          : (node: any) => ["img", node.attrs]
+    reg.extendSchemaNode("image", (spec) => {
+      const baseToDOM = typeof spec.toDOM === "function" ? spec.toDOM : (node: any) => ["img", node.attrs]
       return {
         ...spec,
         attrs: {
@@ -516,7 +522,7 @@ export const imagePlugin: WikiPlugin = {
           // images with an explicit author preference.
           if (node.attrs.bg) {
             if (Array.isArray(result) && typeof result[1] === "object" && result[1] !== null) {
-              result = [result[0], { ...result[1], "data-bg": node.attrs.bg }, ...(result.slice(2))]
+              result = [result[0], { ...result[1], "data-bg": node.attrs.bg }, ...result.slice(2)]
             }
           }
           return result
@@ -577,7 +583,7 @@ export const imagePlugin: WikiPlugin = {
         const alt = escapeAltText(node.attrs.alt ?? "")
         const title = node.attrs.title
         if (title) {
-          return "![" + alt + "](" + src + ' "' + String(title).replace(/"/g, "\\\"") + '")'
+          return "![" + alt + "](" + src + ' "' + String(title).replace(/"/g, '\\"') + '")'
         }
         return "![" + alt + "](" + src + ")"
       },

@@ -30,7 +30,7 @@ func handleSelfSign(svc *Service, extractUsername func(*http.Request) string) ht
 		}
 
 		var req struct {
-			Username     string `json:"username"`
+			Username      string `json:"username"`
 			PublicKeySPKI string `json:"public_key_spki"` // base64-encoded SPKI
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

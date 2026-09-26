@@ -293,7 +293,7 @@ func (s *Server) handleAIMeta(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAIConventions(w http.ResponseWriter, _ *http.Request) {
 	conventions := map[string]any{
 		"dialect": map[string]any{
-			"name": "Gowiki Markdown",
+			"name":        "Gowiki Markdown",
 			"description": "A bijective Markdown dialect. One canonical syntax per node type. Round-trip lossless.",
 			"rules": []string{
 				"*italic* only — _italic_ is NOT italic, it is underline",
@@ -345,12 +345,12 @@ func (s *Server) handleAIConventions(w http.ResponseWriter, _ *http.Request) {
 			"metadata_location":    "data/meta/ mirrors content/ structure, with .json extension instead of .md",
 		},
 		"conventions": map[string]any{
-			"summary_format":    "[AI: <tool_name>] <description of change>",
-			"summary_example":   "[AI: Claude] Translate section 3 to English",
-			"summary_required":  "Summary is required for all token-authenticated writes",
+			"summary_format":     "[AI: <tool_name>] <description of change>",
+			"summary_example":    "[AI: Claude] Translate section 3 to English",
+			"summary_required":   "Summary is required for all token-authenticated writes",
 			"optimistic_locking": "Always read the page first, then write with expected_version set to the version you read",
-			"user_agent":        "Set User-Agent: <tool>/1.0 (gowiki-ai-api; user=<username>)",
-			"authentication":    "Preferred: Authorization: Bearer gwk_<token> header. Fallback: ?token=gwk_<token> query parameter (for platforms that cannot set custom headers).",
+			"user_agent":         "Set User-Agent: <tool>/1.0 (gowiki-ai-api; user=<username>)",
+			"authentication":     "Preferred: Authorization: Bearer gwk_<token> header. Fallback: ?token=gwk_<token> query parameter (for platforms that cannot set custom headers).",
 		},
 		"quality_checks": map[string]any{
 			"render_endpoint":  "GET /api/render/{path} — returns rendered HTML via headless browser",

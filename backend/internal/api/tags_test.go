@@ -262,7 +262,7 @@ func TestResolveAuthorDisplay_Modes(t *testing.T) {
 		mode string
 		want string
 	}{
-		{"", "alice"},         // default / login
+		{"", "alice"}, // default / login
 		{"login", "alice"},
 		{"fullname", "Alice Alpha"},
 		{"email", "alice@example.com"},

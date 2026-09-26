@@ -15,19 +15,19 @@ type ChatRequest struct {
 
 // Message is a single conversation turn.
 type Message struct {
-	Role       string        `json:"role"`    // "user" or "assistant"
-	Content    any           `json:"content"` // string or []ContentBlock
+	Role    string `json:"role"`    // "user" or "assistant"
+	Content any    `json:"content"` // string or []ContentBlock
 }
 
 // ContentBlock is a structured content block (text, tool_use, tool_result).
 type ContentBlock struct {
-	Type      string `json:"type"`                 // "text", "tool_use", "tool_result"
-	Text      string `json:"text,omitempty"`       // for "text" blocks
-	ID        string `json:"id,omitempty"`         // for "tool_use" blocks
-	Name      string `json:"name,omitempty"`       // for "tool_use" blocks
-	Input     any    `json:"input,omitempty"`      // for "tool_use" blocks
+	Type      string `json:"type"`                  // "text", "tool_use", "tool_result"
+	Text      string `json:"text,omitempty"`        // for "text" blocks
+	ID        string `json:"id,omitempty"`          // for "tool_use" blocks
+	Name      string `json:"name,omitempty"`        // for "tool_use" blocks
+	Input     any    `json:"input,omitempty"`       // for "tool_use" blocks
 	ToolUseID string `json:"tool_use_id,omitempty"` // for "tool_result" blocks
-	Content   string `json:"content,omitempty"`    // for "tool_result" blocks (overloaded with Text)
+	Content   string `json:"content,omitempty"`     // for "tool_result" blocks (overloaded with Text)
 }
 
 // Tool describes a tool the AI can call.

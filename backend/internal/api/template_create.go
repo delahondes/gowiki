@@ -30,13 +30,13 @@ type TemplateCreateRequest struct {
 // TemplateCreateResult is what a successful create returns — enough to
 // let a caller record what was issued without re-reading the page.
 type TemplateCreateResult struct {
-	Path                string `json:"path"`
-	Version             int64  `json:"version"`
-	TemplatePath        string `json:"template_path"`
-	TemplateVersion     int64  `json:"template_version"`
-	TemplateVersionTag  string `json:"template_version_tag,omitempty"`
-	Stamp               string `json:"stamp"`
-	ReviewflowResolved  string `json:"reviewflow_resolved,omitempty"`
+	Path               string `json:"path"`
+	Version            int64  `json:"version"`
+	TemplatePath       string `json:"template_path"`
+	TemplateVersion    int64  `json:"template_version"`
+	TemplateVersionTag string `json:"template_version_tag,omitempty"`
+	Stamp              string `json:"stamp"`
+	ReviewflowResolved string `json:"reviewflow_resolved,omitempty"`
 }
 
 // TemplateCreateError is a caller-facing failure. Kind classifies it so

@@ -8,7 +8,12 @@ import { markdownToPM } from "../compiler/markdown_to_pm"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 import { highlightCodeBlocks } from "../highlight"
 import { slugify } from "../compiler/slugify"
-import { headingNumberKey, computeHeadingNumbers, getHeadingCountersAt, INCLUDE_HEADING_META } from "../compiler/core_nodes"
+import {
+  headingNumberKey,
+  computeHeadingNumbers,
+  getHeadingCountersAt,
+  INCLUDE_HEADING_META,
+} from "../compiler/core_nodes"
 
 /**
  * Rewrite relative links in a ProseMirror doc so they resolve against
@@ -18,9 +23,7 @@ function rebaseRelativeLinks(doc: PMNode, includedPagePath: string, isNamespaceI
   const ns = includedPagePath.replace(/^\/+|\/+$/g, "")
   // For namespace index pages, the page IS the namespace (./foo resolves inside it).
   // For regular pages, the namespace is the parent directory.
-  const pageNamespace = isNamespaceIndex
-    ? ns
-    : ns.includes("/") ? ns.split("/").slice(0, -1).join("/") : ""
+  const pageNamespace = isNamespaceIndex ? ns : ns.includes("/") ? ns.split("/").slice(0, -1).join("/") : ""
   if (!pageNamespace) return doc
 
   function resolveHref(href: string): string {
@@ -65,7 +68,7 @@ function rebaseRelativeLinks(doc: PMNode, includedPagePath: string, isNamespaceI
     // Recurse into children
     const children: PMNode[] = []
     let changed = attrs !== node.attrs
-    node.content.forEach(child => {
+    node.content.forEach((child) => {
       const newChild = rebaseNode(child)
       if (newChild !== child) changed = true
       children.push(newChild)
@@ -76,7 +79,7 @@ function rebaseRelativeLinks(doc: PMNode, includedPagePath: string, isNamespaceI
 
   const children: PMNode[] = []
   let changed = false
-  doc.content.forEach(child => {
+  doc.content.forEach((child) => {
     const newChild = rebaseNode(child)
     if (newChild !== child) changed = true
     children.push(newChild)
@@ -171,9 +174,7 @@ function resolveIncludePath(includePath: string): string {
   // Get current page path from location
   let current = window.location.pathname.replace(/^\/+|\/+$/g, "")
   if (!current || current === "index") current = ""
-  const namespace = current.includes("/")
-    ? current.slice(0, current.lastIndexOf("/"))
-    : ""
+  const namespace = current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : ""
   if (includePath.startsWith("./")) {
     const rel = includePath.slice(2)
     return namespace ? `/${namespace}/${rel}` : `/${rel}`
@@ -195,7 +196,7 @@ function encodePagePath(path: string): string {
   return path
     .split("/")
     .filter(Boolean)
-    .map(part => encodeURIComponent(part))
+    .map((part) => encodeURIComponent(part))
     .join("/")
 }
 
@@ -208,12 +209,7 @@ class IncludeNodeView {
   private getPos: () => number | undefined
   private innerView: EditorView | null = null
 
-  constructor(
-    node: PMNode,
-    outerView: EditorView,
-    getPos: () => number | undefined,
-    registry: Registry
-  ) {
+  constructor(node: PMNode, outerView: EditorView, getPos: () => number | undefined, registry: Registry) {
     this.node = node
     this.registry = registry
     this.outerView = outerView
@@ -298,23 +294,27 @@ class IncludeNodeView {
       // Compute heading counter state from the outer doc up to this include's position,
       // so numbered headings in the included content continue the parent's sequence.
       const pos = this.getPos()
-      const initialCounters = pos !== undefined
-        ? getHeadingCountersAt(this.outerView.state.doc, pos)
-        : undefined
+      const initialCounters = pos !== undefined ? getHeadingCountersAt(this.outerView.state.doc, pos) : undefined
       // Replace the standard heading-numbers plugin with one seeded from parent counters.
-      const plugins = this.registry.getEditorPlugins().filter(
-        p => (p as any).key !== headingNumberKey.key
+      const plugins = this.registry.getEditorPlugins().filter((p) => (p as any).key !== headingNumberKey.key)
+      plugins.push(
+        new PMPlugin({
+          key: includeHeadingKey,
+          state: {
+            init(_, s) {
+              return computeHeadingNumbers(s.doc, initialCounters)
+            },
+            apply(tr, old) {
+              return tr.docChanged ? computeHeadingNumbers(tr.doc, initialCounters) : old
+            },
+          },
+          props: {
+            decorations(s) {
+              return includeHeadingKey.getState(s)
+            },
+          },
+        })
       )
-      plugins.push(new PMPlugin({
-        key: includeHeadingKey,
-        state: {
-          init(_, s) { return computeHeadingNumbers(s.doc, initialCounters) },
-          apply(tr, old) { return tr.docChanged ? computeHeadingNumbers(tr.doc, initialCounters) : old },
-        },
-        props: {
-          decorations(s) { return includeHeadingKey.getState(s) },
-        },
-      }))
       const state = EditorState.create({
         doc,
         schema: this.registry.schema,
@@ -342,9 +342,7 @@ class IncludeNodeView {
         this.outerView.dispatch(tr)
       }
     } catch (err) {
-      this.showError(
-        `Error loading include: ${err instanceof Error ? err.message : String(err)}`
-      )
+      this.showError(`Error loading include: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -427,9 +425,7 @@ export const includePlugin: WikiPlugin = {
     reg.registerText("include", {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
-        ctx.push(
-          ctx.schema.nodes.include.create({ path: attrs.path ?? "" })
-        )
+        ctx.push(ctx.schema.nodes.include.create({ path: attrs.path ?? "" }))
       },
     })
 
@@ -465,16 +461,12 @@ export const includePlugin: WikiPlugin = {
         // Find the freshly inserted include node near the original cursor position
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === includeType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === includeType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))

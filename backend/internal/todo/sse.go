@@ -1,10 +1,10 @@
 package todo
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
-	"encoding/json"
 )
 
 // Hub is an in-process pub-sub for SSE task events.

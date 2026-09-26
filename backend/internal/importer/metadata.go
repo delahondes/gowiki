@@ -10,12 +10,12 @@ import (
 
 // PageMetadata matches the Gowiki backend PageMetadata struct.
 type PageMetadata struct {
-	ID        string         `json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	Version   int64          `json:"version"`
-	Author    string         `json:"author,omitempty"`
-	CreatedBy string         `json:"created_by,omitempty"`
+	ID        string           `json:"id"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+	Version   int64            `json:"version"`
+	Author    string           `json:"author,omitempty"`
+	CreatedBy string           `json:"created_by,omitempty"`
 	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
 }
 

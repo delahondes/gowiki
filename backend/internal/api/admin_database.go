@@ -312,9 +312,9 @@ func (s *Server) handleMigratePagePaths(w http.ResponseWriter, r *http.Request) 
 		"update_links": updateLinks,
 		"total_rows":   len(rows),
 		"summary": map[string]int{
-			"moved":    moved,
-			"skipped":  skipped,
-			"errors":   errors,
+			"moved":   moved,
+			"skipped": skipped,
+			"errors":  errors,
 			"would_move": func() int {
 				if !dryRun {
 					return 0

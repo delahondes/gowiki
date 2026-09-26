@@ -7,9 +7,18 @@ import { enablePropertiesPanel } from "../compiler/core_ui"
 const VALID_TYPES = ["pie", "doughnut", "bar", "hbar", "line", "radar", "polar"]
 
 const DEFAULT_PALETTE = [
-  "#4e79a7", "#f28e2b", "#e15759", "#76b7b2",
-  "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
-  "#9c755f", "#bab0ac", "#d37295", "#a0cbe8",
+  "#4e79a7",
+  "#f28e2b",
+  "#e15759",
+  "#76b7b2",
+  "#59a14f",
+  "#edc948",
+  "#b07aa1",
+  "#ff9da7",
+  "#9c755f",
+  "#bab0ac",
+  "#d37295",
+  "#a0cbe8",
 ]
 
 const DEFAULT_WIDTH = 400
@@ -56,7 +65,10 @@ function parseChartInfo(info: string): ChartAttrs {
       attrs.type = lower
     } else if (/^\d+x\d+$/.test(tok)) {
       const [w, h] = tok.split("x").map(Number)
-      if (w > 0 && h > 0) { attrs.width = w; attrs.height = h }
+      if (w > 0 && h > 0) {
+        attrs.width = w
+        attrs.height = h
+      }
     } else if (lower === "nolegend") {
       attrs.legend = "false"
     } else if (lower === "legend") {
@@ -96,7 +108,10 @@ function serializeChartHeader(attrs: Record<string, any>): string {
   if (attrs.align && attrs.align !== "center") parts.push(attrs.align)
 
   if (attrs.colors) {
-    const colorList = String(attrs.colors).split(",").map((c: string) => c.trim()).filter(Boolean)
+    const colorList = String(attrs.colors)
+      .split(",")
+      .map((c: string) => c.trim())
+      .filter(Boolean)
     for (const c of colorList) parts.push(c)
   }
 
@@ -133,7 +148,7 @@ const chartProperties: NodePropertySpec[] = [
       throw new Error(`Invalid chart type "${raw}". Use: ${VALID_TYPES.join(", ")}`)
     },
     serialize: (v: string | null) => String(v ?? "pie"),
-    options: VALID_TYPES.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
+    options: VALID_TYPES.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
   },
   {
     name: "width",
@@ -168,17 +183,23 @@ const chartProperties: NodePropertySpec[] = [
     name: "legend",
     label: "Legend",
     default: "true",
-    parse: (raw: string) => raw.trim().toLowerCase() === "false" ? "false" : "true",
+    parse: (raw: string) => (raw.trim().toLowerCase() === "false" ? "false" : "true"),
     serialize: (v: string | null) => String(v ?? "true"),
-    options: [{ value: "true", label: "Show" }, { value: "false", label: "Hide" }],
+    options: [
+      { value: "true", label: "Show" },
+      { value: "false", label: "Hide" },
+    ],
   },
   {
     name: "values",
     label: "Values",
     default: "false",
-    parse: (raw: string) => raw.trim().toLowerCase() === "true" ? "true" : "false",
+    parse: (raw: string) => (raw.trim().toLowerCase() === "true" ? "true" : "false"),
     serialize: (v: string | null) => String(v ?? "false"),
-    options: [{ value: "false", label: "Hide" }, { value: "true", label: "Show" }],
+    options: [
+      { value: "false", label: "Hide" },
+      { value: "true", label: "Show" },
+    ],
   },
   {
     name: "align",
@@ -291,11 +312,14 @@ class ChartNodeView {
     }
 
     const attrs = this.node.attrs
-    const chartType = attrs.type === "hbar" ? "bar" : (attrs.type === "polar" ? "polarArea" : attrs.type)
+    const chartType = attrs.type === "hbar" ? "bar" : attrs.type === "polar" ? "polarArea" : attrs.type
 
     let palette: string[]
     if (attrs.colors) {
-      palette = String(attrs.colors).split(",").map((c: string) => c.trim()).filter(Boolean)
+      palette = String(attrs.colors)
+        .split(",")
+        .map((c: string) => c.trim())
+        .filter(Boolean)
     } else {
       palette = [...DEFAULT_PALETTE]
     }
@@ -328,18 +352,20 @@ class ChartNodeView {
       type: chartType,
       data: {
         labels,
-        datasets: [{
-          data: values,
-          backgroundColor: bgColors,
-          borderColor: bgColors,
-          borderWidth: 1,
-        }],
+        datasets: [
+          {
+            data: values,
+            backgroundColor: bgColors,
+            borderColor: bgColors,
+            borderWidth: 1,
+          },
+        ],
       },
       options: {
         responsive: false,
         maintainAspectRatio: false,
         animation: false,
-        indexAxis: attrs.type === "hbar" ? "y" as const : "x" as const,
+        indexAxis: attrs.type === "hbar" ? ("y" as const) : ("x" as const),
         plugins: {
           title: {
             display: !!attrs.title,
@@ -425,46 +451,52 @@ export const chartPlugin: WikiPlugin = {
           group: "block",
           atom: true,
           attrs: {
-            type:   { default: "pie" },
-            width:  { default: DEFAULT_WIDTH },
+            type: { default: "pie" },
+            width: { default: DEFAULT_WIDTH },
             height: { default: DEFAULT_HEIGHT },
-            title:  { default: "" },
+            title: { default: "" },
             legend: { default: "true" },
             values: { default: "false" },
-            align:  { default: "" },
+            align: { default: "" },
             colors: { default: "" },
-            data:   { default: "" },
+            data: { default: "" },
           },
           toDOM(node: any) {
-            return ["div", {
-              class: "gowiki-chart",
-              "data-chart-type": node.attrs.type,
-              "data-chart-width": String(node.attrs.width),
-              "data-chart-height": String(node.attrs.height),
-              "data-chart-title": node.attrs.title,
-              "data-chart-legend": node.attrs.legend,
-              "data-chart-values": node.attrs.values,
-              "data-chart-align": node.attrs.align,
-              "data-chart-colors": node.attrs.colors,
-              "data-chart-data": node.attrs.data,
-            }, `Chart: ${node.attrs.type}${node.attrs.title ? " — " + node.attrs.title : ""}`]
+            return [
+              "div",
+              {
+                class: "gowiki-chart",
+                "data-chart-type": node.attrs.type,
+                "data-chart-width": String(node.attrs.width),
+                "data-chart-height": String(node.attrs.height),
+                "data-chart-title": node.attrs.title,
+                "data-chart-legend": node.attrs.legend,
+                "data-chart-values": node.attrs.values,
+                "data-chart-align": node.attrs.align,
+                "data-chart-colors": node.attrs.colors,
+                "data-chart-data": node.attrs.data,
+              },
+              `Chart: ${node.attrs.type}${node.attrs.title ? " — " + node.attrs.title : ""}`,
+            ]
           },
-          parseDOM: [{
-            tag: "div.gowiki-chart",
-            getAttrs(dom: HTMLElement) {
-              return {
-                type: dom.getAttribute("data-chart-type") || "pie",
-                width: parseInt(dom.getAttribute("data-chart-width") || String(DEFAULT_WIDTH), 10),
-                height: parseInt(dom.getAttribute("data-chart-height") || String(DEFAULT_HEIGHT), 10),
-                title: dom.getAttribute("data-chart-title") || "",
-                legend: dom.getAttribute("data-chart-legend") || "true",
-                values: dom.getAttribute("data-chart-values") || "false",
-                align: dom.getAttribute("data-chart-align") || "",
-                colors: dom.getAttribute("data-chart-colors") || "",
-                data: dom.getAttribute("data-chart-data") || "",
-              }
+          parseDOM: [
+            {
+              tag: "div.gowiki-chart",
+              getAttrs(dom: HTMLElement) {
+                return {
+                  type: dom.getAttribute("data-chart-type") || "pie",
+                  width: parseInt(dom.getAttribute("data-chart-width") || String(DEFAULT_WIDTH), 10),
+                  height: parseInt(dom.getAttribute("data-chart-height") || String(DEFAULT_HEIGHT), 10),
+                  title: dom.getAttribute("data-chart-title") || "",
+                  legend: dom.getAttribute("data-chart-legend") || "true",
+                  values: dom.getAttribute("data-chart-values") || "false",
+                  align: dom.getAttribute("data-chart-align") || "",
+                  colors: dom.getAttribute("data-chart-colors") || "",
+                  data: dom.getAttribute("data-chart-data") || "",
+                }
+              },
             },
-          }],
+          ],
         },
       },
     })
@@ -474,67 +506,76 @@ export const chartPlugin: WikiPlugin = {
 
     // ── markdown-it block rule ──
     reg.registerMarkdownItPlugin((md: any) => {
-      md.block.ruler.before("fence", "chart_fence", (state: any, startLine: number, endLine: number, silent: boolean) => {
-        const startPos = state.bMarks[startLine] + state.tShift[startLine]
-        const maxPos = state.eMarks[startLine]
-        const firstLine = state.src.slice(startPos, maxPos)
+      md.block.ruler.before(
+        "fence",
+        "chart_fence",
+        (state: any, startLine: number, endLine: number, silent: boolean) => {
+          const startPos = state.bMarks[startLine] + state.tShift[startLine]
+          const maxPos = state.eMarks[startLine]
+          const firstLine = state.src.slice(startPos, maxPos)
 
-        if (!firstLine.match(/^`{3,}chart(?:\s|$)/)) return false
-        if (silent) return true
+          if (!firstLine.match(/^`{3,}chart(?:\s|$)/)) return false
+          if (silent) return true
 
-        const backtickCount = firstLine.match(/^(`+)/)![1].length
-        const infoStr = firstLine.slice(backtickCount).replace(/^chart\s*/, "").trim()
+          const backtickCount = firstLine.match(/^(`+)/)![1].length
+          const infoStr = firstLine
+            .slice(backtickCount)
+            .replace(/^chart\s*/, "")
+            .trim()
 
-        // Find closing fence
-        let nextLine = startLine + 1
-        let found = false
-        for (; nextLine < endLine; nextLine++) {
-          const lineStart = state.bMarks[nextLine] + state.tShift[nextLine]
-          const lineEnd = state.eMarks[nextLine]
-          const line = state.src.slice(lineStart, lineEnd)
-          if (line.match(new RegExp("^`{" + backtickCount + ",}\\s*$"))) {
-            found = true
-            break
+          // Find closing fence
+          let nextLine = startLine + 1
+          let found = false
+          for (; nextLine < endLine; nextLine++) {
+            const lineStart = state.bMarks[nextLine] + state.tShift[nextLine]
+            const lineEnd = state.eMarks[nextLine]
+            const line = state.src.slice(lineStart, lineEnd)
+            if (line.match(new RegExp("^`{" + backtickCount + ",}\\s*$"))) {
+              found = true
+              break
+            }
           }
+          if (!found) return false
+
+          // Extract body
+          const bodyLines: string[] = []
+          for (let l = startLine + 1; l < nextLine; l++) {
+            bodyLines.push(state.src.slice(state.bMarks[l], state.eMarks[l]))
+          }
+          const body = bodyLines.join("\n")
+
+          // Parse info string
+          const attrs = parseChartInfo(infoStr)
+
+          // Emit single token
+          const token = state.push("chart", "div", 0)
+          token.block = true
+          token.map = [startLine, nextLine + 1]
+          token.meta = { ...attrs, data: body }
+
+          state.line = nextLine + 1
+          return true
         }
-        if (!found) return false
-
-        // Extract body
-        const bodyLines: string[] = []
-        for (let l = startLine + 1; l < nextLine; l++) {
-          bodyLines.push(state.src.slice(state.bMarks[l], state.eMarks[l]))
-        }
-        const body = bodyLines.join("\n")
-
-        // Parse info string
-        const attrs = parseChartInfo(infoStr)
-
-        // Emit single token
-        const token = state.push("chart", "div", 0)
-        token.block = true
-        token.map = [startLine, nextLine + 1]
-        token.meta = { ...attrs, data: body }
-
-        state.line = nextLine + 1
-        return true
-      })
+      )
     })
 
     // ── Markdown → PM ──
     reg.registerText("chart", {
       run(ctx, tok) {
         const meta = tok.meta ?? {}
-        ctx.push(ctx.schema.nodes.chart.create({
-          type: meta.type ?? "pie",
-          width: meta.width ?? DEFAULT_WIDTH,
-          height: meta.height ?? DEFAULT_HEIGHT,
-          title: meta.title ?? "",
-          legend: meta.legend ?? "true",
-          values: meta.values ?? "false",
-          align: meta.align ?? "",
-          colors: meta.colors ?? "",
-          data: meta.data ?? "",
-        }))
+        ctx.push(
+          ctx.schema.nodes.chart.create({
+            type: meta.type ?? "pie",
+            width: meta.width ?? DEFAULT_WIDTH,
+            height: meta.height ?? DEFAULT_HEIGHT,
+            title: meta.title ?? "",
+            legend: meta.legend ?? "true",
+            values: meta.values ?? "false",
+            align: meta.align ?? "",
+            colors: meta.colors ?? "",
+            data: meta.data ?? "",
+          })
+        )
       },
     })
 
@@ -573,21 +614,19 @@ export const chartPlugin: WikiPlugin = {
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
         let insertedAt: number | null = null
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === chartType && insertedAt === null) {
-              insertedAt = pos
-              return false
-            }
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === chartType && insertedAt === null) {
+            insertedAt = pos
+            return false
           }
-        )
+        })
         if (insertedAt !== null) {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

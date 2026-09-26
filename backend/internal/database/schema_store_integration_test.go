@@ -302,8 +302,8 @@ func TestSchemaStore_SetEnumValues_ReplacesInPlace(t *testing.T) {
 func TestSchemaStore_GetHistory_RecordsChangesInOrder(t *testing.T) {
 	t.Parallel()
 	s, ctx := newSchemaStore(t)
-	tid := makeTable(t, s, "audits") // -> create_table entry
-	fid := makeField(t, s, tid, "who", FieldTypeText)   // -> add_field
+	tid := makeTable(t, s, "audits")                  // -> create_table entry
+	fid := makeField(t, s, tid, "who", FieldTypeText) // -> add_field
 	// Two archives so we get more entries.
 	// Fetch then update once, archive once.
 	fields, _ := s.ListFields(ctx, tid)

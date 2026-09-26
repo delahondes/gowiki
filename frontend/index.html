@@ -6,7 +6,7 @@
     <script>
       // No-flash theme boot: resolve the user's preference before first paint.
       // Order: localStorage → cookie (set at login) → OS preference → light.
-      (function () {
+      ;(function () {
         try {
           var pref = localStorage.getItem("gowiki-theme")
           if (!pref) {
@@ -22,9 +22,9 @@
         }
       })()
     </script>
-    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
-    <link rel="icon" href="/icons/favicon.ico" sizes="16x16 32x32 48x48">
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/theme.css" />
     <link rel="stylesheet" href="/api/theme/overrides.css" />
     <link rel="stylesheet" href="/style.css" />
@@ -33,11 +33,11 @@
   </head>
   <body>
     <header id="banner">
-      <a id="banner-logo" href="/"><img id="banner-logo-img" src="/icons/logo-small.png" alt="Gowiki"></a>
+      <a id="banner-logo" href="/"><img id="banner-logo-img" src="/icons/logo-small.png" alt="Gowiki" /></a>
       <div id="banner-title">Gowiki</div>
       <div id="recent-pages"></div>
       <div id="banner-search">
-        <input type="text" id="search-input" placeholder="Search... ( / )" autocomplete="off">
+        <input type="text" id="search-input" placeholder="Search... ( / )" autocomplete="off" />
         <div id="search-results" class="search-results-hidden"></div>
       </div>
       <div id="banner-user"></div>

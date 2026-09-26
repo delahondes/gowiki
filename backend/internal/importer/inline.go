@@ -20,10 +20,6 @@ var (
 	// Inline code: <code>text</code> (without language specifier)
 	reCodeInline = regexp.MustCompile(`(?i)<code>(.+?)</code>`)
 
-	// Italic: //text//
-	// Must not match URLs (://), so require non-: before opening //
-	reItalic = regexp.MustCompile(`(?:^|[^:])//(.+?)//`)
-
 	// Underline: __text__
 	reUnderline = regexp.MustCompile(`__(.+?)__`)
 
@@ -194,8 +190,8 @@ func convertDokuWikiEntities(line string) string {
 // convertDokuWikiIcons replaces DokuWiki icon syntax with UTF-8 equivalents.
 func convertDokuWikiIcons(line string) string {
 	replacements := []struct{ old, new string }{
-		{":!:", "\u26A0\uFE0F"},  // ⚠️
-		{":?:", "\u2139\uFE0F"},  // ℹ️
+		{":!:", "\u26A0\uFE0F"}, // ⚠️
+		{":?:", "\u2139\uFE0F"}, // ℹ️
 		{"FIXME", "\u26A0\uFE0F FIXME"},
 		{"DELETEME", "\u274C DELETEME"},
 		{"TODO", "\u2611\uFE0F TODO"}, // Not used by DokuWiki natively but common in content
@@ -216,7 +212,7 @@ func convertBareURLs(line string, prot *protector) string {
 		}
 		url := sub[1]
 		// Replace just the URL portion, preserve any leading whitespace
-		converted := prot.protect("[]("+url+")")
+		converted := prot.protect("[](" + url + ")")
 		return strings.Replace(m, url, converted, 1)
 	})
 }
@@ -316,9 +312,7 @@ func convertLink(inner string, currentNS string) string {
 	}
 
 	// Handle this> links
-	if strings.HasPrefix(target, "this>") {
-		target = strings.TrimPrefix(target, "this>")
-	}
+	target = strings.TrimPrefix(target, "this>")
 
 	// Internal link: convert path
 	// Split off anchor

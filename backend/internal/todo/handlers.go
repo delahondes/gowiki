@@ -414,7 +414,6 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-
 // authGroupResolver resolves group membership using the auth stores.
 type authGroupResolver struct {
 	groupStore *auth.GroupStore

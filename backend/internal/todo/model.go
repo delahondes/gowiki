@@ -35,25 +35,25 @@ const (
 
 // Task is the core domain object.
 type Task struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description,omitempty"`
-	Status      Status   `json:"status"`
-	Source      Source   `json:"source"`
-	SourcePage  string   `json:"source_page,omitempty"`
-	NodeKey     string   `json:"node_key,omitempty"`
-	Assignee    Assignee `json:"assignee"`
-	DueDate     string   `json:"due_date,omitempty"` // YYYY-MM-DD or ""
-	Recurrence  Recurrence `json:"recurrence,omitempty"`
-	WikiAction  WikiAction `json:"wiki_action,omitempty"`
-	Tags        string   `json:"tags,omitempty"`
-	Priority    Priority `json:"priority"`
-	CreatedBy   string   `json:"created_by,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Warnings    []string `json:"warnings,omitempty"` // populated at response time, not stored
-	Inactive    bool     `json:"inactive,omitempty"` // populated at response time, not stored
-	RecurrenceGroupID string `json:"recurrence_group_id,omitempty"`
+	ID                string     `json:"id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description,omitempty"`
+	Status            Status     `json:"status"`
+	Source            Source     `json:"source"`
+	SourcePage        string     `json:"source_page,omitempty"`
+	NodeKey           string     `json:"node_key,omitempty"`
+	Assignee          Assignee   `json:"assignee"`
+	DueDate           string     `json:"due_date,omitempty"` // YYYY-MM-DD or ""
+	Recurrence        Recurrence `json:"recurrence,omitempty"`
+	WikiAction        WikiAction `json:"wiki_action,omitempty"`
+	Tags              string     `json:"tags,omitempty"`
+	Priority          Priority   `json:"priority"`
+	CreatedBy         string     `json:"created_by,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	Warnings          []string   `json:"warnings,omitempty"` // populated at response time, not stored
+	Inactive          bool       `json:"inactive,omitempty"` // populated at response time, not stored
+	RecurrenceGroupID string     `json:"recurrence_group_id,omitempty"`
 }
 
 // Assignee describes who is responsible for a task.
@@ -205,32 +205,32 @@ type Event struct {
 
 // CreateRequest holds the fields for creating a new task.
 type CreateRequest struct {
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	Source      Source     `json:"source"`
-	SourcePage  string     `json:"source_page"`
-	NodeKey     string     `json:"node_key"`
-	Assignee    Assignee   `json:"assignee"`
-	DueDate     string     `json:"due_date"`
-	Recurrence  Recurrence `json:"recurrence"`
-	WikiAction  WikiAction `json:"wiki_action"`
-	Tags        string     `json:"tags"`
-	Priority    Priority   `json:"priority"`
-	CreatedBy   string     `json:"created_by"`
-	RecurrenceGroupID string `json:"recurrence_group_id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description"`
+	Source            Source     `json:"source"`
+	SourcePage        string     `json:"source_page"`
+	NodeKey           string     `json:"node_key"`
+	Assignee          Assignee   `json:"assignee"`
+	DueDate           string     `json:"due_date"`
+	Recurrence        Recurrence `json:"recurrence"`
+	WikiAction        WikiAction `json:"wiki_action"`
+	Tags              string     `json:"tags"`
+	Priority          Priority   `json:"priority"`
+	CreatedBy         string     `json:"created_by"`
+	RecurrenceGroupID string     `json:"recurrence_group_id"`
 }
 
 // Patch holds optional fields for updating a task.
 type Patch struct {
-	Title       *string    `json:"title,omitempty"`
-	Description *string    `json:"description,omitempty"`
-	Status      *Status    `json:"status,omitempty"`
-	Assignee    *Assignee  `json:"assignee,omitempty"`
-	DueDate     *string    `json:"due_date,omitempty"`
+	Title       *string     `json:"title,omitempty"`
+	Description *string     `json:"description,omitempty"`
+	Status      *Status     `json:"status,omitempty"`
+	Assignee    *Assignee   `json:"assignee,omitempty"`
+	DueDate     *string     `json:"due_date,omitempty"`
 	Recurrence  *Recurrence `json:"recurrence,omitempty"`
 	WikiAction  *WikiAction `json:"wiki_action,omitempty"`
-	Tags        *string    `json:"tags,omitempty"`
-	Priority    *Priority  `json:"priority,omitempty"`
+	Tags        *string     `json:"tags,omitempty"`
+	Priority    *Priority   `json:"priority,omitempty"`
 }
 
 // IsEmpty returns true if no fields are set.

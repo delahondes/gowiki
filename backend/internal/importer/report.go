@@ -18,15 +18,15 @@ func (r *Report) Markdown() string {
 		convPct = float64(r.ConvertLines) / float64(r.TotalLines) * 100
 	}
 	b.WriteString("## Summary\n\n")
-	b.WriteString(fmt.Sprintf("| Metric | Value |\n"))
+	b.WriteString("| Metric | Value |\n")
 	b.WriteString("| --- | --- |\n")
-	b.WriteString(fmt.Sprintf("| Total pages | %d |\n", r.TotalPages))
-	b.WriteString(fmt.Sprintf("| Total lines | %d |\n", r.TotalLines))
-	b.WriteString(fmt.Sprintf("| Converted lines | %d |\n", r.ConvertLines))
-	b.WriteString(fmt.Sprintf("| Flagged lines | %d |\n", r.FlaggedLines))
-	b.WriteString(fmt.Sprintf("| Conversion rate | %.1f%% |\n", convPct))
-	b.WriteString(fmt.Sprintf("| Media copied | %d |\n", r.MediaCopied))
-	b.WriteString(fmt.Sprintf("| Media missing | %d |\n", len(r.MediaMissing)))
+	fmt.Fprintf(&b, "| Total pages | %d |\n", r.TotalPages)
+	fmt.Fprintf(&b, "| Total lines | %d |\n", r.TotalLines)
+	fmt.Fprintf(&b, "| Converted lines | %d |\n", r.ConvertLines)
+	fmt.Fprintf(&b, "| Flagged lines | %d |\n", r.FlaggedLines)
+	fmt.Fprintf(&b, "| Conversion rate | %.1f%% |\n", convPct)
+	fmt.Fprintf(&b, "| Media copied | %d |\n", r.MediaCopied)
+	fmt.Fprintf(&b, "| Media missing | %d |\n", len(r.MediaMissing))
 	b.WriteString("\n")
 
 	// Unsupported features
@@ -48,7 +48,7 @@ func (r *Report) Markdown() string {
 			return sorted[i].count > sorted[j].count
 		})
 		for _, kv := range sorted {
-			b.WriteString(fmt.Sprintf("| %s | %d |\n", kv.key, kv.count))
+			fmt.Fprintf(&b, "| %s | %d |\n", kv.key, kv.count)
 		}
 		b.WriteString("\n")
 	}
@@ -57,7 +57,7 @@ func (r *Report) Markdown() string {
 	if len(r.MediaMissing) > 0 {
 		b.WriteString("## Missing Media\n\n")
 		for _, m := range r.MediaMissing {
-			b.WriteString(fmt.Sprintf("- %s\n", m))
+			fmt.Fprintf(&b, "- %s\n", m)
 		}
 		b.WriteString("\n")
 	}
@@ -76,12 +76,12 @@ func (r *Report) Markdown() string {
 			if len(p.Flagged) == 0 {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("### %s\n\n", p.SourcePath))
+			fmt.Fprintf(&b, "### %s\n\n", p.SourcePath)
 			for _, f := range p.Flagged {
 				if f.LineNum > 0 {
-					b.WriteString(fmt.Sprintf("- Line %d: **%s** `%s`\n", f.LineNum, f.Reason, truncate(f.Content, 80)))
+					fmt.Fprintf(&b, "- Line %d: **%s** `%s`\n", f.LineNum, f.Reason, truncate(f.Content, 80))
 				} else {
-					b.WriteString(fmt.Sprintf("- **%s** `%s`\n", f.Reason, truncate(f.Content, 80)))
+					fmt.Fprintf(&b, "- **%s** `%s`\n", f.Reason, truncate(f.Content, 80))
 				}
 			}
 			b.WriteString("\n")

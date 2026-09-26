@@ -97,7 +97,9 @@ class TemplateMarkerNodeView {
           missingRoles = Object.keys(status.missing_roles || {})
         }
       }
-    } catch { /* leave defaults */ }
+    } catch {
+      /* leave defaults */
+    }
 
     // Read the page markdown so we can prefill the title pattern in the
     // dialog. Falling back to "" is fine — the user can type anything.
@@ -111,7 +113,9 @@ class TemplateMarkerNodeView {
         const md: string = data.markdown || ""
         titlePattern = extractTemplateTitlePattern(md)
       }
-    } catch { /* leave defaults */ }
+    } catch {
+      /* leave defaults */
+    }
 
     this.status = { isValidated, versionTag, missingRoles, hasReviewflow, templateTitle, titlePattern }
     this.render()
@@ -119,7 +123,9 @@ class TemplateMarkerNodeView {
 
   private openDialog() {
     if (this.status && this.status.hasReviewflow && !this.status.isValidated) {
-      alert(`Cannot create: the template's reviewflow is not fully validated. Missing role(s): ${this.status.missingRoles.join(", ")}.`)
+      alert(
+        `Cannot create: the template's reviewflow is not fully validated. Missing role(s): ${this.status.missingRoles.join(", ")}.`
+      )
       return
     }
     openCreateFromTemplateDialog({
@@ -178,8 +184,12 @@ class TemplateTitleNodeView {
     return true
   }
 
-  stopEvent(): boolean { return true }
-  ignoreMutation(): boolean { return true }
+  stopEvent(): boolean {
+    return true
+  }
+  ignoreMutation(): boolean {
+    return true
+  }
 }
 
 // ── {template-stamp} ─────────────────────────────────────────────────
@@ -211,7 +221,8 @@ class TemplateStampNodeView {
     } else {
       const err = document.createElement("span")
       err.className = "gowiki-template-stamp-error"
-      err.textContent = "⚠ Unresolved {template-stamp} — this page has no {template} marker. Recreate the document from its template via the Create document button."
+      err.textContent =
+        "⚠ Unresolved {template-stamp} — this page has no {template} marker. Recreate the document from its template via the Create document button."
       this.dom.appendChild(err)
     }
   }
@@ -229,8 +240,12 @@ class TemplateStampNodeView {
     return true
   }
 
-  stopEvent(): boolean { return true }
-  ignoreMutation(): boolean { return true }
+  stopEvent(): boolean {
+    return true
+  }
+  ignoreMutation(): boolean {
+    return true
+  }
 }
 
 // ── {template-reviewflow …} ──────────────────────────────────────────
@@ -261,7 +276,9 @@ class TemplateReviewflowNodeView {
     let roles: Record<string, string> = {}
     try {
       roles = JSON.parse(this.node.attrs.roles || "{}")
-    } catch { /* empty */ }
+    } catch {
+      /* empty */
+    }
     const version = this.node.attrs.version || "1.0 (default)"
 
     const summary = document.createElement("div")
@@ -279,10 +296,7 @@ class TemplateReviewflowNodeView {
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
-    if (
-      node.attrs.version !== this.node.attrs.version ||
-      node.attrs.roles !== this.node.attrs.roles
-    ) {
+    if (node.attrs.version !== this.node.attrs.version || node.attrs.roles !== this.node.attrs.roles) {
       this.node = node
       this.render()
     } else {
@@ -291,8 +305,12 @@ class TemplateReviewflowNodeView {
     return true
   }
 
-  stopEvent(): boolean { return true }
-  ignoreMutation(): boolean { return true }
+  stopEvent(): boolean {
+    return true
+  }
+  ignoreMutation(): boolean {
+    return true
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -421,7 +439,9 @@ function openCreateFromTemplateDialog(opts: CreateDialogOpts) {
   okBtn.className = "gowiki-link-modal-btn"
   okBtn.textContent = "Create"
 
-  function close() { overlay.remove() }
+  function close() {
+    overlay.remove()
+  }
 
   async function submit() {
     warning.textContent = ""
@@ -480,11 +500,19 @@ function openCreateFromTemplateDialog(opts: CreateDialogOpts) {
 
   cancelBtn.addEventListener("click", close)
   okBtn.addEventListener("click", submit)
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) close() })
-  ;[pathInput, titleInput, summaryInput].forEach(inp => {
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close()
+  })
+  ;[pathInput, titleInput, summaryInput].forEach((inp) => {
     inp.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); submit() }
-      if (e.key === "Escape") { e.preventDefault(); close() }
+      if (e.key === "Enter") {
+        e.preventDefault()
+        submit()
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        close()
+      }
     })
   })
 
@@ -713,7 +741,11 @@ export const templatePlugin: WikiPlugin = {
             roles: { default: "{}" },
           },
           toDOM(node: PMNode) {
-            return ["div", { class: "gowiki-template-reviewflow", "data-version": node.attrs.version || "" }, "Template reviewflow"]
+            return [
+              "div",
+              { class: "gowiki-template-reviewflow", "data-version": node.attrs.version || "" },
+              "Template reviewflow",
+            ]
           },
           parseDOM: [
             {
@@ -785,20 +817,30 @@ export const templatePlugin: WikiPlugin = {
 
     // PM → Markdown.
     reg.registerPMNode("template_marker", {
-      print() { return `{template}\n\n` },
+      print() {
+        return `{template}\n\n`
+      },
     })
     reg.registerPMNode("template_title", {
-      print() { return `{template-title}\n` },
+      print() {
+        return `{template-title}\n`
+      },
     })
     reg.registerPMNode("template_stamp", {
-      print() { return `{template-stamp}\n\n` },
+      print() {
+        return `{template-stamp}\n\n`
+      },
     })
     reg.registerPMNode("template_reviewflow", {
       print(node) {
         const parts: string[] = []
         if (node.attrs.version) parts.push(`version=${node.attrs.version}`)
         let roles: Record<string, string> = {}
-        try { roles = JSON.parse(node.attrs.roles || "{}") } catch { /* empty */ }
+        try {
+          roles = JSON.parse(node.attrs.roles || "{}")
+        } catch {
+          /* empty */
+        }
         for (const key of Object.keys(roles).sort()) {
           parts.push(`${key}=${roles[key]}`)
         }
@@ -867,19 +909,17 @@ export const templatePlugin: WikiPlugin = {
         const node = type.create({ version: "", roles: "{}" })
         let tr = state.tr.replaceSelectionWith(node)
         const approxPos = tr.mapping.map(state.selection.from)
-        tr.doc.nodesBetween(
-          Math.max(0, approxPos - 5),
-          Math.min(tr.doc.content.size, approxPos + 5),
-          (n, pos) => {
-            if (n.type === type) {
-              try {
-                tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
-                tr = enablePropertiesPanel(tr)
-              } catch { /* ignore */ }
-              return false
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === type) {
+            try {
+              tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
+              tr = enablePropertiesPanel(tr)
+            } catch {
+              /* ignore */
             }
+            return false
           }
-        )
+        })
         dispatch(tr.scrollIntoView())
       }
       return true

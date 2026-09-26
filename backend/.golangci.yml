@@ -1,0 +1,22 @@
+# golangci-lint config for the Gowiki backend.
+#
+# Only linters whose findings are already zero on the codebase are enabled.
+# Growing the set is a two-step commit: fix the outstanding findings, then
+# enable the linter here in the same PR that adds the test proving it's
+# clean.
+#
+# Local: `cd backend && golangci-lint run`
+# CI: `.github/workflows/ci.yml` runs the same command as a required step.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet          # official static analyzer — must always pass.
+    - ineffassign    # catches assignments that are never read (e.g. shadowed by a later assignment before use).
+    - unused         # catches unused variables, constants, fields, types.
+    - staticcheck    # deep static analysis — bug-catching + simplifications.
+
+formatters:
+  enable:
+    - gofmt          # enforces the canonical Go format. Non-negotiable.

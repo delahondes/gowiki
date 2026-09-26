@@ -30,8 +30,8 @@ type atticVersion struct {
 
 // pageHistory groups all attic versions for one page.
 type pageHistory struct {
-	PageID   string          // DokuWiki page ID (e.g. "pipeline/profile")
-	Versions []atticVersion  // sorted by timestamp ascending
+	PageID   string         // DokuWiki page ID (e.g. "pipeline/profile")
+	Versions []atticVersion // sorted by timestamp ascending
 }
 
 // reAtticFile matches DokuWiki attic filenames: pagename.TIMESTAMP.txt.gz
@@ -266,8 +266,9 @@ func loadChangelogs(metaDir string) map[string]map[int64]changelogEntry {
 
 // dokuPageIDToGowikiPath converts a DokuWiki page ID to a Gowiki page path.
 // e.g. "pipeline/profile" -> "/pipeline/profile"
-//      "start" -> "/"
-//      "ns/start" -> "/ns"
+//
+//	"start" -> "/"
+//	"ns/start" -> "/ns"
 func dokuPageIDToGowikiPath(pageID string) string {
 	// Replace start with index equivalent
 	parts := strings.Split(pageID, "/")
@@ -363,12 +364,12 @@ func writeAtticVersion(atticRoot, pagePath string, version int64, content []byte
 
 // atticIndexEntry matches the Gowiki AtticEntry format.
 type atticIndexEntry struct {
-	Version   int64             `json:"version"`
-	Timestamp string            `json:"timestamp"`
-	Author    string            `json:"author"`
-	MD5       string            `json:"md5"`
-	Summary   string            `json:"summary"`
-	MediaRefs map[string]int64  `json:"media_refs,omitempty"`
+	Version   int64            `json:"version"`
+	Timestamp string           `json:"timestamp"`
+	Author    string           `json:"author"`
+	MD5       string           `json:"md5"`
+	Summary   string           `json:"summary"`
+	MediaRefs map[string]int64 `json:"media_refs,omitempty"`
 }
 
 // readCurrentPageContent reads the current (already-converted) page content from data/content/.

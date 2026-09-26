@@ -145,9 +145,7 @@ class PresentationEngine {
     slideEl.innerHTML = ""
     slideEl.appendChild(this.slides[index].cloneNode(true))
 
-    const pct = this.slides.length > 1
-      ? ((index + 1) / this.slides.length) * 100
-      : 100
+    const pct = this.slides.length > 1 ? ((index + 1) / this.slides.length) * 100 : 100
     this.progressBar.style.width = `${pct}%`
     this.counter.textContent = `${index + 1} / ${this.slides.length}`
   }
@@ -243,7 +241,9 @@ function collectSlides(markerDom: HTMLElement): HTMLElement[] {
           img.style.maxWidth = "100%"
           img.style.height = "auto"
           cloned.replaceWith(img)
-        } catch { /* tainted canvas, keep blank */ }
+        } catch {
+          /* tainted canvas, keep blank */
+        }
       }
       current.appendChild(clone)
     }
@@ -300,7 +300,13 @@ class SlidesMarkerView {
     btn.addEventListener("click", (e) => {
       e.preventDefault()
       e.stopPropagation()
-      launchPresentation(this.dom, this.node.attrs.theme, this.node.attrs.ratio, this.node.attrs.background, this.node.attrs.font)
+      launchPresentation(
+        this.dom,
+        this.node.attrs.theme,
+        this.node.attrs.ratio,
+        this.node.attrs.background,
+        this.node.attrs.font
+      )
     })
   }
 
@@ -347,7 +353,7 @@ const slidesProperties: NodePropertySpec[] = [
       throw new Error(`Invalid theme "${raw}". Use: ${VALID_THEMES.join(", ")}`)
     },
     serialize: (v: string | null) => String(v ?? "light"),
-    options: VALID_THEMES.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
+    options: VALID_THEMES.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
   },
   {
     name: "ratio",
@@ -359,7 +365,7 @@ const slidesProperties: NodePropertySpec[] = [
       throw new Error(`Invalid ratio "${raw}". Use: ${VALID_RATIOS.join(", ")}`)
     },
     serialize: (v: string | null) => String(v ?? "16:9"),
-    options: VALID_RATIOS.map(r => ({ value: r, label: r })),
+    options: VALID_RATIOS.map((r) => ({ value: r, label: r })),
   },
   {
     name: "background",
@@ -574,27 +580,33 @@ export const slidePlugin: WikiPlugin = {
             font: { default: "" },
           },
           toDOM(node: any) {
-            return ["div", {
-              class: "gowiki-slides-marker",
-              "data-slides-title": node.attrs.title,
-              "data-slides-theme": node.attrs.theme,
-              "data-slides-ratio": node.attrs.ratio,
-              "data-slides-background": node.attrs.background,
-              "data-slides-font": node.attrs.font,
-            }, `Slides: ${node.attrs.title || "Presentation"}`]
+            return [
+              "div",
+              {
+                class: "gowiki-slides-marker",
+                "data-slides-title": node.attrs.title,
+                "data-slides-theme": node.attrs.theme,
+                "data-slides-ratio": node.attrs.ratio,
+                "data-slides-background": node.attrs.background,
+                "data-slides-font": node.attrs.font,
+              },
+              `Slides: ${node.attrs.title || "Presentation"}`,
+            ]
           },
-          parseDOM: [{
-            tag: "div.gowiki-slides-marker",
-            getAttrs(dom: HTMLElement) {
-              return {
-                title: dom.getAttribute("data-slides-title") || "",
-                theme: dom.getAttribute("data-slides-theme") || "light",
-                ratio: dom.getAttribute("data-slides-ratio") || "16:9",
-                background: dom.getAttribute("data-slides-background") || "",
-                font: dom.getAttribute("data-slides-font") || "",
-              }
+          parseDOM: [
+            {
+              tag: "div.gowiki-slides-marker",
+              getAttrs(dom: HTMLElement) {
+                return {
+                  title: dom.getAttribute("data-slides-title") || "",
+                  theme: dom.getAttribute("data-slides-theme") || "light",
+                  ratio: dom.getAttribute("data-slides-ratio") || "16:9",
+                  background: dom.getAttribute("data-slides-background") || "",
+                  font: dom.getAttribute("data-slides-font") || "",
+                }
+              },
             },
-          }],
+          ],
         },
       },
     })
@@ -610,13 +622,15 @@ export const slidePlugin: WikiPlugin = {
     reg.registerText("slides", {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
-        ctx.push(ctx.schema.nodes.slides.create({
-          title: attrs.title ?? "",
-          theme: attrs.theme ?? "light",
-          ratio: attrs.ratio ?? "16:9",
-          background: attrs.background ?? "",
-          font: attrs.font ?? "",
-        }))
+        ctx.push(
+          ctx.schema.nodes.slides.create({
+            title: attrs.title ?? "",
+            theme: attrs.theme ?? "light",
+            ratio: attrs.ratio ?? "16:9",
+            background: attrs.background ?? "",
+            font: attrs.font ?? "",
+          })
+        )
       },
     })
 
@@ -682,7 +696,9 @@ export const slidePlugin: WikiPlugin = {
           try {
             tr = tr.setSelection(NodeSelection.create(tr.doc, insertedAt))
             tr = enablePropertiesPanel(tr)
-          } catch { /* leave default selection */ }
+          } catch {
+            /* leave default selection */
+          }
         }
         dispatch(tr.scrollIntoView())
       }

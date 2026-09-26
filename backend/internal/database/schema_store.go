@@ -325,7 +325,8 @@ func (s *SchemaStore) CreateField(ctx context.Context, f *FieldDef, changedBy st
 
 	dtName := dataTableName(tableName)
 
-	if f.Type == FieldTypeMultiEnum {
+	switch f.Type {
+	case FieldTypeMultiEnum:
 		// Create junction table instead of column.
 		jt := fmt.Sprintf("%s__%s", dtName, f.Name)
 		ddl := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -336,7 +337,7 @@ func (s *SchemaStore) CreateField(ctx context.Context, f *FieldDef, changedBy st
 		if _, err := tx.Exec(ctx, ddl); err != nil {
 			return fmt.Errorf("create junction table: %w", err)
 		}
-	} else if f.Type == FieldTypeAutoIncrement {
+	case FieldTypeAutoIncrement:
 		// Create sequence and column with default.
 		seqName := fmt.Sprintf("%s_%s_seq", dtName, f.Name)
 		if _, err := tx.Exec(ctx, fmt.Sprintf("CREATE SEQUENCE IF NOT EXISTS %s", quoteIdent(seqName))); err != nil {
@@ -348,7 +349,7 @@ func (s *SchemaStore) CreateField(ctx context.Context, f *FieldDef, changedBy st
 		if _, err := tx.Exec(ctx, alterSQL); err != nil {
 			return fmt.Errorf("add auto_increment column: %w", err)
 		}
-	} else {
+	default:
 		sqlType := SQLTypeForField(f.Type)
 		defaultClause := ""
 		switch f.Type {
