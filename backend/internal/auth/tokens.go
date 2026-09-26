@@ -177,8 +177,12 @@ func (s *TokenStore) Verify(rawToken string) (APIToken, error) {
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(t.TokenHash), []byte(rawToken)); err == nil {
-			// Match found — update last used asynchronously.
-			go s.updateLastUsed(t.ID)
+			// Match found — update last-used synchronously. Doing it in a
+			// goroutine used to race test cleanup (TempDir removal fought
+			// the still-pending write) and could also lose updates under
+			// concurrent Verify calls. The extra disk write is
+			// negligible compared to the bcrypt cost above.
+			s.updateLastUsed(t.ID)
 			safe := t
 			safe.TokenHash = ""
 			return safe, nil
