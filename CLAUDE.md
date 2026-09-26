@@ -148,31 +148,25 @@ Known smell: `frontend/compiler/core_nodes.ts` lines 114–129 contain a specifi
 ### Rendering model
 Rendering is done entirely by ProseMirror. There is no separate rendering pipeline for view mode — the visual editor output and the rendered view are identical by construction. This is a deliberate architectural choice and should not be changed.
 
-### v0.1–v0.3 status
-v0.1, v0.2, and v0.3 are complete.
+### Release status
+
+The v0.1 through v0.9 milestones are complete and deployed. The next tag is **v1.0.0-rc.1**, cutting a release candidate before v1.0.0. See `CHANGELOG.md` for the full journey.
 
 ## Milestone targets
 
-- **v0.1** ✓ — Single-page correctness: edit and persist main page content, render sidebar and footer composition, save/reload reliably, render included content as read-only.
+Shipped (short form — the full list is in `CHANGELOG.md`):
+
+- **v0.1** ✓ — Single-page correctness: edit and persist page content, render sidebar/footer/included content, save/reload reliably.
 - **v0.2** ✓ — Site-level consistency: reference tracking, orphan detection, circular include detection.
-- **v0.3** ✓ — Search: full-text, incremental, typo-tolerant. Language-specific syntax highlighting in code blocks.
-- **v0.4** — Editing robustness: correct copy/paste semantics, document validity after any edit.
-- **v0.5** — History and diff: page history, rollback.
-- **v0.6** — Admin page: configuration UI, authentication backends, ACL.
-- **v0.7** — Structured data: per-page structured fields, queries, rendering.
+- **v0.3** ✓ — Full-text search (incremental, typo-tolerant), code-block syntax highlighting.
+- **v0.4** ✓ — Editing robustness: copy/paste dialect enforcement, document validity after any edit, round-trip stability.
+- **v0.5** ✓ — Page history, rollback, drafts, media versioning, competing edits (same user).
+- **v0.6** ✓ — Admin UI, authentication backends (local + OAuth Azure), ACL, group management.
+- **v0.7** ✓ — Structured data: database tables, `{database-row}` binding, `{database-query}` with filters and pivots, includes and templates.
+- **v0.8** ✓ — Templates with variables, extended tables (formulas, column properties, cell merging, vertical text/align), tags with query and grouping, PDF export, sitemap, todos with assignment and email, numbered headings.
+- **v0.9** ✓ — Reviewflow (author/reviewer/validator + X.509 signing + observers), comments, backlinks, move/rename with link updates, image drag-resize, captions, spoilers, charts, mermaid, slides, bibliography, footnotes, DokuWiki importer, coedition with presence badges, AI Content API + integrated AI assistant, MCP server (page + database + attachment + draft-session tools), theming (light/dark), template stamping with reviewflow pinning.
 
-## v0.4 detailed scope
-
-### Copy/paste semantics
-- Pasting into an editable region must strip or transform any content that violates the dialect (foreign Markdown syntax, raw HTML, unsupported node types).
-- Pasting must never affect non-editable regions (sidebar, footer, included content).
-- Pasting across the boundary of a non-editable region must be handled gracefully: split the paste around the non-editable zone, or reject with a clear user signal. Never silently corrupt the document.
-
-### Document validity after any edit
-- After any edit operation (paste, drag, undo, redo), the document must remain a valid Gowiki dialect document.
-- Invalid states must be caught and corrected at the ProseMirror schema level, not silently stored.
-- The Markdown produced after any edit must pass round-trip validation: serialize → parse → serialize must yield the same result.
-- This applies in both visual and raw mode.
+**v1.0.0-rc.1** — Release candidate. No new features versus v0.9x; the RC exists to stabilise the surface for a v1.0.0 tag. If the RC ages a week without a regression severe enough to reroll, tag v1.0.0 unchanged. Bug fixes accepted during the RC window; feature additions push the RC number (rc.2, …) rather than the base version.
 
 ## v0.2 detailed scope (reference)
 
@@ -224,6 +218,5 @@ The backend detects and rejects circular includes at save time (not render time)
 - Do not let plugins touch authentication, ACL, storage layout, or search indexing
 - Do not bundle core and plugins together — they must remain independently loadable
 - Do not detect include cycles in the frontend — this is a backend responsibility
-- Do not implement media versioning before v0.5
 - Do not silently store invalid document states — enforce at the ProseMirror schema level
 - Do not process cell content (directives, formulas, or any `{...}` / `=...` pattern) when the cell text is inside a `code` or `code_expand` mark — backticks protect cell content from all in-cell parsing. This is a critical invariant: every new cell-level feature must check `hasCodeMark` before processing.

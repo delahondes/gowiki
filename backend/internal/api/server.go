@@ -36,8 +36,9 @@ import (
 //go:embed openapi.json
 var openapiJSON []byte
 
-// Version is the Gowiki software version string.
-const Version = "0.4.0"
+// Version is the Gowiki software version string. Bump before tagging a
+// release; the site-info endpoint and any manifest ride on this constant.
+const Version = "1.0.0-rc.1"
 
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
