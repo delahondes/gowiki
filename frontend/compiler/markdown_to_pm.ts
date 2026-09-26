@@ -25,15 +25,25 @@ function parseDirective(line: string): DirectiveToken | null {
   }
 
   const attrs: Record<string, string> = {}
-  // Parse attributes, supporting quoted values: key="value with spaces or ="
+  // Parse attributes, supporting quoted values with backslash-escaped
+  // inner quotes: key="value with spaces or = or \" quote". The escape
+  // character is `\`; any `\X` inside a quoted value becomes X on the
+  // way in. Without this, values that carry JSON blobs (pivot label
+  // maps in particular) get truncated at the first inner quote — the
+  // round-trip stays stable but the semantic map is silently lost.
+  // Symmetric on the write side: unquoted `\` and `"` are escaped.
   const attrStr = inner.slice(parts[0].length).trim()
-  const attrRe = /([\p{L}_][\p{L}\p{N}_.+-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/gu
+  const attrRe = /([\p{L}_][\p{L}\p{N}_.+-]*)=(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|(\S+))/gu
   let m: RegExpExecArray | null
   // Track which parts of attrStr are consumed by key=value pairs
   const consumed = new Set<number>()
+  const unescape = (s: string) => s.replace(/\\(.)/g, "$1")
   while ((m = attrRe.exec(attrStr)) !== null) {
     const key = m[1]
-    const value = m[2] ?? m[3] ?? m[4]
+    let value: string
+    if (m[2] !== undefined) value = unescape(m[2])
+    else if (m[3] !== undefined) value = unescape(m[3])
+    else value = m[4]
     attrs[key] = value
     for (let ci = m.index; ci < m.index + m[0].length; ci++) consumed.add(ci)
   }

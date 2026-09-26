@@ -112,20 +112,14 @@ describe("database-query: pivot params", () => {
 
 // KNOWN DEFECT — the directive attribute parser in
 // `frontend/compiler/markdown_to_pm.ts` uses a regex `"([^"]*)"` that
-// does not understand `\"` escape sequences inside a quoted value. The
-// serializer at `plugins/database.ts` writes `pivot_rows_labels="{\"a\":\"b\"}"`
-// which the parser then truncates at the FIRST unescaped `"` inside the
-// value, dropping the rest and losing the whole label map.
-//
-// Round-trip is "stable" in the trivial sense (both passes drop the
-// same content), but the semantics are broken. The tests below are
-// marked `.fails()` — they document the CORRECT behavior and will start
-// passing (and force removal of the `.fails`) the day the parser is
-// fixed to grok escape sequences. Fix scope: parseDirective's attrRe
-// plus a two-char unescape (`\"` → `"`, `\\` → `\`), matched by a
-// backslash-escape on the write side of every JSON-blob attr.
-describe("database-query: pivot label maps (JSON blobs) [KNOWN BUG]", () => {
-  it.fails("pivot_rows_labels round-trips a simple map", () => {
+// Directive attribute values carry JSON blobs (pivot label maps) that
+// need backslash-escaped inner quotes on the write side and a matching
+// unescape on the read side. `parseDirective` in `compiler/markdown_to_pm.ts`
+// accepts `\.` escape sequences inside quoted values and unescapes on
+// extraction. `plugins/database.ts` writes the corresponding `\"`.
+// These tests pin the invariant end-to-end.
+describe("database-query: pivot label maps (JSON blobs)", () => {
+  it("pivot_rows_labels round-trips a simple map", () => {
     const src = `{database-query table=orders pivot_rows=status pivot_rows_labels="{\\"open\\":\\"Open\\",\\"done\\":\\"Done\\"}"}\n`
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
@@ -133,7 +127,7 @@ describe("database-query: pivot label maps (JSON blobs) [KNOWN BUG]", () => {
     expect(JSON.parse(q?.pivot_rows_labels)).toEqual({ open: "Open", done: "Done" })
   })
 
-  it.fails("pivot_cols_labels with @null sentinel", () => {
+  it("pivot_cols_labels with @null sentinel", () => {
     const src = `{database-query table=orders pivot_cols=country pivot_cols_labels="{\\"@null\\":\\"(none)\\",\\"FR\\":\\"France\\"}"}\n`
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
@@ -141,9 +135,7 @@ describe("database-query: pivot label maps (JSON blobs) [KNOWN BUG]", () => {
     expect(JSON.parse(q?.pivot_cols_labels)).toEqual({ "@null": "(none)", FR: "France" })
   })
 
-  it("empty pivot map (`{}`) round-trips (no escape needed)", () => {
-    // The empty-map case uses no `\"` escape sequences, so the parser
-    // bug does not bite. This one passes on the current codebase.
+  it("empty pivot map (`{}`) round-trips", () => {
     const src = `{database-query table=orders pivot_rows=status pivot_rows_labels="{}"}\n`
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
@@ -153,7 +145,7 @@ describe("database-query: pivot label maps (JSON blobs) [KNOWN BUG]", () => {
     }
   })
 
-  it.fails("label value with unicode key/value survives", () => {
+  it("label value with unicode key/value survives", () => {
     const src = `{database-query table=customers pivot_rows=country pivot_rows_labels="{\\"FR\\":\\"France 🇫🇷\\",\\"BE\\":\\"Belgïe\\"}"}\n`
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
