@@ -31,7 +31,8 @@
     "no-undef": "off",
     "no-redeclare": "off",
     "prefer-const": ["error", { "destructuring": "all" }],
-    "no-var": "error"
+    "no-var": "error",
+    "no-extra-semi": "off"
   },
   "overrides": [
     {
