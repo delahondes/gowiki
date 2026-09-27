@@ -220,6 +220,125 @@ func TestScanner_ReconcileAwayFreshPage(t *testing.T) {
 	}
 }
 
+// DryRun returns the pages a rule fires on WITHOUT touching the todo
+// store. Distinct from Run: no create, no cancel, no
+// ExistingLifecycleTodos consultation. Used by the rendering box on
+// the source page to show a live count.
+func TestScanner_DryRun_FiresPagesOnly(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	rule := Rule{
+		ID:         "R6",
+		SourcePage: "/admin/policies",
+		ScopeRegex: "^/qms/.*",
+		Condition:  Condition{Kind: "stale", Duration: 30 * 24 * time.Hour},
+		Todo:       TodoTemplate{Title: "t", Assign: "a"},
+	}
+	pages := []string{"/qms/a", "/qms/b", "/other/x", "/admin/policies"}
+	updated := map[string]time.Time{
+		"/qms/a":          now.Add(-40 * 24 * time.Hour),
+		"/qms/b":          now.Add(-10 * 24 * time.Hour),
+		"/other/x":        now.Add(-500 * 24 * time.Hour),
+		"/admin/policies": now.Add(-500 * 24 * time.Hour),
+	}
+	s := &spy{}
+	scanner := NewScanner(Deps{
+		Rules:                  func() ([]Rule, error) { return []Rule{rule}, nil },
+		ListPages:              func() []string { return pages },
+		PageTags:               func(string) []string { return nil },
+		Attesters:              []AttestationSource{func(p string) time.Time { return updated[p] }},
+		CreateTodo:             s.create,
+		ExistingLifecycleTodos: s.list,
+		CancelTodo:             s.cancel,
+		Now:                    func() time.Time { return now },
+	})
+	fires := scanner.DryRun(rule)
+	if len(fires) != 1 || fires[0] != "/qms/a" {
+		t.Errorf("fires = %v, want [/qms/a]", fires)
+	}
+	if len(s.created) != 0 {
+		t.Errorf("DryRun must not create todos, got %d", len(s.created))
+	}
+	if len(s.cancelled) != 0 {
+		t.Errorf("DryRun must not cancel todos, got %d", len(s.cancelled))
+	}
+}
+
+// A rule must never fire on its own source page in DryRun either.
+// Same guarantee as Run — kept in a dedicated test so an accidental
+// asymmetry between the two paths is caught.
+func TestScanner_DryRun_SkipsSourcePage(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	rule := Rule{
+		ID:         "R7",
+		SourcePage: "/qms/rules",
+		ScopeRegex: "^/qms/.*",
+		Condition:  Condition{Kind: "stale", Duration: 1 * time.Hour},
+		Todo:       TodoTemplate{Title: "t", Assign: "a"},
+	}
+	// Source page's own timestamp is ancient; if DryRun didn't skip it
+	// the source page would appear in the fires list.
+	scanner := NewScanner(Deps{
+		Rules:     func() ([]Rule, error) { return []Rule{rule}, nil },
+		ListPages: func() []string { return []string{"/qms/rules", "/qms/other"} },
+		PageTags:  func(string) []string { return nil },
+		Attesters: []AttestationSource{func(string) time.Time { return now.Add(-10 * 24 * time.Hour) }},
+		Now:       func() time.Time { return now },
+	})
+	fires := scanner.DryRun(rule)
+	for _, p := range fires {
+		if p == "/qms/rules" {
+			t.Errorf("DryRun fired on its own source page: %v", fires)
+		}
+	}
+	if len(fires) != 1 || fires[0] != "/qms/other" {
+		t.Errorf("fires = %v, want [/qms/other]", fires)
+	}
+}
+
+// DryRun must honour the same selector semantics as Run: OR-of-tags,
+// NAND-of-exclude-tags. Regression guard against a shared-code
+// divergence.
+func TestScanner_DryRun_TagSelectors(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	rule := Rule{
+		ID:          "R8",
+		SourcePage:  "/rules",
+		Tags:        []string{"sop", "rec"},
+		ExcludeTags: []string{"archived"},
+		Condition:   Condition{Kind: "stale", Duration: 1 * time.Hour},
+		Todo:        TodoTemplate{Title: "t", Assign: "a"},
+	}
+	tagsByPage := map[string][]string{
+		"/a": {"sop"},                // in scope, fires
+		"/b": {"rec"},                // in scope, fires
+		"/c": {"tpl"},                // out of scope (no matching tag)
+		"/d": {"sop", "archived"},    // excluded
+		"/e": {"rec", "sop", "misc"}, // in scope (OR: any matching tag is enough)
+	}
+	pages := []string{"/a", "/b", "/c", "/d", "/e"}
+	scanner := NewScanner(Deps{
+		Rules:     func() ([]Rule, error) { return []Rule{rule}, nil },
+		ListPages: func() []string { return pages },
+		PageTags:  func(p string) []string { return tagsByPage[p] },
+		Attesters: []AttestationSource{func(string) time.Time { return now.Add(-24 * time.Hour) }},
+		Now:       func() time.Time { return now },
+	})
+	fires := scanner.DryRun(rule)
+	got := map[string]bool{}
+	for _, p := range fires {
+		got[p] = true
+	}
+	if !got["/a"] || !got["/b"] || !got["/e"] {
+		t.Errorf("expected /a,/b,/e in fires, got %v", fires)
+	}
+	if got["/c"] || got["/d"] {
+		t.Errorf("unexpected fires: %v", fires)
+	}
+}
+
 // {{path}} and {{stale_days}} in the todo title must be substituted.
 func TestScanner_TemplateVarsInTitle(t *testing.T) {
 	t.Parallel()
