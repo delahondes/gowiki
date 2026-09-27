@@ -134,3 +134,14 @@ Reviewflow confirmations can be cryptographically signed using X.509 certificate
 ## 1. Deadlines
 
 Admins can configure deadlines per role in Admin > Configuration > Reviewflow. When a confirmation is overdue, the todo system can send reminders.
+
+## 1. Hiding drafts from uninvolved readers
+
+Regulated wikis often need a stronger guarantee: **an unsigned document must not appear as an authoritative reference to people who aren't part of the review chain**. Set the config option `reviewflow.hide_drafts_from_uninvolved: true` (Admin > Configuration > Reviewflow) to turn on this gating. Default is `false` — everything visible — preserving the historical behaviour.
+
+When the gate is on, and a document has a `{reviewflow}` directive whose current version is not fully validated:
+
+- **Uninvolved readers** (not assigned to any role and not a global observer) get the last validated version served transparently. If the document has never been validated, they get 404 — for compliance purposes an unsigned document does not exist for outsiders.
+- **Involved readers** (author, reviewer, validator, custom role assignee, group-scoped assignee, or global observer) see the current draft AND a small notice in the reviewflow panel: *"You're viewing a draft. The published version is here."* — with a link to the previous validated version, so they never confuse a WIP with the authoritative procedure.
+
+The gate does not affect documents without a `{reviewflow}` directive, and it never gates the editor path — authors always see what they're editing.

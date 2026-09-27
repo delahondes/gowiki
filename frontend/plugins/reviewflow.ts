@@ -239,6 +239,28 @@ class ReviewflowNodeView {
       wrapper.appendChild(warn)
     }
 
+    // Draft-with-published notice. When the reader is looking at a
+    // draft AND there is a previously-validated version, point them
+    // to it. The reader who ISN'T involved won't see this \u2014 the
+    // backend already served them the validated content \u2014 so this
+    // line only reaches people who are on the review chain (or
+    // observers) and can be confident that "here" means "the
+    // published procedure, not the WIP you're editing."
+    const validatedVersion = this.status?.validated_page_version || 0
+    if (!isValidated && !this.loading && validatedVersion > 0) {
+      const notice = document.createElement("div")
+      notice.className = "gowiki-rf-draft-notice"
+      const linkPath = `${window.location.pathname}?v=${validatedVersion}`
+      notice.innerHTML = ""
+      notice.appendChild(document.createTextNode("You're viewing a draft. The published version is "))
+      const link = document.createElement("a")
+      link.href = linkPath
+      link.textContent = "here"
+      notice.appendChild(link)
+      notice.appendChild(document.createTextNode("."))
+      wrapper.appendChild(notice)
+    }
+
     // Table
     if (roleEntries.length > 0) {
       const table = document.createElement("table")
@@ -504,6 +526,18 @@ const reviewflowStyles = `
   color: var(--gw-color-warning);
   font-size: 13px;
   border-bottom: 1px solid var(--gw-color-border);
+}
+
+.gowiki-rf-draft-notice {
+  padding: 6px 14px;
+  color: var(--gw-color-subtle);
+  font-size: 12px;
+  font-style: italic;
+  border-bottom: 1px solid var(--gw-color-border);
+}
+.gowiki-rf-draft-notice a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .gowiki-rf-loading {

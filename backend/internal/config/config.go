@@ -76,6 +76,14 @@ type ReviewflowConfig struct {
 	Deadlines map[string]string `yaml:"deadlines" json:"deadlines"` // role name -> duration string (e.g. "72h")
 	Observers []string          `yaml:"observers" json:"observers"` // users/groups who can view all drafts (e.g. "alice", "group:quality")
 	Signing   SigningConfig     `yaml:"signing" json:"signing"`
+	// HideDraftsFromUninvolved gates uninvolved readers away from
+	// unsigned drafts. When true and a document has a {reviewflow}
+	// directive, viewers who are not an assigned role or a global
+	// observer get redirected to the last validated version (302 to
+	// ?v=N), or 404 if there is no validated version yet. Default
+	// false: everything visible, preserving pre-existing behaviour.
+	// Regulatory installations (QMS, SOP-heavy wikis) flip this on.
+	HideDraftsFromUninvolved bool `yaml:"hide_drafts_from_uninvolved" json:"hide_drafts_from_uninvolved"`
 }
 
 // SigningConfig holds X.509 document signing settings.

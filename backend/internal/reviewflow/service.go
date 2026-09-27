@@ -87,6 +87,50 @@ func (svc *Service) AddRevokedFingerprint(fingerprint string, at time.Time) {
 	svc.configStore.Update(cfg)
 }
 
+// IsInvolved returns true if the user is part of a page's reviewflow
+// chain in any capacity: assigned to any role (author, reviewer,
+// validator, or custom), OR a global observer. Used by the page-serve
+// path to decide whether an uninvolved reader should be gated away
+// from an unsigned draft.
+//
+// The `pagePath` may reference a page with no reviewflow — in that
+// case there are no roles and the observer check still applies (a
+// global observer sees everything, whether or not the page has a
+// {reviewflow} directive). An empty username → not involved.
+func (svc *Service) IsInvolved(pagePath, username string, groups []string) bool {
+	if username == "" {
+		return false
+	}
+	// Global observers always count as involved.
+	if svc.IsObserver(username, groups) {
+		return true
+	}
+	st, err := svc.store.Load(pagePath)
+	if err != nil || st == nil {
+		return false
+	}
+	// A user is involved if they hold ANY role on this page. Role
+	// values may reference a group with the "@group" prefix per the
+	// group resolver's convention; expand those and check membership.
+	for _, assignee := range st.Roles {
+		if assignee == "" {
+			continue
+		}
+		if assignee == username {
+			return true
+		}
+		if strings.HasPrefix(assignee, "@") {
+			groupName := strings.TrimPrefix(assignee, "@")
+			for _, g := range groups {
+				if g == groupName {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // IsObserver returns true if the user is in the global observer list
 // (either directly by username or via a group membership).
 func (svc *Service) IsObserver(username string, groups []string) bool {
