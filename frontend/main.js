@@ -12049,6 +12049,27 @@ async function renderAdminConfigTab(container) {
     form.appendChild(rfObserversLabel)
     form.appendChild(rfObserversInput)
 
+    // Hide-drafts gate — opt-in strict visibility for regulated wikis.
+    // When on, uninvolved readers are served the last validated version
+    // (or a 404 if there is none) instead of the current draft.
+    const rfHideDraftsCheckbox = document.createElement("input")
+    rfHideDraftsCheckbox.type = "checkbox"
+    rfHideDraftsCheckbox.checked = !!rfConfig.hide_drafts_from_uninvolved
+    const rfHideDraftsLabel = document.createElement("label")
+    rfHideDraftsLabel.style.display = "flex"
+    rfHideDraftsLabel.style.alignItems = "center"
+    rfHideDraftsLabel.style.gap = "8px"
+    rfHideDraftsLabel.style.margin = "12px 0 4px 0"
+    rfHideDraftsLabel.appendChild(rfHideDraftsCheckbox)
+    rfHideDraftsLabel.appendChild(document.createTextNode("Hide drafts from uninvolved readers"))
+    form.appendChild(rfHideDraftsLabel)
+
+    const rfHideDraftsNote = document.createElement("div")
+    rfHideDraftsNote.style.cssText = "font-size:0.85em;color:#666;margin:0 0 4px 20px"
+    rfHideDraftsNote.textContent =
+      "When on, readers not part of the review chain (or an observer) get the last validated version instead of the current draft. If a document has never been validated, they get 404. Involved readers see a link to the published version. Recommended for regulated wikis (QMS, SOP-heavy)."
+    form.appendChild(rfHideDraftsNote)
+
     // Signing sub-section
     const signingConfig = rfConfig.signing || {}
 
@@ -12225,6 +12246,7 @@ async function renderAdminConfigTab(container) {
             .split("\n")
             .map((s) => s.trim())
             .filter(Boolean),
+          hide_drafts_from_uninvolved: rfHideDraftsCheckbox.checked,
           signing: {
             enabled: sigEnabledCheckbox.checked,
             required: sigRequiredCheckbox.checked,
