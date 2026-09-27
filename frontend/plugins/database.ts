@@ -2684,7 +2684,16 @@ class DatabaseRowNodeView {
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
-      if (f && f.type === "image" && val) {
+      if (f && f.type === "page_link" && val) {
+        // Same clickable-link rendering as the query view — a
+        // page_link column must reach its target in one click from
+        // the row-bound view, not sit as inert grey text.
+        const a = document.createElement("a")
+        a.className = "gowiki-database-page-link"
+        a.textContent = String(val)
+        a.href = String(val)
+        tdVal.appendChild(a)
+      } else if (f && f.type === "image" && val) {
         const img = document.createElement("img")
         img.src = String(val)
         img.className = "db-image-cell"
