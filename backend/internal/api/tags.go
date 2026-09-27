@@ -7,7 +7,13 @@ import (
 )
 
 type tagQueryResult struct {
-	Tag   string         `json:"tag"`
+	// Tag echoes the original `tag=` query value verbatim (a CSV when
+	// the caller passed multiple). Preserved for frontends that
+	// display the query context back to the reader.
+	Tag string `json:"tag"`
+	// Tags is the parsed list — always non-empty when the request was
+	// accepted. Single-tag queries yield a one-item list.
+	Tags  []string       `json:"tags"`
 	Pages []tagQueryPage `json:"pages"`
 }
 
@@ -21,8 +27,24 @@ type tagQueryPage struct {
 }
 
 func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
-	tag := r.URL.Query().Get("tag")
-	if tag == "" {
+	rawTag := r.URL.Query().Get("tag")
+	if rawTag == "" {
+		http.Error(w, "tag parameter required", http.StatusBadRequest)
+		return
+	}
+	// `tag=` accepts CSV for OR-of-tags parity with {lifecycle tags=…}.
+	// A single-tag value like "sop" splits to a one-item list; a
+	// multi-tag value like "sop,rec,tpl" is the union across all
+	// three. Whitespace and empty segments are dropped so "sop, rec"
+	// works.
+	var tags []string
+	for _, t := range strings.Split(rawTag, ",") {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	if len(tags) == 0 {
 		http.Error(w, "tag parameter required", http.StatusBadRequest)
 		return
 	}
@@ -43,7 +65,7 @@ func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := s.tagIndex.GetPagesForTag(tag, pathPrefix, excludeTags)
+	entries := s.tagIndex.GetPagesForAnyTag(tags, pathPrefix, excludeTags)
 
 	userDisplay := s.configStore.Get().Site.UserDisplay
 
@@ -77,7 +99,8 @@ func (s *Server) handleTagQuery(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tagQueryResult{
-		Tag:   tag,
+		Tag:   rawTag,
+		Tags:  tags,
 		Pages: pages,
 	})
 }

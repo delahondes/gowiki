@@ -18,9 +18,10 @@ const tagProperties = [
 const tagQueryProperties = [
   {
     name: "tag",
-    label: "Tag",
+    label: "Tag(s)",
     default: "",
     parse: (raw: string) => raw.trim(),
+    helpText: 'Comma-separated for OR (e.g. "sop,rec,tpl") — matches pages carrying AT LEAST ONE.',
   },
   {
     name: "exclude",
@@ -250,7 +251,23 @@ class TagQueryNodeView {
       this.dom.innerHTML = ""
 
       if (pages.length === 0) {
-        this.dom.textContent = `No pages tagged "${tag}"`
+        // Multi-tag phrasing: "No pages tagged sop, rec or tpl"
+        // reads naturally where a raw CSV like "sop,rec,tpl" would
+        // look pasted. Single-tag path unchanged.
+        const parts = tag
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+        const label =
+          parts.length <= 1
+            ? `"${tag}"`
+            : parts.length === 2
+              ? `"${parts[0]}" or "${parts[1]}"`
+              : `${parts
+                  .slice(0, -1)
+                  .map((p) => `"${p}"`)
+                  .join(", ")} or "${parts[parts.length - 1]}"`
+        this.dom.textContent = `No pages tagged ${label}`
         return
       }
 

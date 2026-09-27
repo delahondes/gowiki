@@ -351,6 +351,67 @@ func pagePaths(entries []PageEntry) []string {
 	return out
 }
 
+// OR-of-tags across the union. A page tagged with multiple listed
+// tags must appear exactly once (deduped), and results still respect
+// pathPrefix / excludeTags filters.
+
+func TestTagIndex_GetPagesForAnyTag_UnionAndDedup(t *testing.T) {
+	t.Parallel()
+	idx := newTestTagIndex(t)
+	idx.UpdatePage("/a", []string{"sop"}, "A")
+	idx.UpdatePage("/b", []string{"rec"}, "B")
+	idx.UpdatePage("/c", []string{"tpl"}, "C")
+	idx.UpdatePage("/d", []string{"sop", "rec"}, "D") // must appear ONCE
+
+	got := pagePaths(idx.GetPagesForAnyTag([]string{"sop", "rec"}, "", nil))
+	if !reflect.DeepEqual(got, []string{"/a", "/b", "/d"}) {
+		t.Errorf("OR union = %v, want [/a /b /d] deduped and sorted", got)
+	}
+}
+
+func TestTagIndex_GetPagesForAnyTag_SingleTagMatchesLegacy(t *testing.T) {
+	t.Parallel()
+	// One-tag call goes through the fast path; the result must match
+	// GetPagesForTag identically so callers can uniformly use the new
+	// API.
+	idx := newTestTagIndex(t)
+	idx.UpdatePage("/a", []string{"sop"}, "A")
+	idx.UpdatePage("/b", []string{"other"}, "B")
+	single := pagePaths(idx.GetPagesForTag("sop", "", nil))
+	multi := pagePaths(idx.GetPagesForAnyTag([]string{"sop"}, "", nil))
+	if !reflect.DeepEqual(single, multi) {
+		t.Errorf("single-tag divergence: single=%v multi=%v", single, multi)
+	}
+}
+
+func TestTagIndex_GetPagesForAnyTag_EmptyTagsReturnsNil(t *testing.T) {
+	t.Parallel()
+	idx := newTestTagIndex(t)
+	idx.UpdatePage("/a", []string{"sop"}, "A")
+	got := idx.GetPagesForAnyTag(nil, "", nil)
+	if got != nil {
+		t.Errorf("empty tags must return nil (nothing to match), got %v", got)
+	}
+}
+
+func TestTagIndex_GetPagesForAnyTag_RespectsExcludeAndPrefix(t *testing.T) {
+	t.Parallel()
+	idx := newTestTagIndex(t)
+	idx.UpdatePage("/qms/a", []string{"sop"}, "A")
+	idx.UpdatePage("/qms/b", []string{"rec", "archived"}, "B") // excluded
+	idx.UpdatePage("/other/c", []string{"sop"}, "C")           // out of prefix
+	idx.UpdatePage("/qms/d", []string{"tpl"}, "D")
+
+	got := pagePaths(idx.GetPagesForAnyTag(
+		[]string{"sop", "rec", "tpl"},
+		"/qms",
+		[]string{"archived"},
+	))
+	if !reflect.DeepEqual(got, []string{"/qms/a", "/qms/d"}) {
+		t.Errorf("union with prefix+exclude = %v, want [/qms/a /qms/d]", got)
+	}
+}
+
 func titleFor(idx *TagIndex, tag, path string) string {
 	for _, e := range idx.GetPagesForTag(tag, "", nil) {
 		if e.Path == path {

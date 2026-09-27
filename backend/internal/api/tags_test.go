@@ -205,6 +205,61 @@ func TestHandleTagQuery_ExcludeFilter_SingleAndMulti(t *testing.T) {
 	}
 }
 
+// ─── multi-tag OR query (parity with {lifecycle tags=…}) ────────
+
+func TestHandleTagQuery_CSV_Union(t *testing.T) {
+	t.Parallel()
+	ts := newTagsTestServer(t)
+	ts.tagIndex.UpdatePage("/a", []string{"sop"}, "A")
+	ts.tagIndex.UpdatePage("/b", []string{"rec"}, "B")
+	ts.tagIndex.UpdatePage("/c", []string{"tpl"}, "C")
+	ts.tagIndex.UpdatePage("/d", []string{"sop", "rec"}, "D") // must appear ONCE
+	ts.tagIndex.UpdatePage("/e", []string{"other"}, "E")      // no match
+
+	_, body := ts.get(t, "tag=sop,rec,tpl")
+	// Tag echoes the raw CSV; Tags is the parsed list.
+	if body.Tag != "sop,rec,tpl" {
+		t.Errorf("Tag = %q, want raw CSV", body.Tag)
+	}
+	if want := []string{"sop", "rec", "tpl"}; !equalStringSlices(body.Tags, want) {
+		t.Errorf("Tags = %v, want %v", body.Tags, want)
+	}
+	got := pathsOf(body.Pages)
+	want := []string{"/a", "/b", "/c", "/d"}
+	if !equalStringSlices(got, want) {
+		t.Errorf("Pages = %v, want %v", got, want)
+	}
+}
+
+func TestHandleTagQuery_CSV_WhitespaceTolerated(t *testing.T) {
+	t.Parallel()
+	ts := newTagsTestServer(t)
+	ts.tagIndex.UpdatePage("/a", []string{"sop"}, "A")
+	ts.tagIndex.UpdatePage("/b", []string{"rec"}, "B")
+	// URL-encoded "sop , rec" with spaces around the comma.
+	_, body := ts.get(t, "tag=sop%20,%20rec")
+	if len(body.Tags) != 2 || body.Tags[0] != "sop" || body.Tags[1] != "rec" {
+		t.Errorf("whitespace-tolerant parse: got tags=%v", body.Tags)
+	}
+	got := pathsOf(body.Pages)
+	want := []string{"/a", "/b"}
+	if !equalStringSlices(got, want) {
+		t.Errorf("Pages = %v, want %v", got, want)
+	}
+}
+
+func TestHandleTagQuery_CSV_EmptyAfterTrim_Returns400(t *testing.T) {
+	t.Parallel()
+	ts := newTagsTestServer(t)
+	// A tag= that is all commas/whitespace parses to zero tags — the
+	// handler must refuse rather than silently return everything or
+	// nothing.
+	code, _ := ts.get(t, "tag=,%20,")
+	if code != http.StatusBadRequest {
+		t.Errorf("code = %d, want 400 for empty CSV", code)
+	}
+}
+
 // ─── page metadata + author display ─────────────────────
 
 func TestHandleTagQuery_PageMetadataFromStore(t *testing.T) {
@@ -355,4 +410,16 @@ func pathsOf(pages []tagQueryPage) []string {
 		out = append(out, p.Path)
 	}
 	return out
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

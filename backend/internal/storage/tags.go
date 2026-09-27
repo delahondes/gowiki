@@ -193,6 +193,60 @@ func (idx *TagIndex) GetPagesForTag(tag, pathPrefix string, excludeTags []string
 	return result
 }
 
+// GetPagesForAnyTag returns pages that carry AT LEAST ONE of the
+// given tags (OR union), deduped by path. Same optional filters as
+// GetPagesForTag. Passing a single tag is equivalent to the older
+// GetPagesForTag call — the API layer calls this uniformly for both
+// single- and multi-tag queries, matching the lifecycle `tags=` OR
+// semantics.
+//
+// Empty `tags` returns nil (nothing to match). Callers that want to
+// "match all pages" should not use this — they should look elsewhere
+// in the index.
+func (idx *TagIndex) GetPagesForAnyTag(tags []string, pathPrefix string, excludeTags []string) []PageEntry {
+	if len(tags) == 0 {
+		return nil
+	}
+	if len(tags) == 1 {
+		// Fast path — one tag is just the original call, avoids the
+		// dedup map for the common single-tag case.
+		return idx.GetPagesForTag(tags[0], pathPrefix, excludeTags)
+	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	// Dedup by path across the multiple tag hits — a page tagged both
+	// "sop" and "rec" must appear once, not twice.
+	seen := make(map[string]struct{})
+	var result []PageEntry
+	for _, tag := range tags {
+		for _, p := range idx.TagToPages[tag] {
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			if pathPrefix != "" && !hasPathPrefix(p, pathPrefix) {
+				continue
+			}
+			if len(excludeTags) > 0 {
+				pageTags := idx.PageToTags[p]
+				if hasAnyTag(pageTags, excludeTags) {
+					continue
+				}
+			}
+			seen[p] = struct{}{}
+			title := idx.PageTitles[p]
+			if title == "" {
+				title = p
+			}
+			result = append(result, PageEntry{Path: p, Title: title})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Path < result[j].Path
+	})
+	return result
+}
+
 // hasAnyTag returns true if pageTags contains any of the tags in check.
 func hasAnyTag(pageTags, check []string) bool {
 	for _, c := range check {

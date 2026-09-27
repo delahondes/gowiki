@@ -27,6 +27,12 @@ Display a table of all pages with a given tag using a tag query:
 
 The query renders a table with columns: Page, Version, Date, Author.
 
+`tag=` accepts a comma-separated list for OR-matching — the query returns pages carrying **at least one** of the listed tags (same OR semantics as `{lifecycle tags=…}`):
+
+```
+{tag-query tag=sop,rec,tpl}
+```
+
 Optional parameters:
 - `path=/regulatory/qms` — restrict to a namespace
 - `exclude=draft,archived` — exclude pages that also have these tags
