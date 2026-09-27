@@ -23,6 +23,7 @@ import { footnotePlugin } from "./footnote"
 import { highlightPlugin } from "./highlight"
 import { flowMarkerPlugin } from "./flow_marker"
 import { bibliographyPlugin } from "./bibliography"
+import { lifecyclePlugin } from "./lifecycle"
 
 export const plugins: Plugin[] = [
   captionPlugin,
@@ -49,4 +50,5 @@ export const plugins: Plugin[] = [
   slidePlugin,
   flowMarkerPlugin,
   bibliographyPlugin,
+  lifecyclePlugin,
 ]
