@@ -174,6 +174,22 @@ const databaseNewRowProperties = [
 // still exposes the pinned value to JS-driven submits. (The caller's
 // pinnedForSubmit override already forces the value regardless — this
 // is belt-and-braces.)
+// valueHasContent reports whether a stored row value is worth showing.
+// The row NodeView drops archived-field rows whose value is empty (an
+// archived column that never held anything is just noise), but keeps
+// rows whose value is historical data.
+//
+// Handles the shapes _fields cells arrive in: null, "", "0"-for-refs,
+// arrays for multi-enum, and objects for the rare complex column.
+function valueHasContent(v: unknown): boolean {
+  if (v === null || v === undefined) return false
+  if (typeof v === "string") return v.trim() !== ""
+  if (typeof v === "number") return v !== 0
+  if (Array.isArray(v)) return v.length > 0
+  if (typeof v === "object") return Object.keys(v as object).length > 0
+  return !!v
+}
+
 export function applyPinnedValue(el: HTMLInputElement | HTMLSelectElement | HTMLDivElement, value: string): void {
   el.classList.add("gowiki-database-pinned")
   if (el instanceof HTMLSelectElement) {
@@ -302,6 +318,18 @@ const databaseStyles = `
   font-style: italic;
 }
 .gowiki-database-row-ghost td:first-child {
+  font-weight: 400 !important;
+}
+
+/* Archived row: field soft-deleted from the schema but the row still
+   carries a historical value. Rendered read-only with a subtle marker
+   so the reader keeps the data in view without being invited to edit
+   a column the backend refuses to write. Rows with an EMPTY archived
+   value are dropped entirely by the render loop. */
+.gowiki-database-row-archived {
+  color: var(--gw-color-muted);
+}
+.gowiki-database-row-archived td:first-child {
   font-weight: 400 !important;
 }
 
@@ -2334,7 +2362,11 @@ class DatabaseRowNodeView {
       const resp = await fetch(`/api/database/${encodeURIComponent(table)}/schema`)
       if (resp.ok) {
         const schema = await resp.json()
-        this.schemaFields = (schema.fields || []).filter((f: any) => !f.archived_at)
+        // Keep archived fields in the map so a historical row value
+        // is recognised as belonging to a real (soft-deleted) column
+        // rather than a genuine ghost. Rendering decides how to
+        // present each shape (skip when empty, read-only otherwise).
+        this.schemaFields = schema.fields || []
       }
     } catch {
       /* ignore */
@@ -2359,23 +2391,36 @@ class DatabaseRowNodeView {
     for (const f of this.schemaFields) fieldMap.set(f.name, f)
 
     for (const [key, val] of Object.entries(fields)) {
-      const tr = document.createElement("tr")
       const f = fieldMap.get(key)
-      // Ghost field: present in the historical row but no longer in the
-      // current schema (someone hard-deleted the field after this version
-      // was saved). Render dimmed so the reader knows the value is orphan.
+      // Ghost = key not in the current schema at all (someone
+      // hard-deleted the field). Archived = key still in the schema
+      // but soft-deleted (archived_at set); the value is historical.
       const isGhost = !f && key !== "id"
+      const isArchived = !!(f && f.archived_at)
+      // Skip archived fields whose row has no meaningful value — an
+      // empty archived column is just noise on the reader's page. A
+      // value still worth preserving keeps its row but renders
+      // read-only below.
+      if (isArchived && !valueHasContent(val)) continue
+
+      const tr = document.createElement("tr")
       if (isGhost) tr.className = "gowiki-database-row-ghost"
+      if (isArchived) tr.className = "gowiki-database-row-archived"
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = isGhost ? `${key} (removed)` : f?.label || key
+      if (isGhost) tdKey.textContent = `${key} (removed)`
+      else if (isArchived) tdKey.textContent = `${f.label || key} (archived)`
+      else tdKey.textContent = f?.label || key
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
 
-      if ((f && f.type === "auto_increment") || key === "id") {
-        // auto_increment / system id: read-only.
+      if ((f && f.type === "auto_increment") || key === "id" || isArchived) {
+        // auto_increment / system id / archived column: read-only.
+        // Archived columns must never accept edits — the backend
+        // refuses updates on them and a stale write here would just
+        // 400 back at the user on save.
         tdVal.textContent = String(val)
       } else {
         // Editable input, type-aware.
@@ -2622,14 +2667,20 @@ class DatabaseRowNodeView {
     for (const f of this.schemaFields) fieldMap.set(f.name, f)
 
     for (const [key, val] of Object.entries(fields)) {
-      const tr = document.createElement("tr")
       const f = fieldMap.get(key)
       const isGhost = !f && key !== "id"
+      const isArchived = !!(f && f.archived_at)
+      if (isArchived && !valueHasContent(val)) continue
+
+      const tr = document.createElement("tr")
       if (isGhost) tr.className = "gowiki-database-row-ghost"
+      if (isArchived) tr.className = "gowiki-database-row-archived"
 
       const tdKey = document.createElement("td")
       tdKey.style.fontWeight = "600"
-      tdKey.textContent = isGhost ? `${key} (removed)` : f?.label || key
+      if (isGhost) tdKey.textContent = `${key} (removed)`
+      else if (isArchived) tdKey.textContent = `${f.label || key} (archived)`
+      else tdKey.textContent = f?.label || key
       tr.appendChild(tdKey)
 
       const tdVal = document.createElement("td")
@@ -2666,8 +2717,11 @@ class DatabaseRowNodeView {
         tdVal.textContent = String(val)
       }
 
-      // Inline editing forbidden for auto_increment and system id fields.
-      if (!(f && f.type === "auto_increment") && key !== "id") {
+      // Inline editing forbidden for auto_increment / system id and
+      // for archived columns (the backend refuses writes to archived
+      // fields, and a dbl-click that opened an editor would just
+      // 400 on save).
+      if (!(f && f.type === "auto_increment") && key !== "id" && !isArchived) {
         tdVal.className = "gowiki-database-editable-value"
         tdVal.addEventListener("dblclick", () => {
           this.inlineEdit(tdVal, f, String(key), String(val))
