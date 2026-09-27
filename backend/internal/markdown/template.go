@@ -26,9 +26,12 @@ import (
 
 var (
 	// templateMarkerRe matches a {template} directive line — the marker that
-	// separates the tracking block from the copiable payload. No args yet
-	// but the directive family may grow.
-	templateMarkerRe = regexp.MustCompile(`^\s*\{template(?:\s[^{}]*)?\}\s*$`)
+	// separates the tracking block from the copiable payload. The optional
+	// arg list may include `{{title}}` / `{{slug}}` tokens (`target=…`),
+	// so the arg matcher accepts braces; the trailing `}` still has to be
+	// the last non-whitespace character on the line, which is true for
+	// every well-formed marker line (the directive stands alone).
+	templateMarkerRe = regexp.MustCompile(`^\s*\{template(?:\s.*)?\}\s*$`)
 
 	// templateTitleRe matches a {template-title} directive line. The
 	// directive is a marker prefix on the next heading — this line is
@@ -66,6 +69,118 @@ func IsTemplatePage(content string) bool {
 	}
 	return false
 }
+
+// TemplateTargetPattern extracts the `target=` attribute of the
+// {template} directive, when set. Returns "" for a bare
+// `{template}` marker or when the template page has no marker at all.
+// The pattern is returned verbatim (may still contain {{title}} /
+// {{slug}} tokens — resolution happens at creation time).
+//
+// Purposely parses the marker line by hand rather than reusing
+// templateMarkerRe: that regex refuses `{` / `}` inside the arg list,
+// which would reject a pattern like `target=/qms/{{slug}}` that
+// carries a template variable. The strict marker regex is fine for
+// "does this page have a template marker at all" (IsTemplatePage),
+// but for attribute extraction we need the looser walk below.
+func TemplateTargetPattern(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "{template") {
+			continue
+		}
+		// Bare `{template}` — no args, no target.
+		if trimmed == "{template}" {
+			return ""
+		}
+		// Must be `{template ...}` — a space right after the name and
+		// a closing `}` at the very end of the line. Anything else is
+		// not a marker line (could be `{template-title}`, an inline
+		// mention, or malformed).
+		if len(trimmed) < len("{template }") || trimmed[len("{template")] != ' ' || trimmed[len(trimmed)-1] != '}' {
+			continue
+		}
+		args := trimmed[len("{template ") : len(trimmed)-1]
+		for _, m := range directiveKVRe.FindAllStringSubmatch(args, -1) {
+			if m[1] == "target" {
+				if m[2] != "" {
+					return m[2]
+				}
+				return m[3]
+			}
+		}
+		return ""
+	}
+	return ""
+}
+
+// ResolveTemplateTargetPattern expands the {{title}} / {{slug}} tokens
+// a pattern may carry. Kept minimal on purpose — mirrors the frontend
+// helper in template.ts. Unknown names stay literal so a typo in the
+// pattern shows up in the resulting path instead of silently
+// becoming "".
+func ResolveTemplateTargetPattern(pattern, title string) string {
+	if pattern == "" || !strings.Contains(pattern, "{{") {
+		return pattern
+	}
+	return templateVarRe.ReplaceAllStringFunc(pattern, func(whole string) string {
+		m := templateVarRe.FindStringSubmatch(whole)
+		if m == nil {
+			return whole
+		}
+		name := strings.ToLower(strings.TrimSpace(m[1]))
+		switch name {
+		case "title":
+			return title
+		case "slug":
+			return slugifyForTarget(title)
+		}
+		return whole
+	})
+}
+
+// slugifyForTarget lowercases, ASCII-folds, and hyphenates the input
+// for {{slug}} substitution in target patterns. Kept in step with the
+// frontend `slugify` — the two must agree or a target= pattern
+// authored through the UI would resolve one way in the browser and
+// another way on server-side callers (MCP).
+func slugifyForTarget(s string) string {
+	// Best-effort ASCII fold: replace common Latin accents. Keeping
+	// this dependency-free is on purpose — the UI's Unicode NFKD path
+	// is more thorough but requires a full unicode table.
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == 'à', r == 'â', r == 'ä':
+			b.WriteRune('a')
+		case r == 'é', r == 'è', r == 'ê', r == 'ë':
+			b.WriteRune('e')
+		case r == 'ì', r == 'í', r == 'î', r == 'ï':
+			b.WriteRune('i')
+		case r == 'ò', r == 'ó', r == 'ô', r == 'ö':
+			b.WriteRune('o')
+		case r == 'ù', r == 'ú', r == 'û', r == 'ü':
+			b.WriteRune('u')
+		case r == 'ç':
+			b.WriteRune('c')
+		case r == 'ñ':
+			b.WriteRune('n')
+		default:
+			b.WriteRune('-')
+		}
+	}
+	// Collapse runs of `-` and trim.
+	out := b.String()
+	for strings.Contains(out, "--") {
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	return strings.Trim(out, "-")
+}
+
+// (templateVarRe is declared in database.go and shared across the
+// markdown package — see ResolveTemplateTargetPattern above.)
 
 // SplitTemplatePayload returns the tracking block (above {template}) and
 // the copiable payload (below it), minus the marker line itself. Any blank

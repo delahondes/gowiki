@@ -269,3 +269,68 @@ body`
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+// {template target=…} lifts an author-supplied destination pattern
+// out of the template body. Bare markers and pages without markers
+// return empty.
+
+func TestTemplateTargetPattern_Bare(t *testing.T) {
+	t.Parallel()
+	if got := TemplateTargetPattern("# heading\n\n{template}\n\nbody"); got != "" {
+		t.Errorf("bare marker should have no target, got %q", got)
+	}
+}
+
+func TestTemplateTargetPattern_Simple(t *testing.T) {
+	t.Parallel()
+	got := TemplateTargetPattern("# heading\n\n{template target=/qms/campaigns/{{slug}}}\n\nbody")
+	if got != "/qms/campaigns/{{slug}}" {
+		t.Errorf("got %q, want /qms/campaigns/{{slug}}", got)
+	}
+}
+
+func TestTemplateTargetPattern_Quoted(t *testing.T) {
+	t.Parallel()
+	got := TemplateTargetPattern(`{template target="/qms/campaigns with space/{{slug}}"}`)
+	if got != "/qms/campaigns with space/{{slug}}" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestTemplateTargetPattern_NoMarker(t *testing.T) {
+	t.Parallel()
+	if got := TemplateTargetPattern("no marker here"); got != "" {
+		t.Errorf("no-marker page should return empty, got %q", got)
+	}
+}
+
+// {{title}} / {{slug}} resolution — nothing else is recognised.
+
+func TestResolveTemplateTargetPattern_TitleAndSlug(t *testing.T) {
+	t.Parallel()
+	pat := "/qms/campaigns/{{slug}}/{{title}}"
+	got := ResolveTemplateTargetPattern(pat, "Café Alpha & Beta")
+	// title stays verbatim; slug strips diacritics + non-alnum runs
+	want := "/qms/campaigns/cafe-alpha-beta/Café Alpha & Beta"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestResolveTemplateTargetPattern_UnknownStaysLiteral(t *testing.T) {
+	t.Parallel()
+	// Typos and unsupported names remain in the string so the author
+	// notices at the resulting URL rather than silently getting "".
+	got := ResolveTemplateTargetPattern("/x/{{ptah}}", "anything")
+	if got != "/x/{{ptah}}" {
+		t.Errorf("unknown variable must stay literal, got %q", got)
+	}
+}
+
+func TestResolveTemplateTargetPattern_NoTokensPassthrough(t *testing.T) {
+	t.Parallel()
+	got := ResolveTemplateTargetPattern("/x/y", "irrelevant")
+	if got != "/x/y" {
+		t.Errorf("no tokens: got %q, want /x/y", got)
+	}
+}

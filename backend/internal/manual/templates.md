@@ -128,6 +128,8 @@ Four directives make this up. They live alongside the tracking block on a templa
 
 Every `{template-*}` directive above the horizontal rule in the old hand-copy model is replaced by a single click on the **Create document** button rendered next to the `{template}` marker. The dialog asks for a destination path and title, offers optional reviewflow overrides, and refuses upfront when the template's own reviewflow isn't fully validated. Programmatic callers get the same guarantee via the MCP `create_page_from_template` tool.
 
+**Pinned destination — `{template target=…}`.** A template can pin the namespace its instances land in by adding `target=/some/path/{{slug}}` to the marker. When set, the create dialog pre-fills the destination field with the pattern and locks it (read-only). `{{title}}` and `{{slug}}` expand at creation time against the title the author types; `{{slug}}` is the lowercased, ASCII-folded, hyphenated form (e.g. "Alpha Beta" → `alpha-beta`). The MCP `create_page_from_template` tool refuses any caller-supplied `path` that doesn't match the resolved target — so a template that decides "instances live under `/qms/campaigns/`" carries that rule with it, whether the caller is a human clicking the dialog or an agent calling the tool.
+
 ### Behaviour we rely on
 
 - **The version is frozen at creation.** The `?v=N` link in the stamp points at the template's page-version *at that moment*. A document from 2024 keeps announcing the form as it stood in 2024, no matter what the template does afterwards. The reviewflow VERSIONTAG is used when present (`, version 1.0`); a template without a reviewflow falls back to the raw page revision (`, revision N`) — the wording deliberately differs so the two numbers don't look alike.

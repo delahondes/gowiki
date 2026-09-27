@@ -174,4 +174,36 @@ describe("database-newrow", () => {
     expect(rt.isStable).toBe(true)
     expect(countNodes(rt.doc, "database_newrow")).toBe(1)
   })
+
+  it("pinned field attrs survive parse → serialize (round-trip stable)", () => {
+    const rt = roundTrip("{database-newrow table=software_validation software={{id}} owner=alice}\n")
+    expect(rt.isStable).toBe(true)
+    // Every non-`table` attr lands in _pinned as a JSON blob.
+    let node: any = null
+    rt.doc.descendants((n) => {
+      if (!node && n.type.name === "database_newrow") {
+        node = n
+        return false
+      }
+    })
+    expect(node).not.toBeNull()
+    const pinned = JSON.parse(node.attrs._pinned)
+    expect(pinned.software).toBe("{{id}}")
+    expect(pinned.owner).toBe("alice")
+  })
+
+  it("pinned attrs serialize in alphabetical order (determinism)", () => {
+    const rt = roundTrip("{database-newrow table=t zebra=z alpha=a}\n")
+    expect(rt.isStable).toBe(true)
+    const alphaIdx = rt.first.indexOf("alpha=")
+    const zebraIdx = rt.first.indexOf("zebra=")
+    expect(alphaIdx).toBeGreaterThan(-1)
+    expect(zebraIdx).toBeGreaterThan(alphaIdx)
+  })
+
+  it("values containing whitespace are quoted", () => {
+    const rt = roundTrip('{database-newrow table=t comment="pinned reason with spaces"}\n')
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).toMatch(/comment="pinned reason with spaces"/)
+  })
 })

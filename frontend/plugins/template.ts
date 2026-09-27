@@ -133,6 +133,7 @@ class TemplateMarkerNodeView {
       templateTitle: this.status?.templateTitle || "",
       titlePattern: this.status?.titlePattern || "",
       versionTag: this.status?.versionTag || "",
+      targetPattern: String(this.node.attrs.target || "").trim(),
     })
   }
 
@@ -342,6 +343,38 @@ export function extractTemplateTitlePattern(markdown: string): string {
   return ""
 }
 
+// slugify normalises the author-supplied title into a URL-safe slug
+// for {{slug}} substitution in a template's target= pattern. Kept
+// deliberately conservative: lowercase, ASCII-fold via NFKD, hyphenate
+// whitespace + non-alphanumeric runs, trim leading/trailing dashes.
+// Anything more exotic (Unicode-preserving slugs, custom casings) can
+// be layered later without breaking existing rules.
+function slugify(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+// resolveTargetPattern expands the template variables the target=
+// pattern may reference. Kept minimal on purpose — the author supplies
+// the title in the dialog, the pattern uses {{title}} / {{slug}}, and
+// nothing else is guaranteed at dialog time. Unknown names stay
+// literal so a typo is visible in the resulting path rather than
+// silently becoming "".
+export function resolveTargetPattern(pattern: string, title: string): string {
+  if (!pattern || pattern.indexOf("{{") === -1) return pattern
+  return pattern.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (whole, rawName) => {
+    const name = String(rawName).trim().toLowerCase()
+    if (name === "title") return title
+    if (name === "slug") return slugify(title)
+    return whole
+  })
+}
+
 // ── Create document dialog ───────────────────────────────────────────
 
 interface CreateDialogOpts {
@@ -349,6 +382,11 @@ interface CreateDialogOpts {
   templateTitle: string
   titlePattern: string
   versionTag: string
+  // Pinned destination from the {template target=…} attr, if any.
+  // May carry {{slug}} / {{title}} tokens that resolve at dialog
+  // submit time (the author-supplied title feeds `slug`). When
+  // present, the destination field pre-fills and locks.
+  targetPattern?: string
 }
 
 function openCreateFromTemplateDialog(opts: CreateDialogOpts) {
@@ -375,6 +413,17 @@ function openCreateFromTemplateDialog(opts: CreateDialogOpts) {
   pathInput.type = "text"
   pathInput.className = "gowiki-link-modal-input"
   pathInput.placeholder = "/namespace/document-name"
+  // Pinned target: pre-fill and lock. {{title}} / {{slug}} in the
+  // pattern resolve after the title field settles — see submit().
+  const targetPattern = (opts.targetPattern || "").trim()
+  if (targetPattern) {
+    // Render the pattern as-is so the author sees the rule; the
+    // resolution happens on submit.
+    pathInput.value = targetPattern
+    pathInput.readOnly = true
+    pathInput.title = "Destination pinned by the template's target= attribute"
+    pathInput.classList.add("gowiki-template-dialog-pinned")
+  }
 
   // Title.
   const titleLabel = document.createElement("label")
@@ -445,8 +494,12 @@ function openCreateFromTemplateDialog(opts: CreateDialogOpts) {
 
   async function submit() {
     warning.textContent = ""
-    let path = pathInput.value.trim()
     const title = titleInput.value.trim()
+    // When target= is pinned, resolve {{title}} / {{slug}} against
+    // the title the author just typed. This happens now (not at
+    // parse time) so the author sees the pattern in the field and
+    // the resolved path only becomes real on submit.
+    let path = targetPattern ? resolveTargetPattern(targetPattern, title) : pathInput.value.trim()
     const summary = summaryInput.value.trim()
     if (!path) {
       warning.textContent = "Destination path is required."
@@ -651,6 +704,16 @@ const templateStyles = `
   min-width: 480px;
 }
 
+/* Pinned destination — the template's target= attribute is a rule the
+   author fixed on the template itself; the create dialog surfaces the
+   pattern read-only so nobody accidentally emits documents somewhere
+   the template didn't intend. */
+.gowiki-template-dialog-pinned {
+  background: var(--gw-color-surface, #f5f5f5) !important;
+  color: var(--gw-color-muted, #666) !important;
+  cursor: not-allowed !important;
+}
+
 .gowiki-template-dialog-src {
   color: var(--gw-color-muted);
   font-size: 12px;
@@ -686,7 +749,17 @@ const templateStyles = `
 
 // ── Properties ───────────────────────────────────────────────────────
 
-const templateMarkerProperties = [] as any[]
+const templateMarkerProperties = [
+  {
+    name: "target",
+    label: "Destination path",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => String(v ?? ""),
+    helpText:
+      "Optional. Where instances of this template land, e.g. /regulatory/qms/campaigns/{{slug}}. Pinned target locks the destination field in the create dialog.",
+  },
+] as any[]
 const templateTitleProperties = [] as any[]
 const templateStampProperties = [] as any[]
 const templateReviewflowProperties = [
@@ -710,11 +783,28 @@ export const templatePlugin: WikiPlugin = {
         template_marker: {
           group: "block",
           atom: true,
-          attrs: {},
-          toDOM() {
-            return ["div", { class: "gowiki-template-marker" }, "Template — payload below"]
+          attrs: {
+            // Optional pinned destination path. When set, the create
+            // dialog pre-fills the "New page path" field and locks it
+            // — a template that emits {{path}} of a rule lives with
+            // the rule, and the destination is part of that rule.
+            target: { default: "" },
           },
-          parseDOM: [{ tag: "div.gowiki-template-marker" }],
+          toDOM(node: PMNode) {
+            return [
+              "div",
+              { class: "gowiki-template-marker", "data-target": node.attrs.target || "" },
+              "Template — payload below",
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "div.gowiki-template-marker",
+              getAttrs(dom: HTMLElement) {
+                return { target: dom.getAttribute("data-target") || "" }
+              },
+            },
+          ],
         },
         template_title: {
           group: "block",
@@ -785,8 +875,9 @@ export const templatePlugin: WikiPlugin = {
 
     // Markdown → PM.
     reg.registerText("template_marker", {
-      run(ctx) {
-        ctx.push(ctx.schema.nodes.template_marker.create({}))
+      run(ctx, tok) {
+        const attrs = tok.meta?.attrs ?? {}
+        ctx.push(ctx.schema.nodes.template_marker.create({ target: attrs.target ?? "" }))
       },
     })
     reg.registerText("template_title", {
@@ -818,8 +909,12 @@ export const templatePlugin: WikiPlugin = {
 
     // PM → Markdown.
     reg.registerPMNode("template_marker", {
-      print() {
-        return `{template}\n\n`
+      print(node) {
+        const target = String(node.attrs.target || "").trim()
+        if (!target) return `{template}\n\n`
+        const needsQuote = /[\s"]/.test(target)
+        const val = needsQuote ? `"${target.replace(/"/g, '\\"')}"` : target
+        return `{template target=${val}}\n\n`
       },
     })
     reg.registerPMNode("template_title", {

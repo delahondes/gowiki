@@ -155,6 +155,52 @@ const databaseNewRowProperties = [
   },
 ]
 
+// applyPinnedValue writes `value` into whatever input the newrow form
+// mapped for a given field name and locks it. Handles the three
+// shapes the form emits: real HTMLInputElement / HTMLSelectElement,
+// and the div-wrappers used for image and multi_enum (which expose a
+// `.value` accessor). For a SELECT whose target option hasn't loaded
+// yet (async foreign-key populations), prepend a synthetic option so
+// the reader sees the pinned value even mid-load.
+function applyPinnedValue(el: HTMLInputElement | HTMLSelectElement | HTMLDivElement, value: string): void {
+  el.classList.add("gowiki-database-pinned")
+  if (el instanceof HTMLSelectElement) {
+    // Prepend a synthetic option showing the pinned value only when no
+    // matching option is present. The async foreign-key loaders APPEND
+    // their options so the synthetic one keeps its position at index 0
+    // and can safely stay selected.
+    const hasMatch = Array.from(el.options).some((o) => o.value === value)
+    if (!hasMatch) {
+      const opt = document.createElement("option")
+      opt.value = value
+      opt.textContent = value
+      opt.selected = true
+      el.insertBefore(opt, el.firstChild)
+    }
+    el.value = value
+    el.disabled = true
+    return
+  }
+  if (el instanceof HTMLInputElement) {
+    el.value = value
+    el.readOnly = true
+    // readOnly on <input type="text"> keeps the value in form submits
+    // but blocks edits. For non-text inputs (date, number) readOnly
+    // isn't fully supported by every browser — pair with disabled
+    // for safety, at the cost of the value being excluded from a
+    // native form submit. We POST via JSON with pinnedForSubmit as
+    // an override, so a disabled input is fine.
+    if (el.type !== "text") el.disabled = true
+    return
+  }
+  // Div wrappers (image, multi_enum) — set the exposed .value, then
+  // grey out interactive children. The wrapper doesn't have a real
+  // "disabled" concept, so we intercept clicks with pointer-events.
+  ;(el as unknown as { value: string }).value = value
+  el.style.pointerEvents = "none"
+  el.style.opacity = "0.6"
+}
+
 // ── Styles ──
 
 const databaseStyles = `
@@ -292,6 +338,21 @@ const databaseStyles = `
   color: var(--gw-color-text);
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* A field the directive text pinned (e.g. software={{id}}). Read-only
+   for the reader; the visible cue is a lock glyph in the label and a
+   muted background so it doesn't look like an editable field the
+   author simply forgot to fill. */
+.gowiki-database-pinned {
+  background: var(--gw-color-surface, #f5f5f5) !important;
+  color: var(--gw-color-muted, #666) !important;
+  cursor: not-allowed !important;
+}
+.gowiki-database-form-field:has(.gowiki-database-pinned) label::after {
+  content: " \u{1F512}";
+  color: var(--gw-color-muted, #666);
+  font-size: 11px;
 }
 
 .gowiki-database-form-actions {
@@ -1866,15 +1927,35 @@ class DatabaseQueryNodeView {
 class DatabaseNewRowNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
 
-  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+  constructor(node: PMNode, view: EditorView, _getPos: () => number | undefined) {
     this.node = node
+    this.view = view
 
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-database-newrow"
     this.dom.contentEditable = "false"
 
     this.render()
+  }
+
+  // resolvedPinned parses the JSON blob and interpolates {{name}}
+  // tokens against the current document's template context (globals
+  // + database-row _fields). Called once per render — mirroring the
+  // same policy database-query uses for its filter attr.
+  private resolvedPinned(): Record<string, string> {
+    let raw: Record<string, string> = {}
+    try {
+      raw = JSON.parse(this.node.attrs._pinned || "{}") as Record<string, string>
+    } catch {
+      raw = {}
+    }
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(raw)) {
+      out[k] = expandTemplateVars(String(v ?? ""), this.view)
+    }
+    return out
   }
 
   private render() {
@@ -2061,6 +2142,23 @@ class DatabaseNewRowNodeView {
       form.appendChild(row)
     }
 
+    // Apply pinned field values from the directive's extra attrs.
+    // Pinned = the author wrote `{database-newrow table=X foo={{id}}}`
+    // — foo becomes read-only pre-filled with the resolved value.
+    // A pinned key referencing an unknown field is silently ignored;
+    // the schema check on submit will already say "no such column"
+    // if the author typo'd, and rendering an error inline for every
+    // typo would be a lot of noise on the common case of a stale
+    // directive.
+    const pinned = this.resolvedPinned()
+    const pinnedForSubmit: Record<string, string> = {}
+    for (const [key, value] of Object.entries(pinned)) {
+      const el = inputs.get(key)
+      if (!el) continue
+      pinnedForSubmit[key] = value
+      applyPinnedValue(el, value)
+    }
+
     const actions = document.createElement("div")
     actions.className = "gowiki-database-form-actions"
 
@@ -2075,6 +2173,12 @@ class DatabaseNewRowNodeView {
       for (const f of fields) {
         const el = inputs.get(f.name)
         if (el) fieldValues[f.name] = el.value
+      }
+      // Belt-and-braces: pinned values always win on submit — even if
+      // some hostile UI trick changed a "disabled" input's value in
+      // between apply and submit. The directive is a rule.
+      for (const [k, v] of Object.entries(pinnedForSubmit)) {
+        fieldValues[k] = v
       }
 
       try {
@@ -3162,6 +3266,14 @@ export const databasePlugin: WikiPlugin = {
           atom: true,
           attrs: {
             table: { default: "" },
+            // JSON-encoded map of field_name -> raw value string. Values
+            // may carry `{{name}}` tokens that resolve at render time
+            // against the current document's template context (globals
+            // and database-row fields). Pinned fields render as the
+            // pre-selected option and are locked read-only so the
+            // author's intent — "on THIS page you create against
+            // THIS row" — becomes a rule, not a suggestion.
+            _pinned: { default: "{}" },
           },
           toDOM(node: PMNode) {
             return [
@@ -3169,6 +3281,7 @@ export const databasePlugin: WikiPlugin = {
               {
                 class: "gowiki-database-newrow",
                 "data-table": node.attrs.table ?? "",
+                "data-pinned": node.attrs._pinned || "{}",
               },
               `New row form: ${node.attrs.table || "(no table)"}`,
             ]
@@ -3177,7 +3290,10 @@ export const databasePlugin: WikiPlugin = {
             {
               tag: "div.gowiki-database-newrow",
               getAttrs(dom: HTMLElement) {
-                return { table: dom.getAttribute("data-table") || "" }
+                return {
+                  table: dom.getAttribute("data-table") || "",
+                  _pinned: dom.getAttribute("data-pinned") || "{}",
+                }
               },
             },
           ],
@@ -3255,6 +3371,11 @@ export const databasePlugin: WikiPlugin = {
       tokenType: "database_newrow",
       nodeType: "database_newrow",
       properties: databaseNewRowProperties,
+      // Every non-`table` attribute is a pinned field value —
+      // arbitrary column names, so we can't enumerate them ahead of
+      // time. collectExtra passes them through to the token's attrs
+      // map; registerText below packs them into the `_pinned` JSON.
+      collectExtra: true,
     })
 
     // database-row is handled by a custom markdown-it block rule (see below)
@@ -3362,9 +3483,20 @@ export const databasePlugin: WikiPlugin = {
     reg.registerText("database_newrow", {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
+        // Every attribute except `table` is treated as a pinned field
+        // value. The directive parser accepts arbitrary key=value
+        // pairs; the schema stores them as one JSON blob so the round
+        // trip is stable and the NodeView can apply them without
+        // enumerating column names in advance.
+        const pinned: Record<string, string> = {}
+        for (const [k, v] of Object.entries(attrs)) {
+          if (k === "table" || v == null) continue
+          pinned[k] = String(v)
+        }
         ctx.push(
           ctx.schema.nodes.database_newrow.create({
             table: attrs.table ?? "",
+            _pinned: JSON.stringify(pinned),
           })
         )
       },
@@ -3429,7 +3561,22 @@ export const databasePlugin: WikiPlugin = {
 
     reg.registerPMNode("database_newrow", {
       print(node) {
-        return `{database-newrow table=${node.attrs.table}}\n\n`
+        const parts = [`table=${node.attrs.table}`]
+        // Emit pinned field attrs in sorted-key order so identical
+        // rules serialize identically (deterministic round-trip).
+        let pinned: Record<string, string> = {}
+        try {
+          pinned = JSON.parse(node.attrs._pinned || "{}") as Record<string, string>
+        } catch {
+          pinned = {}
+        }
+        for (const k of Object.keys(pinned).sort()) {
+          const v = pinned[k]
+          if (v == null || v === "") continue
+          const needsQuote = /[\s"]/.test(v)
+          parts.push(`${k}=${needsQuote ? `"${v.replace(/"/g, '\\"')}"` : v}`)
+        }
+        return `{database-newrow ${parts.join(" ")}}\n\n`
       },
     })
 

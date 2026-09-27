@@ -113,6 +113,26 @@ func (s *Server) createPageFromTemplate(req TemplateCreateRequest, author string
 		return nil, &TemplateCreateError{Kind: "not_template", Message: fmt.Sprintf("%s is not a template (no {template} directive)", tplPath)}
 	}
 
+	// When the template pins a destination via `{template target=…}`,
+	// the caller's `path` must match the resolved pattern. This
+	// converts the target from a nice-to-have suggestion into a rule
+	// carried by the template itself. Refusing loudly beats letting a
+	// programmatic caller emit documents into the wrong namespace.
+	if targetPattern := markdown.TemplateTargetPattern(tpl.Markdown); targetPattern != "" {
+		wantPath := strings.TrimSpace(markdown.ResolveTemplateTargetPattern(targetPattern, title))
+		if wantPath != "" {
+			if !strings.HasPrefix(wantPath, "/") {
+				wantPath = "/" + wantPath
+			}
+			if wantPath != dstPath {
+				return nil, &TemplateCreateError{
+					Kind:    "invalid_target",
+					Message: fmt.Sprintf("template %s pins its target to %s (from `target=%s`); caller asked for %s", tplPath, wantPath, targetPattern, dstPath),
+				}
+			}
+		}
+	}
+
 	// Verify the template's reviewflow, when it has one, is fully validated.
 	// A template with NO reviewflow is legitimate (spec §5) — just skip the
 	// check and stamp with the page-version fallback.

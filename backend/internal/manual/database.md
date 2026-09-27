@@ -137,6 +137,18 @@ After filling in the form and clicking **Create**, the row appears in the query 
 
 For page-bound tables, submitting the form also creates a new wiki page from the table's template.
 
+### Pinned field values
+
+Any attribute other than `table=` on `{database-newrow}` is treated as a **pinned field value** — the form pre-fills that field and locks it read-only. Values may reference `{{fieldname}}` tokens from the current page's context (same resolver as `{database-query filter=…}`), so a form on a page bound to one row can pin its own identity into the new row:
+
+```markdown
+{database-newrow table=software_validation software={{id}}}
+```
+
+On the page for software `gowiki`, this form pre-selects `software = gowiki` and prevents changing it — so a validation campaign created from here CANNOT be silently attached to another software. The pinned value is always sent on submit, even if the DOM was tampered with; the directive is a rule.
+
+Pinned fields must exist on the target table's schema; unknown names are silently ignored (the server-side schema check catches the typo on submit).
+
 ## 1. Page-bound rows
 
 A page can be linked to a database row using `{database-row}`:

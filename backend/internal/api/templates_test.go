@@ -347,6 +347,69 @@ func TestCreateFromTemplate_MissingTitle_409(t *testing.T) {
 	}
 }
 
+// When the template pins `target=`, the caller MUST land at the
+// resolved path — otherwise the emitted document could end up in the
+// wrong namespace and the template's authored rule would be silently
+// ignored.
+
+func TestCreateFromTemplate_TargetPinnedMismatch_Refuses(t *testing.T) {
+	t.Parallel()
+	s, contentRoot := newTemplateTestServer(t, false)
+	writeContent(t, contentRoot, "docs/_template.md",
+		"{template target=/docs/campaigns/{{slug}}}\n\n{template-title}\n# Placeholder\n\nBody.\n",
+	)
+
+	// Caller asks for a path the template's target= doesn't sanction.
+	rec := postCreate(t, s, TemplateCreateRequest{
+		TemplatePath: "/docs/_template",
+		Path:         "/docs/elsewhere",
+		Title:        "Alpha",
+		Summary:      "creating",
+	}, "alice")
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (target mismatch), body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Kind  string `json:"kind"`
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Kind != "invalid_target" {
+		t.Errorf("kind = %q, want invalid_target", body.Kind)
+	}
+	if !strings.Contains(body.Error, "target") {
+		t.Errorf("error message should explain the target pin, got %q", body.Error)
+	}
+	// No document created.
+	if s.store.Exists("docs/elsewhere") {
+		t.Errorf("document must not have been created when target= refused")
+	}
+}
+
+func TestCreateFromTemplate_TargetPinnedMatch_Creates(t *testing.T) {
+	t.Parallel()
+	s, contentRoot := newTemplateTestServer(t, false)
+	writeContent(t, contentRoot, "docs/_template.md",
+		"{template target=/docs/campaigns/{{slug}}}\n\n{template-title}\n# Placeholder\n\nBody.\n",
+	)
+
+	// Caller respects the pinned target.
+	rec := postCreate(t, s, TemplateCreateRequest{
+		TemplatePath: "/docs/_template",
+		Path:         "/docs/campaigns/alpha-beta",
+		Title:        "Alpha Beta",
+		Summary:      "creating",
+	}, "alice")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !s.store.Exists("docs/campaigns/alpha-beta") {
+		t.Errorf("document should have been created at the pinned target")
+	}
+}
+
 func TestCreateFromTemplate_NotAuthenticated_401(t *testing.T) {
 	t.Parallel()
 	s, contentRoot := newTemplateTestServer(t, false)

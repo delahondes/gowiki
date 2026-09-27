@@ -154,6 +154,32 @@ describe("full template payload — combined directives", () => {
     expect(countNodes(rt.doc, "template_reviewflow")).toBe(1)
   })
 
+  it("{template target=…} preserves the pin through round-trip", () => {
+    // A target= pattern on {template} carries {{slug}} / {{title}}
+    // tokens that MUST NOT be resolved at parse time (they resolve
+    // when a document is created from the template). Round-trip
+    // preserves the pattern verbatim.
+    const src = "{template target=/qms/campaigns/{{slug}}}\n\nBody\n"
+    const rt = roundTrip(src)
+    expect(rt.isStable).toBe(true)
+    expect(countNodes(rt.doc, "template_marker")).toBe(1)
+    let marker: any = null
+    rt.doc.descendants((n) => {
+      if (!marker && n.type.name === "template_marker") {
+        marker = n
+        return false
+      }
+    })
+    expect(marker.attrs.target).toBe("/qms/campaigns/{{slug}}")
+    expect(rt.first).toMatch(/target=\/qms\/campaigns\/\{\{slug\}\}/)
+  })
+
+  it("bare {template} still serializes without target=", () => {
+    const rt = roundTrip("{template}\n\nBody\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).not.toMatch(/target=/)
+  })
+
   it("variable placeholders {{VAR}} parse to template_var atoms and round-trip", () => {
     // Template variable substitution happens at document creation time on
     // the backend — the frontend represents each {{X}} as a template_var
