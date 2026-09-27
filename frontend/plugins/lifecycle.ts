@@ -89,36 +89,92 @@ const lifecycleProperties = [
 // pages matching X, when Y, do Z."
 const ATTR_ORDER = ["scope", "tags", "exclude_tags", "when", "title", "assign", "priority", "action"]
 
+// Rendering follows specs/directive-general-rendering.md: a discreet
+// grey box (never yellow — yellow is reserved for the property
+// panel). The box is reader-facing; the raw attributes are behind
+// the panel, not on the page.
 const styles = `
 .gowiki-lifecycle {
-  background: #fff8e1;
-  border: 1px solid #f0d060;
-  border-left: 4px solid #c19a2a;
-  border-radius: 4px;
-  padding: 10px 14px;
+  background: var(--gw-color-surface, #f3f4f6);
+  border: 1px solid var(--gw-color-border, #d1d5db);
+  border-left: 3px solid var(--gw-color-border-strong, #9ca3af);
+  border-radius: 3px;
+  padding: 8px 12px;
   margin: 0.6em 0;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
   line-height: 1.4;
-  color: #4a3d10;
+  color: var(--gw-color-text, #1f2937);
 }
 .gowiki-lifecycle-header {
-  font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #7a5f10;
-  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+  color: var(--gw-color-muted, #6b7280);
+  margin-bottom: 2px;
 }
-.gowiki-lifecycle-body { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; }
-.gowiki-lifecycle-key { color: #7a5f10; }
-.gowiki-lifecycle-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #2a2308; }
-.gowiki-lifecycle-empty { color: #b09000; font-style: italic; }
+.gowiki-lifecycle-status {
+  color: var(--gw-color-muted, #6b7280);
+  font-style: italic;
+}
+.gowiki-lifecycle--needs-setup .gowiki-lifecycle-status {
+  color: var(--gw-color-danger, #b91c1c);
+  font-style: normal;
+}
 `
 
-// NodeView: yellow read-only card that shows the rule at a glance.
-// Editing goes through the property panel (opens on click when the
-// editor is in edit mode).
+// describeCondition turns a raw `when=` value (e.g. "stale:30m") into
+// a reader-side phrase ("no attestation for 30 months"). Falls back
+// to the raw value when parsing fails — better a visible oddity than
+// a confidently-wrong description.
+function describeCondition(raw: string): string {
+  const parts = raw.split(":")
+  if (parts.length !== 2 || parts[0] !== "stale") return raw || "the condition is met"
+  const dur = parts[1]
+  const unit = dur.slice(-1).toLowerCase()
+  const n = parseInt(dur.slice(0, -1), 10)
+  if (!Number.isFinite(n)) return `no attestation for ${dur}`
+  const unitName = unit === "d" ? "day" : unit === "m" ? "month" : unit === "y" ? "year" : unit
+  const plural = n === 1 ? "" : "s"
+  return `no attestation for ${n} ${unitName}${plural}`
+}
+
+// describeScope turns the scope selectors into a compact reader phrase
+// suitable for the status line ("pages under /qms/", "pages tagged
+// sop or rec", etc.). Combines path + tag selectors with "and".
+function describeScope(attrs: Record<string, any>): string {
+  const parts: string[] = []
+  const scope = String(attrs.scope || "").trim()
+  if (scope) {
+    // Best-effort: strip a leading `^` and trailing `.*` / `$` so the
+    // path reads naturally in the status line. If the regex is more
+    // complex we fall back to showing it verbatim.
+    const stripped = scope.replace(/^\^/, "").replace(/(\.\*|\.\+)?\$?$/, "")
+    parts.push(`pages under ${stripped}`)
+  }
+  const tags = String(attrs.tags || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+  if (tags.length > 0) {
+    parts.push(`pages tagged ${tags.join(" or ")}`)
+  }
+  const exclude = String(attrs.exclude_tags || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+  if (exclude.length > 0) {
+    parts.push(`excluding ${exclude.join(" and ")}`)
+  }
+  return parts.length > 0 ? parts.join(", ") : "every page in the wiki"
+}
+
+// NodeView: a discreet grey card per the general directive-rendering
+// spec. Renders a short reader-facing status line — NOT the raw
+// attributes, which live behind the property panel. When the rule is
+// missing its required fields (title/assign), the status shifts to
+// the "needs attention" variant so the author notices there's work to
+// do without having to open the panel.
 class LifecycleNodeView {
   dom: HTMLElement
   private node: PMNode
@@ -126,50 +182,39 @@ class LifecycleNodeView {
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
     this.dom = document.createElement("div")
-    this.dom.className = "gowiki-lifecycle"
     this.dom.contentEditable = "false"
     this.render()
   }
 
   private render() {
     this.dom.innerHTML = ""
+    const needsSetup = !this.node.attrs.title || !this.node.attrs.assign
+    this.dom.className = "gowiki-lifecycle" + (needsSetup ? " gowiki-lifecycle--needs-setup" : "")
+
     const header = document.createElement("div")
     header.className = "gowiki-lifecycle-header"
-    header.textContent = "Lifecycle rule"
+    header.textContent = "Lifecycle"
     this.dom.appendChild(header)
 
-    const body = document.createElement("div")
-    body.className = "gowiki-lifecycle-body"
+    const status = document.createElement("div")
+    status.className = "gowiki-lifecycle-status"
+    status.textContent = this.summarise()
+    this.dom.appendChild(status)
+  }
 
-    const rows: [string, string][] = [
-      ["scope", this.node.attrs.scope || ""],
-      ["tags (OR)", this.node.attrs.tags || ""],
-      ["exclude tags", this.node.attrs.exclude_tags || ""],
-      ["when", this.node.attrs.when || ""],
-      ["→ title", this.node.attrs.title || ""],
-      ["→ assign", this.node.attrs.assign || ""],
-      ["→ priority", this.node.attrs.priority || ""],
-      ["→ action", this.node.attrs.action || ""],
-    ]
-    for (const [key, val] of rows) {
-      if (!val) continue // omit empty rows — keeps the block terse
-      const k = document.createElement("div")
-      k.className = "gowiki-lifecycle-key"
-      k.textContent = key
-      const v = document.createElement("div")
-      v.className = "gowiki-lifecycle-val"
-      v.textContent = val
-      body.appendChild(k)
-      body.appendChild(v)
-    }
-    // Special case: brand-new rule (no title yet) — nudge the author.
+  // summarise returns the single reader-facing status line. It's a
+  // passive description of the rule's INTENT — not a live count of
+  // fires (which would need a backend fetch). We opt for grey/passive
+  // most of the time per the spec's "prefer grey over red" guidance.
+  private summarise(): string {
+    const when = String(this.node.attrs.when || "").trim()
     if (!this.node.attrs.title || !this.node.attrs.assign) {
-      const nudge = document.createElement("div")
-      nudge.className = "gowiki-lifecycle-empty"
-      nudge.textContent = "Click to open the property panel and set title + assign."
-      body.appendChild(nudge)
+      return "Rule not yet configured — set title and assign in the property panel."
     }
-    this.dom.appendChild(body)
+    // Turn "stale:30m" into "no attestation for 30 months" reader-side.
+    const cond = describeCondition(when)
+    const scopePhrase = describeScope(this.node.attrs)
+    return `Watching ${scopePhrase} — a review todo is created if ${cond}.`
   }
 
   update(node: PMNode) {
