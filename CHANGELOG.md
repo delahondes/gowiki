@@ -9,7 +9,106 @@ project's design invariants and `specs/` for the dialect specification.
 
 ## [Unreleased]
 
-Nothing pending — the working tree matches `v1.0.0-rc.1`.
+Nothing pending — the working tree matches `v1.0.0-rc.2`.
+
+## [1.0.0-rc.2] — 2026-09-27
+
+Second release candidate. rc.1 was a stabilisation cut; rc.2 lands one
+sizeable new feature (`{lifecycle}` rules) plus polish across
+reviewflow visibility, tag queries, and the test suite.
+
+### Added
+
+- **`{lifecycle}` rule framework.** A single directive on an admin
+  document declaring "if a document in scope satisfies a condition,
+  fan out a todo (or an alert) per matching document." Two condition
+  kinds today: `stale:<duration>` (creates one todo per stale target)
+  and `reviewflow_overdue` (panel-only alert — reviewflow already
+  owns its notification chain). Selectors: `scope=` (path regex) +
+  `tags=` (OR of at least one) + `exclude_tags=` (NAND). Rendering
+  aggregates all `{lifecycle}` directives on a document into ONE
+  discreet panel that turns red only when something fires; each
+  firing rule carries a `▸ show N documents` disclosure listing
+  the flagged paths as clickable links. Backend scanner runs at
+  startup and every 6 h; ID hash is deterministic so todos survive
+  restarts without duplication.
+- **Directive rendering spec** (`specs/directive-general-rendering.md`).
+  Codifies the visual grammar every directive follows: grey / pale
+  red / pale green rendering box; yellow reserved for the property
+  panel; passive-first wording; hover for detail.
+- **Reviewflow draft-visibility gate.** Opt-in config
+  `reviewflow.hide_drafts_from_uninvolved: bool` (default `false`,
+  admin UI checkbox). When on and a document has an unsigned
+  reviewflow, uninvolved readers are transparently served the last
+  validated version — or 404 if the document has never been
+  validated. Involved readers see the draft with a prominent
+  inline pointer next to the DRAFT badge: `→ See VALID VERSION`
+  (green, same size as DRAFT).
+- **Sequential reviewflow notifications by default.** A save on a
+  reviewflow-bearing document only creates the first role's todo;
+  each confirmation advances the chain. Legacy parallel behaviour
+  stays available via `parallel=true`.
+- **`{tag-query tag=…}` accepts CSV** for OR-of-tags — same
+  semantics as `{lifecycle tags=…}`. Single-tag calls unchanged;
+  `tag=sop,rec,tpl` unions the three, dedupes by path.
+- **`{database-query}` filter expands `{{page.title}}` etc.** —
+  same template-variable resolver as the other rendering paths.
+
+### Changed
+
+- **Template "Create document" button** now uses `--gw-color-primary`
+  tokens instead of `--gw-color-accent`, which resolves to a pale
+  chip tint under the default theme (white text on light blue was
+  nearly invisible). Disabled styling on unvalidated templates
+  unchanged.
+- **Alert-only lifecycle rules skip todo creation.** The scanner
+  still surfaces the count on the panel (for `reviewflow_overdue`);
+  reviewflow's own deadline / email chain owns the actual alert.
+  Assignee on alert-only rules is optional but preserved end-to-end
+  so future notification channels can address it.
+- **Save-and-continue / draft-exit copy** clarified; toolbar
+  icons rebalanced (small floppy + prominent right-arrow).
+
+### Fixed
+
+- **Underline after `\n` inside a table cell or list item**
+  (`_word_` refusing to open because markdown-it's `snake_case`
+  guard saw two word chars around the delimiter). The dialect
+  `\n` → newline rewrite now runs before the inline core rule.
+- **`RefIndex.Save` race**: `RLock` held across `MarshalIndent`
+  so a concurrent `UpdatePage` can't corrupt the in-flight
+  snapshot.
+- **`SchemaStore.DeleteTable` ordering**: table drops before its
+  sequences to avoid `DEFAULT nextval(seq)` referencing an
+  already-removed sequence.
+- **`parseDirective`** handles `\"`-escaped quotes so pivot label
+  JSON blobs no longer truncate mid-value.
+- **HTML entities stay literal** in the dialect — the earlier
+  markdown-it default decoded them.
+- **`TokenStore.Verify` async goroutine race** with test cleanup:
+  synchronous `updateLastUsed` call.
+
+### Testing / CI
+
+- **~200 new tests** across the affected surfaces: storage core
+  (pages, canonical paths, links, media, media_versions, diff,
+  RefIndex, tag OR union), API (admin: acl / config / database /
+  locks / tokens / drafts, auth: login / logout / me / oauth
+  client + server, misc handlers, history + reviewflow-history
+  integration, template handlers, tag-query CSV, draft-gate
+  decision table), reviewflow (sequential notifications,
+  IsInvolved), todo (parse, model, recurrence, service, hooks,
+  handlers, notify), lifecycle (parse, selector, evaluator,
+  scanner, HTTP status endpoint, dialect round-trip, NodeView
+  jsdom integration with the three visible states + aggregate
+  path), reviewflow NodeView draft-pointer.
+- Frontend Vitest coverage extended to blockquote, code_expand,
+  spoiler, highlight, image, medialink, mermaid, include, slide,
+  table_formulas, comment, reviewflow, todo, lifecycle. **410
+  frontend tests total, all backend packages green.**
+- CI: `golangci-lint-action` bumped to v7 for v2 linter support;
+  ESLint `no-extra-semi` disabled (Prettier is authoritative on
+  semis).
 
 ## [1.0.0-rc.1] — 2026-09-26
 
