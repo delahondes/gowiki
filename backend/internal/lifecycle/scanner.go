@@ -108,6 +108,31 @@ func NodeKey(ruleID, targetPage string) string {
 // hex prefix, but we document the shape here for reference.
 const LifecycleTagMarker = "lifecycle"
 
+// DryRun evaluates one rule against the current page + attestation
+// state WITHOUT creating or cancelling any todos. Returns the target
+// pages the rule currently fires on. Used by the frontend's rendering
+// box to answer "is my rule doing anything right now" so the reader
+// gets a live status instead of a static description of intent.
+func (s *Scanner) DryRun(r Rule) []string {
+	pages := s.deps.ListPages()
+	now := s.deps.Now()
+	var fires []string
+	for _, pagePath := range pages {
+		if pagePath == r.SourcePage {
+			continue
+		}
+		tags := TagSet(s.deps.PageTags(pagePath))
+		if !PageMatches(r, pagePath, tags) {
+			continue
+		}
+		v := Evaluate(r, pagePath, now, s.deps.Attesters...)
+		if v.Fires {
+			fires = append(fires, pagePath)
+		}
+	}
+	return fires
+}
+
 // Run does one full scan pass. Returns (created, cancelled, err).
 //   - created: number of todos created this pass (existing ones are left
 //     alone by the idempotent CreateTodo).

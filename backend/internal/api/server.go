@@ -28,6 +28,7 @@ import (
 	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/config"
 	"gowiki/backend/internal/database"
+	"gowiki/backend/internal/lifecycle"
 	"gowiki/backend/internal/markdown"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
@@ -146,6 +147,8 @@ type Server struct {
 	reviewflowService   *reviewflow.Service
 	commentService      *comment.Service
 	bibliographyService *bibliography.Service
+	lifecycleStore      *lifecycle.Store
+	lifecycleScanner    *lifecycle.Scanner
 	presenceHub         *collab.Hub
 	collabRelay         *collab.Relay
 	aiProvider          aiassistant.Provider
@@ -154,7 +157,7 @@ type Server struct {
 	webDirPath          string
 }
 
-func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service, oauthServer *auth.OAuthServer) http.Handler {
+func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDetector, searchStore SearchStore, atticStore AtticStore, draftManager DraftManager, logoResolver LogoResolver, mediaAtticStore MediaAtticStore, mediaVersionStore MediaVersionStoreReader, configStore *config.Store, userStore *auth.UserStore, groupStore *auth.GroupStore, sessionStore *auth.SessionStore, aclStore *auth.ACLStore, changelog *storage.Changelog, dbPool *database.Pool, tagIndex *storage.TagIndex, backlinkProvider BacklinkProvider, browserAllocCtx context.Context, browserAllocCancel context.CancelFunc, serveWeb bool, webDirPath string, todoService *todo.TodoService, reviewflowService *reviewflow.Service, commentService *comment.Service, tokenStore *auth.TokenStore, caStore *reviewflow.CAStore, certStore *reviewflow.CertStore, bibliographyService *bibliography.Service, oauthServer *auth.OAuthServer, lifecycleStore *lifecycle.Store, lifecycleScanner *lifecycle.Scanner) http.Handler {
 	s := &Server{
 		store:               store,
 		mediaStore:          mediaStore,
@@ -184,6 +187,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		oauthServer:         oauthServer,
 		caStore:             caStore,
 		certStore:           certStore,
+		lifecycleStore:      lifecycleStore,
+		lifecycleScanner:    lifecycleScanner,
 		presenceHub:         collab.NewHub(),
 		collabRelay:         collab.NewRelay(),
 		rateLimiter:         NewRateLimiter(),
@@ -548,6 +553,17 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 					reviewflow.RegisterCARoutes(r, s.caStore, s.certStore, s.reviewflowService, extractUsername)
 				})
 			}
+		})
+	}
+
+	// Lifecycle plugin endpoints — reader-facing status for the
+	// {lifecycle} rendering box. Optional auth so the NodeView can
+	// render on public pages; the endpoint exposes no data that
+	// isn't already in the page markdown itself.
+	if s.lifecycleStore != nil {
+		r.Route("/api/plugin/lifecycle/v1", func(r chi.Router) {
+			r.Use(s.optionalAuth)
+			lifecycle.RegisterRoutes(r, s.lifecycleStore, s.lifecycleScanner)
 		})
 	}
 

@@ -1,21 +1,23 @@
-// {lifecycle ...} — one directive on an admin page that spawns per-target
-// todos when a page in scope satisfies a condition (today: stale). The
-// backend does the fanout; the frontend just needs to recognise the
-// directive so the editor doesn't render an "Unknown directive" error
-// and to give the author a friendly read-only block with a property
-// panel to edit the rule's attributes.
+// {lifecycle ...} — one directive on an admin document that spawns
+// per-target todos when another document in scope satisfies a
+// condition (today: stale). The backend does the fanout; the frontend
+// renders a discreet reader-facing card and fetches live status so
+// the reader sees "in order" vs "N documents need review" rather than
+// a technical description of the rule's mechanics.
 import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 
-// Every attr the backend parser accepts, mirrored one-to-one. `parse`/
-// `serialize` are the property-panel adapters (from panel text field
-// back to attr, and vice versa). `default` values are what a freshly
-// inserted rule shows; keeping `title` and `assign` empty forces the
-// author into the panel before saving, since the backend refuses a
-// rule without them.
+// currentSourcePath — the canonical path of the document whose editor
+// we're currently mounted in. Matches how other plugins (reviewflow,
+// todo, tag) derive their page path: straight off window.location.
+function currentSourcePath(): string {
+  const p = window.location.pathname || "/"
+  return p
+}
+
 const lifecycleProperties = [
   {
     name: "scope",
@@ -31,7 +33,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: 'Comma-separated. Page must carry AT LEAST ONE (e.g. "sop,rec,tpl"). Optional if scope= is set.',
+    helpText: 'Comma-separated. Document must carry AT LEAST ONE (e.g. "sop,rec,tpl"). Optional if scope= is set.',
   },
   {
     name: "exclude_tags",
@@ -39,7 +41,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: 'Comma-separated. Page must carry NONE of these (e.g. "archived,draft").',
+    helpText: 'Comma-separated. Document must carry NONE of these (e.g. "archived,draft").',
   },
   {
     name: "when",
@@ -79,20 +81,19 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: 'WikiAction on the target page, e.g. "edit:." to edit the page itself.',
+    helpText: 'WikiAction on the target document, e.g. "edit:." to edit it.',
   },
 ]
 
-// Order the serializer writes attrs in — matches the property panel
-// order so authors can visually diff the source. `when` sits between
-// selectors and template because that's how a reader parses it: "on
-// pages matching X, when Y, do Z."
+// Serializer attr order — matches the property panel visual order so the
+// source stays a mirror of what the author sees while editing.
 const ATTR_ORDER = ["scope", "tags", "exclude_tags", "when", "title", "assign", "priority", "action"]
 
 // Rendering follows specs/directive-general-rendering.md: a discreet
-// grey box (never yellow — yellow is reserved for the property
-// panel). The box is reader-facing; the raw attributes are behind
-// the panel, not on the page.
+// grey card by default, red only when something actually needs
+// attention. The status line is human — a sentence a reader can
+// understand — not a translation of the raw attributes. Technical
+// detail is available on hover.
 const styles = `
 .gowiki-lifecycle {
   background: var(--gw-color-surface, #f3f4f6);
@@ -103,33 +104,124 @@ const styles = `
   margin: 0.6em 0;
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.5;
   color: var(--gw-color-text, #1f2937);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
-.gowiki-lifecycle-header {
+.gowiki-lifecycle-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--gw-color-muted, #6b7280);
-  margin-bottom: 2px;
+  flex: 0 0 auto;
 }
 .gowiki-lifecycle-status {
+  flex: 1 1 auto;
   color: var(--gw-color-muted, #6b7280);
   font-style: italic;
 }
+.gowiki-lifecycle-details {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--gw-color-muted, #6b7280);
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+  font-style: normal;
+}
+.gowiki-lifecycle--alert {
+  background: #fef2f2;
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+}
+.gowiki-lifecycle--alert .gowiki-lifecycle-status {
+  color: #b91c1c;
+  font-style: normal;
+  font-weight: 500;
+}
+.gowiki-lifecycle--needs-setup {
+  background: #fef2f2;
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+}
 .gowiki-lifecycle--needs-setup .gowiki-lifecycle-status {
-  color: var(--gw-color-danger, #b91c1c);
+  color: #b91c1c;
   font-style: normal;
 }
 `
 
-// describeCondition turns a raw `when=` value (e.g. "stale:30m") into
-// a reader-side phrase ("no attestation for 30 months"). Falls back
-// to the raw value when parsing fails — better a visible oddity than
-// a confidently-wrong description.
-function describeCondition(raw: string): string {
+type FiresState =
+  | { kind: "loading" }
+  | { kind: "unknown" }
+  | { kind: "ok"; count: 0 }
+  | { kind: "alert"; count: number; sample: string[] }
+
+// Cache per source-document path so multiple lifecycle NodeViews on the
+// same page share one fetch. Keyed by source document; value is the
+// promise (loading) or resolved payload.
+const statusCache = new Map<string, Promise<StatusResponse | null>>()
+
+interface RuleView {
+  scope: string
+  tags: string[]
+  exclude_tags?: string[]
+  when: string
+  title: string
+  assign: string
+  priority?: string
+  action?: string
+}
+interface RuleStatusEntry {
+  rule: RuleView
+  fires_count: number
+  sample_pages?: string[]
+  source_page: string
+}
+interface StatusResponse {
+  rules: RuleStatusEntry[]
+}
+
+// fetchStatus loads (or reuses the cached fetch of) the lifecycle
+// status for the source document. Returns null on any failure so the
+// caller falls back to a passive "status unavailable" render.
+function fetchStatus(sourcePath: string): Promise<StatusResponse | null> {
+  const existing = statusCache.get(sourcePath)
+  if (existing) return existing
+  const p = fetch(`/api/plugin/lifecycle/v1/status?source_page=${encodeURIComponent(sourcePath)}`)
+    .then((r) => (r.ok ? (r.json() as Promise<StatusResponse>) : null))
+    .catch(() => null)
+  statusCache.set(sourcePath, p)
+  // Auto-expire after 30 s so a re-render after an edit picks up the
+  // latest scan. The cache is a "same NodeView-mount burst" dedup, not
+  // a long-lived cache.
+  setTimeout(() => statusCache.delete(sourcePath), 30_000)
+  return p
+}
+
+// matchRule finds the status entry that corresponds to this NodeView's
+// attrs. Matches on (title, assign) — the natural human-readable
+// identifier for a rule on a given source document. Falls back to
+// tolerating extra whitespace so a serialise/parse mismatch doesn't
+// hide the status.
+function matchRule(status: StatusResponse, attrs: Record<string, unknown>): RuleStatusEntry | null {
+  const wantTitle = String(attrs.title || "").trim()
+  const wantAssign = String(attrs.assign || "").trim()
+  if (!wantTitle || !wantAssign) return null
+  for (const s of status.rules) {
+    if (s.rule.title.trim() === wantTitle && s.rule.assign.trim() === wantAssign) {
+      return s
+    }
+  }
+  return null
+}
+
+// summariseWhen turns a raw "stale:30m" back into "no attestation for
+// 30 months" for the hover tooltip. Kept minimal because the reader
+// never sees this unless they hover the details marker.
+function summariseWhen(raw: string): string {
   const parts = raw.split(":")
-  if (parts.length !== 2 || parts[0] !== "stale") return raw || "the condition is met"
+  if (parts.length !== 2 || parts[0] !== "stale") return raw
   const dur = parts[1]
   const unit = dur.slice(-1).toLowerCase()
   const n = parseInt(dur.slice(0, -1), 10)
@@ -139,96 +231,138 @@ function describeCondition(raw: string): string {
   return `no attestation for ${n} ${unitName}${plural}`
 }
 
-// describeScope turns the scope selectors into a compact reader phrase
-// suitable for the status line ("pages under /qms/", "pages tagged
-// sop or rec", etc.). Combines path + tag selectors with "and".
-function describeScope(attrs: Record<string, any>): string {
-  const parts: string[] = []
+// buildDetailsTooltip is the technical hover text on the small
+// `[details]` marker. Never in the main status line — reserved for the
+// author or admin who wants to double-check what the rule actually
+// covers.
+function buildDetailsTooltip(attrs: Record<string, unknown>): string {
+  const bits: string[] = []
   const scope = String(attrs.scope || "").trim()
-  if (scope) {
-    // Best-effort: strip a leading `^` and trailing `.*` / `$` so the
-    // path reads naturally in the status line. If the regex is more
-    // complex we fall back to showing it verbatim.
-    const stripped = scope.replace(/^\^/, "").replace(/(\.\*|\.\+)?\$?$/, "")
-    parts.push(`pages under ${stripped}`)
-  }
-  const tags = String(attrs.tags || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-  if (tags.length > 0) {
-    parts.push(`pages tagged ${tags.join(" or ")}`)
-  }
-  const exclude = String(attrs.exclude_tags || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-  if (exclude.length > 0) {
-    parts.push(`excluding ${exclude.join(" and ")}`)
-  }
-  return parts.length > 0 ? parts.join(", ") : "every page in the wiki"
+  if (scope) bits.push(`scope: ${scope}`)
+  const tags = String(attrs.tags || "").trim()
+  if (tags) bits.push(`tags: ${tags}`)
+  const excludeTags = String(attrs.exclude_tags || "").trim()
+  if (excludeTags) bits.push(`exclude_tags: ${excludeTags}`)
+  const when = String(attrs.when || "").trim()
+  if (when) bits.push(`condition: ${summariseWhen(when)}`)
+  const assign = String(attrs.assign || "").trim()
+  if (assign) bits.push(`assign: ${assign}`)
+  return bits.join("\n")
 }
 
-// NodeView: a discreet grey card per the general directive-rendering
-// spec. Renders a short reader-facing status line — NOT the raw
-// attributes, which live behind the property panel. When the rule is
-// missing its required fields (title/assign), the status shifts to
-// the "needs attention" variant so the author notices there's work to
-// do without having to open the panel.
+// LifecycleNodeView — discreet grey card with a human status line and
+// a small `[details]` marker for the technical hover. Fetches live
+// backend status on mount; renders passive by default and shifts to a
+// loud red state only when the rule actually fires on documents or is
+// missing required setup.
 class LifecycleNodeView {
   dom: HTMLElement
   private node: PMNode
+  private fires: FiresState = { kind: "loading" }
 
   constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
     this.dom = document.createElement("div")
     this.dom.contentEditable = "false"
     this.render()
+    this.loadStatus()
+  }
+
+  private loadStatus() {
+    const sourcePath = currentSourcePath()
+    if (!sourcePath) {
+      this.fires = { kind: "unknown" }
+      this.render()
+      return
+    }
+    fetchStatus(sourcePath).then((status) => {
+      if (!status) {
+        this.fires = { kind: "unknown" }
+      } else {
+        const entry = matchRule(status, this.node.attrs)
+        if (!entry) {
+          this.fires = { kind: "unknown" }
+        } else if (entry.fires_count === 0) {
+          this.fires = { kind: "ok", count: 0 }
+        } else {
+          this.fires = { kind: "alert", count: entry.fires_count, sample: entry.sample_pages || [] }
+        }
+      }
+      this.render()
+    })
   }
 
   private render() {
     this.dom.innerHTML = ""
     const needsSetup = !this.node.attrs.title || !this.node.attrs.assign
-    this.dom.className = "gowiki-lifecycle" + (needsSetup ? " gowiki-lifecycle--needs-setup" : "")
+    const isAlert = !needsSetup && this.fires.kind === "alert"
 
-    const header = document.createElement("div")
-    header.className = "gowiki-lifecycle-header"
-    header.textContent = "Lifecycle"
-    this.dom.appendChild(header)
+    let className = "gowiki-lifecycle"
+    if (needsSetup) className += " gowiki-lifecycle--needs-setup"
+    else if (isAlert) className += " gowiki-lifecycle--alert"
+    this.dom.className = className
 
-    const status = document.createElement("div")
+    const label = document.createElement("span")
+    label.className = "gowiki-lifecycle-label"
+    label.textContent = "Lifecycle"
+    this.dom.appendChild(label)
+
+    const status = document.createElement("span")
     status.className = "gowiki-lifecycle-status"
     status.textContent = this.summarise()
     this.dom.appendChild(status)
+
+    if (!needsSetup) {
+      const details = document.createElement("span")
+      details.className = "gowiki-lifecycle-details"
+      details.textContent = "details"
+      details.title = buildDetailsTooltip(this.node.attrs)
+      this.dom.appendChild(details)
+    }
   }
 
-  // summarise returns the single reader-facing status line. It's a
-  // passive description of the rule's INTENT — not a live count of
-  // fires (which would need a backend fetch). We opt for grey/passive
-  // most of the time per the spec's "prefer grey over red" guidance.
+  // summarise returns the single reader-facing status line. Human
+  // sentence, no directive attributes echoed literally. The mechanics
+  // sit behind the `[details]` hover — the reader only wants to know
+  // whether the rule is doing its job.
   private summarise(): string {
-    const when = String(this.node.attrs.when || "").trim()
     if (!this.node.attrs.title || !this.node.attrs.assign) {
       return "Rule not yet configured — set title and assign in the property panel."
     }
-    // Turn "stale:30m" into "no attestation for 30 months" reader-side.
-    const cond = describeCondition(when)
-    const scopePhrase = describeScope(this.node.attrs)
-    return `Watching ${scopePhrase} — a review todo is created if ${cond}.`
+    switch (this.fires.kind) {
+      case "loading":
+        return "Checking…"
+      case "unknown":
+        return "Rule active."
+      case "ok":
+        return "All documents in scope are within the rule."
+      case "alert": {
+        const n = this.fires.count
+        return n === 1 ? "1 document needs review." : `${n} documents need review.`
+      }
+    }
   }
 
   update(node: PMNode) {
     if (node.type !== this.node.type) return false
+    const prevKey = `${this.node.attrs.title}|${this.node.attrs.assign}`
     this.node = node
+    const nextKey = `${node.attrs.title}|${node.attrs.assign}`
     this.render()
+    // If the identifying attrs changed (title or assign edited), the
+    // cached status entry no longer matches — re-fetch so the new
+    // identity resolves against the backend's current state.
+    if (prevKey !== nextKey) {
+      this.fires = { kind: "loading" }
+      this.render()
+      this.loadStatus()
+    }
     return true
   }
 }
 
 export const lifecyclePlugin: WikiPlugin = {
   register(reg) {
-    // Schema node — atomic block (no editable content; the property
-    // panel is the only way to change attrs).
     reg.registerSchema({
       nodes: {
         lifecycle: {
@@ -270,14 +404,12 @@ export const lifecyclePlugin: WikiPlugin = {
       },
     })
 
-    // Self-contained directive: {lifecycle scope=... when=... title=... assign=...}
     reg.registerSelfContainedDirective("lifecycle", {
       tokenType: "lifecycle",
       nodeType: "lifecycle",
       properties: lifecycleProperties,
     })
 
-    // Markdown → PM: build the node from the parsed directive attrs.
     reg.registerText("lifecycle", {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
@@ -290,25 +422,18 @@ export const lifecyclePlugin: WikiPlugin = {
             title: attrs.title ?? "",
             assign: attrs.assign ?? "",
             priority: attrs.priority ?? "",
-            // Backend accepts either `action` or `do`; property panel
-            // uses `action` so we normalise here.
             action: attrs.action ?? attrs.do ?? "",
           })
         )
       },
     })
 
-    // PM → Markdown: write attrs in a stable order, omit empties so
-    // the source stays terse and doesn't collect noise.
     reg.registerPMNode("lifecycle", {
       print(node) {
         const parts: string[] = []
         for (const key of ATTR_ORDER) {
           const v = String(node.attrs[key] ?? "").trim()
           if (!v) continue
-          // Quote values that contain a space or a `"` so the backend
-          // parser reads them as one attribute. Matches the reviewflow
-          // convention.
           const needsQuote = /[\s"]/.test(v)
           const val = needsQuote ? `"${v.replace(/"/g, '\\"')}"` : v
           parts.push(`${key}=${val}`)
@@ -318,7 +443,6 @@ export const lifecyclePlugin: WikiPlugin = {
       },
     })
 
-    // Editor plugin: mount the NodeView.
     reg.registerEditorPlugin((_schema: Schema) => {
       return new PMPlugin({
         key: new PluginKey("gowiki.lifecycle"),
@@ -332,15 +456,10 @@ export const lifecyclePlugin: WikiPlugin = {
       })
     })
 
-    // Command: insert an empty rule and open the property panel so the
-    // author can fill it in without touching the raw markdown.
     reg.registerCommand("lifecycle", "insert", (state, dispatch) => {
       const lcType = reg.schema.nodes.lifecycle
       if (!lcType) return false
       if (dispatch) {
-        // Seed with a sensible default `when=stale:30m` so a
-        // freshly-inserted rule is a working shape minus title/assign,
-        // matching the property panel's `default:` for `when`.
         const node = lcType.create({
           scope: "",
           tags: "",

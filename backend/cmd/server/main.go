@@ -279,6 +279,7 @@ func main() {
 		log.Fatalf("init lifecycle store: %v", err)
 	}
 	store.LifecycleSync = lifecycle.NewSyncer(lifecycleStore)
+	var lifecycleScanner *lifecycle.Scanner
 	if todoService != nil {
 		// Reviewflow attestation source: the latest VersionRecord's
 		// timestamp from the reviewflow state for a page. Zero-time
@@ -304,7 +305,7 @@ func main() {
 			}
 			return p.Meta.UpdatedAt
 		}
-		scanner := lifecycle.NewScanner(lifecycle.Deps{
+		lifecycleScanner = lifecycle.NewScanner(lifecycle.Deps{
 			Rules: lifecycleStore.AllRules,
 			ListPages: func() []string {
 				entries, err := store.ListAllPages()
@@ -365,7 +366,7 @@ func main() {
 		// and "don't hammer the DB for a slow-moving signal."
 		go func() {
 			ctx := context.Background()
-			created, cancelled, err := scanner.Run(ctx)
+			created, cancelled, err := lifecycleScanner.Run(ctx)
 			if err != nil {
 				log.Printf("lifecycle: initial scan: %v", err)
 			} else {
@@ -374,7 +375,7 @@ func main() {
 			ticker := time.NewTicker(6 * time.Hour)
 			defer ticker.Stop()
 			for range ticker.C {
-				created, cancelled, err := scanner.Run(ctx)
+				created, cancelled, err := lifecycleScanner.Run(ctx)
 				if err != nil {
 					log.Printf("lifecycle: scan: %v", err)
 					continue
@@ -434,7 +435,7 @@ func main() {
 	browserCtx, browserCancel := api.InitBrowser()
 	defer browserCancel()
 
-	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore, bibliographyService, oauthServer)
+	router := api.NewRouter(store, mediaStore, store, searchIndex, store.Attic, store.Drafts, store, mediaAttic, mediaVersionStore, configStore, userStore, groupStore, sessionStore, aclStore, store.Changelog, dbPool, tagIndex, store, browserCtx, browserCancel, serveWebEnabled, filepath.Clean(resolvedWebDir), todoService, reviewflowService, commentService, tokenStore, caStore, certStore, bibliographyService, oauthServer, lifecycleStore, lifecycleScanner)
 	if serveWebEnabled {
 		log.Printf("serving frontend assets from %s", resolvedWebDir)
 	}
