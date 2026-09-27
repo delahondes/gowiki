@@ -63,8 +63,8 @@ function mount(): { view: EditorView; container: HTMLElement } {
   return { view, container }
 }
 
-describe("reviewflow NodeView — draft-with-published notice", () => {
-  it("shows the notice with a ?v=N link when a validated version exists and current is draft", async () => {
+describe("reviewflow NodeView — draft-with-published pointer", () => {
+  it("shows '→ See VALID VERSION' next to the DRAFT badge when a validated version exists", async () => {
     statusResponse = {
       roles: { author: "alice", reviewer: "bob" },
       version_tag: "1.1",
@@ -76,19 +76,20 @@ describe("reviewflow NodeView — draft-with-published notice", () => {
     const { view, container } = mount()
     try {
       await flushMicrotasks()
-      const notice = container.querySelector(".gowiki-rf-draft-notice")
-      expect(notice).not.toBeNull()
-      expect(notice!.textContent).toContain("You're viewing a draft")
-      const link = notice!.querySelector("a")
+      // DRAFT badge is still present, unchanged in size.
+      expect(container.querySelector(".gowiki-rf-draft-badge")).not.toBeNull()
+      // Inline "See VALID VERSION" link right next to it.
+      const link = container.querySelector(".gowiki-rf-draft-see-link") as HTMLAnchorElement | null
       expect(link).not.toBeNull()
-      expect((link as HTMLAnchorElement).getAttribute("href")).toBe(`${currentTestPath}?v=1`)
+      expect(link!.textContent).toBe("VALID VERSION")
+      expect(link!.getAttribute("href")).toBe(`${currentTestPath}?v=1`)
     } finally {
       view.destroy()
       container.remove()
     }
   })
 
-  it("does NOT show the notice when the current version is fully validated", async () => {
+  it("does NOT show the pointer when the current version is fully validated", async () => {
     statusResponse = {
       roles: { author: "alice", reviewer: "bob" },
       version_tag: "1.0",
@@ -100,14 +101,14 @@ describe("reviewflow NodeView — draft-with-published notice", () => {
     const { view, container } = mount()
     try {
       await flushMicrotasks()
-      expect(container.querySelector(".gowiki-rf-draft-notice")).toBeNull()
+      expect(container.querySelector(".gowiki-rf-draft-see-link")).toBeNull()
     } finally {
       view.destroy()
       container.remove()
     }
   })
 
-  it("does NOT show the notice when there is no validated version yet (first draft)", async () => {
+  it("does NOT show the pointer when there is no validated version yet (first draft)", async () => {
     statusResponse = {
       roles: { author: "alice", reviewer: "bob" },
       version_tag: "0.1",
@@ -119,10 +120,9 @@ describe("reviewflow NodeView — draft-with-published notice", () => {
     const { view, container } = mount()
     try {
       await flushMicrotasks()
-      // A first draft with no prior validated version has nothing to
-      // link to — the notice is suppressed rather than showing a
-      // broken link.
-      expect(container.querySelector(".gowiki-rf-draft-notice")).toBeNull()
+      // Nothing to link to — the pointer is suppressed rather than
+      // showing a broken link.
+      expect(container.querySelector(".gowiki-rf-draft-see-link")).toBeNull()
     } finally {
       view.destroy()
       container.remove()

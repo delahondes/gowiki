@@ -222,6 +222,22 @@ class ReviewflowNodeView {
       draft.className = "gowiki-rf-draft-badge"
       draft.textContent = "DRAFT"
       header.appendChild(draft)
+      // Inline pointer to the last validated version, sized to
+      // match the DRAFT badge so readers see it at first glance.
+      // Involved viewers only — uninvolved get the validated version
+      // served transparently by the backend gate.
+      const validatedVersion = this.status?.validated_page_version || 0
+      if (validatedVersion > 0) {
+        const arrow = document.createElement("span")
+        arrow.className = "gowiki-rf-draft-see-arrow"
+        arrow.textContent = "→ See "
+        header.appendChild(arrow)
+        const link = document.createElement("a")
+        link.className = "gowiki-rf-draft-see-link"
+        link.href = `${window.location.pathname}?v=${validatedVersion}`
+        link.textContent = "VALID VERSION"
+        header.appendChild(link)
+      }
     }
     if (this.loading) {
       const loadEl = document.createElement("span")
@@ -239,27 +255,11 @@ class ReviewflowNodeView {
       wrapper.appendChild(warn)
     }
 
-    // Draft-with-published notice. When the reader is looking at a
-    // draft AND there is a previously-validated version, point them
-    // to it. The reader who ISN'T involved won't see this \u2014 the
-    // backend already served them the validated content \u2014 so this
-    // line only reaches people who are on the review chain (or
-    // observers) and can be confident that "here" means "the
-    // published procedure, not the WIP you're editing."
-    const validatedVersion = this.status?.validated_page_version || 0
-    if (!isValidated && !this.loading && validatedVersion > 0) {
-      const notice = document.createElement("div")
-      notice.className = "gowiki-rf-draft-notice"
-      const linkPath = `${window.location.pathname}?v=${validatedVersion}`
-      notice.innerHTML = ""
-      notice.appendChild(document.createTextNode("You're viewing a draft. The published version is "))
-      const link = document.createElement("a")
-      link.href = linkPath
-      link.textContent = "here"
-      notice.appendChild(link)
-      notice.appendChild(document.createTextNode("."))
-      wrapper.appendChild(notice)
-    }
+    // Draft-with-published pointer now lives inline next to the
+    // DRAFT badge (see the header block above) \u2014 a discrete grey
+    // block below the header lost too much attention when the whole
+    // point is that the reader shouldn't confuse this WIP with the
+    // authoritative version.
 
     // Table
     if (roleEntries.length > 0) {
@@ -528,15 +528,20 @@ const reviewflowStyles = `
   border-bottom: 1px solid var(--gw-color-border);
 }
 
-.gowiki-rf-draft-notice {
-  padding: 6px 14px;
-  color: var(--gw-color-subtle);
-  font-size: 12px;
-  font-style: italic;
-  border-bottom: 1px solid var(--gw-color-border);
+.gowiki-rf-draft-see-arrow {
+  color: var(--gw-color-muted);
+  font-weight: 500;
+  font-size: 15px;
+  margin-left: 4px;
 }
-.gowiki-rf-draft-notice a {
-  color: inherit;
+.gowiki-rf-draft-see-link {
+  color: var(--gw-color-success);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 1px;
+  text-decoration: none;
+}
+.gowiki-rf-draft-see-link:hover {
   text-decoration: underline;
 }
 
