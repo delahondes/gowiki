@@ -89,11 +89,16 @@ func RegisterRoutes(r chi.Router, store *Store, scanner *Scanner) {
 				fires := scanner.DryRun(r)
 				view.FiresCount = len(fires)
 				if n := len(fires); n > 0 {
-					// Cap sample at 5 so the payload stays small; the
-					// NodeView only shows a "N documents" count anyway
-					// and the sample is for tooltips / drill-down.
-					if n > 5 {
-						fires = fires[:5]
+					// The frontend renders a collapsible list per rule
+					// so the reader can drill into which documents are
+					// flagged. Cap generously so hundreds of firing
+					// pages still fit; anything above the cap gets
+					// truncated with the count preserved. Anything
+					// above 500 firing pages is a config problem the
+					// list wouldn't be usable for anyway.
+					const cap = 500
+					if n > cap {
+						fires = fires[:cap]
 					}
 					view.SamplePages = fires
 				}

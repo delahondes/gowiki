@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -144,7 +145,9 @@ func TestHTTP_Status_FiresWithSampleCap(t *testing.T) {
 	if err := store.SetPageRules("/admin/policies", rules); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	// Ten stale pages — sample must cap at 5.
+	// Ten stale pages — every one should appear in sample_pages
+	// (well under the 500 cap; the panel needs the full list for its
+	// collapsible drill-down).
 	pages := make([]string, 0, 10)
 	updated := make(map[string]time.Time, 10)
 	for i := 0; i < 10; i++ {
@@ -167,8 +170,45 @@ func TestHTTP_Status_FiresWithSampleCap(t *testing.T) {
 	if resp.Rules[0].FiresCount != 10 {
 		t.Errorf("fires_count = %d, want 10", resp.Rules[0].FiresCount)
 	}
-	if got := len(resp.Rules[0].SamplePages); got != 5 {
-		t.Errorf("sample_pages length = %d, want 5 (capped)", got)
+	if got := len(resp.Rules[0].SamplePages); got != 10 {
+		t.Errorf("sample_pages length = %d, want 10 (full list, under cap)", got)
+	}
+}
+
+// A rule that fires on more than the safety cap (500) still reports
+// the true fires_count and returns a truncated sample. The panel
+// then can still say "N documents" honestly and show the first 500
+// as clickable rows.
+func TestHTTP_Status_FiresAboveCap(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	store := newTestStore(t)
+	rules, errs := Parse("/admin/policies", `{lifecycle scope="^/qms/.*" when=stale:30d title="review" assign=alice}`)
+	if len(errs) > 0 {
+		t.Fatalf("parse errors: %v", errs)
+	}
+	if err := store.SetPageRules("/admin/policies", rules); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	// 600 stale pages — sample must cap at 500, count stays 600.
+	pages := make([]string, 0, 600)
+	updated := make(map[string]time.Time, 600)
+	for i := 0; i < 600; i++ {
+		p := fmt.Sprintf("/qms/p%d", i)
+		pages = append(pages, p)
+		updated[p] = now.Add(-90 * 24 * time.Hour)
+	}
+	scanner := newTestScanner(pages, updated, nil, now)
+	rec := doGet(t, mount(store, scanner), "/api/plugin/lifecycle/v1/status?source_page=/admin/policies")
+	var resp StatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Rules[0].FiresCount != 600 {
+		t.Errorf("fires_count = %d, want 600", resp.Rules[0].FiresCount)
+	}
+	if got := len(resp.Rules[0].SamplePages); got != 500 {
+		t.Errorf("sample_pages length = %d, want 500 (capped)", got)
 	}
 }
 

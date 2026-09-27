@@ -56,7 +56,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: "Supports {{path}}, {{stale_days}}, {{last_attested}}. Not used by reviewflow_overdue.",
+    helpText: "Supports {{path}}, {{stale_days}}, {{last_attested}}. Optional for reviewflow_overdue (alert-only).",
   },
   {
     name: "assign",
@@ -64,7 +64,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: "User or @group. Not used by reviewflow_overdue.",
+    helpText: "User or @group. The alert / todo is addressed to this recipient.",
   },
   {
     name: "priority",
@@ -197,6 +197,46 @@ const styles = `
 .gowiki-lifecycle-chip::before {
   content: "▪";
   color: var(--gw-color-border-strong, #9ca3af);
+}
+.gowiki-lifecycle-secondary-hidden {
+  display: none;
+}
+.gowiki-lifecycle-drilldown-wrap {
+  list-style: none;
+  padding: 0 0 0 138px;
+  margin: 0;
+}
+.gowiki-lifecycle-drilldown {
+  margin: 0;
+}
+.gowiki-lifecycle-drilldown > summary {
+  cursor: pointer;
+  color: var(--gw-color-muted, #6b7280);
+  font-size: 11px;
+  padding: 2px 0;
+  user-select: none;
+}
+.gowiki-lifecycle-drilldown > summary:hover {
+  color: var(--gw-color-text, #1f2937);
+}
+.gowiki-lifecycle-drilldown-list {
+  list-style: none;
+  padding: 4px 0 4px 12px;
+  margin: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border-left: 2px solid var(--gw-color-border, #d1d5db);
+}
+.gowiki-lifecycle-drilldown-list li {
+  padding: 1px 0;
+  font-size: 12px;
+}
+.gowiki-lifecycle-drilldown-list a {
+  color: var(--gw-color-text, #1f2937);
+  text-decoration: none;
+}
+.gowiki-lifecycle-drilldown-list a:hover {
+  text-decoration: underline;
 }
 `
 
@@ -393,14 +433,26 @@ class LifecycleNodeView {
     this.dom.innerHTML = ""
     if (this.isPrimary()) {
       this.renderPanel()
-    } else {
+      return
+    }
+    // Secondary node. In VIEW mode the reader already sees every rule
+    // aggregated on the primary — a chip here would just say "yes,
+    // another rule exists" which is noise. In EDIT mode the chip is
+    // the only way for the author to click into this specific rule's
+    // property panel, so it stays.
+    if (this.view.editable) {
       this.renderChip()
+    } else {
+      // Present but invisible — atom NodeViews still need a DOM node
+      // so PM's positional bookkeeping works, but 0×0 keeps the
+      // reader's view uncluttered.
+      this.dom.className = "gowiki-lifecycle-secondary-hidden"
     }
   }
 
-  // renderChip — the SECONDARY rendering. Compact one-line marker so
-  // the author knows the rule exists here and can click to edit it,
-  // without duplicating the aggregate panel that lives on the primary.
+  // renderChip — the SECONDARY rendering in EDIT mode. Compact
+  // one-line marker so the author knows the rule exists here and can
+  // click to edit it, without duplicating the aggregate panel.
   private renderChip() {
     this.dom.className = "gowiki-lifecycle-chip-wrapper"
     const chip = document.createElement("span")
@@ -481,6 +533,7 @@ class LifecycleNodeView {
       this.dom.appendChild(ul)
       for (const r of perRule) {
         const li = document.createElement("li")
+        li.className = "gowiki-lifecycle-rule"
         const kindSpan = document.createElement("span")
         kindSpan.className = "gowiki-lifecycle-rule-kind"
         kindSpan.textContent = kindLabel(String(r.node.attrs.when || "").split(":")[0] || "?")
@@ -521,6 +574,36 @@ class LifecycleNodeView {
         details.title = buildDetailsTooltip(r.node.attrs)
         li.appendChild(details)
         ul.appendChild(li)
+
+        // Drill-down: when the rule fires on N documents, add a
+        // collapsible list of the flagged paths as clickable links so
+        // the reader can go straight to them. Uses <details>/<summary>
+        // — native disclosure, no extra JS, keyboard-accessible.
+        if (r.state.kind === "alert" && r.state.sample && r.state.sample.length > 0) {
+          const drill = document.createElement("details")
+          drill.className = "gowiki-lifecycle-drilldown"
+          const summary = document.createElement("summary")
+          const shown = r.state.sample.length
+          const total = r.state.count
+          summary.textContent =
+            shown < total ? `show ${shown} of ${total} documents` : `show ${total === 1 ? "document" : "documents"}`
+          drill.appendChild(summary)
+          const listUl = document.createElement("ul")
+          listUl.className = "gowiki-lifecycle-drilldown-list"
+          for (const p of r.state.sample) {
+            const listLi = document.createElement("li")
+            const a = document.createElement("a")
+            a.href = p
+            a.textContent = p
+            listLi.appendChild(a)
+            listUl.appendChild(listLi)
+          }
+          drill.appendChild(listUl)
+          const drillWrap = document.createElement("li")
+          drillWrap.className = "gowiki-lifecycle-drilldown-wrap"
+          drillWrap.appendChild(drill)
+          ul.appendChild(drillWrap)
+        }
       }
     }
   }

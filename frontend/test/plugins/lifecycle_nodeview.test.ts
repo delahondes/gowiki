@@ -64,7 +64,7 @@ async function flushMicrotasks() {
   await new Promise((r) => setTimeout(r, 0))
 }
 
-function mount(doc: any): { view: EditorView; container: HTMLElement } {
+function mount(doc: any, opts: { editable?: boolean } = {}): { view: EditorView; container: HTMLElement } {
   const container = document.createElement("div")
   document.body.appendChild(container)
   const state = EditorState.create({
@@ -72,7 +72,11 @@ function mount(doc: any): { view: EditorView; container: HTMLElement } {
     doc,
     plugins: registry.getEditorPlugins(),
   })
-  const view = new EditorView(container, { state })
+  const editable = opts.editable !== false
+  const view = new EditorView(container, {
+    state,
+    editable: () => editable,
+  })
   return { view, container }
 }
 
@@ -187,10 +191,16 @@ describe("lifecycle NodeView — single rule states", () => {
       const status = panel.querySelector(".gowiki-lifecycle-status")
       expect(status?.textContent).toBe("12 documents need review.")
       // Per-rule bullets appear in the alert state.
-      const bullets = panel.querySelectorAll(".gowiki-lifecycle-rules li")
+      const bullets = panel.querySelectorAll(".gowiki-lifecycle-rule")
       expect(bullets.length).toBe(1)
       const body = bullets[0].querySelector(".gowiki-lifecycle-rule-body")
       expect(body?.textContent).toBe("12 documents")
+      // Drill-down list is present with each sample page as a link.
+      const drill = panel.querySelector(".gowiki-lifecycle-drilldown")
+      expect(drill).not.toBeNull()
+      const links = drill!.querySelectorAll("a")
+      expect(links.length).toBe(2)
+      expect((links[0] as HTMLAnchorElement).getAttribute("href")).toBe("/qms/a")
     } finally {
       view.destroy()
       container.remove()
@@ -288,6 +298,54 @@ describe("lifecycle NodeView — aggregation across rules", () => {
     }
   })
 
+  it("in view mode, secondary lifecycle nodes render invisibly (no chip clutter)", async () => {
+    stub.responses.set("/api/plugin/lifecycle/v1/status", {
+      rules: [
+        {
+          rule: {
+            scope: "^/qms/.*",
+            tags: [],
+            when: "stale:30d",
+            title: "stale-review",
+            assign: "alice",
+            kind: "stale",
+          },
+          fires_count: 0,
+          source_page: currentTestPath,
+        },
+        {
+          rule: {
+            scope: "^/qms/.*",
+            tags: [],
+            when: "reviewflow_overdue",
+            title: "",
+            assign: "",
+            kind: "reviewflow_overdue",
+          },
+          fires_count: 0,
+          source_page: currentTestPath,
+        },
+      ],
+    })
+    const doc = schema.nodes.doc.create(null, [
+      makeLifecycle({ scope: "^/qms/.*", when: "stale:30d", title: "stale-review", assign: "alice" }),
+      makeLifecycle({ scope: "^/qms/.*", when: "reviewflow_overdue" }),
+    ])
+    const { view, container } = mount(doc, { editable: false })
+    try {
+      await flushMicrotasks()
+      // Aggregate panel still renders.
+      expect(container.querySelectorAll(".gowiki-lifecycle-headrow").length).toBe(1)
+      // Chips are suppressed in view mode.
+      expect(container.querySelectorAll(".gowiki-lifecycle-chip").length).toBe(0)
+      // The secondary is present via its hidden marker (PM needs the DOM node).
+      expect(container.querySelectorAll(".gowiki-lifecycle-secondary-hidden").length).toBe(1)
+    } finally {
+      view.destroy()
+      container.remove()
+    }
+  })
+
   it("aggregate goes red when ANY rule fires, and lists each rule as a bullet", async () => {
     stub.responses.set("/api/plugin/lifecycle/v1/status", {
       rules: [
@@ -329,7 +387,7 @@ describe("lifecycle NodeView — aggregation across rules", () => {
       expect(panel.classList.contains("gowiki-lifecycle--alert")).toBe(true)
       const status = panel.querySelector(".gowiki-lifecycle-status")
       expect(status?.textContent).toBe("3 documents need review.")
-      const bullets = panel.querySelectorAll(".gowiki-lifecycle-rules li")
+      const bullets = panel.querySelectorAll(".gowiki-lifecycle-rule")
       expect(bullets.length).toBe(2)
       // Kind labels are reader-facing, not raw when= strings.
       const kinds = Array.from(bullets).map((b) => b.querySelector(".gowiki-lifecycle-rule-kind")?.textContent)
