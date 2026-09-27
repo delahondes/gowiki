@@ -671,31 +671,31 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Draft-visibility gate. When reviewflow's HideDraftsFromUninvolved
-	// config is on AND the current version is not fully validated AND
-	// the requester is not part of the review chain (or a global
-	// observer), swap the markdown for the last validated version.
-	// If there is no validated version yet, return 404 — for a
-	// regulated wiki, an unsigned document does not exist for
-	// outsiders. Involved readers always see the current draft.
+	// Draft-visibility gate — see draftGate in draft_gate.go for the
+	// full decision table. Feature is off by default; when on and the
+	// requester is uninvolved with a draft, we either swap the served
+	// markdown for the last validated version or 404 if there isn't
+	// one yet.
 	servedValidatedVersion := int64(0)
-	if s.reviewflowService != nil && s.configStore.Get().Reviewflow.HideDraftsFromUninvolved {
-		st, statusErr := s.reviewflowService.GetStatus(pagePath)
-		if statusErr == nil && st != nil && !st.IsFullyValidated {
+	if s.reviewflowService != nil {
+		cfg := s.configStore.Get().Reviewflow
+		if cfg.HideDraftsFromUninvolved {
+			st, _ := s.reviewflowService.GetStatus(pagePath)
 			groups := s.getUserGroups(username)
-			if !s.reviewflowService.IsInvolved(pagePath, username, groups) {
-				if st.ValidatedVersion > 0 {
-					content, aerr := s.atticStore.ReadVersion(pagePath, st.ValidatedVersion)
-					if aerr == nil {
-						page.Markdown = string(content)
-						servedValidatedVersion = st.ValidatedVersion
-					}
-					// Attic read failure falls through to serving current
-					// content — better than a 500 for a read request.
-				} else {
-					writeError(w, http.StatusNotFound, "page not found")
-					return
+			involved := s.reviewflowService.IsInvolved(pagePath, username, groups)
+			decision := draftGate(cfg, st, involved)
+			if decision.Return404 {
+				writeError(w, http.StatusNotFound, "page not found")
+				return
+			}
+			if decision.SwapToVersion > 0 {
+				content, aerr := s.atticStore.ReadVersion(pagePath, decision.SwapToVersion)
+				if aerr == nil {
+					page.Markdown = string(content)
+					servedValidatedVersion = decision.SwapToVersion
 				}
+				// Attic read failure falls through to serving current
+				// content — better than a 500 on a read request.
 			}
 		}
 	}

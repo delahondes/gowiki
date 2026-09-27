@@ -45,7 +45,7 @@ Every rule needs a `when=` condition. Two kinds are supported today:
 | `stale:<duration>` | `stale:30m` (30 months) | yes | Fires when a document has had no attestation for at least the duration. |
 | `reviewflow_overdue` | none | no (panel-only alert) | Fires when a document's reviewflow has one or more roles marked overdue by reviewflow's own deadline configuration. |
 
-Alert-only conditions (like `reviewflow_overdue`) do not need `title=` or `assign=` — the reviewflow already owns the notification chain (per-role deadlines and warnings). The lifecycle panel simply surfaces the count so a QARA admin can see it at a glance next to the other rules.
+Alert-only conditions (like `reviewflow_overdue`) do not need `title=` — no todo is created, so there is nothing to title. `assign=` is optional but still meaningful: it names the person or group the alert is addressed to, so future notification channels (email, dashboard) know who to reach. The lifecycle panel always surfaces the count regardless of `assign=`, so a QARA admin sees the state at a glance next to the other rules.
 
 ## 1. The `stale` condition
 
@@ -104,4 +104,8 @@ Every todo the scanner creates carries a deterministic node key derived from `sh
 
 ## 1. What the rendering box says
 
-The card shown in the wiki aggregates ALL `{lifecycle}` rules on the current document into ONE panel. When every rule is in order the reader sees a short italic line — *"All documents in scope are within all rules."* — with a small `details` marker per rule for scope/tags/condition/assignee on hover. When any rule fires, the panel turns red with a plain count and a per-rule bullet list so it's clear which rule needs attention.
+The card shown in the wiki aggregates ALL `{lifecycle}` rules on the current document into ONE panel. When every rule is in order the reader sees a short italic line — *"All documents in scope are within all rules."* — with a small `details` marker per rule for scope/tags/condition/assignee on hover.
+
+When any rule fires, the panel turns red with a plain count (*"12 documents need review."*) and a per-rule bullet list so it's clear which rule needs attention. Each firing bullet carries a `▸ show N documents` disclosure that expands to a scrollable, linked list of the flagged documents — click any path to go straight to it. Above 500 firing documents the count stays honest and the first 500 are listed.
+
+In **visual edit mode** each `{lifecycle}` directive on the page also shows as a small clickable chip (`Lifecycle · <title>`) so the author can click into that specific rule's property panel. In **view mode** the chips are hidden — readers only see the aggregate panel, which already covers every rule on the page.

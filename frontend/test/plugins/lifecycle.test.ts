@@ -87,6 +87,28 @@ describe("lifecycle: serialization determinism", () => {
   })
 })
 
+describe("lifecycle: reviewflow_overdue kind", () => {
+  it("round-trips with only a scope (no title/assign required)", () => {
+    const rt = roundTrip(`{lifecycle scope="^/qms/.*" when=reviewflow_overdue}\n`)
+    expect(rt.isStable).toBe(true)
+    const a = firstLifecycle(rt.doc)!
+    expect(a.when).toBe("reviewflow_overdue")
+    expect(a.scope).toBe("^/qms/.*")
+    expect(a.title).toBe("")
+    expect(a.assign).toBe("")
+  })
+
+  it("preserves assign= when set (alert addressee)", () => {
+    const rt = roundTrip(`{lifecycle scope="^/qms/.*" when=reviewflow_overdue assign=qms-lead}\n`)
+    expect(rt.isStable).toBe(true)
+    const a = firstLifecycle(rt.doc)!
+    expect(a.when).toBe("reviewflow_overdue")
+    expect(a.assign).toBe("qms-lead")
+    // assign= must appear in the serialised source so it survives a save.
+    expect(rt.first).toMatch(/assign=qms-lead/)
+  })
+})
+
 describe("lifecycle: interaction with code fences", () => {
   it("{lifecycle ...} inside a fenced block stays literal", () => {
     const src = "```\n{lifecycle scope=/x when=stale:30d title=t assign=a}\n```\n"
