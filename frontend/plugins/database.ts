@@ -159,38 +159,83 @@ const databaseNewRowProperties = [
 // mapped for a given field name and locks it. Handles the three
 // shapes the form emits: real HTMLInputElement / HTMLSelectElement,
 // and the div-wrappers used for image and multi_enum (which expose a
-// `.value` accessor). For a SELECT whose target option hasn't loaded
-// yet (async foreign-key populations), prepend a synthetic option so
-// the reader sees the pinned value even mid-load.
-function applyPinnedValue(el: HTMLInputElement | HTMLSelectElement | HTMLDivElement, value: string): void {
+// `.value` accessor).
+//
+// For a SELECT whose target option hasn't loaded yet (async foreign-key
+// populations), prepend a synthetic option so the reader sees SOMETHING
+// while the real options load. A MutationObserver then watches for the
+// real option to arrive and rewrites the synthetic's LABEL to match
+// it, so the reader sees "Gowiki" instead of the row id "1". The
+// duplicate real option is hidden — the select is locked anyway, so
+// it would just be a duplicate in a dropdown nobody can open.
+//
+// Select locking: uses pointer-events + aria to *look* disabled, but
+// leaves the DOM `disabled` attribute OFF so the select's `.value`
+// still exposes the pinned value to JS-driven submits. (The caller's
+// pinnedForSubmit override already forces the value regardless — this
+// is belt-and-braces.)
+export function applyPinnedValue(el: HTMLInputElement | HTMLSelectElement | HTMLDivElement, value: string): void {
   el.classList.add("gowiki-database-pinned")
   if (el instanceof HTMLSelectElement) {
-    // Prepend a synthetic option showing the pinned value only when no
-    // matching option is present. The async foreign-key loaders APPEND
-    // their options so the synthetic one keeps its position at index 0
-    // and can safely stay selected.
-    const hasMatch = Array.from(el.options).some((o) => o.value === value)
-    if (!hasMatch) {
-      const opt = document.createElement("option")
-      opt.value = value
-      opt.textContent = value
-      opt.selected = true
-      el.insertBefore(opt, el.firstChild)
+    const select = el
+    const existing = Array.from(select.options).find((o) => o.value === value)
+    let synthetic: HTMLOptionElement | null = null
+    if (existing) {
+      existing.selected = true
+    } else {
+      synthetic = document.createElement("option")
+      synthetic.value = value
+      // Fallback label: use the raw value until the real option loads.
+      // Real options that also match `value` will overwrite this
+      // synthetic's textContent below via the MutationObserver.
+      synthetic.textContent = value
+      synthetic.selected = true
+      synthetic.dataset.pinnedSynthetic = "1"
+      select.insertBefore(synthetic, select.firstChild)
+
+      // Watch for the async loader to append the real option. When it
+      // shows up (matching value), copy its label onto the synthetic
+      // and hide it so the reader sees the right name.
+      const observer = new MutationObserver(() => {
+        for (const opt of Array.from(select.options)) {
+          if (opt === synthetic) continue
+          if (opt.value === value) {
+            if (synthetic) synthetic.textContent = opt.textContent || value
+            opt.hidden = true
+            observer.disconnect()
+            return
+          }
+        }
+      })
+      observer.observe(select, { childList: true })
+      // Safety net: async loaders that never fire (dead network) would
+      // leave the observer running forever. Drop it after 15s — the
+      // synthetic keeps the fallback (bare value) label but the
+      // submit is still correct.
+      setTimeout(() => observer.disconnect(), 15_000)
     }
-    el.value = value
-    el.disabled = true
+    select.value = value
+    // Lock via CSS + ARIA, not the disabled attribute — so `.value`
+    // still returns the pinned option to JS submitters.
+    select.setAttribute("aria-disabled", "true")
+    select.setAttribute("tabindex", "-1")
+    select.style.pointerEvents = "none"
+    // Also prevent keyboard/programmatic mutation via the change
+    // event: any change that isn't the pinned value snaps back.
+    select.addEventListener("change", () => {
+      if (select.value !== value) select.value = value
+    })
     return
   }
   if (el instanceof HTMLInputElement) {
     el.value = value
     el.readOnly = true
-    // readOnly on <input type="text"> keeps the value in form submits
-    // but blocks edits. For non-text inputs (date, number) readOnly
-    // isn't fully supported by every browser — pair with disabled
-    // for safety, at the cost of the value being excluded from a
-    // native form submit. We POST via JSON with pinnedForSubmit as
-    // an override, so a disabled input is fine.
-    if (el.type !== "text") el.disabled = true
+    // readOnly is honoured by text/date/number inputs; still snap the
+    // value back on change events so anything that bypasses readOnly
+    // (drag-and-drop, IME) can't leak a different value in.
+    el.addEventListener("change", () => {
+      if (el.value !== value) el.value = value
+    })
     return
   }
   // Div wrappers (image, multi_enum) — set the exposed .value, then
