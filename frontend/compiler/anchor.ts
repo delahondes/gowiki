@@ -878,18 +878,36 @@ export function resolvePointInRaw(markdown: string, anchor: AnchorPoint): Resolv
 export function resolveRangeInPm(doc: PMNode, anchor: AnchorRange): ResolvedRange {
   const start = resolvePointInPm(doc, anchor.start)
   const end = resolvePointInPm(doc, anchor.end)
-  // If both endpoints resolved exactly, we're done.
+  const structuralFrom = Math.min(start.pos, end.pos)
+  const structuralTo = Math.max(start.pos, end.pos)
+
+  // Both endpoints "exact" is the fast path — but only trust it when
+  // the resolved slice actually contains the stored exact text.
+  // Without this check, structural drift (a new block inserted before
+  // the anchor, e.g. a new section heading) shifts nodeIndex and the
+  // range lands somewhere random with confidence "exact" because the
+  // per-point textQuote (rarely present) never contradicts it. Verify
+  // against the range-level exact before returning.
   if (start.confidence === "exact" && end.confidence === "exact") {
-    return { from: Math.min(start.pos, end.pos), to: Math.max(start.pos, end.pos), confidence: "exact" }
+    if (!anchor.textQuote?.exact) {
+      return { from: structuralFrom, to: structuralTo, confidence: "exact" }
+    }
+    const resolved = pmSlicePlainText(doc, structuralFrom, structuralTo)
+    if (approxEqualExact(resolved, anchor.textQuote.exact)) {
+      return { from: structuralFrom, to: structuralTo, confidence: "exact" }
+    }
+    // Drift detected — fall through to the text-quote search so the
+    // right occurrence wins over the wrong-address structural.
   }
-  // Try the range-level fuzzy search using the textQuote (with exact selected text).
+  // Range-level fuzzy: uses quote.exact + prefix/suffix scoring so the
+  // right instance wins when the exact text repeats in the doc.
   if (anchor.textQuote?.exact) {
     const fuzzy = fuzzyFindRangeInPm(doc, anchor.textQuote)
     if (fuzzy) return { from: fuzzy.from, to: fuzzy.to, confidence: "fuzzy" }
   }
   // Fall back to whatever endpoints we got.
   const confidence: Confidence = start.confidence === "lost" || end.confidence === "lost" ? "lost" : "fuzzy"
-  return { from: Math.min(start.pos, end.pos), to: Math.max(start.pos, end.pos), confidence }
+  return { from: structuralFrom, to: structuralTo, confidence }
 }
 
 // ── Text-quote helpers ──────────────────────────────────────────────────────
@@ -918,6 +936,30 @@ function buildTextQuoteFromDocRange(doc: PMNode, from: number, to: number): Text
   const startPlain = pmPosToPlain(marks, from, plain.length)
   const endPlain = pmPosToPlain(marks, to, plain.length)
   return buildTextQuoteFromPlain(plain, startPlain, endPlain)
+}
+
+// pmSlicePlainText returns the plain text (marks/atoms stripped, hard
+// breaks as "\n") lying between two PM positions. Uses the same
+// projection semantics as buildDocPlainProjection so a stored quote
+// built from the doc round-trips back to the same string.
+function pmSlicePlainText(doc: PMNode, from: number, to: number): string {
+  if (to <= from) return ""
+  const { plain, marks } = buildDocPlainProjection(doc)
+  const fp = pmPosToPlain(marks, from, plain.length)
+  const tp = pmPosToPlain(marks, to, plain.length)
+  const lo = Math.min(fp, tp)
+  const hi = Math.max(fp, tp)
+  return plain.slice(lo, hi)
+}
+
+// approxEqualExact is the tolerant compare used to decide whether a
+// resolved slice matches the stored exact snippet. Trims surrounding
+// whitespace and collapses internal whitespace runs on both sides —
+// enough to shrug off a broken paragraph or an added soft break
+// without accepting a completely different string.
+function approxEqualExact(a: string, b: string): boolean {
+  const norm = (s: string) => s.trim().replace(/\s+/g, " ")
+  return norm(a) === norm(b)
 }
 
 // Does the textQuote agree with what's actually at `offset` in `plain`?
