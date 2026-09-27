@@ -339,6 +339,64 @@ func TestScanner_DryRun_TagSelectors(t *testing.T) {
 	}
 }
 
+// An alert-only rule (reviewflow_overdue) must never spawn a todo,
+// even when its condition fires on many pages. The rule surfaces on
+// the lifecycle panel via DryRun; reviewflow owns the notification
+// chain — the scanner stays out of the way.
+func TestScanner_AlertOnly_ProducesNoTodos(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	rule := Rule{
+		ID:         "R-alert",
+		SourcePage: "/admin/qms",
+		ScopeRegex: "^/qms/.*",
+		Condition:  Condition{Kind: "reviewflow_overdue"},
+		// Deliberately no Title/Assign — an alert-only rule doesn't
+		// need them, and the scanner must not try to synthesize one.
+	}
+	overdue := func(p string) []string {
+		if p == "/qms/late-a" || p == "/qms/late-b" {
+			return []string{"reviewer"}
+		}
+		return nil
+	}
+	s := &spy{}
+	scanner := NewScanner(Deps{
+		Rules:                  func() ([]Rule, error) { return []Rule{rule}, nil },
+		ListPages:              func() []string { return []string{"/qms/late-a", "/qms/late-b", "/qms/fresh"} },
+		PageTags:               func(string) []string { return nil },
+		Attesters:              nil,
+		Overdue:                overdue,
+		CreateTodo:             s.create,
+		ExistingLifecycleTodos: s.list,
+		CancelTodo:             s.cancel,
+		Now:                    func() time.Time { return now },
+	})
+	created, cancelled, err := scanner.Run(context.Background())
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("alert-only rule created %d todos, want 0", created)
+	}
+	if cancelled != 0 {
+		t.Errorf("alert-only rule cancelled %d todos, want 0", cancelled)
+	}
+	// But DryRun must STILL report the fires — that's what the
+	// lifecycle panel renders as "N documents need review."
+	fires := scanner.DryRun(rule)
+	got := map[string]bool{}
+	for _, p := range fires {
+		got[p] = true
+	}
+	if !got["/qms/late-a"] || !got["/qms/late-b"] {
+		t.Errorf("DryRun should surface overdue pages, got %v", fires)
+	}
+	if got["/qms/fresh"] {
+		t.Errorf("DryRun surfaced non-overdue page: %v", fires)
+	}
+}
+
 // {{path}} and {{stale_days}} in the todo title must be substituted.
 func TestScanner_TemplateVarsInTitle(t *testing.T) {
 	t.Parallel()

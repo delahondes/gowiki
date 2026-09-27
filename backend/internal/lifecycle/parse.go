@@ -129,12 +129,17 @@ func parseOne(sourcePage, body string) (Rule, error) {
 			return Rule{}, &ParseError{SourcePage: sourcePage, Reason: fmt.Sprintf("invalid scope regex: %v", err)}
 		}
 	}
-	// Todo template minimum: title + assign. Everything else is optional.
-	if strings.TrimSpace(rule.Todo.Title) == "" {
-		return Rule{}, &ParseError{SourcePage: sourcePage, Reason: "missing title="}
-	}
-	if strings.TrimSpace(rule.Todo.Assign) == "" {
-		return Rule{}, &ParseError{SourcePage: sourcePage, Reason: "missing assign="}
+	// Todo template minimum: title + assign — but only when the condition
+	// actually produces todos. Alert-only conditions (reviewflow_overdue)
+	// surface on the panel without generating anything to assign, so
+	// requiring these fields would be noise.
+	if !rule.Condition.IsAlertOnly() {
+		if strings.TrimSpace(rule.Todo.Title) == "" {
+			return Rule{}, &ParseError{SourcePage: sourcePage, Reason: "missing title="}
+		}
+		if strings.TrimSpace(rule.Todo.Assign) == "" {
+			return Rule{}, &ParseError{SourcePage: sourcePage, Reason: "missing assign="}
+		}
 	}
 
 	// Normalise: sort tag lists for deterministic ID hashing across
@@ -154,12 +159,16 @@ func parseCondition(raw string) (Condition, error) {
 	if raw == "" {
 		return Condition{}, fmt.Errorf("empty when=")
 	}
-	parts := strings.SplitN(raw, ":", 2)
-	if len(parts) != 2 {
-		return Condition{}, fmt.Errorf("condition must be <kind>:<value>, got %q", raw)
+	// A kind may carry a payload (`stale:30m`) or be bare
+	// (`reviewflow_overdue`) — the per-kind switch below decides
+	// whether an empty payload is allowed.
+	var kind, payload string
+	if i := strings.IndexByte(raw, ':'); i >= 0 {
+		kind = strings.ToLower(strings.TrimSpace(raw[:i]))
+		payload = strings.TrimSpace(raw[i+1:])
+	} else {
+		kind = strings.ToLower(raw)
 	}
-	kind := strings.ToLower(strings.TrimSpace(parts[0]))
-	payload := strings.TrimSpace(parts[1])
 
 	switch kind {
 	case "stale":
@@ -171,9 +180,26 @@ func parseCondition(raw string) (Condition, error) {
 			return Condition{}, fmt.Errorf("stale duration must be positive, got %q", payload)
 		}
 		return Condition{Kind: "stale", Duration: d}, nil
+	case "reviewflow_overdue":
+		// No duration — reviewflow's own OverdueRoles already reflects the
+		// configured per-role deadlines. This rule surfaces THAT signal on
+		// the lifecycle panel; it does not add a second deadline.
+		if payload != "" {
+			return Condition{}, fmt.Errorf("reviewflow_overdue takes no duration (reviewflow deadlines apply); got %q", payload)
+		}
+		return Condition{Kind: "reviewflow_overdue"}, nil
 	default:
-		return Condition{}, fmt.Errorf("unknown condition kind %q (supported: stale)", kind)
+		return Condition{}, fmt.Errorf("unknown condition kind %q (supported: stale, reviewflow_overdue)", kind)
 	}
+}
+
+// IsAlertOnly reports whether this condition kind only lights up the
+// admin panel and never spawns a todo. reviewflow_overdue is
+// alert-only because reviewflow already owns its own notification chain
+// (per-role deadlines, emails, panel warnings); this rule surfaces the
+// signal on the lifecycle overview without duplicating the action side.
+func (c Condition) IsAlertOnly() bool {
+	return c.Kind == "reviewflow_overdue"
 }
 
 // parseDuration parses a wiki-friendly duration string: <int><unit>

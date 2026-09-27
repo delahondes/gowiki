@@ -1,21 +1,20 @@
 // {lifecycle ...} — one directive on an admin document that spawns
-// per-target todos when another document in scope satisfies a
-// condition (today: stale). The backend does the fanout; the frontend
-// renders a discreet reader-facing card and fetches live status so
-// the reader sees "in order" vs "N documents need review" rather than
-// a technical description of the rule's mechanics.
+// per-target todos (for `stale` rules) or surfaces a reviewflow
+// overdue count (for `reviewflow_overdue`, alert-only). Multiple
+// lifecycle directives on the same document render as ONE aggregate
+// panel: the reader wants a single "is this document's lifecycle in
+// order?" summary, not a card stack.
 import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import { enablePropertiesPanel } from "../compiler/core_ui"
 
-// currentSourcePath — the canonical path of the document whose editor
-// we're currently mounted in. Matches how other plugins (reviewflow,
-// todo, tag) derive their page path: straight off window.location.
+// currentSourcePath — canonical path of the document whose editor
+// we're mounted in. Matches the pattern used by reviewflow/todo/tag
+// (window.location.pathname).
 function currentSourcePath(): string {
-  const p = window.location.pathname || "/"
-  return p
+  return window.location.pathname || "/"
 }
 
 const lifecycleProperties = [
@@ -49,7 +48,7 @@ const lifecycleProperties = [
     default: "stale:30m",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: 'Format: "stale:<duration>". Units d/m/y. E.g. "stale:30m" for 30 months.',
+    helpText: 'Format: "stale:<duration>" or "reviewflow_overdue" (alert-only, no todo).',
   },
   {
     name: "title",
@@ -57,7 +56,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: "Supports {{path}}, {{stale_days}}, {{last_attested}}.",
+    helpText: "Supports {{path}}, {{stale_days}}, {{last_attested}}. Not used by reviewflow_overdue.",
   },
   {
     name: "assign",
@@ -65,7 +64,7 @@ const lifecycleProperties = [
     default: "",
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
-    helpText: "User or @group.",
+    helpText: "User or @group. Not used by reviewflow_overdue.",
   },
   {
     name: "priority",
@@ -85,15 +84,8 @@ const lifecycleProperties = [
   },
 ]
 
-// Serializer attr order — matches the property panel visual order so the
-// source stays a mirror of what the author sees while editing.
 const ATTR_ORDER = ["scope", "tags", "exclude_tags", "when", "title", "assign", "priority", "action"]
 
-// Rendering follows specs/directive-general-rendering.md: a discreet
-// grey card by default, red only when something actually needs
-// attention. The status line is human — a sentence a reader can
-// understand — not a translation of the raw attributes. Technical
-// detail is available on hover.
 const styles = `
 .gowiki-lifecycle {
   background: var(--gw-color-surface, #f3f4f6);
@@ -106,6 +98,8 @@ const styles = `
   font-size: 13px;
   line-height: 1.5;
   color: var(--gw-color-text, #1f2937);
+}
+.gowiki-lifecycle-headrow {
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -121,6 +115,42 @@ const styles = `
   flex: 1 1 auto;
   color: var(--gw-color-muted, #6b7280);
   font-style: italic;
+}
+.gowiki-lifecycle-metasummary {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--gw-color-muted, #6b7280);
+}
+.gowiki-lifecycle-rules {
+  margin: 6px 0 0 0;
+  padding: 0 0 0 4px;
+  list-style: none;
+}
+.gowiki-lifecycle-rules li {
+  padding: 2px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.gowiki-lifecycle-rule-kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--gw-color-muted, #6b7280);
+  min-width: 130px;
+}
+.gowiki-lifecycle-rule-body {
+  flex: 1 1 auto;
+  color: var(--gw-color-text, #1f2937);
+}
+.gowiki-lifecycle-rule-body--ok {
+  color: var(--gw-color-muted, #6b7280);
+  font-style: italic;
+}
+.gowiki-lifecycle-rule-body--alert {
+  color: #b91c1c;
+  font-weight: 500;
 }
 .gowiki-lifecycle-details {
   flex: 0 0 auto;
@@ -149,6 +179,25 @@ const styles = `
   color: #b91c1c;
   font-style: normal;
 }
+.gowiki-lifecycle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin: 0.3em 0;
+  background: var(--gw-color-surface, #f3f4f6);
+  border: 1px solid var(--gw-color-border, #d1d5db);
+  border-radius: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  color: var(--gw-color-muted, #6b7280);
+  cursor: pointer;
+  user-select: none;
+}
+.gowiki-lifecycle-chip::before {
+  content: "▪";
+  color: var(--gw-color-border-strong, #9ca3af);
+}
 `
 
 type FiresState =
@@ -157,9 +206,6 @@ type FiresState =
   | { kind: "ok"; count: 0 }
   | { kind: "alert"; count: number; sample: string[] }
 
-// Cache per source-document path so multiple lifecycle NodeViews on the
-// same page share one fetch. Keyed by source document; value is the
-// promise (loading) or resolved payload.
 const statusCache = new Map<string, Promise<StatusResponse | null>>()
 
 interface RuleView {
@@ -171,6 +217,8 @@ interface RuleView {
   assign: string
   priority?: string
   action?: string
+  kind: string
+  alert_only?: boolean
 }
 interface RuleStatusEntry {
   rule: RuleView
@@ -182,9 +230,6 @@ interface StatusResponse {
   rules: RuleStatusEntry[]
 }
 
-// fetchStatus loads (or reuses the cached fetch of) the lifecycle
-// status for the source document. Returns null on any failure so the
-// caller falls back to a passive "status unavailable" render.
 function fetchStatus(sourcePath: string): Promise<StatusResponse | null> {
   const existing = statusCache.get(sourcePath)
   if (existing) return existing
@@ -192,34 +237,14 @@ function fetchStatus(sourcePath: string): Promise<StatusResponse | null> {
     .then((r) => (r.ok ? (r.json() as Promise<StatusResponse>) : null))
     .catch(() => null)
   statusCache.set(sourcePath, p)
-  // Auto-expire after 30 s so a re-render after an edit picks up the
-  // latest scan. The cache is a "same NodeView-mount burst" dedup, not
-  // a long-lived cache.
   setTimeout(() => statusCache.delete(sourcePath), 30_000)
   return p
 }
 
-// matchRule finds the status entry that corresponds to this NodeView's
-// attrs. Matches on (title, assign) — the natural human-readable
-// identifier for a rule on a given source document. Falls back to
-// tolerating extra whitespace so a serialise/parse mismatch doesn't
-// hide the status.
-function matchRule(status: StatusResponse, attrs: Record<string, unknown>): RuleStatusEntry | null {
-  const wantTitle = String(attrs.title || "").trim()
-  const wantAssign = String(attrs.assign || "").trim()
-  if (!wantTitle || !wantAssign) return null
-  for (const s of status.rules) {
-    if (s.rule.title.trim() === wantTitle && s.rule.assign.trim() === wantAssign) {
-      return s
-    }
-  }
-  return null
-}
-
-// summariseWhen turns a raw "stale:30m" back into "no attestation for
-// 30 months" for the hover tooltip. Kept minimal because the reader
-// never sees this unless they hover the details marker.
+// summariseWhen turns raw when= text into reader-friendly hover text.
+// Handles both `stale:<dur>` and bare kinds like `reviewflow_overdue`.
 function summariseWhen(raw: string): string {
+  if (raw === "reviewflow_overdue") return "reviewflow overdue on any role"
   const parts = raw.split(":")
   if (parts.length !== 2 || parts[0] !== "stale") return raw
   const dur = parts[1]
@@ -231,10 +256,20 @@ function summariseWhen(raw: string): string {
   return `no attestation for ${n} ${unitName}${plural}`
 }
 
-// buildDetailsTooltip is the technical hover text on the small
-// `[details]` marker. Never in the main status line — reserved for the
-// author or admin who wants to double-check what the rule actually
-// covers.
+// kindLabel turns the parsed condition kind into the short label the
+// bullet list uses when a rule fires. Reader-facing wording — no
+// technical suffix.
+function kindLabel(kind: string): string {
+  switch (kind) {
+    case "stale":
+      return "staleness"
+    case "reviewflow_overdue":
+      return "reviewflow overdue"
+    default:
+      return kind
+  }
+}
+
 function buildDetailsTooltip(attrs: Record<string, unknown>): string {
   const bits: string[] = []
   const scope = String(attrs.scope || "").trim()
@@ -247,21 +282,75 @@ function buildDetailsTooltip(attrs: Record<string, unknown>): string {
   if (when) bits.push(`condition: ${summariseWhen(when)}`)
   const assign = String(attrs.assign || "").trim()
   if (assign) bits.push(`assign: ${assign}`)
+  const title = String(attrs.title || "").trim()
+  if (title) bits.push(`title: ${title}`)
   return bits.join("\n")
 }
 
-// LifecycleNodeView — discreet grey card with a human status line and
-// a small `[details]` marker for the technical hover. Fetches live
-// backend status on mount; renders passive by default and shifts to a
-// loud red state only when the rule actually fires on documents or is
-// missing required setup.
+// collectLifecycleNodes walks the doc and returns every lifecycle node
+// with its position, in doc order. The first entry is the "primary"
+// — the one that renders the aggregate panel; the rest render as
+// chips.
+function collectLifecycleNodes(view: EditorView): Array<{ pos: number; node: PMNode }> {
+  const out: Array<{ pos: number; node: PMNode }> = []
+  const doc = view.state.doc
+  doc.descendants((n, pos) => {
+    if (n.type.name === "lifecycle") {
+      out.push({ pos, node: n })
+    }
+  })
+  return out
+}
+
+// matchEntry pairs one PM lifecycle node with its status entry from
+// the backend response, keyed on (title, assign). Alert-only rules
+// omit those so they match on (when, scope, tags) instead. Returns
+// null when no match is found — the panel then renders that rule in
+// the "unknown" state.
+function matchEntry(entries: RuleStatusEntry[], node: PMNode): RuleStatusEntry | null {
+  const attrs = node.attrs
+  const isAlertOnly = String(attrs.when || "").trim() === "reviewflow_overdue"
+  if (isAlertOnly) {
+    for (const e of entries) {
+      if (e.rule.when === "reviewflow_overdue" && e.rule.scope === String(attrs.scope || "").trim()) {
+        return e
+      }
+    }
+    return null
+  }
+  const wantTitle = String(attrs.title || "").trim()
+  const wantAssign = String(attrs.assign || "").trim()
+  if (!wantTitle || !wantAssign) return null
+  for (const e of entries) {
+    if (e.rule.title.trim() === wantTitle && e.rule.assign.trim() === wantAssign) {
+      return e
+    }
+  }
+  return null
+}
+
+function needsSetup(node: PMNode): boolean {
+  const isAlertOnly = String(node.attrs.when || "").trim() === "reviewflow_overdue"
+  if (isAlertOnly) return !String(node.attrs.scope || "").trim() && !String(node.attrs.tags || "").trim()
+  return !node.attrs.title || !node.attrs.assign
+}
+
+// LifecycleNodeView — one PM NodeView per {lifecycle} node. The
+// primary (first in doc order) renders the aggregate panel across
+// ALL lifecycle nodes on the doc; secondary nodes render a compact
+// chip so authors can still click into them for property editing.
 class LifecycleNodeView {
   dom: HTMLElement
   private node: PMNode
+  private view: EditorView
+  private getPos: () => number | undefined
   private fires: FiresState = { kind: "loading" }
+  private status: StatusResponse | null = null
 
-  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.node = node
+    this.view = view
+    this.getPos = getPos
     this.dom = document.createElement("div")
     this.dom.contentEditable = "false"
     this.render()
@@ -276,10 +365,11 @@ class LifecycleNodeView {
       return
     }
     fetchStatus(sourcePath).then((status) => {
+      this.status = status
       if (!status) {
         this.fires = { kind: "unknown" }
       } else {
-        const entry = matchRule(status, this.node.attrs)
+        const entry = matchEntry(status.rules, this.node)
         if (!entry) {
           this.fires = { kind: "unknown" }
         } else if (entry.fires_count === 0) {
@@ -292,68 +382,183 @@ class LifecycleNodeView {
     })
   }
 
+  private isPrimary(): boolean {
+    const all = collectLifecycleNodes(this.view)
+    if (all.length === 0) return true
+    const myPos = this.getPos()
+    return myPos === all[0].pos
+  }
+
   private render() {
     this.dom.innerHTML = ""
-    const needsSetup = !this.node.attrs.title || !this.node.attrs.assign
-    const isAlert = !needsSetup && this.fires.kind === "alert"
+    if (this.isPrimary()) {
+      this.renderPanel()
+    } else {
+      this.renderChip()
+    }
+  }
+
+  // renderChip — the SECONDARY rendering. Compact one-line marker so
+  // the author knows the rule exists here and can click to edit it,
+  // without duplicating the aggregate panel that lives on the primary.
+  private renderChip() {
+    this.dom.className = "gowiki-lifecycle-chip-wrapper"
+    const chip = document.createElement("span")
+    chip.className = "gowiki-lifecycle-chip"
+    const title = String(this.node.attrs.title || "").trim()
+    const label = title || summariseWhen(String(this.node.attrs.when || "").trim() || "lifecycle rule")
+    chip.textContent = `Lifecycle · ${label}`
+    chip.title = buildDetailsTooltip(this.node.attrs)
+    chip.addEventListener("click", () => {
+      const pos = this.getPos()
+      if (pos === undefined) return
+      try {
+        const tr = this.view.state.tr.setSelection(NodeSelection.create(this.view.state.doc, pos))
+        this.view.dispatch(enablePropertiesPanel(tr))
+        this.view.focus()
+      } catch {
+        // Position may have shifted; ignore.
+      }
+    })
+    this.dom.appendChild(chip)
+  }
+
+  // renderPanel — the PRIMARY rendering. Aggregates every lifecycle
+  // node on the doc into one card and reports the worst-case state.
+  private renderPanel() {
+    const all = collectLifecycleNodes(this.view)
+    // Build per-rule states with matched status entries.
+    const perRule = all.map(({ node }) => {
+      const setup = needsSetup(node)
+      const entry = this.status ? matchEntry(this.status.rules, node) : null
+      let state: FiresState
+      if (setup) {
+        state = { kind: "unknown" }
+      } else if (!this.status) {
+        state = { kind: "loading" }
+      } else if (!entry) {
+        state = { kind: "unknown" }
+      } else if (entry.fires_count === 0) {
+        state = { kind: "ok", count: 0 }
+      } else {
+        state = { kind: "alert", count: entry.fires_count, sample: entry.sample_pages || [] }
+      }
+      return { node, setup, state, entry }
+    })
+
+    const anyAlert = perRule.some((r) => r.state.kind === "alert")
+    const anySetup = perRule.some((r) => r.setup)
 
     let className = "gowiki-lifecycle"
-    if (needsSetup) className += " gowiki-lifecycle--needs-setup"
-    else if (isAlert) className += " gowiki-lifecycle--alert"
+    if (anySetup || anyAlert) className += " gowiki-lifecycle--alert"
     this.dom.className = className
+
+    const headrow = document.createElement("div")
+    headrow.className = "gowiki-lifecycle-headrow"
+    this.dom.appendChild(headrow)
 
     const label = document.createElement("span")
     label.className = "gowiki-lifecycle-label"
     label.textContent = "Lifecycle"
-    this.dom.appendChild(label)
+    headrow.appendChild(label)
 
     const status = document.createElement("span")
     status.className = "gowiki-lifecycle-status"
-    status.textContent = this.summarise()
-    this.dom.appendChild(status)
+    status.textContent = this.summariseAggregate(perRule, anyAlert, anySetup)
+    headrow.appendChild(status)
 
-    if (!needsSetup) {
-      const details = document.createElement("span")
-      details.className = "gowiki-lifecycle-details"
-      details.textContent = "details"
-      details.title = buildDetailsTooltip(this.node.attrs)
-      this.dom.appendChild(details)
-    }
-  }
+    const metaSummary = document.createElement("span")
+    metaSummary.className = "gowiki-lifecycle-metasummary"
+    metaSummary.textContent = perRule.length === 1 ? "1 rule" : `${perRule.length} rules`
+    headrow.appendChild(metaSummary)
 
-  // summarise returns the single reader-facing status line. Human
-  // sentence, no directive attributes echoed literally. The mechanics
-  // sit behind the `[details]` hover — the reader only wants to know
-  // whether the rule is doing its job.
-  private summarise(): string {
-    if (!this.node.attrs.title || !this.node.attrs.assign) {
-      return "Rule not yet configured — set title and assign in the property panel."
-    }
-    switch (this.fires.kind) {
-      case "loading":
-        return "Checking…"
-      case "unknown":
-        return "Rule active."
-      case "ok":
-        return "All documents in scope are within the rule."
-      case "alert": {
-        const n = this.fires.count
-        return n === 1 ? "1 document needs review." : `${n} documents need review.`
+    // Per-rule bullets only when at least one rule needs attention.
+    // Green case stays as ONE calm line — the panel gets specific only
+    // when specificity matters.
+    if (anyAlert || anySetup) {
+      const ul = document.createElement("ul")
+      ul.className = "gowiki-lifecycle-rules"
+      this.dom.appendChild(ul)
+      for (const r of perRule) {
+        const li = document.createElement("li")
+        const kindSpan = document.createElement("span")
+        kindSpan.className = "gowiki-lifecycle-rule-kind"
+        kindSpan.textContent = kindLabel(String(r.node.attrs.when || "").split(":")[0] || "?")
+        li.appendChild(kindSpan)
+
+        const body = document.createElement("span")
+        body.className = "gowiki-lifecycle-rule-body"
+        if (r.setup) {
+          body.classList.add("gowiki-lifecycle-rule-body--alert")
+          body.textContent = "rule not yet configured"
+        } else {
+          switch (r.state.kind) {
+            case "loading":
+              body.classList.add("gowiki-lifecycle-rule-body--ok")
+              body.textContent = "checking…"
+              break
+            case "unknown":
+              body.classList.add("gowiki-lifecycle-rule-body--ok")
+              body.textContent = "status unavailable"
+              break
+            case "ok":
+              body.classList.add("gowiki-lifecycle-rule-body--ok")
+              body.textContent = "all in order"
+              break
+            case "alert": {
+              body.classList.add("gowiki-lifecycle-rule-body--alert")
+              const n = r.state.count
+              body.textContent = n === 1 ? "1 document" : `${n} documents`
+              break
+            }
+          }
+        }
+        li.appendChild(body)
+
+        const details = document.createElement("span")
+        details.className = "gowiki-lifecycle-details"
+        details.textContent = "details"
+        details.title = buildDetailsTooltip(r.node.attrs)
+        li.appendChild(details)
+        ul.appendChild(li)
       }
     }
   }
 
+  // summariseAggregate returns the one-line header status for the
+  // aggregate panel. Calm when everything is fine; specific about the
+  // total when at least one rule fires.
+  private summariseAggregate(
+    perRule: Array<{ setup: boolean; state: FiresState }>,
+    anyAlert: boolean,
+    anySetup: boolean
+  ): string {
+    if (anySetup) {
+      const n = perRule.filter((r) => r.setup).length
+      return n === 1 ? "1 rule not yet configured." : `${n} rules not yet configured.`
+    }
+    if (anyAlert) {
+      let total = 0
+      for (const r of perRule) {
+        if (r.state.kind === "alert") total += r.state.count
+      }
+      return total === 1 ? "1 document needs review." : `${total} documents need review.`
+    }
+    const anyLoading = perRule.some((r) => r.state.kind === "loading")
+    if (anyLoading) return "Checking…"
+    return "All documents in scope are within all rules."
+  }
+
   update(node: PMNode) {
     if (node.type !== this.node.type) return false
-    const prevKey = `${this.node.attrs.title}|${this.node.attrs.assign}`
+    const prevKey = `${this.node.attrs.title}|${this.node.attrs.assign}|${this.node.attrs.when}|${this.node.attrs.scope}`
     this.node = node
-    const nextKey = `${node.attrs.title}|${node.attrs.assign}`
+    const nextKey = `${node.attrs.title}|${node.attrs.assign}|${node.attrs.when}|${node.attrs.scope}`
     this.render()
-    // If the identifying attrs changed (title or assign edited), the
-    // cached status entry no longer matches — re-fetch so the new
-    // identity resolves against the backend's current state.
     if (prevKey !== nextKey) {
       this.fires = { kind: "loading" }
+      this.status = null
+      statusCache.delete(currentSourcePath())
       this.render()
       this.loadStatus()
     }
@@ -443,6 +648,12 @@ export const lifecyclePlugin: WikiPlugin = {
       },
     })
 
+    // When the doc changes (rules added / removed / reordered), the
+    // primary lifecycle node may switch. Force a re-render of every
+    // lifecycle NodeView by dispatching a no-op transaction — actually
+    // PM's NodeView.update fires naturally for each affected node when
+    // its position changes, and we recompute isPrimary() on every
+    // render(), so this plugin body is minimal.
     reg.registerEditorPlugin((_schema: Schema) => {
       return new PMPlugin({
         key: new PluginKey("gowiki.lifecycle"),

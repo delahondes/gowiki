@@ -42,6 +42,12 @@ type RuleView struct {
 	Assign      string   `json:"assign"`
 	Priority    string   `json:"priority,omitempty"`
 	Action      string   `json:"action,omitempty"`
+	// Kind is the semantic label the panel uses when breaking down
+	// firing rules ("staleness", "reviewflow overdue"). Derived from
+	// the parsed Condition.Kind so the frontend doesn't have to
+	// re-parse `when=`.
+	Kind      string `json:"kind"`
+	AlertOnly bool   `json:"alert_only,omitempty"`
 }
 
 // RegisterRoutes wires the lifecycle plugin's HTTP surface. The scanner
@@ -74,6 +80,8 @@ func RegisterRoutes(r chi.Router, store *Store, scanner *Scanner) {
 					Assign:      r.Todo.Assign,
 					Priority:    r.Todo.Priority,
 					Action:      r.Todo.Action,
+					Kind:        r.Condition.Kind,
+					AlertOnly:   r.Condition.IsAlertOnly(),
 				},
 				SourcePage: r.SourcePage,
 			}
@@ -112,5 +120,7 @@ func formatCondition(c Condition) string {
 		days := int(c.Duration / (24 * time.Hour))
 		return fmt.Sprintf("stale:%dd", days)
 	}
+	// reviewflow_overdue and any other alert-only kinds carry no
+	// payload — the bare kind name IS the canonical when= text.
 	return c.Kind
 }

@@ -36,6 +36,17 @@ A document is in scope for a rule iff **every present selector matches**:
 - **At least one of `scope=` or `tags=` must be present.** A rule with only `exclude_tags=` would target the whole wiki minus a few exceptions, which is almost never what you meant.
 - `scope` uses the same regex convention as `scope_regexp` on database tables — anchored with `^` and `$` when needed.
 
+## 1. Conditions
+
+Every rule needs a `when=` condition. Two kinds are supported today:
+
+| Kind | Payload | Produces todos? | Purpose |
+|---|---|---|---|
+| `stale:<duration>` | `stale:30m` (30 months) | yes | Fires when a document has had no attestation for at least the duration. |
+| `reviewflow_overdue` | none | no (panel-only alert) | Fires when a document's reviewflow has one or more roles marked overdue by reviewflow's own deadline configuration. |
+
+Alert-only conditions (like `reviewflow_overdue`) do not need `title=` or `assign=` — the reviewflow already owns the notification chain (per-role deadlines and warnings). The lifecycle panel simply surfaces the count so a QARA admin can see it at a glance next to the other rules.
+
 ## 1. The `stale` condition
 
 `when=stale:<duration>` fires when a document has had no attestation of any kind for at least `<duration>`.
@@ -93,4 +104,4 @@ Every todo the scanner creates carries a deterministic node key derived from `sh
 
 ## 1. What the rendering box says
 
-The card shown in the wiki for a rule is deliberately calm. When everything is in order the reader sees a short italic line — *"All documents in scope are within the rule."* — with a small `details` marker that shows scope, tags, condition and assignee on hover. When the rule actually fires on documents, the card turns red and shows a plain count — *"12 documents need review."* — so it's impossible to miss without cluttering the ordinary case.
+The card shown in the wiki aggregates ALL `{lifecycle}` rules on the current document into ONE panel. When every rule is in order the reader sees a short italic line — *"All documents in scope are within all rules."* — with a small `details` marker per rule for scope/tags/condition/assignee on hover. When any rule fires, the panel turns red with a plain count and a per-rule bullet list so it's clear which rule needs attention.

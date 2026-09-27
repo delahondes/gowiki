@@ -305,6 +305,20 @@ func main() {
 			}
 			return p.Meta.UpdatedAt
 		}
+		// Reviewflow overdue probe: the OverdueRoles list from the
+		// reviewflow status — the same signal the reviewflow panel
+		// renders as "⚠ Overdue" on affected roles. Feeds the
+		// reviewflow_overdue lifecycle condition (alert-only rule).
+		overdueProbe := func(pagePath string) []string {
+			if reviewflowService == nil {
+				return nil
+			}
+			st, err := reviewflowService.GetStatus(pagePath)
+			if err != nil || st == nil {
+				return nil
+			}
+			return st.OverdueRoles
+		}
 		lifecycleScanner = lifecycle.NewScanner(lifecycle.Deps{
 			Rules: lifecycleStore.AllRules,
 			ListPages: func() []string {
@@ -320,6 +334,7 @@ func main() {
 			},
 			PageTags:  tagIndex.GetTagsForPage,
 			Attesters: []lifecycle.AttestationSource{pageEditAttester, reviewflowAttester},
+			Overdue:   overdueProbe,
 			CreateTodo: func(ctx context.Context, req lifecycle.TodoRequest) error {
 				// Idempotency lives in the scanner (it consults
 				// ExistingLifecycleTodos before calling us), so this

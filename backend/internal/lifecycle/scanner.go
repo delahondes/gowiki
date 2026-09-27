@@ -55,6 +55,12 @@ type Deps struct {
 	// doesn't matter — the max non-zero timestamp wins.
 	Attesters []AttestationSource
 
+	// Overdue is the categorical probe for the reviewflow_overdue
+	// condition — returns the set of overdue roles on a page's
+	// reviewflow. Optional; nil disables reviewflow_overdue rules
+	// gracefully (they evaluate to Fires=false).
+	Overdue OverdueProbe
+
 	// CreateTodo is called for every (rule, page) that fires. The
 	// implementation MUST be idempotent by NodeKey: if a todo with the
 	// same NodeKey already exists (and is not cancelled), it should
@@ -125,7 +131,7 @@ func (s *Scanner) DryRun(r Rule) []string {
 		if !PageMatches(r, pagePath, tags) {
 			continue
 		}
-		v := Evaluate(r, pagePath, now, s.deps.Attesters...)
+		v := Evaluate(r, pagePath, now, s.deps.Overdue, s.deps.Attesters...)
 		if v.Fires {
 			fires = append(fires, pagePath)
 		}
@@ -166,7 +172,13 @@ func (s *Scanner) Run(ctx context.Context) (created, cancelled int, err error) {
 			if !PageMatches(r, pagePath, tags) {
 				continue
 			}
-			verdict := Evaluate(r, pagePath, now, s.deps.Attesters...)
+			// Alert-only rules (reviewflow_overdue) surface on the
+			// lifecycle panel via DryRun but never spawn or reconcile
+			// todos — reviewflow already owns the notification chain.
+			if r.Condition.IsAlertOnly() {
+				continue
+			}
+			verdict := Evaluate(r, pagePath, now, s.deps.Overdue, s.deps.Attesters...)
 			if !verdict.Fires {
 				continue
 			}

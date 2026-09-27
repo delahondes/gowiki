@@ -173,3 +173,52 @@ func TestParse_MultipleRulesOnSamePage(t *testing.T) {
 		t.Errorf("distinct rules should have distinct IDs")
 	}
 }
+
+// A reviewflow_overdue rule is alert-only: parse must accept it
+// without title= or assign=, and no duration payload is allowed.
+func TestParse_ReviewflowOverdue(t *testing.T) {
+	t.Parallel()
+	src := `{lifecycle scope="^/qms/.*" when=reviewflow_overdue}` + "\n"
+	rules, errs := Parse("/admin/qms", src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("want 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if r.Condition.Kind != "reviewflow_overdue" {
+		t.Errorf("kind = %q, want reviewflow_overdue", r.Condition.Kind)
+	}
+	if r.Condition.Duration != 0 {
+		t.Errorf("reviewflow_overdue must carry no duration, got %v", r.Condition.Duration)
+	}
+	if !r.Condition.IsAlertOnly() {
+		t.Errorf("reviewflow_overdue must be alert-only")
+	}
+}
+
+// Any payload on when=reviewflow_overdue is refused — the reviewflow
+// deadlines already own the "how long is too long" question, and
+// silently accepting a duration would confuse readers into thinking
+// the lifecycle rule owns it.
+func TestParse_ReviewflowOverdueRejectsPayload(t *testing.T) {
+	t.Parallel()
+	src := `{lifecycle scope="^/qms/.*" when=reviewflow_overdue:30d}` + "\n"
+	rules, errs := Parse("/admin/qms", src)
+	if len(rules) != 0 || len(errs) == 0 {
+		t.Errorf("payload on reviewflow_overdue must be rejected")
+	}
+}
+
+// title=/assign= remain OPTIONAL for reviewflow_overdue since it's
+// alert-only — that was the whole point of the kind. Regression guard
+// against re-adding a blanket "title required" check.
+func TestParse_ReviewflowOverdueNoTitleOK(t *testing.T) {
+	t.Parallel()
+	src := `{lifecycle tags=sop when=reviewflow_overdue}` + "\n"
+	rules, errs := Parse("/admin/qms", src)
+	if len(rules) != 1 || len(errs) != 0 {
+		t.Fatalf("expected 1 rule with no error, got rules=%d errs=%v", len(rules), errs)
+	}
+}
