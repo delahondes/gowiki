@@ -117,6 +117,64 @@ Every write tool requires an `@ai` ACL grant on the target page in addition to t
 - **Todos** — `list_todos`, `complete_todo`.
 - **Conventions** — `get_conventions` returns the dialect rules; AI clients should load this once before writing.
 
+## Running tests
+
+Two suites, two invocations. The unit suites run without any external dependency; the integration suites need a live Postgres.
+
+### Unit tests (no dependencies)
+
+Backend:
+
+```sh
+cd backend && go test ./...
+```
+
+Frontend (Vitest, jsdom):
+
+```sh
+cd frontend && npm install && npx vitest run
+```
+
+Or from the repo root:
+
+```sh
+make test-backend
+make test-frontend
+```
+
+### Integration tests (need Postgres)
+
+Two backend packages ship integration tests behind the `integration` build tag: `internal/database` (schema + data-store + sync) and `internal/todo` (store + scheduler + acknowledgement). They read `DATABASE_URL` and create per-test databases so runs are isolated.
+
+Start a local Postgres — the containerised default the tests look for is on port 5432, but any URL you point `DATABASE_URL` at works:
+
+```sh
+docker run --rm -d -p 55432:5432 \
+  -e POSTGRES_USER=gowiki -e POSTGRES_PASSWORD=gowiki -e POSTGRES_DB=gowiki_test \
+  postgres:16-alpine
+```
+
+Run the full integration suite:
+
+```sh
+DATABASE_URL="postgres://gowiki:gowiki@localhost:55432/gowiki_test?sslmode=disable" \
+  make test-integration
+```
+
+Or one specific test:
+
+```sh
+cd backend
+DATABASE_URL="postgres://gowiki:gowiki@localhost:55432/gowiki_test?sslmode=disable" \
+  go test -tags=integration -count=1 -run TestTodoScheduler_CheckReminders_FiresInsideWindow ./internal/todo/...
+```
+
+Without a reachable Postgres, integration tests `t.Skipf` (they don't fail); unit tests are unaffected.
+
+### CI
+
+Every push runs `make test-backend`, `make test-frontend`, `make test-integration`, `golangci-lint`, ESLint and Prettier via GitHub Actions. A red CI blocks merges to `main`.
+
 ## License
 
 Gowiki is licensed under the **GNU General Public License v3.0** (GPL-3.0). In tribute to DokuWiki's open-source tradition, we chose the GPL family to ensure this project remains open.
