@@ -345,17 +345,28 @@ function collectLifecycleNodes(view: EditorView): Array<{ pos: number; node: PMN
   return out
 }
 
+// ALERT_ONLY_KINDS lists the when= values that produce panel-only
+// alerts rather than todos. Kept in sync with the backend's
+// Condition.IsAlertOnly (backend/internal/lifecycle/parse.go). Alert-
+// only rules match on (when, scope) instead of (title, assign) and
+// don't require title/assign for setup.
+const ALERT_ONLY_KINDS: ReadonlySet<string> = new Set(["reviewflow_overdue", "comments_open"])
+
+function isAlertOnlyKind(when: string): boolean {
+  return ALERT_ONLY_KINDS.has(when.trim())
+}
+
 // matchEntry pairs one PM lifecycle node with its status entry from
 // the backend response, keyed on (title, assign). Alert-only rules
-// omit those so they match on (when, scope, tags) instead. Returns
-// null when no match is found — the panel then renders that rule in
+// omit those so they match on (when, scope) instead. Returns null
+// when no match is found — the panel then renders that rule in
 // the "unknown" state.
 function matchEntry(entries: RuleStatusEntry[], node: PMNode): RuleStatusEntry | null {
   const attrs = node.attrs
-  const isAlertOnly = String(attrs.when || "").trim() === "reviewflow_overdue"
-  if (isAlertOnly) {
+  const rawWhen = String(attrs.when || "").trim()
+  if (isAlertOnlyKind(rawWhen)) {
     for (const e of entries) {
-      if (e.rule.when === "reviewflow_overdue" && e.rule.scope === String(attrs.scope || "").trim()) {
+      if (e.rule.when === rawWhen && e.rule.scope === String(attrs.scope || "").trim()) {
         return e
       }
     }
@@ -373,8 +384,10 @@ function matchEntry(entries: RuleStatusEntry[], node: PMNode): RuleStatusEntry |
 }
 
 function needsSetup(node: PMNode): boolean {
-  const isAlertOnly = String(node.attrs.when || "").trim() === "reviewflow_overdue"
-  if (isAlertOnly) return !String(node.attrs.scope || "").trim() && !String(node.attrs.tags || "").trim()
+  const rawWhen = String(node.attrs.when || "").trim()
+  if (isAlertOnlyKind(rawWhen)) {
+    return !String(node.attrs.scope || "").trim() && !String(node.attrs.tags || "").trim()
+  }
   return !node.attrs.title || !node.attrs.assign
 }
 
