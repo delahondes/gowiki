@@ -571,3 +571,117 @@ func TestCreateFromTemplate_ACLDenied_403(t *testing.T) {
 		t.Errorf("status = %d, want 403", rec.Code)
 	}
 }
+
+// EF07 regulatory audit: a document issued from a `{template}` carries
+// a stamp naming the template AND the exact version it was issued
+// from. When the template is later modified — new heading, new
+// version — the stamp on the previously-issued document MUST NOT
+// silently follow along. A regulator inspecting a document in 2028
+// must see the template state as it was on the day of issuance,
+// not the current source. That's why the stamp is resolved once at
+// creation time and written into the document's markdown, never
+// re-resolved on read.
+func TestCreateFromTemplate_Stamp_StaysFrozenWhenTemplateChanges(t *testing.T) {
+	t.Parallel()
+	s, _ := newTemplateTestServer(t, false)
+
+	// Seed the template via PageStore so it carries a real version.
+	if _, err := s.store.(*storage.FileStore).Put(
+		"/docs/_template",
+		"{template}\n\n{template-title}\n# Placeholder\n\n{template-stamp}\n\nOriginal body.\n",
+		"alice",
+	); err != nil {
+		t.Fatalf("seed template: %v", err)
+	}
+	tplBefore, err := s.store.Get("/docs/_template")
+	if err != nil {
+		t.Fatalf("read template: %v", err)
+	}
+	issuedFromVersion := tplBefore.Meta.Version
+	if issuedFromVersion <= 0 {
+		t.Fatalf("template version = %d, want positive", issuedFromVersion)
+	}
+
+	// Issue a document from the template's current version.
+	rec := postCreate(t, s, TemplateCreateRequest{
+		TemplatePath: "/docs/_template",
+		Path:         "/docs/issued",
+		Title:        "Issued document",
+		Summary:      "issuance",
+	}, "alice")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("issuance: status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// The document's markdown must contain the resolved stamp with
+	// the version it was issued from (a ?v=N link).
+	issued, err := s.store.Get("/docs/issued")
+	if err != nil {
+		t.Fatalf("read issued: %v", err)
+	}
+	frozenSnippet := "?v=" + itoa(issuedFromVersion)
+	if !strings.Contains(issued.Markdown, frozenSnippet) {
+		t.Fatalf("issued document must reference template version %d, got:\n%s", issuedFromVersion, issued.Markdown)
+	}
+	if strings.Contains(issued.Markdown, "{template-stamp}") {
+		t.Errorf("issued document still carries the unresolved {template-stamp} directive: %s", issued.Markdown)
+	}
+
+	// Modify the template — this bumps its version. Anything that
+	// re-resolves the stamp dynamically would now silently retarget
+	// the issued document at the newer version.
+	if _, err := s.store.PutWithSummary(
+		"/docs/_template",
+		"{template}\n\n{template-title}\n# Placeholder\n\n{template-stamp}\n\nCompletely rewritten body.\n",
+		"bob",
+		"template overhaul",
+	); err != nil {
+		t.Fatalf("modify template: %v", err)
+	}
+	tplAfter, err := s.store.Get("/docs/_template")
+	if err != nil {
+		t.Fatalf("re-read template: %v", err)
+	}
+	if tplAfter.Meta.Version <= issuedFromVersion {
+		t.Fatalf("template version didn't bump: before=%d after=%d", issuedFromVersion, tplAfter.Meta.Version)
+	}
+
+	// Re-read the issued document — its stamp MUST still point at the
+	// original version. Freeze-at-creation is the regulatory
+	// invariant this test is here to protect.
+	stillIssued, err := s.store.Get("/docs/issued")
+	if err != nil {
+		t.Fatalf("re-read issued: %v", err)
+	}
+	if !strings.Contains(stillIssued.Markdown, frozenSnippet) {
+		t.Errorf("stamp lost the frozen version reference after template change; got:\n%s", stillIssued.Markdown)
+	}
+	newerSnippet := "?v=" + itoa(tplAfter.Meta.Version)
+	if strings.Contains(stillIssued.Markdown, newerSnippet) {
+		t.Errorf("stamp drifted to the newer template version %d — a regulator would see the wrong source:\n%s", tplAfter.Meta.Version, stillIssued.Markdown)
+	}
+	// The body still contains what was in the template AT issuance —
+	// "Original body" — not the later rewrite.
+	if !strings.Contains(stillIssued.Markdown, "Original body") {
+		t.Errorf("issued document lost its original body:\n%s", stillIssued.Markdown)
+	}
+	if strings.Contains(stillIssued.Markdown, "Completely rewritten body") {
+		t.Errorf("issued document leaked the newer template body — content freeze broken:\n%s", stillIssued.Markdown)
+	}
+}
+
+// itoa avoids pulling strconv into this test file just for the tiny
+// version-to-string interpolation the stamp assertion needs.
+func itoa(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
+}

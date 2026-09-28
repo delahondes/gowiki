@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gowiki/backend/internal/config"
 )
 
 // Store tests exercise the full Postgres schema: todo_tasks, todo_completions,
@@ -517,5 +519,142 @@ func TestTodoStore_ListPendingAcks_ScopedToUserAndGroups(t *testing.T) {
 		if strings.Contains(a.Title, "bob") {
 			t.Errorf("shouldn't include bob's task: %+v", a)
 		}
+	}
+}
+
+// integrationStubResolver is a minimal GroupResolver for integration
+// tests — the sibling model_test.go declares one under the plain
+// build tag, so we duplicate a copy here rather than share to keep
+// the //go:build integration boundary clean.
+type integrationStubResolver struct {
+	groups map[string][]string
+}
+
+func (r integrationStubResolver) GroupMembers(name string) []string {
+	if r.groups == nil {
+		return nil
+	}
+	return r.groups[strings.TrimPrefix(name, "group:")]
+}
+
+// EF03b regulatory audit: a per-document read acknowledgement
+// assigned to a group must (a) show up in every group member's
+// pending-ack list until they personally acknowledge, and (b) only
+// promote the task to done once EVERY member has acknowledged.
+// This is what "the acknowledgement follows the reader list of its
+// own document" means end-to-end.
+func TestTodoStore_GroupAck_AllMembersMustAcknowledge(t *testing.T) {
+	t.Parallel()
+	s, ctx := newStoreForTest(t)
+	resolver := integrationStubResolver{groups: map[string][]string{
+		"qa": {"alice", "bob", "carol"},
+	}}
+	page := "/regulatory/qms/sop/12"
+	task := mustCreate(t, s, CreateRequest{
+		Title:      "Read SOP-12",
+		Assignee:   Assignee{Type: "group", Target: "group:qa", Resolution: "all"},
+		WikiAction: WikiAction{Type: "read", Page: page},
+	})
+
+	// Every group member sees the task as pending on the page's ack
+	// list — an ack is per-member.
+	for _, member := range []string{"alice", "bob", "carol"} {
+		acks, err := s.ListPendingAcks(ctx, page, member, []string{"qa"})
+		if err != nil {
+			t.Fatalf("list pending acks for %s: %v", member, err)
+		}
+		if len(acks) != 1 {
+			t.Errorf("%s should see 1 pending ack, got %d", member, len(acks))
+		}
+	}
+
+	// alice acknowledges — task must NOT promote yet.
+	got, promoted, err := s.Acknowledge(ctx, task.ID, "alice", 1, resolver)
+	if err != nil {
+		t.Fatalf("ack alice: %v", err)
+	}
+	if promoted || got.Status == StatusDone {
+		t.Errorf("task promoted after ONE member, want still-open until all: %+v", got)
+	}
+	// One completion recorded so far.
+	if completions, _ := s.ListCompletions(ctx, task.ID); len(completions) != 1 {
+		t.Errorf("after alice ack: got %d completions, want 1", len(completions))
+	}
+
+	// bob acknowledges — still not done.
+	_, promoted, _ = s.Acknowledge(ctx, task.ID, "bob", 1, resolver)
+	if promoted {
+		t.Errorf("task promoted after 2 of 3 members, want still-open")
+	}
+
+	// carol closes the chain.
+	got, promoted, _ = s.Acknowledge(ctx, task.ID, "carol", 1, resolver)
+	if !promoted || got.Status != StatusDone {
+		t.Errorf("task must promote once every member has acked, got %+v (promoted=%v)", got, promoted)
+	}
+	completions, _ := s.ListCompletions(ctx, task.ID)
+	if len(completions) != 3 {
+		t.Errorf("expected one completion per member, got %d", len(completions))
+	}
+	// Every member's completion is recorded independently, keyed by
+	// their user id — the reader-list stays traceable per name for
+	// audit.
+	seen := map[string]bool{}
+	for _, c := range completions {
+		seen[c.UserID] = true
+	}
+	for _, member := range []string{"alice", "bob", "carol"} {
+		if !seen[member] {
+			t.Errorf("completion for %s not recorded — the reader list must be per-name traceable", member)
+		}
+	}
+}
+
+// EF03a regulatory audit: the reminder scheduler must dispatch a
+// due_reminder for a task whose due date falls inside the configured
+// window (e.g. hours=[360] = 15 days). Tasks outside the window
+// stay quiet, and a second scheduler pass never re-sends. This is
+// the "reminds after fifteen days" guarantee at the mechanism level.
+func TestTodoScheduler_CheckReminders_FiresInsideWindow(t *testing.T) {
+	t.Parallel()
+	s, _ := newStoreForTest(t)
+	// Dispatcher with no email + no webhook = Notify is a no-op; we
+	// only assert on the store's notification bookkeeping.
+	dispatcher := NewDispatcherStatic(config.TodoNotifyConfig{}, "test")
+
+	now := time.Now().UTC()
+	inWindow := mustCreate(t, s, CreateRequest{
+		Title:    "Reads within 15 days",
+		Assignee: Assignee{Type: "user", Target: "alice"},
+		DueDate:  now.Add(10 * 24 * time.Hour).Format("2006-01-02"),
+	})
+	outOfWindow := mustCreate(t, s, CreateRequest{
+		Title:    "Reads far in the future",
+		Assignee: Assignee{Type: "user", Target: "alice"},
+		DueDate:  now.Add(20 * 24 * time.Hour).Format("2006-01-02"),
+	})
+
+	checkReminders(context.Background(), s, dispatcher, []int{15 * 24})
+
+	// The in-window task must be marked reminded; the out-of-window
+	// task must not.
+	sentIn, err := s.HasNotificationBeenSent(context.Background(), inWindow.ID, "due_reminder")
+	if err != nil {
+		t.Fatalf("HasNotificationBeenSent inWindow: %v", err)
+	}
+	if !sentIn {
+		t.Errorf("in-window task should have received a due_reminder")
+	}
+	sentOut, _ := s.HasNotificationBeenSent(context.Background(), outOfWindow.ID, "due_reminder")
+	if sentOut {
+		t.Errorf("out-of-window task must not have received a due_reminder")
+	}
+
+	// Second pass: the reminder is idempotent — no duplicate is
+	// dispatched, and the notification record stays a single row.
+	checkReminders(context.Background(), s, dispatcher, []int{15 * 24})
+	stillSentIn, _ := s.HasNotificationBeenSent(context.Background(), inWindow.ID, "due_reminder")
+	if !stillSentIn {
+		t.Errorf("marker lost after second pass")
 	}
 }

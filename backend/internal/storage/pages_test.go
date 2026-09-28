@@ -250,6 +250,81 @@ func TestFileStore_Delete(t *testing.T) {
 	}
 }
 
+// EF01 regulatory audit: every earlier version of a page must remain
+// retrievable AFTER the page has been deleted — with author + summary
+// + timestamp — so a regulator can reconstruct any state the wiki
+// ever advertised. The Delete happy path already asserts v1 survives
+// with its original bytes; this test also proves v2 and v3 do, and
+// that ListVersions still returns the complete audit trail.
+func TestFileStore_Delete_PreservesEveryHistoricalVersion(t *testing.T) {
+	t.Parallel()
+	s := newTestFileStore(t)
+
+	if _, err := s.PutWithSummary("/rec/10", "v1 body", "alice", "creation"); err != nil {
+		t.Fatalf("Put v1: %v", err)
+	}
+	if _, err := s.PutWithSummary("/rec/10", "v2 body", "bob", "review comments"); err != nil {
+		t.Fatalf("Put v2: %v", err)
+	}
+	if _, err := s.PutWithSummary("/rec/10", "v3 body", "carol", "final wording"); err != nil {
+		t.Fatalf("Put v3: %v", err)
+	}
+	if _, err := s.Delete("/rec/10", "carol"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	// Live read must fail — the page is gone.
+	if _, err := s.Get("/rec/10"); !errors.Is(err, ErrPageNotFound) {
+		t.Errorf("Get after Delete: got %v, want ErrPageNotFound", err)
+	}
+	// Every historical version stays retrievable with its bytes AND
+	// its audit metadata (author + summary + timestamp).
+	versions, err := s.Attic.ListVersions("/rec/10")
+	if err != nil {
+		t.Fatalf("ListVersions after Delete: %v", err)
+	}
+	if len(versions) < 3 {
+		t.Fatalf("want at least v1..v3 in attic after delete, got %d entries", len(versions))
+	}
+	byVersion := map[int64]AtticEntry{}
+	for _, v := range versions {
+		byVersion[v.Version] = v
+	}
+	cases := []struct {
+		ver     int64
+		body    string
+		author  string
+		summary string
+	}{
+		{1, "v1 body", "alice", "creation"},
+		{2, "v2 body", "bob", "review comments"},
+		{3, "v3 body", "carol", "final wording"},
+	}
+	for _, c := range cases {
+		got, err := s.Attic.ReadVersion("/rec/10", c.ver)
+		if err != nil {
+			t.Errorf("ReadVersion v%d after Delete: %v", c.ver, err)
+			continue
+		}
+		if string(got) != c.body {
+			t.Errorf("v%d bytes after Delete = %q, want %q", c.ver, got, c.body)
+		}
+		entry, ok := byVersion[c.ver]
+		if !ok {
+			t.Errorf("v%d missing from ListVersions after Delete", c.ver)
+			continue
+		}
+		if entry.Author != c.author {
+			t.Errorf("v%d author = %q, want %q", c.ver, entry.Author, c.author)
+		}
+		if entry.Summary != c.summary {
+			t.Errorf("v%d summary = %q, want %q", c.ver, entry.Summary, c.summary)
+		}
+		if entry.Timestamp == "" {
+			t.Errorf("v%d timestamp is empty", c.ver)
+		}
+	}
+}
+
 func TestFileStore_DeleteUnknownPage(t *testing.T) {
 	t.Parallel()
 	s := newTestFileStore(t)
