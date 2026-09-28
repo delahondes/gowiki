@@ -13,8 +13,13 @@ import (
 // policy, we test the decision here and rely on the caller wiring
 // (a two-line adapter in handleGetPage) staying trivial.
 
+// status builds a Status that looks like a real reviewflow: the
+// Roles map is non-empty so the "no-reviewflow-directive" short
+// circuit doesn't fire. Tests that want to prove the short-circuit
+// pass an empty-Roles status directly.
 func status(fullyValidated bool, validatedVersion int64) *reviewflow.Status {
 	return &reviewflow.Status{
+		Roles:            map[string]string{"author": "alice", "reviewer": "bob"},
 		IsFullyValidated: fullyValidated,
 		ValidatedVersion: validatedVersion,
 	}
@@ -40,6 +45,27 @@ func TestDraftGate_NoReviewflowStatus_NoAction(t *testing.T) {
 	d := draftGate(cfg, nil, false)
 	if d.SwapToVersion != 0 || d.Return404 {
 		t.Errorf("nil status must return zero decision, got %+v", d)
+	}
+}
+
+// Regression: a page without a {reviewflow} directive reaches the
+// gate as an empty-Roles Status (that's what computeStatus returns
+// when st.Roles is empty). Before this test, the gate saw
+// IsFullyValidated=false + Roles={} + not-involved and 404'd every
+// ordinary wiki page. The fix short-circuits when Roles is empty —
+// no directive means not a draft, means no gate.
+func TestDraftGate_EmptyRolesStatus_NoAction(t *testing.T) {
+	t.Parallel()
+	cfg := config.ReviewflowConfig{HideDraftsFromUninvolved: true}
+	emptyStatus := &reviewflow.Status{
+		Roles:            map[string]string{},
+		MissingRoles:     map[string]string{},
+		IsFullyValidated: false,
+		ValidatedVersion: 0,
+	}
+	d := draftGate(cfg, emptyStatus, false)
+	if d.SwapToVersion != 0 || d.Return404 {
+		t.Errorf("empty-Roles status must return zero decision (no reviewflow on the page), got %+v", d)
 	}
 }
 

@@ -26,20 +26,34 @@ type draftGateDecision struct {
 //
 // Rules, evaluated in order:
 //
-//  1. Feature off (or no reviewflow at all) → no action.
-//  2. Reviewflow status is fully validated → no action (nothing to
+//  1. Feature off → no action.
+//  2. Page has NO {reviewflow} directive (empty Roles) → no action.
+//     The gate only bites documents that opted into review; general
+//     wiki pages stay visible to everyone even when the flag is on.
+//  3. Reviewflow status is fully validated → no action (nothing to
 //     hide).
-//  3. Requester is involved (any role assignee or global observer) →
+//  4. Requester is involved (any role assignee or global observer) →
 //     no action (authors see what they're editing).
-//  4. Requester is uninvolved AND a validated version exists → swap
+//  5. Requester is uninvolved AND a validated version exists → swap
 //     content for that version.
-//  5. Requester is uninvolved AND no validated version exists yet →
+//  6. Requester is uninvolved AND no validated version exists yet →
 //     404 (an unsigned document does not exist for outsiders).
 func draftGate(cfg config.ReviewflowConfig, status *reviewflow.Status, involved bool) draftGateDecision {
 	if !cfg.HideDraftsFromUninvolved {
 		return draftGateDecision{}
 	}
-	if status == nil || status.IsFullyValidated {
+	if status == nil {
+		return draftGateDecision{}
+	}
+	// computeStatus returns an empty-Roles Status when the page
+	// carries no {reviewflow} directive — that's NOT a draft; that's a
+	// page that never opted in. Bailing out here fixes a class of
+	// false 404s the gate would otherwise inflict on every ordinary
+	// wiki page.
+	if len(status.Roles) == 0 {
+		return draftGateDecision{}
+	}
+	if status.IsFullyValidated {
 		return draftGateDecision{}
 	}
 	if involved {
