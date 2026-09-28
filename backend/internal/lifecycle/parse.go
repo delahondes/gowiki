@@ -188,18 +188,26 @@ func parseCondition(raw string) (Condition, error) {
 			return Condition{}, fmt.Errorf("reviewflow_overdue takes no duration (reviewflow deadlines apply); got %q", payload)
 		}
 		return Condition{Kind: "reviewflow_overdue"}, nil
+	case "comments_open":
+		// Fires on documents that carry at least one unresolved
+		// top-level comment thread. Alert-only — resolution flows
+		// through the comment UI, not a todo. No payload.
+		if payload != "" {
+			return Condition{}, fmt.Errorf("comments_open takes no duration; got %q", payload)
+		}
+		return Condition{Kind: "comments_open"}, nil
 	default:
-		return Condition{}, fmt.Errorf("unknown condition kind %q (supported: stale, reviewflow_overdue)", kind)
+		return Condition{}, fmt.Errorf("unknown condition kind %q (supported: stale, reviewflow_overdue, comments_open)", kind)
 	}
 }
 
 // IsAlertOnly reports whether this condition kind only lights up the
-// admin panel and never spawns a todo. reviewflow_overdue is
-// alert-only because reviewflow already owns its own notification chain
-// (per-role deadlines, emails, panel warnings); this rule surfaces the
-// signal on the lifecycle overview without duplicating the action side.
+// admin panel and never spawns a todo. Alert-only kinds surface the
+// signal on the lifecycle overview without duplicating the action
+// side — the underlying subsystem (reviewflow deadlines, comment
+// resolution UI) already owns how the alert gets acted on.
 func (c Condition) IsAlertOnly() bool {
-	return c.Kind == "reviewflow_overdue"
+	return c.Kind == "reviewflow_overdue" || c.Kind == "comments_open"
 }
 
 // parseDuration parses a wiki-friendly duration string: <int><unit>

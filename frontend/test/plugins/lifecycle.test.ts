@@ -109,6 +109,18 @@ describe("lifecycle: reviewflow_overdue kind", () => {
   })
 })
 
+describe("lifecycle: comments_open kind", () => {
+  it("round-trips a bare comments_open rule", () => {
+    const rt = roundTrip(`{lifecycle scope="^/qms/.*" when=comments_open}\n`)
+    expect(rt.isStable).toBe(true)
+    const a = firstLifecycle(rt.doc)!
+    expect(a.when).toBe("comments_open")
+    expect(a.scope).toBe("^/qms/.*")
+    expect(a.title).toBe("")
+    expect(a.assign).toBe("")
+  })
+})
+
 describe("lifecycle: interaction with code fences", () => {
   it("{lifecycle ...} inside a fenced block stays literal", () => {
     const src = "```\n{lifecycle scope=/x when=stale:30d title=t assign=a}\n```\n"

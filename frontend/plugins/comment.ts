@@ -224,14 +224,27 @@ function showCollapsedToggle() {
 
   collapsedToggle = document.createElement("div")
   collapsedToggle.className = "comment-collapsed-toggle"
-  collapsedToggle.title = "Show comments"
 
-  const n = currentComments.filter((c) => !c.resolved).length
+  const tops = currentComments.filter((c) => !c.parent_id)
+  const unresolved = tops.filter((c) => !c.resolved).length
   const arrow = document.createElement("span")
   arrow.className = "comment-header-arrow"
   arrow.textContent = "▶"
   collapsedToggle.appendChild(arrow)
-  collapsedToggle.appendChild(document.createTextNode(` ${n}`))
+  // Chip label reflects the meaningful state:
+  //   - active discussion (any unresolved thread): "▶ N" — the
+  //     open-thread count is the actionable signal.
+  //   - everything resolved: "▶ ✓" — a calm nudge that the archive
+  //     is there without pretending there's action pending.
+  if (unresolved > 0) {
+    collapsedToggle.title = `Show comments (${unresolved} open)`
+    collapsedToggle.appendChild(document.createTextNode(` ${unresolved}`))
+  } else if (tops.length > 0) {
+    collapsedToggle.title = `Show ${tops.length} resolved comment${tops.length === 1 ? "" : "s"}`
+    collapsedToggle.appendChild(document.createTextNode(" ✓"))
+  } else {
+    collapsedToggle.title = "Show comments"
+  }
 
   collapsedToggle.addEventListener("click", () => {
     sidebarHidden = false
@@ -943,6 +956,13 @@ function renderAll() {
     return
   }
   const orphanedIds = refreshDecorations()
+  if (sidebarHidden) {
+    // Reader chose (or the default-collapsed rule chose for them) to
+    // keep the sidebar tucked away — show only the counter chip.
+    removeSidebar()
+    showCollapsedToggle()
+    return
+  }
   renderSidebar(currentComments, orphanedIds)
   setupScrollListener()
   setupReflowListeners()
@@ -965,6 +985,16 @@ export async function initComments(opts: {
   sidebarHidden = false
 
   currentComments = await fetchComments(opts.pagePath)
+  // Default-collapsed rule: if the doc has comments but every
+  // top-level thread is resolved, the reader shouldn't be forced to
+  // look at a stack of past conversations. Start collapsed and let
+  // them click through when they want the archive. Any single
+  // unresolved thread keeps the sidebar open — that's the actionable
+  // signal.
+  const tops = currentComments.filter((c) => !c.parent_id)
+  if (tops.length > 0 && tops.every((c) => c.resolved)) {
+    sidebarHidden = true
+  }
   renderAll()
 }
 

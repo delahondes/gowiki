@@ -409,6 +409,13 @@ func main() {
 	commentStore := comment.NewStore(metaRoot)
 	commentService := comment.NewService(commentStore)
 	store.CommentStore = commentStore
+	// Late-wire the lifecycle scanner's comments_open probe: comment
+	// service is initialised AFTER the scanner (order-of-init) but
+	// the probe is only consulted at scan time, so patching the Deps
+	// via a small setter works fine.
+	if lifecycleScanner != nil {
+		lifecycleScanner.SetOpenCommentsProbe(commentService.CountOpenThreads)
+	}
 	log.Printf("comment plugin: active")
 
 	// Initialize bibliography plugin (PubMed + DOI citation resolver).

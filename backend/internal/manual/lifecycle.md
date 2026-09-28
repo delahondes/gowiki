@@ -38,14 +38,15 @@ A document is in scope for a rule iff **every present selector matches**:
 
 ## 1. Conditions
 
-Every rule needs a `when=` condition. Two kinds are supported today:
+Every rule needs a `when=` condition. Three kinds are supported today:
 
 | Kind | Payload | Produces todos? | Purpose |
 |---|---|---|---|
 | `stale:<duration>` | `stale:30m` (30 months) | yes | Fires when a document has had no attestation for at least the duration. |
 | `reviewflow_overdue` | none | no (panel-only alert) | Fires when a document's reviewflow has one or more roles marked overdue by reviewflow's own deadline configuration. |
+| `comments_open` | none | no (panel-only alert) | Fires when a document has one or more unresolved top-level comment threads. |
 
-Alert-only conditions (like `reviewflow_overdue`) do not need `title=` — no todo is created, so there is nothing to title. `assign=` is optional but still meaningful: it names the person or group the alert is addressed to, so future notification channels (email, dashboard) know who to reach. The lifecycle panel always surfaces the count regardless of `assign=`, so a QARA admin sees the state at a glance next to the other rules.
+Alert-only conditions (like `reviewflow_overdue` and `comments_open`) do not need `title=` — no todo is created, so there is nothing to title. `assign=` is optional but still meaningful: it names the person or group the alert is addressed to, so future notification channels (email, dashboard) know who to reach. The lifecycle panel always surfaces the count regardless of `assign=`, so a QARA admin sees the state at a glance next to the other rules.
 
 ## 1. The `stale` condition
 

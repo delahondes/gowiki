@@ -34,6 +34,31 @@ func (svc *Service) List(pagePath string) ([]Comment, error) {
 	return comments, nil
 }
 
+// CountOpenThreads returns the number of unresolved top-level comment
+// threads on a page. Replies (ParentID != "") don't count as threads
+// on their own — resolution is per-thread. A page with no comments or
+// no state file returns 0.
+//
+// Exposed for the lifecycle plugin's `when=comments_open` rule so the
+// scanner can flag documents that still carry unresolved reader
+// feedback.
+func (svc *Service) CountOpenThreads(pagePath string) int {
+	comments, err := svc.store.Load(pagePath)
+	if err != nil || len(comments) == 0 {
+		return 0
+	}
+	open := 0
+	for _, c := range comments {
+		if c.ParentID != "" {
+			continue
+		}
+		if !c.Resolved {
+			open++
+		}
+	}
+	return open
+}
+
 // Create adds a new comment to a page. When parentID is non-empty, the new
 // comment is a reply: it inherits the parent's anchor and skips anchor
 // validation. Replies to replies are rejected (single-level threads only).

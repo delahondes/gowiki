@@ -222,3 +222,37 @@ func TestParse_ReviewflowOverdueNoTitleOK(t *testing.T) {
 		t.Fatalf("expected 1 rule with no error, got rules=%d errs=%v", len(rules), errs)
 	}
 }
+
+// comments_open follows the same alert-only pattern: no payload,
+// title/assign optional, and IsAlertOnly() returns true so the
+// scanner skips todo creation.
+func TestParse_CommentsOpen(t *testing.T) {
+	t.Parallel()
+	src := `{lifecycle scope="^/qms/.*" when=comments_open}` + "\n"
+	rules, errs := Parse("/admin/qms", src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("want 1 rule, got %d", len(rules))
+	}
+	r := rules[0]
+	if r.Condition.Kind != "comments_open" {
+		t.Errorf("kind = %q, want comments_open", r.Condition.Kind)
+	}
+	if r.Condition.Duration != 0 {
+		t.Errorf("comments_open must carry no duration, got %v", r.Condition.Duration)
+	}
+	if !r.Condition.IsAlertOnly() {
+		t.Errorf("comments_open must be alert-only")
+	}
+}
+
+func TestParse_CommentsOpenRejectsPayload(t *testing.T) {
+	t.Parallel()
+	src := `{lifecycle scope="^/qms/.*" when=comments_open:30d}` + "\n"
+	rules, errs := Parse("/admin/qms", src)
+	if len(rules) != 0 || len(errs) == 0 {
+		t.Errorf("payload on comments_open must be rejected")
+	}
+}

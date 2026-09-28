@@ -282,9 +282,10 @@ function fetchStatus(sourcePath: string): Promise<StatusResponse | null> {
 }
 
 // summariseWhen turns raw when= text into reader-friendly hover text.
-// Handles both `stale:<dur>` and bare kinds like `reviewflow_overdue`.
+// Handles both `stale:<dur>` and the bare alert-only kinds.
 function summariseWhen(raw: string): string {
   if (raw === "reviewflow_overdue") return "reviewflow overdue on any role"
+  if (raw === "comments_open") return "one or more unresolved comment threads"
   const parts = raw.split(":")
   if (parts.length !== 2 || parts[0] !== "stale") return raw
   const dur = parts[1]
@@ -305,6 +306,8 @@ function kindLabel(kind: string): string {
       return "staleness"
     case "reviewflow_overdue":
       return "reviewflow overdue"
+    case "comments_open":
+      return "open comments"
     default:
       return kind
   }

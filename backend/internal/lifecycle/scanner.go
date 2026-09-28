@@ -61,6 +61,11 @@ type Deps struct {
 	// gracefully (they evaluate to Fires=false).
 	Overdue OverdueProbe
 
+	// OpenComments is the probe for the comments_open condition — the
+	// count of unresolved top-level comment threads on a page.
+	// Optional; nil disables comments_open rules gracefully.
+	OpenComments OpenCommentsProbe
+
 	// CreateTodo is called for every (rule, page) that fires. The
 	// implementation MUST be idempotent by NodeKey: if a todo with the
 	// same NodeKey already exists (and is not cancelled), it should
@@ -98,6 +103,25 @@ func NewScanner(deps Deps) *Scanner {
 	return &Scanner{deps: deps}
 }
 
+// SetOpenCommentsProbe wires (or replaces) the comments_open probe
+// after the scanner is constructed. Order-of-init workaround: the
+// comment service is created after the scanner in main.go, and this
+// setter avoids reshuffling that whole boot sequence.
+func (s *Scanner) SetOpenCommentsProbe(p OpenCommentsProbe) {
+	s.deps.OpenComments = p
+}
+
+// probes bundles the categorical probes from Deps into the shape
+// Evaluate expects. Kept as a method (not inlined) so the two call
+// sites — Run and DryRun — stay in step whenever a new probe kind
+// gets added to Deps.
+func (s *Scanner) probes() Probes {
+	return Probes{
+		Overdue:      s.deps.Overdue,
+		OpenComments: s.deps.OpenComments,
+	}
+}
+
 // NodeKey returns the deterministic identifier for a (rule, page) todo.
 // Exposed so the todo layer can identify lifecycle-owned todos when
 // filtering the store for the reconciliation path.
@@ -131,7 +155,7 @@ func (s *Scanner) DryRun(r Rule) []string {
 		if !PageMatches(r, pagePath, tags) {
 			continue
 		}
-		v := Evaluate(r, pagePath, now, s.deps.Overdue, s.deps.Attesters...)
+		v := Evaluate(r, pagePath, now, s.probes(), s.deps.Attesters...)
 		if v.Fires {
 			fires = append(fires, pagePath)
 		}
@@ -178,7 +202,7 @@ func (s *Scanner) Run(ctx context.Context) (created, cancelled int, err error) {
 			if r.Condition.IsAlertOnly() {
 				continue
 			}
-			verdict := Evaluate(r, pagePath, now, s.deps.Overdue, s.deps.Attesters...)
+			verdict := Evaluate(r, pagePath, now, s.probes(), s.deps.Attesters...)
 			if !verdict.Fires {
 				continue
 			}
