@@ -116,7 +116,7 @@ describe("comment anchor — drift regression", () => {
       paragraphOf("Then review the second document (the important one)."),
     ])
     // Anchor on the SECOND "review".
-    let paraPos: number[] = []
+    const paraPos: number[] = []
     doc.descendants((n, pos) => {
       if (n.type.name === "paragraph") paraPos.push(pos + 1)
     })
