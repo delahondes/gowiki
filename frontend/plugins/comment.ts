@@ -340,6 +340,7 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
     toggle.textContent = `Resolved (${resolved.length})`
     let expanded = false
     const resolvedContainer = document.createElement("div")
+    resolvedContainer.className = "comment-resolved-list"
     resolvedContainer.style.display = "none"
     for (const c of resolved)
       resolvedContainer.appendChild(renderCommentBox(c, orphanedIds.has(c.id), replies.get(c.id) || []))
@@ -347,6 +348,16 @@ function renderSidebar(comments: CommentEntry[], orphanedIds: Set<string>) {
       expanded = !expanded
       resolvedContainer.style.display = expanded ? "block" : "none"
       toggle.textContent = `${expanded ? "Hide" : "Show"} resolved (${resolved.length})`
+      // The anchored stack above uses marginTop offsets to align each
+      // box with its highlight. That layout leaves the toggle sitting
+      // near the bottom of a tall sidebar, and expanding the archive
+      // adds boxes below it — often below the viewport. Reposition
+      // to keep alignment fresh and scroll the container into view so
+      // the reader actually sees what they asked for.
+      requestAnimationFrame(() => {
+        positionComments()
+        if (expanded) resolvedContainer.scrollIntoView({ block: "nearest", behavior: "smooth" })
+      })
     })
     sidebar.appendChild(toggle)
     sidebar.appendChild(resolvedContainer)

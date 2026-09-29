@@ -143,6 +143,58 @@ describe("comment sidebar default state", () => {
     expect(container!.querySelector(".comment-collapsed-toggle")).toBeNull()
   })
 
+  // Regression: the Resolved toggle at the bottom of the sidebar must
+  // reveal the resolved-thread boxes on click. The container starts
+  // display:none and every click flips it. Any breakage here (missing
+  // boxes, wrong count, toggle text stuck on "Show") reproduces the
+  // user-reported "Show resolved shows nothing" bug.
+  it("Resolved toggle button reveals the resolved boxes on click", async () => {
+    await bootWithRows(
+      [
+        { id: "open1", text: "live", resolved: false },
+        { id: "res1", text: "old settled thread", resolved: true },
+        { id: "res2", text: "another settled thread", resolved: true },
+      ],
+      "/mixed"
+    )
+    const sidebar = container!.querySelector("#comment-sidebar")!
+    // Toggle button is visible with the resolved count.
+    const toggle = sidebar.querySelector(".comment-resolved-toggle") as HTMLElement | null
+    expect(toggle).not.toBeNull()
+    expect(toggle!.textContent).toBe("Resolved (2)")
+    // The resolved boxes exist in the DOM but their container starts hidden.
+    const resolvedContainer = toggle!.nextElementSibling as HTMLElement | null
+    expect(resolvedContainer).not.toBeNull()
+    expect(resolvedContainer!.classList.contains("comment-resolved-list")).toBe(true)
+    expect(resolvedContainer!.style.display).toBe("none")
+    // Two comment boxes are inside the hidden container.
+    const boxesBefore = resolvedContainer!.querySelectorAll(".comment-box")
+    expect(boxesBefore.length).toBe(2)
+    // Track scrollIntoView calls — the click should pull the newly-visible
+    // container into view when the anchored stack has pushed it below
+    // the fold (a user-visible symptom of the "shows nothing" report).
+    const scrollCalls: HTMLElement[] = []
+    for (const el of Array.from(resolvedContainer!.querySelectorAll("*"))) {
+      ;(el as any).scrollIntoView = () => {}
+    }
+    resolvedContainer!.scrollIntoView = () => {
+      scrollCalls.push(resolvedContainer!)
+    }
+    // Click reveals them and renames the toggle.
+    toggle!.click()
+    expect(resolvedContainer!.style.display).toBe("block")
+    expect(toggle!.textContent).toBe("Hide resolved (2)")
+    // Give the requestAnimationFrame in the click handler one tick.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(scrollCalls.length).toBe(1)
+    // A second click hides them again — no scroll on the collapse.
+    toggle!.click()
+    expect(resolvedContainer!.style.display).toBe("none")
+    expect(toggle!.textContent).toBe("Show resolved (2)")
+    await new Promise((r) => setTimeout(r, 20))
+    expect(scrollCalls.length).toBe(1)
+  })
+
   it("replies to a resolved top-level thread do not force expansion", async () => {
     // The doc has one root thread (resolved) and two replies to it.
     // Replies inherit the parent's resolution — they are not their
