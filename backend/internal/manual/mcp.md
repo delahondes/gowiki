@@ -169,6 +169,7 @@ npx @modelcontextprotocol/inspector \
 | `list_recent_changes` | Cross-page changelog, filterable by `since`/`until`/`author`/`path_prefix` — every entry ACL-checked |
 | `diff_page_versions` | Line-level diff between two archived versions of the same page (same hunk shape as `preview_page_diff`) |
 | `list_attachments` | Files (with extension) directly under a namespace, with size, current version, and referring pages |
+| `list_page_comments` | Comment threads on a page — unresolved by default, `include_resolved=true` to also return the archive. Each thread carries its selected-text anchor plus grouped replies. Complements the `open_comments` count that `list_namespace` can emit. |
 | `read_attachment` | Attachment metadata (mime, size, sha256, version, referring pages); optionally inline body (text ≤128 KB / base64 ≤512 KB) or `out_dir` to save to disk |
 | `upload_attachment` | Create or replace an attachment via base64 (small files only); optional sha256/size_bytes verification catches transport corruption |
 | `upload_attachment_instructions` | Return a ready-to-run `curl -F` command for the wiki's HTTP multipart endpoint — use this for anything bigger than a few KB |

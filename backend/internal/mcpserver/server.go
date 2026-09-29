@@ -14,6 +14,7 @@ import (
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 
 	"gowiki/backend/internal/auth"
+	"gowiki/backend/internal/comment"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
@@ -268,6 +269,7 @@ type Deps struct {
 	Backlinks       BacklinkProvider
 	TagIndex        *storage.TagIndex
 	Reviewflow      *reviewflow.Service
+	Comments        *comment.Service
 	DraftState      DraftStateProvider
 	Todo            *todo.TodoService
 	SchemaStore     *database.SchemaStore

@@ -33,6 +33,7 @@ func (s *Server) buildMCPHandler() http.Handler {
 		Backlinks:       s.backlinkProvider,
 		TagIndex:        s.tagIndex,
 		Reviewflow:      s.reviewflowService,
+		Comments:        s.commentService,
 		DraftState:      s.draftManager,
 		Todo:            s.todoService,
 		SchemaStore:     s.schemaStore,

@@ -50,6 +50,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerDeletePageTool(srv, deps)
 	registerEditPageTool(srv, deps)
 	registerListAttachmentsTool(srv, deps)
+	registerListPageCommentsTool(srv, deps)
 	registerReadAttachmentTool(srv, deps)
 	registerUploadAttachmentTool(srv, deps)
 	registerUploadAttachmentInstructionsTool(srv, deps)
@@ -144,6 +145,13 @@ func registerListNamespaceTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithBoolean("include_meta",
 			mcpgo.Description("Include version, last_modified, author for each page."),
 		),
+		mcpgo.WithBoolean("include_comments",
+			mcpgo.Description(
+				"Include the count of unresolved top-level comment threads on each page ("+
+					"open_comments field). Cheap: comments live in a per-page sidecar file "+
+					"that is only opened when the page has ever had a comment.",
+			),
+		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		if deps.Sitemap == nil {
@@ -152,6 +160,7 @@ func registerListNamespaceTool(srv *mcpsrv.MCPServer, deps Deps) {
 		nsPath := strings.Trim(req.GetString("path", ""), "/")
 		depth := req.GetInt("depth", 1)
 		includeMeta := req.GetBool("include_meta", false)
+		includeComments := req.GetBool("include_comments", false)
 
 		allPages, err := deps.Sitemap.ListAllPages()
 		if err != nil {
@@ -169,6 +178,7 @@ func registerListNamespaceTool(srv *mcpsrv.MCPServer, deps Deps) {
 			Version      int64  `json:"version,omitempty"`
 			LastModified string `json:"last_modified,omitempty"`
 			Author       string `json:"author,omitempty"`
+			OpenComments int    `json:"open_comments,omitempty"`
 		}
 		type nsInfo struct {
 			Path      string `json:"path"`
@@ -203,6 +213,12 @@ func registerListNamespaceTool(srv *mcpsrv.MCPServer, deps Deps) {
 					pi.LastModified = page.Meta.UpdatedAt.Format(time.RFC3339)
 					pi.Author = page.Meta.Author
 				}
+			}
+			if includeComments && deps.Comments != nil {
+				// Pass the canonical page path (leading slash, plus the
+				// trailing slash the sitemap already carries on ns-indexes)
+				// so the comment store sees the same shape as the API.
+				pi.OpenComments = deps.Comments.CountOpenThreads(p.Path)
 			}
 			pages = append(pages, pi)
 		}

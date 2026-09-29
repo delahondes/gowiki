@@ -1,0 +1,130 @@
+package mcpserver
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
+	mcpsrv "github.com/mark3labs/mcp-go/server"
+
+	"gowiki/backend/internal/comment"
+)
+
+// ── list_page_comments ─────────────────────────────────────────────────────
+
+func registerListPageCommentsTool(srv *mcpsrv.MCPServer, deps Deps) {
+	tool := mcpgo.NewTool("list_page_comments",
+		mcpgo.WithDescription(
+			"List every comment on a page — the sidebar annotations authors "+
+				"leave on selected text without modifying the page content. "+
+				"Returns top-level threads with their replies grouped under each; "+
+				"an unresolved thread is one that still needs someone's attention. "+
+				"Use include_resolved=false (default) to focus on what's actionable.",
+		),
+		mcpgo.WithString("page_path", mcpgo.Required(),
+			mcpgo.Description("Page path (leading slash optional). Namespace indexes end with '/'."),
+		),
+		mcpgo.WithBoolean("include_resolved",
+			mcpgo.Description("Include resolved threads too. Default false — most callers want the open work."),
+		),
+	)
+	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.Comments == nil {
+			return errorResult("comments service not available"), nil
+		}
+		raw := strings.TrimSpace(req.GetString("page_path", ""))
+		if raw == "" {
+			return errorResult("page_path is required"), nil
+		}
+		// Preserve the trailing slash — it distinguishes a namespace-index
+		// page from a leaf. The store's statePath normalises it correctly
+		// on both shapes since the comment-store fix.
+		pagePath := "/" + strings.TrimPrefix(raw, "/")
+		// canView takes a leaf-shape path; strip the trailing slash for
+		// the ACL lookup only.
+		aclPath := strings.TrimRight(strings.TrimPrefix(pagePath, "/"), "/")
+		if !deps.canView(ctx, aclPath) {
+			return errorResult("access denied"), nil
+		}
+		includeResolved := req.GetBool("include_resolved", false)
+
+		comments, err := deps.Comments.List(pagePath)
+		if err != nil {
+			return errorResult("list comments: " + err.Error()), nil
+		}
+
+		// Group replies under their parent so the caller sees threads
+		// instead of a flat list. Replies inherit the parent's anchor
+		// and resolution state — the schema and the docs both call this
+		// out, so the tool result surfaces it as {thread, replies[]}.
+		replies := map[string][]replyView{}
+		var tops []comment.Comment
+		for _, c := range comments {
+			if c.ParentID == "" {
+				tops = append(tops, c)
+			} else {
+				replies[c.ParentID] = append(replies[c.ParentID], replyView{
+					ID:        c.ID,
+					Author:    c.Author,
+					Text:      c.Text,
+					CreatedAt: c.CreatedAt.Format(time.RFC3339),
+					AI:        c.AI,
+				})
+			}
+		}
+
+		type threadView struct {
+			ID        string      `json:"id"`
+			Anchor    string      `json:"anchor"`
+			Author    string      `json:"author"`
+			Text      string      `json:"text"`
+			CreatedAt string      `json:"created_at"`
+			UpdatedAt string      `json:"updated_at,omitempty"`
+			Resolved  bool        `json:"resolved"`
+			AI        bool        `json:"ai,omitempty"`
+			Replies   []replyView `json:"replies,omitempty"`
+		}
+		open := 0
+		threads := make([]threadView, 0, len(tops))
+		for _, c := range tops {
+			if !c.Resolved {
+				open++
+			}
+			if c.Resolved && !includeResolved {
+				continue
+			}
+			t := threadView{
+				ID:        c.ID,
+				Anchor:    c.Anchor.Selected,
+				Author:    c.Author,
+				Text:      c.Text,
+				CreatedAt: c.CreatedAt.Format(time.RFC3339),
+				Resolved:  c.Resolved,
+				AI:        c.AI,
+				Replies:   replies[c.ID],
+			}
+			if !c.UpdatedAt.IsZero() && !c.UpdatedAt.Equal(c.CreatedAt) {
+				t.UpdatedAt = c.UpdatedAt.Format(time.RFC3339)
+			}
+			threads = append(threads, t)
+		}
+
+		return jsonResult(map[string]any{
+			"page_path":         pagePath,
+			"open_threads":      open,
+			"total_threads":     len(tops),
+			"threads":           threads,
+			"includes_resolved": includeResolved,
+		}), nil
+	})
+}
+
+// replyView is the flat, LLM-friendly reply shape emitted under a thread.
+type replyView struct {
+	ID        string `json:"id"`
+	Author    string `json:"author"`
+	Text      string `json:"text"`
+	CreatedAt string `json:"created_at"`
+	AI        bool   `json:"ai,omitempty"`
+}
