@@ -367,6 +367,15 @@ Attachments are non-`.md` files under `data/content/`, referenced from pages via
 
 **Version model.** Attachments are versioned exactly like pages: v1 on first upload, incremented on overwrite, previous bytes preserved in the media attic. The frontend serves the current file for `/path/to/file.ext`, and older versions via `?v=N` — unchanged by the MCP layer.
 
+## Comments
+
+Comments are sidebar annotations authors leave on a specific text selection in a page, without touching the page content. They live in a per-page JSON sidecar under `data/meta/`; the wiki manual has the full workflow at [Comments](./comments).
+
+- **`list_page_comments(page_path, include_resolved?)`** — every top-level thread on a page, with its replies grouped underneath. Each thread carries the anchor's selected text (`anchor`), the author, the body, timestamps, its `resolved` flag, and a nested `replies` array. The response also reports `open_threads` and `total_threads` so an agent can pick a next action from one call. Defaults to unresolved-only; pass `include_resolved: true` to also get the archive (still counted the same). Requires view permission on the page.
+- **`list_namespace(path, include_comments?)`** — set `include_comments: true` to add an `open_comments` field to every page in the result, straight from `CountOpenThreads`. Cheap: the store no-ops for pages that never had a comment sidecar. Combine with `depth: 0` to sweep a whole namespace for pages that still carry unresolved reader feedback.
+
+The lifecycle plugin's `{lifecycle when=comments_open}` rule surfaces the same count on-wiki, so agents and readers see one source of truth. Use `list_page_comments` when you want to read what's actually being asked; use `list_namespace(include_comments: true)` when you want a quick scan of where the open conversations sit.
+
 ## Diagrams and charts (mermaid / chart)
 
 Before generating a diagram or chart as an image and uploading it as an attachment, check whether the wiki can render it natively — both surfaces read as first-class content, edit in place, and don't need a media file:
