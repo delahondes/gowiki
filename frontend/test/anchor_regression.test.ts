@@ -139,4 +139,147 @@ describe("comment anchor — drift regression", () => {
     const before = drifted.textBetween(Math.max(0, resolved.from - 25), resolved.from, "\n")
     expect(before).toContain("Then ")
   })
+
+  // Second regression, discovered on wiki.gmt.bio: the anchored text
+  // `(standards or paragraphs of standards)` was DELETED from the doc
+  // during a later edit. The old resolveRangeInPm still returned the
+  // structural position with confidence "fuzzy" — so the comment
+  // highlight landed on random text ("isk analysis and the criticality
+  // of the") several paragraphs away. Deleted anchors must resolve as
+  // "lost" so the caller marks the comment as orphaned.
+  it("reports confidence 'lost' when the exact text is deleted from the doc", () => {
+    const original = schema.nodes.doc.create(null, [
+      paragraphOf("The audit program also identifies the audit criteria (standards or paragraphs of standards), the auditors, and the frequency of audits."),
+    ])
+    // Anchor the phrase inside the parens.
+    let paraPos = 0
+    original.descendants((n, pos) => {
+      if (n.type.name === "paragraph") {
+        paraPos = pos + 1
+        return false
+      }
+    })
+    const target = "(standards or paragraphs of standards)"
+    const plain =
+      "The audit program also identifies the audit criteria (standards or paragraphs of standards), the auditors, and the frequency of audits."
+    const from = paraPos + plain.indexOf(target)
+    const to = from + target.length
+    const anchor = rangeFromPm(original, from, to, { withTextQuote: true })
+    expect(anchor.textQuote?.exact).toBe(target)
+
+    // Someone rewrites the paragraph and strips the parenthetical.
+    const rewritten = schema.nodes.doc.create(null, [
+      paragraphOf("The audit program also identifies the audit criteria, the auditors, and the frequency of audits."),
+    ])
+    const resolved = resolveRangeInPm(rewritten, anchor)
+    expect(resolved.confidence).toBe("lost")
+    // The whole point: a lost resolution makes resolveCommentToRange
+    // return null in the caller, which flags the comment as orphaned.
+    // We don't care about the exact from/to when confidence is "lost".
+  })
+
+  // Third regression, motivated by the same wiki.gmt.bio case: the
+  // anchor text may still exist somewhere in the doc even though the
+  // author moved the whole paragraph. Fuzzy MUST find it — the
+  // structural drift is arbitrary. This keeps the fast path honest.
+  it("finds a moved paragraph — structural drift + text still present", () => {
+    const original = schema.nodes.doc.create(null, [
+      paragraphOf("Intro paragraph."),
+      paragraphOf("The audit program identifies the audit criteria, the auditors, and the frequency."),
+      paragraphOf("Closing remarks."),
+    ])
+    let pos = 0
+    let seen = 0
+    original.descendants((n, p) => {
+      if (n.type.name === "paragraph") {
+        seen++
+        if (seen === 2) {
+          pos = p + 1
+          return false
+        }
+      }
+    })
+    const target = "identifies the audit criteria"
+    const paraText = "The audit program identifies the audit criteria, the auditors, and the frequency."
+    const from = pos + paraText.indexOf(target)
+    const anchor = rangeFromPm(original, from, from + target.length, { withTextQuote: true })
+
+    // Author reorders: the target paragraph now sits FIRST, closing
+    // remarks disappear, new paragraphs added at the end.
+    const reordered = schema.nodes.doc.create(null, [
+      paragraphOf(paraText),
+      paragraphOf("Follow-up section."),
+      paragraphOf("Additional notes and clarifications go here."),
+    ])
+    const resolved = resolveRangeInPm(reordered, anchor)
+    expect(resolved.confidence).not.toBe("lost")
+    const slice = reordered.textBetween(resolved.from, resolved.to, "\n")
+    expect(slice).toBe(target)
+  })
+
+  // Fourth regression: an author rewords the paragraph, keeping the
+  // exact selected text intact but changing everything AROUND it.
+  // Prefix and suffix don't match anymore, but the exact text still
+  // uniquely occurs — fuzzy must still find it.
+  it("finds the target when only the exact text survives an edit (prefix/suffix rewritten)", () => {
+    const original = schema.nodes.doc.create(null, [
+      paragraphOf("Before context. UNIQUE_MARKER_PHRASE. After context."),
+    ])
+    let paraPos = 0
+    original.descendants((n, pos) => {
+      if (n.type.name === "paragraph") {
+        paraPos = pos + 1
+        return false
+      }
+    })
+    const target = "UNIQUE_MARKER_PHRASE"
+    const plain = "Before context. UNIQUE_MARKER_PHRASE. After context."
+    const from = paraPos + plain.indexOf(target)
+    const anchor = rangeFromPm(original, from, from + target.length, { withTextQuote: true })
+    expect(anchor.textQuote?.prefix).toContain("context.")
+
+    const rewritten = schema.nodes.doc.create(null, [
+      paragraphOf("Completely different wording around: UNIQUE_MARKER_PHRASE. And a fresh trailing sentence."),
+    ])
+    const resolved = resolveRangeInPm(rewritten, anchor)
+    expect(resolved.confidence).not.toBe("lost")
+    const slice = rewritten.textBetween(resolved.from, resolved.to, "\n")
+    expect(slice).toBe(target)
+  })
+
+  // Fifth regression: the exact text exists TWICE now (once in the
+  // original spot, once in an inserted paragraph). Prefix/suffix
+  // scoring must pick the original occurrence rather than the newer
+  // one — that's what "anchored to a specific sentence" means.
+  it("picks the semantically-right occurrence when duplicates appear after an edit", () => {
+    const original = schema.nodes.doc.create(null, [
+      paragraphOf("Section one: the process owner reviews the checklist."),
+    ])
+    let paraPos = 0
+    original.descendants((n, pos) => {
+      if (n.type.name === "paragraph") {
+        paraPos = pos + 1
+        return false
+      }
+    })
+    const target = "process owner"
+    const plain = "Section one: the process owner reviews the checklist."
+    const from = paraPos + plain.indexOf(target)
+    const anchor = rangeFromPm(original, from, from + target.length, { withTextQuote: true })
+    expect(anchor.textQuote?.prefix).toContain("Section one:")
+
+    // Author adds a SECOND paragraph that ALSO mentions "process owner"
+    // but in a different context — no "Section one" prefix.
+    const withDuplicate = schema.nodes.doc.create(null, [
+      paragraphOf("Section one: the process owner reviews the checklist."),
+      paragraphOf("An external process owner may act as backup."),
+    ])
+    const resolved = resolveRangeInPm(withDuplicate, anchor)
+    expect(resolved.confidence).not.toBe("lost")
+    // The BEFORE window from the resolved position must still mention
+    // Section one — i.e. we picked the original occurrence, not the
+    // new backup-context one.
+    const before = withDuplicate.textBetween(Math.max(0, resolved.from - 40), resolved.from, "\n")
+    expect(before).toContain("Section one")
+  })
 })

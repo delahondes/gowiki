@@ -904,8 +904,18 @@ export function resolveRangeInPm(doc: PMNode, anchor: AnchorRange): ResolvedRang
   if (anchor.textQuote?.exact) {
     const fuzzy = fuzzyFindRangeInPm(doc, anchor.textQuote)
     if (fuzzy) return { from: fuzzy.from, to: fuzzy.to, confidence: "fuzzy" }
+    // Range carries a stored exact and the fuzzy search couldn't find
+    // it anywhere in the doc — the annotated text has been deleted or
+    // rewritten. Structural drift + missing text means the endpoints
+    // point at whatever text happens to sit at those positions now.
+    // Report "lost" so the caller (resolveCommentToRange) marks the
+    // comment as orphaned rather than placing the highlight on a
+    // wrong slice.
+    return { from: structuralFrom, to: structuralTo, confidence: "lost" }
   }
-  // Fall back to whatever endpoints we got.
+  // No range-level exact to check against — accept whatever the
+  // endpoints yielded. This is the point-anchor / legacy-comment path;
+  // orphaned detection still works because "lost" endpoints propagate.
   const confidence: Confidence = start.confidence === "lost" || end.confidence === "lost" ? "lost" : "fuzzy"
   return { from: structuralFrom, to: structuralTo, confidence }
 }
