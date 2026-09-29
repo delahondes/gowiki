@@ -18,9 +18,27 @@ func NewStore(metaRoot string) *Store {
 }
 
 // statePath derives the comment file path for a page.
-// /foo/bar → meta/foo/bar.comments.json
+//
+//	/foo/bar   → meta/foo/bar.comments.json         (leaf)
+//	/foo/bar/  → meta/foo/bar.comments.json         (namespace index, same file)
+//	/          → meta/index.comments.json
+//
+// A trailing slash is significant in the canonical path — it marks a
+// namespace-index page — but the state file is stored at the same
+// leaf-shape location either way. This keeps a page's comments file
+// stable across a leaf ↔ namespace-index conversion (which is common:
+// SOP01.md → SOP01/index.md keeps SOP01.comments.json in place).
+//
+// The previous shape appended `.comments.json` AFTER the trailing
+// slash was joined, producing a hidden `.comments.json` file INSIDE
+// the namespace directory. That location does not survive the
+// leaf→ns-index conversion — the historical file stayed at the
+// sibling location the leaf shape would produce, which is where
+// every existing comment file on real instances lives. Normalising
+// the trailing slash away here re-aligns Load/Save with those files.
 func (s *Store) statePath(pagePath string) string {
 	clean := strings.TrimPrefix(pagePath, "/")
+	clean = strings.TrimRight(clean, "/")
 	if clean == "" {
 		clean = "index"
 	}

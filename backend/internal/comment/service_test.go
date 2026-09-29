@@ -81,6 +81,34 @@ func TestCountOpenThreads_RepliesDontCount(t *testing.T) {
 	}
 }
 
+// Regression: namespace-index pages have a trailing slash in their
+// canonical form (/foo/bar/), while the comment file is stored at
+// the leaf-shape sibling location (foo/bar.comments.json) —
+// specifically because that keeps the file stable across a leaf ↔
+// namespace-index conversion. statePath must normalise the trailing
+// slash away; the earlier shape appended `.comments.json` after the
+// join and produced `foo/bar/.comments.json` (hidden dotfile inside
+// the directory), which silently made every ns-index page's comment
+// count 0 — exactly the bug the lifecycle comments_open rule hit
+// on the QARA managing page.
+func TestCountOpenThreads_NamespaceIndexPathReadsSiblingFile(t *testing.T) {
+	t.Parallel()
+	svc := newTestService(t)
+	// A comment is created on the ns-index page (trailing slash form).
+	c := mustCreate(t, svc, "/regulatory/qms/qara/sop01/", "hello", "alice", "")
+	_ = c
+	// Reading with the same ns-index form must find it.
+	if got := svc.CountOpenThreads("/regulatory/qms/qara/sop01/"); got != 1 {
+		t.Errorf("ns-index reader (trailing slash): got %d, want 1", got)
+	}
+	// Reading with the leaf-shape form (no trailing slash) must find
+	// the SAME file — this is how legacy comments created before a
+	// leaf-to-ns conversion stay reachable.
+	if got := svc.CountOpenThreads("/regulatory/qms/qara/sop01"); got != 1 {
+		t.Errorf("leaf-shape reader (no trailing slash): got %d, want 1 — should map to the same file", got)
+	}
+}
+
 func TestCountOpenThreads_AllResolved(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
