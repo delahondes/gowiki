@@ -45,6 +45,12 @@ var (
 	// line. Args mirror {reviewflow}: version, author, reviewer, validation.
 	templateReviewflowRe = regexp.MustCompile(`^\s*\{template-reviewflow(\s[^{}]*)?\}\s*$`)
 
+	// templateTodoRe matches a {template-todo …} directive line. Args are
+	// carried verbatim into the created document's {todo …} — a template
+	// declares a distribution list once, and every document created from
+	// it inherits it without the template itself firing the task.
+	templateTodoRe = regexp.MustCompile(`^\s*\{template-todo(\s[^{}]*)?\}\s*$`)
+
 	// reviewflowRe matches the template's own {reviewflow …} directive.
 	// Used to lift default actors when {template-reviewflow} omits them.
 	reviewflowRe = regexp.MustCompile(`^\s*\{reviewflow(\s[^{}]*)?\}\s*$`)
@@ -363,6 +369,24 @@ func ResolveTemplatePayload(payload string, opts TemplateResolveOpts) string {
 				out = append(out, renderReviewflowDirective(opts.ReviewflowArgs))
 			}
 			// else: drop it silently — row-bound-page path.
+			i++
+			continue
+		}
+
+		// {template-todo …} — the args after the directive name pass
+		// through verbatim as {todo …} args. A template with several
+		// distribution steps (read, acknowledge, validate) declares one
+		// {template-todo} per step; each becomes a real {todo} in the
+		// created document. The line loop preserves order — several
+		// distribution steps land in the same relative order the
+		// template author placed them.
+		if m := templateTodoRe.FindStringSubmatch(line); m != nil {
+			args := strings.TrimSpace(m[1])
+			if args == "" {
+				out = append(out, "{todo}")
+			} else {
+				out = append(out, "{todo "+args+"}")
+			}
 			i++
 			continue
 		}

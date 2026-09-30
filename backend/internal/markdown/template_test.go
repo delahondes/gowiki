@@ -334,3 +334,110 @@ func TestResolveTemplateTargetPattern_NoTokensPassthrough(t *testing.T) {
 		t.Errorf("no tokens: got %q, want /x/y", got)
 	}
 }
+
+// {template-todo} — args pass through verbatim into the created
+// document's {todo}. A template carries its distribution list once,
+// and every derived document inherits it without the template itself
+// firing the task (workaround: authors used to escape as \{todo …\}
+// and reactivate by hand on every copy — this removes the trap).
+
+func TestResolveTemplatePayload_TodoBareArgs(t *testing.T) {
+	t.Parallel()
+	payload := "{tag rec}\n\n{template-todo action=read assign=@all}\n\nbody\n"
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{})
+	if !strings.Contains(got, "{todo action=read assign=@all}") {
+		t.Errorf("template-todo not resolved to {todo}:\n%s", got)
+	}
+	if strings.Contains(got, "template-todo") {
+		t.Errorf("template-todo marker leaked into output:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoNoArgs(t *testing.T) {
+	// A bare {template-todo} (no args) is legal — it becomes a bare {todo},
+	// which the todo plugin then treats as the default action for the
+	// currently-signed roles. Nothing forces args on the template author.
+	t.Parallel()
+	payload := "{template-todo}\n"
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{})
+	if !strings.Contains(got, "{todo}") {
+		t.Errorf("bare template-todo not resolved:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoMultipleInOrder(t *testing.T) {
+	// Distribution flow of three steps: read → acknowledge → validate.
+	// Order is preserved (line-by-line walk), so the created document
+	// carries the three {todo} lines in exactly the same order.
+	t.Parallel()
+	payload := `{template-todo action=read assign=@ops}
+{template-todo action=acknowledge assign=@quality-team}
+{template-todo action=validate assign=@heads}
+`
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{})
+	idxRead := strings.Index(got, "{todo action=read")
+	idxAck := strings.Index(got, "{todo action=acknowledge")
+	idxVal := strings.Index(got, "{todo action=validate")
+	if idxRead < 0 || idxAck < 0 || idxVal < 0 {
+		t.Fatalf("one of the three template-todo lines was not resolved:\n%s", got)
+	}
+	if !(idxRead < idxAck && idxAck < idxVal) {
+		t.Errorf("order not preserved: read=%d ack=%d val=%d\n%s", idxRead, idxAck, idxVal, got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoQuotedValueSurvives(t *testing.T) {
+	// Todo args may carry quoted values (a title like "read the SOP").
+	// Verbatim carry-over means the quoting must survive intact.
+	t.Parallel()
+	payload := `{template-todo action=read title="Please read the SOP and confirm"}` + "\n"
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{})
+	want := `{todo action=read title="Please read the SOP and confirm"}`
+	if !strings.Contains(got, want) {
+		t.Errorf("quoted todo args not preserved:\nwant substring: %q\ngot:\n%s", want, got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoAlongsideOtherDirectives(t *testing.T) {
+	// The rc.3 use case: a template carries title, reviewflow, stamp AND
+	// a distribution list. Every {template-*} directive must resolve in
+	// the same pass without stepping on each other's output.
+	t.Parallel()
+	payload := `{template-title}
+# Pattern
+
+{template-todo action=read assign=@ops}
+
+{template-reviewflow}
+
+{template-stamp}
+`
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{
+		Stamp: TemplateStampArgs{
+			TemplatePath:  "/qms/sop09/tpl01",
+			TemplateTitle: "SOP09/TPL01",
+			VersionTag:    "1.0",
+		},
+		Title: "My Document",
+		ReviewflowArgs: map[string]string{
+			"version":  "1.0",
+			"author":   "alice",
+			"reviewer": "bob",
+		},
+	})
+	for _, want := range []string{
+		"# My Document",
+		"{todo action=read assign=@ops}",
+		"{reviewflow version=1.0 author=alice reviewer=bob}",
+		"Created from template [SOP09/TPL01]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"{template-title}", "{template-todo", "{template-reviewflow", "{template-stamp"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("marker %q leaked into output:\n%s", unwanted, got)
+		}
+	}
+}

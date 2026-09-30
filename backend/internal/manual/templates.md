@@ -115,7 +115,7 @@ These are described in detail in [Database](./database).
 
 For documents that need to record which template produced them and in which version — the ISO 13485 §4.2.4 traceability question — a second, complementary template shape exists. Instead of `_template*` filename dispatch, these are ordinary pages that carry a `{template}` directive; the wiki performs the copy itself and freezes the template's version into the created document at the moment of the copy.
 
-Four directives make this up. They live alongside the tracking block on a template page and get resolved at document creation:
+Five directives make this up. They live alongside the tracking block on a template page and get resolved at document creation:
 
 | Directive | Where it lives | Fate at creation |
 | --- | --- | --- |
@@ -123,6 +123,7 @@ Four directives make this up. They live alongside the tracking block on a templa
 | `{template-title}` | Template and document | Prefixes the heading that becomes the document's title. Resolved to that heading, with the pattern replaced by the user's completed title. |
 | `{template-stamp}` | Template and document | Replaced by the origin sentence (`Created from template [Title](/path?v=N), version 1.0`). |
 | `{template-reviewflow …}` | Template only | Replaced by `{reviewflow …}` in the created document — actors default to the template's own, version defaults to `1.0`. |
+| `{template-todo …}` | Template only | Replaced by `{todo …}` in the created document — args carry through verbatim. The template itself never fires the task. Use it for distribution lists ("`{template-todo action=read assign=@ops}`") that must trigger on every derived document but stay inert on the pattern. |
 
 ### The copy is performed by the wiki
 
@@ -136,6 +137,7 @@ Every `{template-*}` directive above the horizontal rule in the old hand-copy mo
 - **A stamp outside a template is loud.** If you paste a `{template-stamp}` onto a page that has no `{template}` marker, it renders as a red error rather than silently. The failure would otherwise be caught at audit rather than at writing time.
 - **Templates without a reviewflow are fine.** Some registers issue documents without a review-flow cycle; `{template}`, `{template-title}` and `{template-stamp}` work normally in that case, and `{template-reviewflow}` is simply omitted.
 - **Row-bound-page templates also get the stamp.** A page created by inserting a row into a database table with a `page_template_path` inherits the same `{template-stamp}` resolution — the row-bound-page template gets stamped with its current page version at row-insert time. `{template-title}` and `{template-reviewflow}` are ignored on that path (the row supplies the title, and row-bound pages carry no reviewflow of their own).
+- **`{template-todo}` replaces the "escape and un-escape" trap for distribution lists.** A template that needs every derived document to notify a group (`{todo action=read assign=@ops}`) used to force the author into escaping the directive (`\{todo …\}`) so it wouldn't fire against the template itself, then remembering to un-escape it on every copy — which nobody did. Wrap it as `{template-todo action=read assign=@ops}` instead: the template stays inert, every derived document carries a live `{todo}` from the moment it's created. Several `{template-todo}` lines can coexist on one template (multi-step flow like read → acknowledge → validate), and their order is preserved end-to-end.
 
 ### Migrating an existing template
 
@@ -145,5 +147,6 @@ Templates in a QMS that follow the hand-copy convention today can be converted m
 2. Replace the hand-written "Source template: …" block with `{template-stamp}`.
 3. Replace the escaped `\{reviewflow …\}` on the payload side with `{template-reviewflow}` (arguments are optional — defaults inherit the template's own reviewflow).
 4. Add `{template-title}` on the line just above the payload's H1 heading.
+5. Replace any escaped `\{todo …\}` (the distribution-list workaround) with `{template-todo …}` carrying the same args — the created document then gets a live `{todo}` without the template itself firing.
 
-Nothing in the resulting template needs maintaining by hand: version numbers, actor lists and origin sentences are all derived at creation time from the template's current state.
+Nothing in the resulting template needs maintaining by hand: version numbers, actor lists, origin sentences and distribution tasks are all derived at creation time from the template's current state.

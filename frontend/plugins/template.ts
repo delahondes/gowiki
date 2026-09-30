@@ -3,6 +3,7 @@ import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin } from "../compiler/registry"
 import { enablePropertiesPanel } from "../compiler/core_ui"
+import { todoProperties } from "./todo"
 
 // ── {template} — the copy marker ──────────────────────────────────────
 //
@@ -303,6 +304,68 @@ class TemplateReviewflowNodeView {
     } else {
       this.node = node
     }
+    return true
+  }
+
+  stopEvent(): boolean {
+    return true
+  }
+  ignoreMutation(): boolean {
+    return true
+  }
+}
+
+// ── {template-todo …} ────────────────────────────────────────────────
+//
+// Renders as a muted panel showing the todo args that will be carried
+// verbatim into the created document. Prevents the trap where a
+// {todo} placed directly in the template would fire against every
+// reader of the template itself (or force the author to escape the
+// directive and then remember to un-escape after each copy).
+
+class TemplateTodoNodeView {
+  dom: HTMLElement
+  private node: PMNode
+
+  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
+    this.node = node
+    this.dom = document.createElement("div")
+    this.dom.className = "gowiki-template-todo"
+    this.dom.contentEditable = "false"
+    this.render()
+  }
+
+  private render() {
+    this.dom.innerHTML = ""
+
+    const label = document.createElement("span")
+    label.className = "gowiki-template-todo-label"
+    label.textContent = "Template todo — resolved at document creation"
+    this.dom.appendChild(label)
+
+    const summary = document.createElement("div")
+    summary.className = "gowiki-template-todo-summary"
+    const parts: string[] = []
+    // Show title first (the todo's primary label), then the two fields
+    // authors actually care about at a glance: who's on the hook and
+    // what they must do.
+    const title = String(this.node.attrs.title || "").trim()
+    if (title) parts.push(`title=${JSON.stringify(title)}`)
+    const assign = String(this.node.attrs.assign || "").trim()
+    if (assign) parts.push(`assign=${assign}`)
+    const action = String(this.node.attrs.action || "").trim()
+    if (action) parts.push(`action=${action}`)
+    const due = String(this.node.attrs.due || "").trim()
+    if (due) parts.push(`due=${due}`)
+    if (parts.length === 0) parts.push("(no args — bare {todo} will be inserted)")
+    summary.textContent = parts.join(" · ")
+    this.dom.appendChild(summary)
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type !== this.node.type) return false
+    this.node = node
+    this.render()
     return true
   }
 
@@ -691,11 +754,30 @@ const templateStyles = `
   margin-top: 2px;
 }
 
+.gowiki-template-todo {
+  margin: 4px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--gw-color-accent, #4e79a7);
+  background: var(--gw-color-surface-alt, #f5f8ff);
+  font-size: 12px;
+}
+.gowiki-template-todo-label {
+  color: var(--gw-color-muted);
+  font-style: italic;
+  font-size: 11px;
+}
+.gowiki-template-todo-summary {
+  font-family: monospace;
+  color: var(--gw-color-text);
+  margin-top: 2px;
+}
+
 /* Selection outline shared with other block NodeViews. */
 #app.gowiki-editing .gowiki-template-marker.ProseMirror-selectednode,
 #app.gowiki-editing .gowiki-template-title.ProseMirror-selectednode,
 #app.gowiki-editing .gowiki-template-stamp.ProseMirror-selectednode,
-#app.gowiki-editing .gowiki-template-reviewflow.ProseMirror-selectednode {
+#app.gowiki-editing .gowiki-template-reviewflow.ProseMirror-selectednode,
+#app.gowiki-editing .gowiki-template-todo.ProseMirror-selectednode {
   outline: 2px solid #ffd43b;
   outline-offset: 1px;
 }
@@ -773,6 +855,13 @@ const templateReviewflowProperties = [
   },
 ]
 
+// {template-todo} shares its property surface with {todo} — the args are
+// carried verbatim into the created document's {todo}. Importing the
+// todo plugin's list means "add a field to todo" automatically propagates
+// to template-todo, so a template author can pin any todo attribute the
+// runtime supports.
+const templateTodoProperties = todoProperties
+
 // ── Plugin registration ──────────────────────────────────────────────
 
 export const templatePlugin: WikiPlugin = {
@@ -847,6 +936,49 @@ export const templatePlugin: WikiPlugin = {
             },
           ],
         },
+        // Same attribute surface as `todo` — the args carry into the
+        // created document verbatim. Keeping the schemas parallel means
+        // the property panel and any todo-side helper (validation,
+        // enum options) work identically for template-todo.
+        template_todo: {
+          group: "block",
+          atom: true,
+          attrs: {
+            title: { default: "" },
+            assign: { default: "" },
+            resolution: { default: "any" },
+            due: { default: "" },
+            recur: { default: "" },
+            priority: { default: "normal" },
+            action: { default: "" },
+            tags: { default: "" },
+            description: { default: "" },
+          },
+          toDOM(node: PMNode) {
+            return [
+              "div",
+              {
+                class: "gowiki-template-todo",
+                "data-title": node.attrs.title || "",
+                "data-assign": node.attrs.assign || "",
+                "data-action": node.attrs.action || "",
+              },
+              "Template todo",
+            ]
+          },
+          parseDOM: [
+            {
+              tag: "div.gowiki-template-todo",
+              getAttrs(dom: HTMLElement) {
+                return {
+                  title: dom.getAttribute("data-title") || "",
+                  assign: dom.getAttribute("data-assign") || "",
+                  action: dom.getAttribute("data-action") || "",
+                }
+              },
+            },
+          ],
+        },
       },
     })
 
@@ -871,6 +1003,11 @@ export const templatePlugin: WikiPlugin = {
       nodeType: "template_reviewflow",
       properties: templateReviewflowProperties,
       collectExtra: true,
+    })
+    reg.registerSelfContainedDirective("template-todo", {
+      tokenType: "template_todo",
+      nodeType: "template_todo",
+      properties: templateTodoProperties,
     })
 
     // Markdown → PM.
@@ -902,6 +1039,24 @@ export const templatePlugin: WikiPlugin = {
           ctx.schema.nodes.template_reviewflow.create({
             version,
             roles: JSON.stringify(roles),
+          })
+        )
+      },
+    })
+    reg.registerText("template_todo", {
+      run(ctx, tok) {
+        const attrs = tok.meta?.attrs ?? {}
+        ctx.push(
+          ctx.schema.nodes.template_todo.create({
+            title: attrs.title ?? "",
+            assign: attrs.assign ?? "",
+            resolution: attrs.resolution ?? "any",
+            due: attrs.due ?? "",
+            recur: attrs.recur ?? "",
+            priority: attrs.priority ?? "normal",
+            action: attrs.action ?? "",
+            tags: attrs.tags ?? "",
+            description: attrs.description ?? "",
           })
         )
       },
@@ -943,6 +1098,31 @@ export const templatePlugin: WikiPlugin = {
         return parts.length ? `{template-reviewflow ${parts.join(" ")}}\n\n` : `{template-reviewflow}\n\n`
       },
     })
+    // Serialization mirrors the `todo` node: title is always emitted
+    // (required by the todo directive contract), other keys only when
+    // non-default. Quoting on values that may contain spaces (title,
+    // assign, description) matches todo.ts's own output so a
+    // template-todo and a todo look identical modulo the directive name.
+    reg.registerPMNode("template_todo", {
+      print(node) {
+        const parts: string[] = []
+        const title = node.attrs.title || ""
+        parts.push(`title="${title}"`)
+        if (node.attrs.assign) parts.push(`assign="${node.attrs.assign}"`)
+        if (node.attrs.resolution && node.attrs.resolution !== "any") {
+          parts.push(`resolution=${node.attrs.resolution}`)
+        }
+        if (node.attrs.due) parts.push(`due=${node.attrs.due}`)
+        if (node.attrs.recur) parts.push(`recur=${node.attrs.recur}`)
+        if (node.attrs.priority && node.attrs.priority !== "normal") {
+          parts.push(`priority=${node.attrs.priority}`)
+        }
+        if (node.attrs.action) parts.push(`action="${node.attrs.action}"`)
+        if (node.attrs.tags) parts.push(`tags="${node.attrs.tags}"`)
+        if (node.attrs.description) parts.push(`description="${node.attrs.description}"`)
+        return `{template-todo ${parts.join(" ")}}\n\n`
+      },
+    })
 
     // Editor plugin: NodeViews.
     reg.registerEditorPlugin((_schema: Schema) => {
@@ -961,6 +1141,9 @@ export const templatePlugin: WikiPlugin = {
             },
             template_reviewflow(node: PMNode, view: EditorView, getPos: () => number | undefined) {
               return new TemplateReviewflowNodeView(node, view, getPos)
+            },
+            template_todo(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+              return new TemplateTodoNodeView(node, view, getPos)
             },
           },
         },

@@ -63,7 +63,7 @@ function formatAssigneeSync(raw: string): string {
 
 // --- Properties ---
 
-const todoProperties = [
+export const todoProperties = [
   {
     name: "title",
     label: "Title",

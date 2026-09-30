@@ -138,6 +138,79 @@ describe("{template-reviewflow …} directive", () => {
   })
 })
 
+describe("{template-todo …} directive", () => {
+  // {template-todo} declares a distribution/acknowledgement task the
+  // template carries. It stays inert on the template itself and resolves
+  // to a real {todo} on the created document (backend resolver). The
+  // frontend concern here is bijective round-trip: the args authors set
+  // (title, assign, action, due, priority, …) survive parse → serialize
+  // untouched, so the visual editor and the raw source agree.
+  it("bare {template-todo} round-trips", () => {
+    // A bare {template-todo} still round-trips because the serialiser
+    // always emits title="" (required by the todo directive contract
+    // that {template-todo} mirrors).
+    const rt = roundTrip('{template}\n\n{template-todo title=""}\n\nBody\n')
+    expect(rt.isStable).toBe(true)
+    expect(countNodes(rt.doc, "template_todo")).toBe(1)
+  })
+
+  it("preserves title=", () => {
+    const rt = roundTrip('{template}\n\n{template-todo title="Read the SOP"}\n\nBody\n')
+    expect(rt.isStable).toBe(true)
+    const node = firstNode(rt.doc, "template_todo")
+    expect(node?.attrs.title).toBe("Read the SOP")
+  })
+
+  it("preserves assign= and action=", () => {
+    const rt = roundTrip('{template}\n\n{template-todo title="Please read" assign="@ops" action=read}\n\nBody\n')
+    expect(rt.isStable).toBe(true)
+    const node = firstNode(rt.doc, "template_todo")
+    expect(node?.attrs.assign).toBe("@ops")
+    expect(node?.attrs.action).toBe("read")
+  })
+
+  it("mixed args (due, priority, tags, description) all survive", () => {
+    const src =
+      "{template}\n\n" +
+      '{template-todo title="Full review" assign="@quality-team" due=2026-12-31 priority=high tags="sop09,q4" description="Sign only after reading the SOP end-to-end"}\n\n' +
+      "Body\n"
+    const rt = roundTrip(src)
+    expect(rt.isStable).toBe(true)
+    const node = firstNode(rt.doc, "template_todo")
+    expect(node?.attrs.title).toBe("Full review")
+    expect(node?.attrs.assign).toBe("@quality-team")
+    expect(node?.attrs.due).toBe("2026-12-31")
+    expect(node?.attrs.priority).toBe("high")
+    expect(node?.attrs.tags).toBe("sop09,q4")
+    expect(node?.attrs.description).toBe("Sign only after reading the SOP end-to-end")
+  })
+
+  it("several {template-todo} lines coexist (multi-step distribution)", () => {
+    // A template can declare N distribution steps (read → acknowledge →
+    // validate). Each becomes a separate {todo} on the created document,
+    // in the same relative order the author placed them.
+    const src =
+      "{template}\n\n" +
+      '{template-todo title="Read" action=read}\n\n' +
+      '{template-todo title="Acknowledge" action=acknowledge}\n\n' +
+      '{template-todo title="Validate" action=validate}\n\n' +
+      "Body\n"
+    const rt = roundTrip(src)
+    expect(rt.isStable).toBe(true)
+    expect(countNodes(rt.doc, "template_todo")).toBe(3)
+  })
+
+  it("default resolution/priority values drop on serialise", () => {
+    // Consistency with the todo node: only non-default keys are emitted.
+    const rt = roundTrip('{template}\n\n{template-todo title="X" resolution=any priority=normal}\n\nBody\n')
+    expect(rt.isStable).toBe(true)
+    const line = rt.first.split("\n").find((l) => l.startsWith("{template-todo"))
+    expect(line).toBeDefined()
+    expect(line).not.toMatch(/resolution=/)
+    expect(line).not.toMatch(/priority=/)
+  })
+})
+
 describe("full template payload — combined directives", () => {
   it("complete template with all four directives round-trips", () => {
     const src =

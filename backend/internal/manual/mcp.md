@@ -147,7 +147,7 @@ npx @modelcontextprotocol/inspector \
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page (full rewrite) — requires a summary; refuses fully-validated pages unless `force=true` (see the fully-validated-page guard below) |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption); same fully-validated-page guard as `write_page` |
-| `create_page_from_template` | Create a new page from a `{template}`-marked template. Resolves `{template-title}`/`{template-stamp}`/`{template-reviewflow}`; refuses when the template's reviewflow has open roles or when the destination exists. |
+| `create_page_from_template` | Create a new page from a `{template}`-marked template. Resolves `{template-title}`/`{template-stamp}`/`{template-reviewflow}`/`{template-todo}`; refuses when the template's reviewflow has open roles or when the destination exists. |
 | `render_page` | Return the FULLY rendered page as a browser sees it — every dynamic directive resolved. `format=text` (default, structured extraction) or `format=html`. Use when the answer depends on resolved data (databases, tag queries, template stamps) rather than raw source. Heavy call; not for bulk scans. |
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
 | `complete_todo` | Mark a todo as done |
@@ -284,6 +284,7 @@ Templates that carry a `{template}` directive expose a dedicated creation path �
   - `{template-title}` → the H1 heading below it is rewritten to `title`.
   - `{template-stamp}` → `Created from template [<title>](<template_path>?v=<N>), version <tag>`. When the template has no reviewflow, the sentence reads `revision <N>` instead — the wording deliberately differs, because a wiki revision number and a reviewflow version tag name different things.
   - `{template-reviewflow …}` → `{reviewflow …}` with defaults filled in: version defaults to `1.0`; unspecified actors inherit from the template's own `{reviewflow}`. `reviewflow` arg to this tool overrides those defaults.
+  - `{template-todo …}` → `{todo …}` with the same args carried verbatim. Several `{template-todo}` lines coexist on one template and become the same number of live `{todo}` directives on the created document, in the same order. The template itself never fires the task — the trap that motivated this directive was the "escape the `{todo}` on the template, un-escape after every copy" workaround, which nobody remembered.
 - **Refusal rules:**
   - The source is not a template (no `{template}` marker) — `kind: "not_template"`.
   - The template's reviewflow has open roles — `kind: "not_validated"`, with the missing role names in the message. Issuing a document from an unvalidated form contradicts the whole point of the stamp.
