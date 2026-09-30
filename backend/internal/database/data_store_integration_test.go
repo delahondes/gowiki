@@ -367,12 +367,25 @@ func TestDataStore_UpdatePagePath(t *testing.T) {
 	schema, data, ctx := newFullStack(t)
 	makeIssuesTable(t, schema)
 	row := &Row{PagePath: "/old", Fields: map[string]any{"title": "t"}}
-	_ = data.InsertRow(ctx, "issues", row)
+	// A prior version swallowed InsertRow's error; when it flaked under
+	// parallel test load, row.ID stayed 0 and the GetRow at the bottom
+	// nil-panicked instead of surfacing the actual insert failure.
+	// t.Fatalf here turns a flake into a diagnostic and keeps the test's
+	// intent (path is updated) crisp.
+	if err := data.InsertRow(ctx, "issues", row); err != nil {
+		t.Fatalf("InsertRow: %v", err)
+	}
 
 	if err := data.UpdatePagePath(ctx, "issues", row.ID, "/new"); err != nil {
 		t.Fatalf("UpdatePagePath: %v", err)
 	}
-	got, _ := data.GetRow(ctx, "issues", row.ID)
+	got, err := data.GetRow(ctx, "issues", row.ID)
+	if err != nil {
+		t.Fatalf("GetRow: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("GetRow(id=%d): row missing after UpdatePagePath", row.ID)
+	}
 	if got.PagePath != "/new" {
 		t.Errorf("path not updated: %q", got.PagePath)
 	}

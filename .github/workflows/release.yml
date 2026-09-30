@@ -66,10 +66,60 @@ jobs:
         working-directory: frontend
         run: npm test
 
+  prepare-release:
+    # Both upload jobs below assume the GitHub Release object exists —
+    # `gh release upload` refuses with "release not found" otherwise.
+    # Historically the release was created by hand before pushing the tag,
+    # which is easy to forget under time pressure (see rc.3 post-mortem:
+    # tag pushed, workflow failed, release had to be created manually
+    # before re-running the upload jobs). Create it here from the CHANGELOG
+    # entry for the tag so a tag push is enough on its own.
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify-version, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract CHANGELOG section for this tag
+        id: notes
+        # The CHANGELOG entry for the tag is delimited by "## [<version>]"
+        # headings. awk carves the block for THIS release; the trailing
+        # heading line of the next entry is dropped so notes end cleanly.
+        # If no entry is found (undocumented release) we fall back to a
+        # placeholder rather than fail the workflow — the operator can
+        # edit the release afterwards, but the tag artefacts still ship.
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify-version.outputs.version }}"
+          if [ -z "${version}" ]; then version=${GITHUB_REF_NAME#v}; fi
+          awk -v v="${version}" '
+            $0 ~ "^## \\["v"\\]" { on=1; print; next }
+            on && $0 ~ "^## \\[" { on=0 }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No CHANGELOG entry for ${version} — writing a placeholder."
+            echo "Release ${GITHUB_REF_NAME}. See git log and CHANGELOG for details." > release-notes.md
+          fi
+          head -3 release-notes.md
+      - name: Create release (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `gh release view` returns non-zero when the release is absent,
+        # which the `if !` inverts into "create it". Re-running the
+        # workflow on the same tag is a no-op instead of an error.
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md
+          else
+            echo "Release ${GITHUB_REF_NAME} already exists — nothing to do."
+          fi
+
   build:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
-    needs: [verify-version, test]
+    needs: [verify-version, test, prepare-release]
     strategy:
       matrix:
         include:
@@ -120,7 +170,7 @@ jobs:
   build-frontend:
     name: Build frontend bundle
     runs-on: ubuntu-latest
-    needs: [verify-version, test]
+    needs: [verify-version, test, prepare-release]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
