@@ -52,6 +52,46 @@ Access: Admin > Configuration
 Configure outbound email for todo notifications:
 - **From address**, **SMTP host/port**, **username/password**
 
+STARTTLS is negotiated automatically when the server advertises it, so
+port 587 is the right choice for the two mainstream providers.
+
+### Google Workspace / Gmail
+
+| Field         | Value                                        |
+| ------------- | -------------------------------------------- |
+| SMTP host     | `smtp.gmail.com`                             |
+| SMTP port     | `587`                                        |
+| Username      | the sending mailbox's full address           |
+| Password      | an **app password** (not the account password) |
+| From address  | the same mailbox, or a verified alias        |
+
+App passwords require 2FA to be enabled on the sending account, then
+generated at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+The account's regular password is rejected by Gmail's SMTP endpoint.
+
+### Microsoft 365 (Exchange Online)
+
+| Field         | Value                                        |
+| ------------- | -------------------------------------------- |
+| SMTP host     | `smtp.office365.com`                         |
+| SMTP port     | `587`                                        |
+| Username      | the sending mailbox's UPN (full address)     |
+| Password      | the mailbox's password                       |
+| From address  | the same mailbox                             |
+
+Two prerequisites that trip up most first-time setups:
+
+1. **SMTP AUTH must be enabled on the mailbox.** Microsoft disables it
+   tenant-wide by default since 2022. An admin turns it on per-mailbox
+   from the Admin center → *Users* → the mailbox → *Mail* →
+   *Manage email apps* → *Authenticated SMTP*, or in PowerShell:
+   `Set-CASMailbox -Identity user@company.com -SmtpClientAuthenticationDisabled $false`.
+2. **MFA blocks basic auth.** If the sending account has MFA enabled
+   (usually the case), basic SMTP AUTH will fail. The clean paths are
+   a dedicated notification mailbox without MFA, or Microsoft's
+   modern-auth (OAuth) flow — the latter is not yet wired into this
+   admin form.
+
 ## 1. Webhooks
 
 Configure outbound webhooks for notifications (Slack, Zulip, etc.):
