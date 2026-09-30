@@ -233,6 +233,89 @@ func TestReattachByDigest_DedupsByMostRecent(t *testing.T) {
 	}
 }
 
+// Status.NextRoles powers the {reviewflow-query when=next} filter — a
+// caller asks "what's actionable right now on this page?". Sequential
+// mode reports only the head of the queue; parallel mode reports every
+// missing role. A fully-validated page has an empty NextRoles regardless
+// of mode. Pins the invariants so a query-time refactor doesn't silently
+// pull "wait your turn" slots into a "sign now" dashboard.
+func TestComputeStatus_NextRoles_Sequential(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newSvcWithSpy(t)
+
+	// Sequential (default) — author → reviewer → validator ordering.
+	if err := svc.SyncFromMarkdown("/doc", 1, directive3); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing confirmed → head of queue is the first ordered role.
+	st, _ := svc.store.Load("/doc")
+	status, _ := svc.computeStatus("/doc", st)
+	if len(status.NextRoles) != 1 || status.NextRoles[0] != "author" {
+		t.Errorf("initial NextRoles = %+v, want [author]", status.NextRoles)
+	}
+	if status.Parallel {
+		t.Error("sequential mode leaked Parallel=true into status")
+	}
+
+	// After author confirms, head of queue is now reviewer.
+	_, _ = svc.Confirm("/doc", "author", "alice", nil)
+	st, _ = svc.store.Load("/doc")
+	status, _ = svc.computeStatus("/doc", st)
+	if len(status.NextRoles) != 1 || status.NextRoles[0] != "reviewer" {
+		t.Errorf("after author: NextRoles = %+v, want [reviewer]", status.NextRoles)
+	}
+}
+
+func TestComputeStatus_NextRoles_Parallel(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newSvcWithSpy(t)
+
+	// parallel=true — every missing role is actionable right away.
+	parallelMd := "{reviewflow author=alice reviewer=bob validator=cathy parallel=true}\n"
+	if err := svc.SyncFromMarkdown("/doc", 1, parallelMd); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := svc.store.Load("/doc")
+	status, _ := svc.computeStatus("/doc", st)
+	if !status.Parallel {
+		t.Error("Parallel flag not propagated to status")
+	}
+	if len(status.NextRoles) != 3 {
+		t.Fatalf("parallel NextRoles = %+v, want 3 entries", status.NextRoles)
+	}
+	// Ordering is deterministic (sorted) so a client can render a
+	// stable list without reshuffling on each render.
+	if status.NextRoles[0] != "author" || status.NextRoles[1] != "reviewer" || status.NextRoles[2] != "validator" {
+		t.Errorf("parallel NextRoles = %+v, want sorted", status.NextRoles)
+	}
+
+	// After author confirms, two roles remain actionable.
+	_, _ = svc.Confirm("/doc", "author", "alice", nil)
+	st, _ = svc.store.Load("/doc")
+	status, _ = svc.computeStatus("/doc", st)
+	if len(status.NextRoles) != 2 {
+		t.Errorf("after one confirm: NextRoles = %+v, want 2", status.NextRoles)
+	}
+}
+
+func TestComputeStatus_NextRoles_EmptyWhenFullyValidated(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := newSvcWithSpy(t)
+
+	_ = svc.SyncFromMarkdown("/doc", 1, directive2)
+	_, _ = svc.Confirm("/doc", "author", "alice", nil)
+	_, _ = svc.Confirm("/doc", "reviewer", "bob", nil)
+
+	st, _ := svc.store.Load("/doc")
+	status, _ := svc.computeStatus("/doc", st)
+	if !status.IsFullyValidated {
+		t.Fatal("expected fully validated")
+	}
+	if len(status.NextRoles) != 0 {
+		t.Errorf("fully validated: NextRoles = %+v, want empty", status.NextRoles)
+	}
+}
+
 // findVersionRecord powers the "don't double-snapshot" guard. Test the
 // obvious cases so a future refactor doesn't silently regress.
 func TestFindVersionRecord(t *testing.T) {

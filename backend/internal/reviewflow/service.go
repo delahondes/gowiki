@@ -617,12 +617,29 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 		}
 	}
 
+	// NextRoles: what's actionable NOW — parallel → all missing;
+	// sequential → head of queue only. Empty when nothing's missing.
+	var nextRoles []string
+	if len(missing) > 0 {
+		if st.Parallel {
+			for role := range missing {
+				nextRoles = append(nextRoles, role)
+			}
+			sort.Strings(nextRoles)
+		} else if next := nextUnconfirmedRole(st); next != "" {
+			nextRoles = []string{next}
+		}
+	}
+
 	status := &Status{
 		Roles:            st.Roles,
 		VersionTag:       st.VersionTag,
 		CurrentPageVer:   st.CurrentPageVersion,
 		ValidatedVersion: st.ValidatedVersion,
 		MissingRoles:     missing,
+		NextRoles:        nextRoles,
+		Parallel:         st.Parallel,
+		RoleOrder:        st.RoleOrder,
 		IsFullyValidated: len(missing) == 0,
 		VersionHistory:   st.VersionHistory,
 	}

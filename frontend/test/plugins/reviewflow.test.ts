@@ -151,6 +151,44 @@ describe("reviewflow-query", () => {
     expect(rt.isStable).toBe(true)
     expect(rt.first).not.toMatch(/status=draft/)
   })
+
+  // user + when filters, added rc.3. Bijectivity pinned: non-default
+  // values round-trip on both attrs, default values drop, and the
+  // parsed doc reflects the requested filter.
+  it("{reviewflow-query user=@me when=next} round-trips both attrs", () => {
+    const rt = roundTrip("{reviewflow-query user=@me when=next}\n")
+    expect(rt.isStable).toBe(true)
+    const a = firstReviewflowQuery(rt.doc)!
+    expect(a.user).toBe("@me")
+    expect(a.when).toBe("next")
+  })
+
+  it("{reviewflow-query user=etienne.formstecher} defaults when to 'any' and drops it", () => {
+    const rt = roundTrip("{reviewflow-query user=etienne.formstecher}\n")
+    expect(rt.isStable).toBe(true)
+    const a = firstReviewflowQuery(rt.doc)!
+    expect(a.user).toBe("etienne.formstecher")
+    expect(a.when).toBe("any")
+    expect(rt.first).not.toMatch(/when=/)
+  })
+
+  it("{reviewflow-query when=overdue} without user is legal source but ineffective (user filter empty)", () => {
+    // The filter runs only when user is non-empty, but the attrs must
+    // still parse and round-trip so an author can add user later
+    // without losing their `when` choice.
+    const rt = roundTrip("{reviewflow-query when=overdue}\n")
+    expect(rt.isStable).toBe(true)
+    const a = firstReviewflowQuery(rt.doc)!
+    expect(a.when).toBe("overdue")
+    expect(a.user).toBe("")
+  })
+
+  it("unknown when= value falls back to 'any'", () => {
+    // Guards against a typo silently becoming a permanent bogus filter.
+    const rt = roundTrip("{reviewflow-query user=alice when=whenever}\n")
+    expect(rt.isStable).toBe(true)
+    expect(firstReviewflowQuery(rt.doc)!.when).toBe("any")
+  })
 })
 
 describe("reviewflow: interaction with code fences", () => {

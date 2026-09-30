@@ -60,6 +60,11 @@ interface ReviewflowStatus {
   current_page_version: number
   validated_page_version: number
   missing_roles: Record<string, string>
+  // Actionable-now roles (parallel: every missing role; sequential: head of
+  // queue only). Consumed by the {reviewflow-query when=next} filter.
+  next_roles?: string[]
+  parallel?: boolean
+  role_order?: string[]
   deadlines?: Record<string, string>
   overdue_roles?: string[]
   is_fully_validated: boolean
@@ -134,6 +139,40 @@ function findLastSignatureVersion(
     }
   }
   return latest
+}
+
+// rowMatchesUser is the `{reviewflow-query user=X when=Y}` predicate.
+// A row survives when the user holds a role on the page AND the row
+// meets the `when` narrowing:
+//   any     — user has any assigned role (widest filter)
+//   missing — user's assigned role is in missing_roles for the current version
+//   next    — user's role is in next_roles (parallel: any missing role;
+//             sequential: only the head of the queue). This is the
+//             "queue-position-aware ready-to-sign" case.
+//   overdue — user's assigned role is overdue AND missing
+// A user with no role on a page never matches, regardless of `when`.
+function rowMatchesUser(status: ReviewflowStatus, user: string, when: string): boolean {
+  const rolesForUser: string[] = []
+  for (const [role, assignee] of Object.entries(status.roles || {})) {
+    if (assignee === user) rolesForUser.push(role)
+  }
+  if (rolesForUser.length === 0) return false
+  if (when === "any") return true
+
+  const missing = status.missing_roles || {}
+  const missingForUser = rolesForUser.filter((r) => r in missing)
+  if (missingForUser.length === 0) return false // when=missing/next/overdue all require missing
+
+  if (when === "missing") return true
+  if (when === "overdue") {
+    const overdue = new Set(status.overdue_roles || [])
+    return missingForUser.some((r) => overdue.has(r))
+  }
+  if (when === "next") {
+    const next = new Set(status.next_roles || [])
+    return missingForUser.some((r) => next.has(r))
+  }
+  return true
 }
 
 const gate = {
@@ -727,6 +766,18 @@ class ReviewflowQueryNodeView {
   private async fetchAndRender() {
     const path = this.resolvePathPrefix()
     const statusFilter = this.node.attrs.status || "draft"
+    // User filter: "@me" resolves to the current viewer; empty means no
+    // user filter (path/status only). "when" narrows further:
+    //   any     — user has any assigned role on the page
+    //   missing — user's role is missing (they haven't confirmed the current version)
+    //   next    — user's role is actionable RIGHT NOW (head of the sequential
+    //             queue, or any missing role in parallel mode) — the
+    //             "what should I sign now?" case
+    //   overdue — user's role is missing AND overdue
+    const rawUser = String(this.node.attrs.user || "").trim()
+    const currentUser = (window as any).__gowikiCurrentUser?.username || ""
+    const userFilter = rawUser === "@me" ? currentUser : rawUser
+    const whenFilter = String(this.node.attrs.when || "any").toLowerCase()
 
     this.dom.innerHTML = '<div class="gowiki-rfq-loading">Loading reviewflow status...</div>'
 
@@ -756,12 +807,17 @@ class ReviewflowQueryNodeView {
       const results = (await Promise.all(statusPromises)).filter(Boolean) as any[]
 
       // 3. Filter by status
-      const filtered = results.filter((r) => {
+      let filtered = results.filter((r) => {
         const isValidated = r.status.is_fully_validated === true
         if (statusFilter === "draft") return !isValidated
         if (statusFilter === "validated") return isValidated
         return true // "all"
       })
+
+      // 4. Filter by user + when (when is ignored when user is empty)
+      if (userFilter) {
+        filtered = filtered.filter((r) => rowMatchesUser(r.status, userFilter, whenFilter))
+      }
 
       // 4. Sort by date (most recent first)
       filtered.sort((a, b) => {
@@ -781,7 +837,20 @@ class ReviewflowQueryNodeView {
           : statusFilter === "validated"
             ? "Validated documents"
             : "All reviewflow documents"
-      header.textContent = `Reviewflow: ${label} (/${path})`
+      let headerText = `Reviewflow: ${label} (/${path})`
+      if (userFilter) {
+        const userLabel = getUserLabel(userFilter)
+        const suffix =
+          whenFilter === "next"
+            ? "ready to sign now"
+            : whenFilter === "overdue"
+              ? "overdue"
+              : whenFilter === "missing"
+                ? "awaiting confirmation"
+                : "with an assigned role"
+        headerText += ` — ${userLabel} · ${suffix}`
+      }
+      header.textContent = headerText
       this.dom.appendChild(header)
 
       if (filtered.length === 0) {
@@ -1181,6 +1250,31 @@ export const reviewflowPlugin: WikiPlugin = {
           { value: "all", label: "All" },
         ],
       },
+      {
+        name: "user",
+        label: "User filter",
+        default: "",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+        helpText: "Only pages where this user has a role. Use @me for the current user.",
+      },
+      {
+        name: "when",
+        label: "Actionability",
+        default: "any",
+        parse: (raw: string) => {
+          const v = raw.trim().toLowerCase()
+          return v === "next" || v === "missing" || v === "overdue" ? v : "any"
+        },
+        serialize: (value: string | null) => String(value ?? "any"),
+        options: [
+          { value: "any", label: "Any (user has a role)" },
+          { value: "next", label: "Next (user's action is up now)" },
+          { value: "missing", label: "Missing (user has not confirmed current version)" },
+          { value: "overdue", label: "Overdue (user's deadline has passed)" },
+        ],
+        helpText: "Combined with 'User filter'. Ignored when user is empty.",
+      },
     ]
 
     reg.registerSchema({
@@ -1191,6 +1285,8 @@ export const reviewflowPlugin: WikiPlugin = {
           attrs: {
             path: { default: "" },
             status: { default: "draft" },
+            user: { default: "" },
+            when: { default: "any" },
           },
           toDOM(node: PMNode) {
             return [
@@ -1199,6 +1295,8 @@ export const reviewflowPlugin: WikiPlugin = {
                 class: "gowiki-reviewflow-query",
                 "data-path": node.attrs.path || "",
                 "data-status": node.attrs.status || "draft",
+                "data-user": node.attrs.user || "",
+                "data-when": node.attrs.when || "any",
               },
               `Reviewflow query: ${node.attrs.status || "draft"}`,
             ]
@@ -1210,6 +1308,8 @@ export const reviewflowPlugin: WikiPlugin = {
                 return {
                   path: dom.getAttribute("data-path") || "",
                   status: dom.getAttribute("data-status") || "draft",
+                  user: dom.getAttribute("data-user") || "",
+                  when: dom.getAttribute("data-when") || "any",
                 }
               },
             },
@@ -1231,6 +1331,8 @@ export const reviewflowPlugin: WikiPlugin = {
           ctx.schema.nodes.reviewflow_query.create({
             path: attrs.path ?? "",
             status: attrs.status ?? "draft",
+            user: attrs.user ?? "",
+            when: attrs.when ?? "any",
           })
         )
       },
@@ -1243,6 +1345,8 @@ export const reviewflowPlugin: WikiPlugin = {
         if (node.attrs.status && node.attrs.status !== "draft") {
           parts.push(`status=${node.attrs.status}`)
         }
+        if (node.attrs.user) parts.push(`user=${node.attrs.user}`)
+        if (node.attrs.when && node.attrs.when !== "any") parts.push(`when=${node.attrs.when}`)
         return parts.length ? `{reviewflow-query ${parts.join(" ")}}\n\n` : `{reviewflow-query}\n\n`
       },
     })

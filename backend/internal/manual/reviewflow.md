@@ -92,6 +92,31 @@ By default, it scans the current page's namespace and shows only **draft** docum
 | --- | --- | --- |
 | path | Namespace to scan | Current page's namespace |
 | status | Filter: `draft`, `validated`, or `all` | `draft` |
+| user | Restrict to pages where this user has an assigned role. Use `@me` for the currently-logged-in viewer, or a username for a fixed dashboard. | (no filter) |
+| when | Narrows the `user` match further: `any` (all assignments), `missing` (user's role hasn't confirmed the current version), `next` (user's role is actionable **right now** — head of the sequential queue, or any missing role in parallel mode), `overdue` (user's role missed its deadline). Ignored when `user` is empty. | `any` |
+
+### Common `user` + `when` patterns
+
+- **"What must I sign right now?"** — a personal to-do list of the exact
+  documents where the reviewflow chain is waiting on the viewer:
+
+  ```markdown
+  {reviewflow-query path=/regulatory/qms user=@me when=next}
+  ```
+
+- **"What is Etienne on the hook for?"** — a fixed dashboard someone else
+  can consult without impersonation:
+
+  ```markdown
+  {reviewflow-query path=/regulatory/qms user=etienne.formstecher when=next}
+  ```
+
+- **"What's overdue on my desk?"** — same as above but only the pages
+  whose deadline has already passed:
+
+  ```markdown
+  {reviewflow-query user=@me when=overdue}
+  ```
 
 The table shows for each document:
 - **Page** — clickable link to the page

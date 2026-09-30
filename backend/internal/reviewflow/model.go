@@ -68,12 +68,20 @@ type State struct {
 }
 
 // Status is the computed response sent to the frontend.
+//
+// NextRoles is the actionable-now set: parallel mode → every missing
+// role; sequential mode → only the head of the queue. Consumed by the
+// `{reviewflow-query when=next}` filter so a "what should I sign now?"
+// dashboard doesn't drag in slots that aren't the user's turn yet.
 type Status struct {
 	Roles            map[string]string `json:"roles"`
 	VersionTag       string            `json:"version_tag"`
 	CurrentPageVer   int64             `json:"current_page_version"`
 	ValidatedVersion int64             `json:"validated_page_version"`
 	MissingRoles     map[string]string `json:"missing_roles"`
+	NextRoles        []string          `json:"next_roles,omitempty"`
+	Parallel         bool              `json:"parallel,omitempty"`
+	RoleOrder        []string          `json:"role_order,omitempty"`
 	Deadlines        map[string]string `json:"deadlines,omitempty"`
 	OverdueRoles     []string          `json:"overdue_roles,omitempty"`
 	IsFullyValidated bool              `json:"is_fully_validated"`
