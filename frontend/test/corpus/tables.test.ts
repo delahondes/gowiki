@@ -119,6 +119,44 @@ describe("formulas", () => {
   })
 })
 
+describe("pipe escape inside cells (regression: `|` in visual mode split the row)", () => {
+  // Typing `|` inside a cell in visual mode used to break the row — the
+  // serializer emitted the literal `|`, which markdown-it's next parse
+  // treated as a cell boundary. Fix: escape `|` as `\|` on cell content
+  // serialize; markdown-it parses `\|` back to a literal text `|`.
+  it("cell containing a literal | round-trips as `\\|`", () => {
+    const rt = roundTrip("| a\\|b | c |\n| --- | --- |\n| d\\|e | f |\n")
+    expect(rt.isStable).toBe(true)
+    // The parsed text carries the raw pipe.
+    const texts: string[] = []
+    rt.doc.descendants((n) => {
+      if (n.isText) texts.push(n.text ?? "")
+    })
+    expect(texts).toContain("a|b")
+    expect(texts).toContain("d|e")
+    // And the serialized form re-emits the escape.
+    expect(rt.first).toContain("| a\\|b |")
+    expect(rt.first).toContain("| d\\|e |")
+  })
+
+  it("cell content that is just `|` also round-trips", () => {
+    const rt = roundTrip("| a | b |\n| --- | --- |\n| \\| | text |\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).toContain("| \\| |")
+  })
+
+  it("multiple pipes in a single cell all get escaped", () => {
+    const rt = roundTrip("| head |\n| --- |\n| a\\|b\\|c |\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).toContain("a\\|b\\|c")
+    let joined = ""
+    rt.doc.descendants((n) => {
+      if (n.isText) joined += n.text ?? ""
+    })
+    expect(joined).toContain("a|b|c")
+  })
+})
+
 describe("footnote-in-cell (regression: publish crashed on tpl02)", () => {
   // The parse-time gowiki_hardbreak_escape rule replaces every "\n" (backslash + n)
   // in every inline token's content with a real newline, so it can be interpreted

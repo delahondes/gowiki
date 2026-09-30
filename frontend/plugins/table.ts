@@ -946,6 +946,15 @@ function serializeCellContent(cell: Node, recurse: (node: Node) => string): stri
     txt += recurse(p).trim()
   })
 
+  // Cell boundaries are pipes — any literal `|` in the serialized content
+  // would prematurely close the cell. Escape as `\|` so markdown-it's
+  // pipe-table parser sees it as literal text (and the round-trip is
+  // stable — parse produces a text node with `|`, serialize turns it back
+  // to `\|`). Backslashes in `recurse` output are already doubled up by
+  // escapeMarkdownText, so no `\|` can appear here from another escape
+  // chain — a simple global replace is safe.
+  txt = txt.replace(/\|/g, "\\|")
+
   return prefix + txt
 }
 
