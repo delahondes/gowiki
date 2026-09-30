@@ -26,12 +26,26 @@ type ConfirmOpts struct {
 	TimestampToken  string
 }
 
-// VersionRecord records a fully-validated version.
+// VersionRecord records a state snapshot for a page version. Historically
+// only fully-validated versions landed here; from v1.0.0-rc.3 onward a
+// snapshot is also written on every version bump that would otherwise wipe
+// a non-empty Confirmations set (partial-signature preservation, so a
+// same-digest restore or a draft discard can re-attach the signatures).
+//
+// ConfirmedBy stays as the legacy role→user summary because the audit
+// export handler and older read paths depend on it. Confirmations carries
+// the full crypto payload (digest, signature, cert, TSA token) and is what
+// SyncFromMarkdown reads to re-attach on a matching-digest bump.
+// IsValidated distinguishes an all-roles-confirmed snapshot from a
+// partial one; readers that only care about "was this fully validated"
+// should check the flag rather than compare ConfirmedBy against Roles.
 type VersionRecord struct {
-	PageVersion int64             `json:"page_version"`
-	Timestamp   time.Time         `json:"timestamp"`
-	ConfirmedBy map[string]string `json:"confirmed_by"` // role -> user
-	VersionTag  string            `json:"version_tag"`
+	PageVersion   int64             `json:"page_version"`
+	Timestamp     time.Time         `json:"timestamp"`
+	ConfirmedBy   map[string]string `json:"confirmed_by"` // role -> user (legacy summary)
+	VersionTag    string            `json:"version_tag"`
+	Confirmations []Confirmation    `json:"confirmations,omitempty"` // full crypto payload; added rc.3
+	IsValidated   bool              `json:"is_validated,omitempty"`  // true = all roles confirmed on this version
 }
 
 // State is the persisted reviewflow state for a page.

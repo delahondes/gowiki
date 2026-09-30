@@ -233,14 +233,37 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 		st = &State{}
 	}
 
-	// If page version changed, reset confirmations (content changed)
-	// and create the review todo task(s). In parallel mode we create
-	// every role's task at once (historical behaviour); in sequential
-	// mode we create only the FIRST role's task and advance the chain
-	// on each confirmation (see Confirm).
+	// If page version changed, reset confirmations (content changed) —
+	// but first snapshot the outgoing partial-signature state to history
+	// so a same-digest restore (discard-draft or restore-from-history)
+	// can re-attach the signatures, then look at every historical
+	// confirmation whose Digest matches the NEW page content and carry
+	// those forward onto the new page version. Signatures are computed
+	// over a content digest (see signing.go:ComputeDigest), so a byte-
+	// identical restore keeps them cryptographically valid.
 	if st.CurrentPageVersion != pageVersion {
-		st.Confirmations = nil
-		if svc.todo != nil {
+		// Snapshot the outgoing state if it carried unsnapshotted
+		// confirmations. Skip when a VersionRecord for the outgoing
+		// version already exists — the all-confirmed branch of Confirm
+		// snapshots at validation time, so we'd otherwise double-write
+		// the same fully-validated record on the next edit.
+		if len(st.Confirmations) > 0 && findVersionRecord(st.VersionHistory, st.CurrentPageVersion) < 0 {
+			st.VersionHistory = append(st.VersionHistory, snapshotVersionRecord(st))
+		}
+
+		// Recompute the incoming digest and pull any historical
+		// confirmation that matches into the new version. Empty digest
+		// means the caller confirmed without signing, so those never
+		// re-attach — they wouldn't survive a real audit anyway.
+		newDigest := ComputeDigest([]byte(markdown))
+		st.Confirmations = reattachByDigest(st, pageVersion, newDigest)
+
+		// Only cancel + recreate review tasks when NOTHING re-attached
+		// (i.e. this is a genuine content change, not a same-digest
+		// restore). A restore that brought back a fully-validated set
+		// leaves the review dashboard alone — no phantom tasks for
+		// signatures that are already in place.
+		if svc.todo != nil && len(st.Confirmations) == 0 {
 			_ = svc.todo.CancelReviewTasks(pagePath)
 			dueDate := svc.computeDueDate(dir.Roles)
 			if dir.Parallel {
@@ -259,6 +282,15 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 	st.VersionTag = dir.VersionTag
 	st.Parallel = dir.Parallel
 	st.CurrentPageVersion = pageVersion
+
+	// A same-digest restore may have re-attached confirmations covering
+	// every role. In that case the new page version is already validated
+	// end-to-end and we need to run the same finalize path Confirm() uses
+	// so ValidatedVersion, review tasks, attic meta and the VersionRecord
+	// are all consistent.
+	if len(st.Confirmations) > 0 && svc.allConfirmed(st) {
+		svc.finalizeValidatedVersion(pagePath, st)
+	}
 
 	return svc.store.Save(pagePath, st)
 }
@@ -416,36 +448,7 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 
 	// Check if all roles are now confirmed.
 	if svc.allConfirmed(st) {
-		confirmedBy := make(map[string]string)
-		for _, c := range st.Confirmations {
-			if c.PageVersion == st.CurrentPageVersion {
-				confirmedBy[c.Role] = c.User
-			}
-		}
-		vr := VersionRecord{
-			PageVersion: st.CurrentPageVersion,
-			Timestamp:   time.Now().UTC(),
-			ConfirmedBy: confirmedBy,
-			VersionTag:  st.VersionTag,
-		}
-		st.VersionHistory = append(st.VersionHistory, vr)
-		st.ValidatedVersion = st.CurrentPageVersion
-
-		// Mark review tasks done — all roles confirmed (reviews actually performed).
-		if svc.todo != nil {
-			_, _ = svc.todo.CompleteReviewTasks(pagePath, confirmedBy)
-		}
-
-		// Update attic entry with reviewflow metadata.
-		if svc.attic != nil {
-			meta := AtticMeta{
-				VersionTag:  st.VersionTag,
-				ConfirmedBy: confirmedBy,
-				IsValidated: true,
-			}
-			metaJSON, _ := json.Marshal(meta)
-			_ = svc.attic.UpdateEntryMeta(pagePath, st.CurrentPageVersion, "reviewflow", metaJSON)
-		}
+		svc.finalizeValidatedVersion(pagePath, st)
 	}
 
 	if err := svc.store.Save(pagePath, st); err != nil {
@@ -693,4 +696,153 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 	}
 
 	return status, nil
+}
+
+// ── Signature preservation across version bumps ─────────────────────────
+//
+// A version bump used to unconditionally wipe st.Confirmations, so a
+// discard-draft-that-returned-to-the-last-published-bytes or a restore-
+// from-history threw away signatures that were still cryptographically
+// valid (they are digest-bound — see signing.go:ComputeDigest — and the
+// digest of the restored bytes matches the digest they were signed over).
+// The four helpers below let SyncFromMarkdown snapshot the outgoing
+// state to history before the wipe and then re-attach any historical
+// confirmation whose digest matches the incoming content.
+
+// findVersionRecord returns the index of the VersionRecord for the given
+// page version, or -1 if none exists. Used to skip the pre-wipe snapshot
+// when the outgoing version is already in history (all-confirmed branch
+// of Confirm() snapshots at validation time; without this guard we'd
+// double-write the same record on the next edit).
+func findVersionRecord(history []VersionRecord, pageVersion int64) int {
+	for i, vr := range history {
+		if vr.PageVersion == pageVersion {
+			return i
+		}
+	}
+	return -1
+}
+
+// snapshotVersionRecord captures the current Confirmations set on
+// st.CurrentPageVersion as a VersionRecord that will land in history
+// right before the wipe. Called only when st.Confirmations is non-empty
+// and no record for that version exists yet.
+func snapshotVersionRecord(st *State) VersionRecord {
+	confirmedBy := make(map[string]string)
+	confs := make([]Confirmation, 0, len(st.Confirmations))
+	for _, c := range st.Confirmations {
+		if c.PageVersion != st.CurrentPageVersion {
+			continue
+		}
+		confirmedBy[c.Role] = c.User
+		confs = append(confs, c)
+	}
+	return VersionRecord{
+		PageVersion:   st.CurrentPageVersion,
+		Timestamp:     time.Now().UTC(),
+		ConfirmedBy:   confirmedBy,
+		VersionTag:    st.VersionTag,
+		Confirmations: confs,
+	}
+}
+
+// reattachByDigest scans every historical confirmation on this page (the
+// about-to-be-wiped current set plus every VersionRecord in history) and
+// re-attaches, onto the new page version, any confirmation whose Digest
+// matches the new content's digest. This is what makes a restore or a
+// draft discard preserve signatures — the crypto payload is unchanged,
+// only the page-version integer is rewritten. Empty digests never match
+// (click-only, unsigned confirmations don't survive a bump — they had no
+// crypto guarantee to preserve in the first place).
+//
+// When two candidates cover the same (role, user) pair, the most recent
+// timestamp wins. That keeps the semantics of "if the user re-signed
+// after their old signature, the new signature is what carries forward".
+func reattachByDigest(st *State, newPageVersion int64, newDigest string) []Confirmation {
+	if newDigest == "" {
+		return nil
+	}
+	// Collect candidates: current Confirmations plus every historical set.
+	candidates := make([]Confirmation, 0, len(st.Confirmations))
+	candidates = append(candidates, st.Confirmations...)
+	for _, vr := range st.VersionHistory {
+		candidates = append(candidates, vr.Confirmations...)
+	}
+	// Keep only digest matches, dedup by (role, user) keeping newest.
+	type key struct{ role, user string }
+	best := make(map[key]Confirmation)
+	for _, c := range candidates {
+		if c.Digest == "" || c.Digest != newDigest {
+			continue
+		}
+		k := key{c.Role, c.User}
+		if prev, ok := best[k]; ok && !c.Timestamp.After(prev.Timestamp) {
+			continue
+		}
+		best[k] = c
+	}
+	if len(best) == 0 {
+		return nil
+	}
+	out := make([]Confirmation, 0, len(best))
+	for _, c := range best {
+		c.PageVersion = newPageVersion
+		out = append(out, c)
+	}
+	// Stable order for deterministic on-disk output.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Role != out[j].Role {
+			return out[i].Role < out[j].Role
+		}
+		return out[i].User < out[j].User
+	})
+	return out
+}
+
+// finalizeValidatedVersion is the "all roles confirmed on the current
+// page version" wrap-up: record the VersionRecord (with the full crypto
+// payload), bump ValidatedVersion, complete review tasks, and stamp the
+// attic entry. Called from Confirm() when a role confirmation completes
+// the set, and from SyncFromMarkdown when a re-attach after a same-digest
+// restore already covers every role.
+func (svc *Service) finalizeValidatedVersion(pagePath string, st *State) {
+	confirmedBy := make(map[string]string)
+	confs := make([]Confirmation, 0, len(st.Confirmations))
+	for _, c := range st.Confirmations {
+		if c.PageVersion != st.CurrentPageVersion {
+			continue
+		}
+		confirmedBy[c.Role] = c.User
+		confs = append(confs, c)
+	}
+	vr := VersionRecord{
+		PageVersion:   st.CurrentPageVersion,
+		Timestamp:     time.Now().UTC(),
+		ConfirmedBy:   confirmedBy,
+		VersionTag:    st.VersionTag,
+		Confirmations: confs,
+		IsValidated:   true,
+	}
+	// If a partial-snapshot record for this version already exists (the
+	// wipe path pre-snapshotted before re-attach covered everyone), replace
+	// it with the fully-validated one; else append.
+	if idx := findVersionRecord(st.VersionHistory, st.CurrentPageVersion); idx >= 0 {
+		st.VersionHistory[idx] = vr
+	} else {
+		st.VersionHistory = append(st.VersionHistory, vr)
+	}
+	st.ValidatedVersion = st.CurrentPageVersion
+
+	if svc.todo != nil {
+		_, _ = svc.todo.CompleteReviewTasks(pagePath, confirmedBy)
+	}
+	if svc.attic != nil {
+		meta := AtticMeta{
+			VersionTag:  st.VersionTag,
+			ConfirmedBy: confirmedBy,
+			IsValidated: true,
+		}
+		metaJSON, _ := json.Marshal(meta)
+		_ = svc.attic.UpdateEntryMeta(pagePath, st.CurrentPageVersion, "reviewflow", metaJSON)
+	}
 }

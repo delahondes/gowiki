@@ -68,6 +68,22 @@ interface ReviewflowStatus {
     timestamp: string
     confirmed_by: Record<string, string>
     version_tag: string
+    // Full crypto payload per role that confirmed at this version. Added
+    // rc.3 as part of the signature-preservation change — a client reads
+    // Confirmations to answer "what was my last signature for this role"
+    // (used for the "diff since your last signature" side link when a
+    // user's signature has since been invalidated by a content change).
+    // Older state files or partial snapshots may still omit it.
+    confirmations?: {
+      page_version: number
+      role: string
+      user: string
+      timestamp: string
+      version_tag: string
+      signature?: string
+      digest?: string
+    }[]
+    is_validated?: boolean
   }[]
   signing_enabled?: boolean
   signing_required?: boolean
@@ -94,6 +110,30 @@ async function resolveUserLabels(usernames: string[]): Promise<void> {
 
 function getUserLabel(username: string): string {
   return userDisplayCache[username] || username
+}
+
+// Scan version_history for the most recent page version at which `user`
+// signed as `role` (non-empty signature = cryptographic sign, not a plain
+// click-through confirmation). Returns 0 when no signed record exists —
+// the caller uses that as "no diff link needed" (first-time review, or a
+// state-file predating the rc.3 Confirmations field). We do NOT fall back
+// to matching by role assignment only, because the whole point of the
+// link is to show a diff since the SPECIFIC content the user endorsed.
+function findLastSignatureVersion(
+  history: NonNullable<ReviewflowStatus["version_history"]>,
+  user: string,
+  role: string
+): number {
+  let latest = 0
+  for (const vr of history) {
+    if (!vr.confirmations) continue
+    for (const c of vr.confirmations) {
+      if (c.role !== role || c.user !== user) continue
+      if (!c.signature) continue
+      if (c.page_version > latest) latest = c.page_version
+    }
+  }
+  return latest
 }
 
 const gate = {
@@ -331,6 +371,30 @@ class ReviewflowNodeView {
             this.doConfirm(role)
           })
           tdAction.appendChild(btn)
+
+          // "Diff since your last signature" side link \u2014 when a prior
+          // signature by this user for this role was invalidated by a
+          // content change, offer a one-click view of what actually moved
+          // between the version they signed and the current one. Skip if
+          // this is a first-time review (no prior signature) or if the
+          // history entries don't carry Confirmations (old state files
+          // pre-rc.3 have only the confirmed_by summary).
+          const lastSignedVersion = findLastSignatureVersion(versionHistory, currentUser, role)
+          if (lastSignedVersion > 0 && lastSignedVersion < (this.status?.current_page_version ?? 0)) {
+            const diffLink = document.createElement("a")
+            diffLink.className = "gowiki-rf-diff-link"
+            diffLink.href = "#"
+            diffLink.textContent = `diff since v${lastSignedVersion}`
+            diffLink.title = "What changed since your previous signature was invalidated"
+            diffLink.addEventListener("click", (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              const show = (window as any).showDiff
+              if (typeof show === "function") show(lastSignedVersion, 0)
+            })
+            tdAction.appendChild(document.createTextNode(" "))
+            tdAction.appendChild(diffLink)
+          }
         }
         tr.appendChild(tdAction)
 
@@ -610,6 +674,17 @@ const reviewflowStyles = `
 
 .gowiki-rf-confirm-btn:hover {
   background: #1565c0;
+}
+
+.gowiki-rf-diff-link {
+  color: var(--gw-color-muted);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gowiki-rf-diff-link:hover {
+  color: var(--gw-color-text);
 }
 
 #app.gowiki-editing .gowiki-reviewflow.ProseMirror-selectednode {

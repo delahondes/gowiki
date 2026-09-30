@@ -8007,6 +8007,13 @@ async function showDiff(fromVersion, toVersion) {
     setStatus("Failed to load diff")
   }
 }
+// Expose for plugins — the reviewflow node's "diff since your last
+// signature" side link calls window.showDiff(lastSigned, 0) when a
+// signature has been invalidated and the reviewer wants to see what
+// content moved. Kept as a single global rather than an event because
+// showDiff owns clearContent() + renderDiffView, which need main.js's
+// module-local pagePath / pageDisplayPath state.
+window.showDiff = showDiff
 
 function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRefs) {
   const container = document.createElement("div")
