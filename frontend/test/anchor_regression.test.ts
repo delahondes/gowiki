@@ -149,7 +149,9 @@ describe("comment anchor — drift regression", () => {
   // "lost" so the caller marks the comment as orphaned.
   it("reports confidence 'lost' when the exact text is deleted from the doc", () => {
     const original = schema.nodes.doc.create(null, [
-      paragraphOf("The audit program also identifies the audit criteria (standards or paragraphs of standards), the auditors, and the frequency of audits."),
+      paragraphOf(
+        "The audit program also identifies the audit criteria (standards or paragraphs of standards), the auditors, and the frequency of audits."
+      ),
     ])
     // Anchor the phrase inside the parens.
     let paraPos = 0
