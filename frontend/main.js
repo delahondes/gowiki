@@ -5,6 +5,7 @@ import { schema as basicSchema } from "prosemirror-schema-basic"
 import { keymap } from "prosemirror-keymap"
 import { baseKeymap, setBlockType, toggleMark, wrapIn } from "prosemirror-commands"
 import { history, undo, redo } from "prosemirror-history"
+import { gapCursor } from "prosemirror-gapcursor"
 import { icons } from "prosemirror-menu"
 import { splitListItem, sinkListItem, liftListItem, wrapInList } from "prosemirror-schema-list"
 import { markdownToPM } from "./compiler/markdown_to_pm.ts"
@@ -6749,6 +6750,15 @@ function renderEdit(nextEditMode) {
     // (e.g. Enter inside a table cell) before the generic split-paragraph
     // default consumes the event.
     ...registry.getEditorPlugins(),
+    // Gap cursor: lets the caret sit BETWEEN block-level atoms (todos,
+    // images, includes, mermaid, …) that otherwise sit flush against each
+    // other with no text position between them. Without it, ArrowRight
+    // over a todo NodeSelection snaps directly to the next todo, and
+    // typing on a NodeSelection replaces the atom — the reported "select
+    // between two todos" / "todo escaped when text added" bugs. Must go
+    // before baseKeymap so its arrow-key handling wins over generic
+    // selectNodeForward / selectNodeBackward.
+    gapCursor(),
     keymap(baseKeymap),
     menubarStatePlugin,
     collabNotifyPlugin,

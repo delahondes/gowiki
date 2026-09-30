@@ -101,3 +101,30 @@
 .ProseMirror ::selection {
   background: var(--gw-color-selection);
 }
+
+/* Gap cursor: renders the caret in the "gap" between block-level atoms
+   (todos, images, includes, mermaid, …) that sit flush against each other.
+   Copied from prosemirror-gapcursor's stock stylesheet and themed against
+   our variables so the blink line inherits the dark-mode text color. */
+.ProseMirror-gapcursor {
+  display: none;
+  pointer-events: none;
+  position: absolute;
+}
+.ProseMirror-gapcursor:after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -2px;
+  width: 20px;
+  border-top: 1px solid var(--gw-color-text);
+  animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
+}
+@keyframes ProseMirror-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+.ProseMirror-focused .ProseMirror-gapcursor {
+  display: block;
+}

@@ -1,4 +1,4 @@
-import { Plugin as PMPlugin, PluginKey, NodeSelection } from "prosemirror-state"
+import { Plugin as PMPlugin, PluginKey, NodeSelection, TextSelection } from "prosemirror-state"
 import type { Node as PMNode, Schema } from "prosemirror-model"
 import { EditorView } from "prosemirror-view"
 import type { Plugin as WikiPlugin, Registry } from "../compiler/registry"
@@ -1548,8 +1548,8 @@ export const todoPlugin: WikiPlugin = {
       },
     })
 
-    // Editor plugin: NodeView
-    reg.registerEditorPlugin((_schema: Schema) => {
+    // Editor plugin: NodeView + typing guard
+    reg.registerEditorPlugin((schema: Schema) => {
       return new PMPlugin({
         key: new PluginKey("gowiki.todo"),
         props: {
@@ -1557,6 +1557,38 @@ export const todoPlugin: WikiPlugin = {
             todo(node: PMNode, view: EditorView, getPos: () => number | undefined) {
               return new TodoNodeView(node, view, getPos)
             },
+          },
+          // Guard against the "todo escapes when you type text beside it"
+          // bug: with a NodeSelection on a todo, PM's default insertText
+          // would replaceSelectionWith(schema.text(char)) — that wipes the
+          // todo and its serialized "{todo …}" directive reappears as
+          // raw text. Instead, redirect the input to a paragraph AFTER
+          // the todo so the char extends fresh text next to it.
+          handleTextInput(view, _from, _to, text) {
+            const sel = view.state.selection
+            if (!(sel instanceof NodeSelection)) return false
+            if (sel.node.type !== schema.nodes.todo) return false
+            const after = sel.from + sel.node.nodeSize
+            const $after = view.state.doc.resolve(after)
+            // Case 1: a textblock (paragraph, heading, …) already sits
+            // after the todo — drop the cursor at its start and let the
+            // text extend it.
+            if ($after.parent.isTextblock) {
+              const tr = view.state.tr.insertText(text, after, after)
+              tr.setSelection(TextSelection.create(tr.doc, after + text.length))
+              view.dispatch(tr)
+              return true
+            }
+            // Case 2: another block-atom (or end of doc) — create a
+            // paragraph carrying the char, insert it, and land the
+            // cursor after the char.
+            const paragraph = schema.nodes.paragraph
+            if (!paragraph) return false
+            const node = paragraph.create(null, schema.text(text))
+            const tr = view.state.tr.insert(after, node)
+            tr.setSelection(TextSelection.create(tr.doc, after + 1 + text.length))
+            view.dispatch(tr)
+            return true
           },
         },
       })
