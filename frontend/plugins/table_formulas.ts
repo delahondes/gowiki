@@ -7,14 +7,22 @@ import { getCellText, evaluateColorRules, parseColorRules, resolveColumnProps, t
 
 type CellRef = { col: number; row: number }
 
+// Accepts A1, $A1, A$1, $A$1 — the $ marks are relevant only for
+// copy/paste shifting (see shiftFormula below); evaluation ignores them.
 function parseCellRef(ref: string): CellRef | null {
-  const m = ref.match(/^([A-Z]+)(\d+)$/)
+  const m = ref.match(/^\$?([A-Z]+)\$?(\d+)$/)
   if (!m) return null
   let col = 0
   for (const ch of m[1]) {
     col = col * 26 + (ch.charCodeAt(0) - 64)
   }
   return { col: col - 1, row: Number(m[2]) - 1 }
+}
+
+function colLetterToIndex(letters: string): number {
+  let col = 0
+  for (const ch of letters) col = col * 26 + (ch.charCodeAt(0) - 64)
+  return col - 1
 }
 
 function parseRange(range: string): CellRef[] | null {
@@ -71,17 +79,20 @@ function tokenize(expr: string): Token[] {
       continue
     }
 
-    // Cell ref, range, or function name
-    if (/[A-Z]/i.test(ch)) {
+    // Cell ref, range, or function name.
+    // Accept a leading "$" so absolute refs like $A$1 tokenize as a single
+    // ref token — the $ is preserved for shiftFormula and stripped by
+    // parseCellRef at eval time.
+    if (/[A-Z$]/i.test(ch)) {
       let word = ""
-      while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) {
+      while (i < expr.length && /[A-Za-z0-9$]/.test(expr[i])) {
         word += expr[i++]
       }
-      // Check for range (A1:B3)
+      // Check for range (A1:B3, $A$1:$B$3, etc.)
       if (i < expr.length && expr[i] === ":") {
         let range = word + ":"
         i++
-        while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) {
+        while (i < expr.length && /[A-Za-z0-9$]/.test(expr[i])) {
           range += expr[i++]
         }
         tokens.push({ type: "range", value: range.toUpperCase() })
@@ -324,6 +335,24 @@ function indexToColLetter(index: number): string {
     n = Math.floor(n / 26)
   }
   return letter
+}
+
+// Excel-style copy/paste ref shift. Rewrites every cell ref in the formula
+// string, adjusting col by dCol and row by dRow, unless that axis is pinned
+// with $ ($A1 pins the col, A$1 pins the row, $A$1 pins both). LEFT/ABOVE
+// are position-relative by construction and not touched. Refs that shift
+// off the grid (negative col or row < 1) become #REF so the broken cell is
+// visible instead of silently wrong.
+export function shiftFormula(formula: string, dRow: number, dCol: number): string {
+  if (dRow === 0 && dCol === 0) return formula
+  return formula.replace(/(\$?)([A-Z]+)(\$?)(\d+)/g, (_full, dc: string, col: string, dr: string, row: string) => {
+    const newColIdx = colLetterToIndex(col) + (dc ? 0 : dCol)
+    const newRowNum = parseInt(row, 10) + (dr ? 0 : dRow)
+    if (newColIdx < 0 || newRowNum < 1) return "#REF"
+    const newCol = dc ? col : indexToColLetter(newColIdx)
+    const newRow = dr ? row : String(newRowNum)
+    return `${dc}${newCol}${dr}${newRow}`
+  })
 }
 
 function expandRelatives(

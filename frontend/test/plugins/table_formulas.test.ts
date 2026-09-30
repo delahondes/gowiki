@@ -3,7 +3,7 @@
 // attr and round-trip through table.ts (covered in the tables corpus);
 // this file pins the parser and its interaction invariants.
 import { describe, it, expect } from "vitest"
-import { parseFormula } from "../../plugins/table_formulas"
+import { parseFormula, shiftFormula } from "../../plugins/table_formulas"
 import { roundTrip, countNodes } from "../helpers"
 
 // A tiny AST-walking helper — parseFormula returns a discriminated
@@ -143,5 +143,87 @@ describe("formula cells in tables (round-trip via table.ts)", () => {
     expect(sawFormulaAttr).toBe(false)
     // And the doc still contains a table.
     expect(countNodes(rt.doc, "table")).toBe(1)
+  })
+})
+
+// Excel-style paste shift. shiftFormula operates on the formula STRING —
+// the copy/paste path in table.ts records the source cell's visual row/col
+// on copy, then hands the delta (dstRow-srcRow, dstCol-srcCol) here on
+// paste. Every ref that isn't pinned with $ moves by the delta; refs off
+// the grid become #REF so a broken paste is visible.
+describe("shiftFormula — Excel-style copy/paste shift", () => {
+  it("no-op when delta is zero", () => {
+    expect(shiftFormula("A1+B2", 0, 0)).toBe("A1+B2")
+  })
+
+  it("shifts a single ref one row down", () => {
+    // Copy =A1 from row 1, paste into row 2 → =A2.
+    expect(shiftFormula("A1", 1, 0)).toBe("A2")
+  })
+
+  it("shifts a single ref one column right", () => {
+    // Copy =A1 from col A, paste into col B → =B1.
+    expect(shiftFormula("A1", 0, 1)).toBe("B1")
+  })
+
+  it("shifts every ref in a product", () => {
+    // The scenario the user described: multiply a cell by the one two to
+    // its left, in row 3; paste to row 4, expect all refs shifted down.
+    expect(shiftFormula("B3*A3", 1, 0)).toBe("B4*A4")
+  })
+
+  it("shifts range endpoints independently", () => {
+    // =SUM(A1:C3) pasted 2 rows down + 1 col right becomes =SUM(B3:D5).
+    expect(shiftFormula("SUM(A1:C3)", 2, 1)).toBe("SUM(B3:D5)")
+  })
+
+  it("$ pins the column: $A1 stays column A", () => {
+    // The $ on the col disables that axis of the shift.
+    expect(shiftFormula("$A1", 1, 5)).toBe("$A2")
+  })
+
+  it("$ pins the row: A$1 stays row 1", () => {
+    expect(shiftFormula("A$1", 3, 4)).toBe("E$1")
+  })
+
+  it("$A$1 is fully pinned — nothing moves", () => {
+    expect(shiftFormula("$A$1+B2", 4, 4)).toBe("$A$1+F6")
+  })
+
+  it("mixed refs shift independently — classic total column pattern", () => {
+    // Sum from a fixed anchor to the current row: =SUM($A$1:A5)
+    // Paste one row down → =SUM($A$1:A6).
+    expect(shiftFormula("SUM($A$1:A5)", 1, 0)).toBe("SUM($A$1:A6)")
+  })
+
+  it("returns #REF when a ref would land off the grid (negative col)", () => {
+    // A2 shifted left one col → column index -1, no such letter.
+    expect(shiftFormula("A2+B2", 0, -1)).toContain("#REF")
+  })
+
+  it("returns #REF when a ref would land off the grid (row < 1)", () => {
+    expect(shiftFormula("A2", -3, 0)).toBe("#REF")
+  })
+
+  it("leaves LEFT / ABOVE alone (they are position-relative already)", () => {
+    // These keywords expand to a range centered on the CURRENT cell at
+    // eval time, so they don't need a copy-time rewrite.
+    expect(shiftFormula("SUM(LEFT)", 5, 5)).toBe("SUM(LEFT)")
+    expect(shiftFormula("SUM(ABOVE)+B1", 2, 0)).toBe("SUM(ABOVE)+B3")
+  })
+
+  it("multi-letter columns shift correctly across the Z boundary", () => {
+    // Z1 shifted +1 col → AA1.
+    expect(shiftFormula("Z1", 0, 1)).toBe("AA1")
+    // AA1 shifted -1 col → Z1.
+    expect(shiftFormula("AA1", 0, -1)).toBe("Z1")
+  })
+
+  it("$A$1-style ref still parses and evaluates", () => {
+    // The parser must accept $ prefixes without choking; shiftFormula
+    // relies on the tokenizer/regex both recognizing them.
+    const ast = parseFormula("$A$1+B2")
+    expect(ast).toBeDefined()
+    expect(ast.kind).toBe("binop")
   })
 })

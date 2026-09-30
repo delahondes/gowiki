@@ -21,7 +21,7 @@ import { Plugin as PMPlugin, Transaction, NodeSelection, TextSelection, Selectio
 import { Decoration, DecorationSet } from "prosemirror-view"
 import { keymap } from "prosemirror-keymap"
 import markdownItMultiMdTable from "markdown-it-multimd-table"
-import { formulaSyncPlugin, formulaColorPlugin } from "./table_formulas"
+import { formulaSyncPlugin, formulaColorPlugin, shiftFormula } from "./table_formulas"
 import { enablePropertiesPanel, requestInputFocus } from "../compiler/core_ui"
 
 // ─── Named color presets ─────────────────────────────────
@@ -1041,6 +1041,14 @@ html[data-theme="dark"] .ProseMirror th[data-cell-color]:not([data-cell-color="r
 
 // ─── Formula display keyboard / clipboard plugin ────────
 
+// Custom clipboard MIME carrying the source cell's visual row/col alongside
+// the formula. Read on paste to shift refs Excel-style (delta between src
+// and dst). text/plain is set in parallel as a fallback so cross-tool copy
+// still works — pasting into a text editor gives "=formula" verbatim, and
+// pasting from an outside source without this MIME gives the literal
+// formula (no shift).
+const FORMULA_MIME = "application/x-gowiki-formula"
+
 function formulaDisplayPlugin(schema: Schema): PMPlugin {
   function findParentCell(state: any, atomPos: number) {
     const $pos = state.doc.resolve(atomPos)
@@ -1058,6 +1066,55 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
     if (!parent) return ""
     const formula = parent.cellNode.attrs.formula
     return formula != null ? `=${formula}` : ""
+  }
+
+  // Visual row/col for the cell containing atomPos, or null if not in a
+  // table. Visual col accounts for colspans in earlier cells of the row.
+  function getCellCoords(state: any, atomPos: number): { row: number; col: number } | null {
+    const $pos = state.doc.resolve(atomPos)
+    for (let d = $pos.depth; d > 0; d--) {
+      if ($pos.node(d).type === schema.nodes.table) {
+        const table = $pos.node(d)
+        const tableStart = $pos.before(d) + 1
+        let rowStart = tableStart
+        for (let r = 0; r < table.childCount; r++) {
+          const row = table.child(r)
+          const rowEnd = rowStart + row.nodeSize
+          if (atomPos >= rowStart && atomPos < rowEnd) {
+            let cellStart = rowStart + 1
+            let visualCol = 0
+            for (let c = 0; c < row.childCount; c++) {
+              const cell = row.child(c)
+              const cellEnd = cellStart + cell.nodeSize
+              if (atomPos >= cellStart && atomPos < cellEnd) {
+                return { row: r, col: visualCol }
+              }
+              cellStart = cellEnd
+              visualCol += cell.attrs.colspan ?? 1
+            }
+          }
+          rowStart = rowEnd
+        }
+      }
+    }
+    return null
+  }
+
+  function writeFormulaClipboard(clipboardData: DataTransfer | null, state: any, atomPos: number) {
+    if (!clipboardData) return
+    const text = getFormulaText(state, atomPos)
+    clipboardData.setData("text/plain", text)
+    const coords = getCellCoords(state, atomPos)
+    if (coords && text.startsWith("=")) {
+      // Payload is the raw formula (no leading "=") plus the source cell
+      // coords, so the paste handler can compute the shift delta and rewrite
+      // refs. Kept separate from text/plain so a paste into a plain text
+      // target still gets exactly "=formula".
+      clipboardData.setData(
+        FORMULA_MIME,
+        JSON.stringify({ formula: text.slice(1), srcRow: coords.row, srcCol: coords.col })
+      )
+    }
   }
 
   function clearFormula(view: any, sel: NodeSelection) {
@@ -1174,9 +1231,35 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
         // Paste "=formula" into a table cell → set formula attr.
         // Using handleDOMEvents.paste so it fires before other plugins'
         // handlePaste (e.g. prosemirror-tables).
+        //
+        // If the clipboard carries the gowiki-formula MIME (a formula copied
+        // from another gowiki cell in the same session), rewrite refs by the
+        // delta between the source cell and the destination — Excel behavior.
+        // Refs pinned with $ (per-axis: $A1, A$1, $A$1) don't shift. Falls
+        // back to a literal paste when the payload is missing (an outside
+        // "=…" clipboard, or a formula written by hand into text/plain).
         paste(view, event) {
-          const text = event.clipboardData?.getData("text/plain")
-          if (!text || !text.startsWith("=")) return false
+          const payloadJSON = event.clipboardData?.getData(FORMULA_MIME) || ""
+          const plain = event.clipboardData?.getData("text/plain") || ""
+          let formula: string | null = null
+          let src: { row: number; col: number } | null = null
+          if (payloadJSON) {
+            try {
+              const p = JSON.parse(payloadJSON)
+              if (typeof p.formula === "string") {
+                formula = p.formula
+                if (typeof p.srcRow === "number" && typeof p.srcCol === "number") {
+                  src = { row: p.srcRow, col: p.srcCol }
+                }
+              }
+            } catch {
+              // Fall through to plain text handling
+            }
+          }
+          if (formula == null) {
+            if (!plain.startsWith("=")) return false
+            formula = plain.slice(1)
+          }
 
           const $from = view.state.selection.$from
           for (let d = $from.depth; d > 0; d--) {
@@ -1184,10 +1267,16 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
             if (node.type === schema.nodes.table_cell || node.type === schema.nodes.table_header) {
               event.preventDefault()
               const cellPos = $from.before(d)
-              const formula = text.slice(1) // remove "=" prefix
+
+              let shifted = formula
+              if (src) {
+                const dst = getCellCoords(view.state, cellPos + 1)
+                if (dst) shifted = shiftFormula(formula, dst.row - src.row, dst.col - src.col)
+              }
+
               const tr = view.state.tr.setNodeMarkup(cellPos, undefined, {
                 ...node.attrs,
-                formula,
+                formula: shifted,
               })
               // Clear any existing text in the paragraph
               const para = node.child(0)
@@ -1211,7 +1300,7 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
           if (sel.node.type !== schema.nodes.formula_display) return false
 
           event.preventDefault()
-          event.clipboardData?.setData("text/plain", getFormulaText(view.state, sel.from))
+          writeFormulaClipboard(event.clipboardData, view.state, sel.from)
           clearFormula(view, sel)
           return true
         },
@@ -1223,7 +1312,7 @@ function formulaDisplayPlugin(schema: Schema): PMPlugin {
           if (sel.node.type !== schema.nodes.formula_display) return false
 
           event.preventDefault()
-          event.clipboardData?.setData("text/plain", getFormulaText(view.state, sel.from))
+          writeFormulaClipboard(event.clipboardData, view.state, sel.from)
           return true
         },
       },
