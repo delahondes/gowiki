@@ -15,6 +15,7 @@ import (
 	"gowiki/backend/internal/auth"
 	"gowiki/backend/internal/database"
 	"gowiki/backend/internal/markdown"
+	"gowiki/backend/internal/reviewflow"
 	"gowiki/backend/internal/storage"
 	"gowiki/backend/internal/todo"
 )
@@ -523,61 +524,96 @@ func registerListReviewflowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult("list pages: " + err.Error()), nil
 		}
 
-		type row struct {
-			Path             string   `json:"path"`
-			IsFullyValidated bool     `json:"is_fully_validated"`
-			CurrentVersion   int64    `json:"current_version"`
-			ValidatedVersion int64    `json:"validated_version"`
-			OverdueRoles     []string `json:"overdue_roles,omitempty"`
-			HasReviewflow    bool     `json:"has_reviewflow"`
-		}
-		out := []row{}
-		scanned, skippedAcl := 0, 0
-		matchPrefix := prefix
-		if matchPrefix != "" {
-			matchPrefix += "/"
-		}
-
+		pagePaths := make([]string, 0, len(allPages))
 		for _, p := range allPages {
-			if len(out) >= limit {
-				break
-			}
-			pagePath := strings.TrimPrefix(p.Path, "/")
-			if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != prefix {
-				continue
-			}
-			if !deps.canView(ctx, pagePath) {
-				skippedAcl++
-				continue
-			}
-			scanned++
-			st, err := deps.Reviewflow.GetStatus(pagePath)
-			if err != nil {
-				// Skip pages that fail to load rather than aborting the whole scan.
-				continue
-			}
-			configured := st != nil && len(st.Roles) > 0
-			if !configured && !includeUnconfigured {
-				continue
-			}
-			out = append(out, row{
-				Path:             "/" + pagePath,
-				IsFullyValidated: st.IsFullyValidated,
-				CurrentVersion:   st.CurrentPageVer,
-				ValidatedVersion: st.ValidatedVersion,
-				OverdueRoles:     st.OverdueRoles,
-				HasReviewflow:    configured,
-			})
+			pagePaths = append(pagePaths, p.Path)
 		}
+		rows, scanned, skippedAcl := buildReviewflowList(reviewflowScanArgs{
+			pages:               pagePaths,
+			prefix:              prefix,
+			includeUnconfigured: includeUnconfigured,
+			limit:               limit,
+			canView:             func(p string) bool { return deps.canView(ctx, p) },
+			getStatus:           deps.Reviewflow.GetStatus,
+		})
 
 		return jsonResult(map[string]any{
 			"path_prefix":        "/" + prefix,
-			"rows":               out,
+			"rows":               rows,
 			"scanned":            scanned,
 			"skipped_access":     skippedAcl,
-			"truncated_at_limit": len(out) >= limit,
+			"truncated_at_limit": len(rows) >= limit,
 		}), nil
 	})
+}
+
+// reviewflowRow is one row of the list_reviewflows response; kept at
+// package scope so the pure buildReviewflowList helper (and its tests)
+// can share the shape with the tool handler above.
+type reviewflowRow struct {
+	Path             string   `json:"path"`
+	IsFullyValidated bool     `json:"is_fully_validated"`
+	CurrentVersion   int64    `json:"current_version"`
+	ValidatedVersion int64    `json:"validated_version"`
+	OverdueRoles     []string `json:"overdue_roles,omitempty"`
+	HasReviewflow    bool     `json:"has_reviewflow"`
+}
+
+// reviewflowScanArgs bundles the inputs to buildReviewflowList. The
+// getStatus callback returns the minimal subset of reviewflow.Status the
+// scan reads, so the test can construct fakes without depending on the
+// reviewflow package.
+type reviewflowScanArgs struct {
+	pages               []string
+	prefix              string
+	includeUnconfigured bool
+	limit               int
+	canView             func(pagePath string) bool
+	getStatus           func(pagePath string) (*reviewflow.Status, error)
+}
+
+// buildReviewflowList is the pure core of the list_reviewflows tool. It
+// takes the page corpus plus lookup callbacks and returns the filtered
+// rows and counters for the response envelope. Side-effect free so tests
+// can drive it with plain maps.
+func buildReviewflowList(a reviewflowScanArgs) (rows []reviewflowRow, scanned int, skippedAcl int) {
+	rows = []reviewflowRow{}
+	matchPrefix := a.prefix
+	if matchPrefix != "" {
+		matchPrefix += "/"
+	}
+	for _, raw := range a.pages {
+		if len(rows) >= a.limit {
+			break
+		}
+		pagePath := strings.TrimPrefix(raw, "/")
+		if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != a.prefix {
+			continue
+		}
+		if a.canView != nil && !a.canView(pagePath) {
+			skippedAcl++
+			continue
+		}
+		scanned++
+		st, err := a.getStatus(pagePath)
+		if err != nil {
+			// Skip pages that fail to load rather than aborting the whole scan.
+			continue
+		}
+		configured := st != nil && len(st.Roles) > 0
+		if !configured && !a.includeUnconfigured {
+			continue
+		}
+		rows = append(rows, reviewflowRow{
+			Path:             "/" + pagePath,
+			IsFullyValidated: st.IsFullyValidated,
+			CurrentVersion:   st.CurrentPageVer,
+			ValidatedVersion: st.ValidatedVersion,
+			OverdueRoles:     st.OverdueRoles,
+			HasReviewflow:    configured,
+		})
+	}
+	return rows, scanned, skippedAcl
 }
 
 // ── preview_page_diff ───────────────────────────────────────────────────

@@ -27,6 +27,21 @@ func formatRetryAfter(d time.Duration) string {
 	return strconv.Itoa(secs)
 }
 
+// classifyRequestAsWrite decides which token-rate-limit bucket a request
+// falls into. Verb-based classification (POST/PUT/PATCH/DELETE = write)
+// is the right call for the AI Content API's REST surface. MCP is
+// JSON-RPC over POST — a naive verb rule would land every read tool
+// (get_page, list_namespace, get_reviewflow_status, …) in the tighter
+// write bucket and make corpus-scale scans impossible. Bucket all
+// /api/mcp/v1/* traffic against the read limit instead; per-tool write
+// authorization is still enforced by each mutation tool's handler.
+func classifyRequestAsWrite(method, urlPath string) bool {
+	if strings.HasPrefix(urlPath, "/api/mcp/v1") {
+		return false
+	}
+	return method != http.MethodGet && method != http.MethodHead
+}
+
 type contextKey string
 
 const (
@@ -318,16 +333,7 @@ func (s *Server) rateLimitToken(next http.Handler) http.Handler {
 		}
 
 		cfg := s.configStore.Get()
-		// Classify by HTTP verb for the AI Content API. MCP is JSON-RPC over
-		// POST, so a verb-based split would land every read tool (get_page,
-		// list_namespace, get_reviewflow_status, …) in the tighter write
-		// bucket and make a corpus-scale scan impossible. Bucket all MCP
-		// traffic against the read limit; per-tool write authorization
-		// remains enforced by each mutation tool's handler.
-		isWrite := r.Method != http.MethodGet && r.Method != http.MethodHead
-		if strings.HasPrefix(r.URL.Path, "/api/mcp/v1") {
-			isWrite = false
-		}
+		isWrite := classifyRequestAsWrite(r.Method, r.URL.Path)
 
 		allowed, retryAfter := s.rateLimiter.Allow(tokenID, isWrite, cfg.AIAPI.RateLimitRead, cfg.AIAPI.RateLimitWrite)
 		if !allowed {

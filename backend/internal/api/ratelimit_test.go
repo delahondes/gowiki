@@ -69,6 +69,39 @@ func TestRateLimiter_AllowsThenBlocks(t *testing.T) {
 	}
 }
 
+// MCP is JSON-RPC over POST, so a plain verb-based rule sends every read
+// tool through the write bucket and makes corpus-scale scans impossible.
+// The middleware forces all /api/mcp/v1/* traffic into the read bucket;
+// this test pins that policy so a well-meaning refactor can't undo it.
+func TestClassifyRequestAsWrite(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		method string
+		path   string
+		want   bool
+		note   string
+	}{
+		// AI Content API — verb rules as usual.
+		{"GET", "/api/pages/foo", false, "REST GET is a read"},
+		{"HEAD", "/api/pages/foo", false, "HEAD is a read"},
+		{"POST", "/api/ai/v1/pages/foo", true, "AI API POST is a write"},
+		{"PUT", "/api/pages/foo", true, "PUT is a write"},
+		{"PATCH", "/api/pages/foo", true, "PATCH is a write"},
+		{"DELETE", "/api/pages/foo", true, "DELETE is a write"},
+		// MCP over JSON-RPC — every call is POST, but we bucket as read.
+		{"POST", "/api/mcp/v1/", false, "MCP root JSON-RPC POST is bucketed as read"},
+		{"POST", "/api/mcp/v1/messages", false, "MCP messages POST is bucketed as read"},
+		{"GET", "/api/mcp/v1/sse", false, "MCP SSE GET is a read (and the classifier agrees)"},
+		{"DELETE", "/api/mcp/v1/session", false, "even DELETE on an MCP subpath stays in the read bucket"},
+	}
+	for _, tc := range cases {
+		got := classifyRequestAsWrite(tc.method, tc.path)
+		if got != tc.want {
+			t.Errorf("%s %s: got isWrite=%v, want %v (%s)", tc.method, tc.path, got, tc.want, tc.note)
+		}
+	}
+}
+
 // A separate token must have its own window — one token exhausting its
 // budget can't collateral-damage another caller.
 func TestRateLimiter_PerTokenIsolation(t *testing.T) {

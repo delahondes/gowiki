@@ -443,6 +443,36 @@ The server advertises these in its instructions and re-exposes them through `get
 3. Every write requires a summary formatted `[AI: <tool>] <description>`.
 4. Optimistic locking: read → preview → write with `expected_version` set to the read version.
 
+## Rate limits and 429 handling
+
+MCP calls are token-authenticated, and each token has a per-minute
+budget. The whole `/api/mcp/v1/*` surface counts against the READ
+bucket (defaults: `rate_limit_read: 120` requests per minute for the
+whole `ai_api` section, configurable in `config.yaml`). MCP is
+JSON-RPC over POST, so counting POSTs as writes the way the REST API
+does would quietly bucket every read tool — `read_page`,
+`list_namespace`, `get_reviewflow_status`, `list_reviewflows`, … —
+into the tighter write budget, and any corpus-scale scan would 429 a
+few tool calls in. Per-tool write authorization still enforces
+mutation gates at each handler.
+
+When the budget is exhausted, the server returns:
+
+- HTTP status `429 Too Many Requests`
+- Body `{"error":"rate limit exceeded"}`
+- `Retry-After` header carrying an integer count of seconds
+  (per RFC 9110 §10.2.3), rounded up and floored to 1.
+
+Clients that read the header get the exact wait; clients that fall
+back to exponential backoff still recover but overshoot. A single
+`initialize` counts as one request — a client that reconnects after a
+429 without waiting the announced delay just digs its own hole.
+
+For corpus-wide scans that would otherwise blow the budget, prefer
+batched tools: `read_pages_batch` for page content,
+`list_reviewflows` for compliance state, `list_namespace` (with
+`include_meta` / `include_comments`) for one-shot inventory.
+
 ## Relationship to the HTTP AI API
 
 The MCP server reuses the same handlers conceptually but is a separate entry point. If you already integrate via `/api/ai/v1/…`, nothing changes — both paths stay available. New agent integrations should prefer MCP because:
