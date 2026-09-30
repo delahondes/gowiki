@@ -9,7 +9,204 @@ project's design invariants and `specs/` for the dialect specification.
 
 ## [Unreleased]
 
-Nothing pending — the working tree matches `v1.0.0-rc.2`.
+Nothing pending — the working tree matches `v1.0.0-rc.3`.
+
+## [1.0.0-rc.3] — 2026-09-30
+
+Third release candidate. The bulk of rc.3 is a coordinated hardening
+of the reviewflow signing surface after a mass invalidation incident
+on the QMS corpus (37 pages' signatures wiped in a single AI-driven
+cleanup pass). Signatures now survive discard-draft and restore-from-
+history, the write tools refuse fully-validated pages by default, and
+the reviewflow query directive grows the filters needed to run a
+"what should I sign right now?" personal dashboard. Adjacent polish
+across MCP (batched compliance scans, RFC-compliant rate-limit
+headers) and the editor (gap cursor, cell pipes, formula copy/paste).
+
+### Added
+
+- **Signature preservation across version bumps.** Signatures are
+  computed over the page content's SHA-256 digest, not the page-
+  version integer, but the app used to wipe every confirmation on
+  version bump. Now: `SyncFromMarkdown` snapshots the outgoing
+  Confirmations set to `VersionHistory` before wiping (so an audit
+  can trace who signed what content at every step, not only at
+  fully-validated milestones), then re-attaches any historical
+  confirmation whose stored digest matches the new content. Discard
+  a draft that returned to last-published bytes → signatures back.
+  Restore-from-history to a prior signed version → signatures back.
+  When the re-attach covers every role, the page returns to fully-
+  validated in one action, no re-signing round.
+- **"Diff since your last signature" side link.** Next to the Sign
+  button, when a role is missing AND the current user was a signer
+  at an earlier version, a `diff since v{N}` link opens the standard
+  page diff between the version the user signed and current. Crypto-
+  signatures only (not click-only confirmations) — the whole point
+  is showing what changed against the specific content endorsed.
+- **Fully-validated-page guard on `edit_page` and `write_page`.**
+  Both MCP write tools now refuse when the target page is fully
+  validated by reviewflow — because the write would invalidate every
+  signature at once — unless the call passes `force=true`. The
+  refusal names every signed role so the LLM can surface the cost
+  to the human before retrying. `dry_run: true` on `edit_page` skips
+  the guard (a preview writes nothing). This is the root-cause fix
+  for the incident that motivated the rc.
+- **`{reviewflow-query user=X when=Y}`.** Personal to-do lists per
+  reviewer. `user=@me` resolves to the current viewer; `user=<login>`
+  makes a fixed dashboard someone else can consult. `when` narrows
+  the match: `any` (has an assigned role), `missing` (role unsigned),
+  `next` (queue-actionable now — head of the sequential queue, or
+  any missing role in parallel mode), `overdue` (deadline passed).
+  Answers "what must I sign right now?" as a one-liner directive.
+- **`list_reviewflows` MCP tool.** Batched form of
+  `get_reviewflow_status`: `path_prefix` scans a namespace and returns
+  one row per configured page — `{path, is_fully_validated,
+  current_version, validated_version, overdue_roles}`. A 143-page
+  compliance sweep now costs one MCP call rather than 143.
+- **`list_page_comments` MCP tool + `include_comments` on
+  `list_namespace`.** Comment threads on a page, grouped with replies
+  under their parent; per-page unresolved-count opt-in on the
+  namespace listing for a quick "where are the open conversations"
+  scan.
+- **Gap cursor between block atoms.** ProseMirror `gapCursor` plugin
+  is now in the editor plugin stack. Arrow keys past a selected block
+  atom (todo, image, include, mermaid, database block) land a caret
+  in the gap between two adjacent atoms — building a list of todos
+  with commentary between them no longer needs the click / undo /
+  click ritual.
+- **Typing beside a selected block atom preserves the atom.** With
+  a todo NodeSelection, typing a character used to replace the atom
+  with the character; now the character extends a fresh paragraph
+  after the atom, and the atom is never lost to an accidental key.
+- **Excel-style formula copy/paste in tables.** Copying a formula
+  cell rewrites refs by the destination-source delta on paste, same
+  as a spreadsheet. `A1` shifts both axes; `$A1` pins the column;
+  `A$1` pins the row; `$A$1` fully absolute. Off-grid targets become
+  `#REF`. Classic `=SUM($A$1:A5)` growing-anchor pattern works.
+  `LEFT` / `ABOVE` are already position-relative, so they carry
+  through unchanged.
+- **Literal `|` in a table cell.** Typing `|` in a cell in visual
+  mode now serialises as `\|` (the standard CommonMark escape) and
+  round-trips as literal text — the visual editor shows the bare
+  `|`, raw mode shows the escape. Prevents accidentally splitting
+  a row when a cell needs a pipe (URLs, choice notation, regex-like
+  text).
+- **Comments auto-collapse when every top-level thread is resolved.**
+  A reader shouldn't have to hunt for actionable state on a doc
+  whose whole comment history is settled. The sidebar starts
+  collapsed as a small corner chip (`▶ ✓`); any single unresolved
+  thread keeps it open. Companion `{lifecycle when=comments_open}`
+  rule surfaces the same count as an alert on the QARA managing
+  page.
+- **Reviewflow-query header banner** reflects the active `user` and
+  `when` filters so a reader recognises the dashboard's scope at
+  a glance ("Documents pending validation (/qms) — Etienne
+  Formstecher · ready to sign now").
+
+### Changed
+
+- **MCP traffic bucketed against the read rate limit.** MCP is
+  JSON-RPC over POST, so a plain verb-based classification routed
+  every read tool (get_page, list_namespace, list_reviewflows, …)
+  through the tight write bucket and made corpus-scale scans
+  impossible. All `/api/mcp/v1/*` requests now count against the
+  read limit; per-tool write authorisation still gates mutation at
+  each handler.
+- **`Retry-After` header on 429 is now RFC 9110 integer seconds.**
+  Was `time.Duration.String()` output (e.g. `15.644403776s`) — no
+  compliant HTTP client parses that, so every client dropped to
+  blind exponential backoff and waited much longer than the server
+  asked for. Rounded up, floored to 1.
+- **Sidebar visibility respects the "resolved" default-collapse
+  rule** even when the reader opens the page fresh: the collapsed
+  chip is the reader-facing signal that the archive is there but
+  demands no attention.
+
+### Fixed
+
+- **Publish crash on tables with a footnote carrying a hard break.**
+  The `gowiki_hardbreak_escape` parse rule replaced `\n` with real
+  newlines in every inline token — including the text captured by
+  `^[…]`. Serialising the footnote back emitted the raw newline
+  mid-row, splitting the enclosing table row and blowing up
+  `resolveMerges` on the next parse ("cannot access property
+  content, t is undefined"). The footnote serialiser now escapes
+  real newlines back to `\n` literal; `resolveMerges` guards against
+  uneven rows as a defence in depth.
+- **Comment highlight drifts when a block is inserted before the
+  anchor.** Structural anchor was captured after the insert instead
+  of before it, so the highlight landed on the wrong slice.
+- **Comment on deleted text places its highlight on wrong slice.**
+  When the anchored text was removed from the doc, the fuzzy search
+  returned `null` but the code kept the structural position with
+  confidence `fuzzy` — so the sidebar entry pointed at unrelated
+  content. Now returns `lost`, and the caller marks the comment
+  orphaned.
+- **Comment `statePath` misplaces the file for namespace-index
+  pages.** ns-index paths produced `foo/.comments.json` (dotfile)
+  instead of `foo.comments.json` (sibling), so comments on `sop01/`
+  weren't detected.
+- **"Show resolved" toggle appears to do nothing when the archive
+  is below the fold.** The anchored-comments stack could push the
+  toggle far down the sidebar; expanding the archive added boxes
+  immediately below, often past the viewport. `scrollIntoView` on
+  expand pulls the container into view.
+- **`hide_drafts_from_uninvolved` gate 404s every page without
+  `{reviewflow}`.** The gate applied unconditionally; now short-
+  circuits when a page has no reviewflow roles.
+- **`comments_open` lifecycle rule flagged as "not yet configured"**
+  even after the plugin was wired up.
+- **Pinned values on `{database-newrow}` and `{template}`
+  destinations, archived fields on row-bound pages,
+  `page_link` field rendering on row-bound pages** — the
+  cluster of database-plumbing fixes that landed alongside rc.2's
+  aftermath.
+
+### Docs
+
+- New "Signatures that survive a discard-draft or a restore" and
+  "Diff since your last signature" sections in the reviewflow
+  manual. Digest-bound re-attach explained, seat-holder-changed
+  caveat called out, first-time-review case ruled out.
+- New "Copy/paste — refs shift like a spreadsheet" section in the
+  tables manual, with the `$`-pinning cheat table and the growing-
+  anchor pattern. Companion "Type `|` inside a cell" note.
+- New "Editing around block atoms" section in the visual-editor
+  manual describing gap-cursor navigation and typing-preserves-
+  atom.
+- New "Common `user` + `when` patterns" section in the reviewflow
+  query documentation.
+- New "Rate limits and 429 handling" section in the MCP manual
+  documenting the read-bucket policy, the RFC-compliant
+  `Retry-After` contract, and a nudge toward batched tools for
+  corpus-scale scans. `list_reviewflows` and `list_page_comments`
+  documented alongside their single-page counterparts.
+- SMTP setup examples for Google Workspace and Microsoft 365 in
+  admin-config, with the vendor-specific gotchas (Gmail app
+  passwords, MS 365 SMTP AUTH + MFA).
+- README gains a "Running tests" section documenting unit vs
+  integration test invocation.
+- New `ROADMAP.md` at repo root carrying deferred items (fenced
+  grouping block for the div-like usage that overloads `>`;
+  paste-side acceptance of CommonMark alignment syntax on
+  tables).
+
+### Tests
+
+- Backend: 6 cases for the fully-validated-page guard; 7 for
+  signature preservation (snapshot, re-attach, finalize, wipe,
+  unsigned skip, dedup); 3 for `NextRoles` (sequential /
+  parallel / fully-validated); 5 for the rate-limiter and MCP
+  bucket classification; 7 for `list_reviewflows`; new coverage
+  for the comment statePath fix and the hide-drafts short-circuit.
+- Frontend: 4 for gap-cursor + typing guard; 13 for Excel-style
+  formula shift (all axes, `$` pinning modes, ranges, off-grid,
+  dedup, Z→AA); 3 for cell-pipe escape; 1 for the footnote hard-
+  break regression; 4 for `{reviewflow-query user + when}` round-
+  trip and 7 for the `rowMatchesUser` predicate; extra anchor
+  regression coverage (deleted-text, moved paragraph, rewritten
+  context, duplicated insertion).
+- **467 frontend tests, 10 backend packages, all green.**
 
 ## [1.0.0-rc.2] — 2026-09-27
 
