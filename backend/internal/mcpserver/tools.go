@@ -26,6 +26,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerGetPageMetaTool(srv, deps)
 	registerSearchPagesTool(srv, deps)
 	registerGetReviewflowStatusTool(srv, deps)
+	registerListReviewflowsTool(srv, deps)
 	registerPreviewPageDiffTool(srv, deps)
 	registerWritePageTool(srv, deps)
 	registerListTodosTool(srv, deps)
@@ -472,6 +473,110 @@ func registerGetReviewflowStatusTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult("reviewflow: " + err.Error()), nil
 		}
 		return jsonResult(status), nil
+	})
+}
+
+// ── list_reviewflows ────────────────────────────────────────────────────
+
+func registerListReviewflowsTool(srv *mcpsrv.MCPServer, deps Deps) {
+	tool := mcpgo.NewTool("list_reviewflows",
+		mcpgo.WithDescription(
+			"Batch reviewflow status across every page under a path prefix. Returns one row per "+
+				"reviewflow-configured page: {path, is_fully_validated, current_version, "+
+				"validated_version, overdue_roles}. Skips pages the caller can't view. Use for "+
+				"corpus-wide compliance passes — the single-page get_reviewflow_status would "+
+				"require one MCP call per page and burn through the rate limit.",
+		),
+		mcpgo.WithString("path_prefix",
+			mcpgo.Description("Namespace prefix (leading slash optional). Empty scans the whole wiki."),
+		),
+		mcpgo.WithBoolean("include_unconfigured",
+			mcpgo.Description(
+				"Also return pages that have no reviewflow directive at all. Default false: "+
+					"pages with an empty Roles map are skipped so the result is a compact "+
+					"compliance list.",
+			),
+		),
+		mcpgo.WithNumber("limit",
+			mcpgo.Description("Maximum rows to return (default 500, max 2000). Sorted by path."),
+		),
+	)
+	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.Reviewflow == nil {
+			return errorResult("reviewflow service not available"), nil
+		}
+		if deps.Sitemap == nil {
+			return errorResult("namespace listing not available"), nil
+		}
+		prefix := strings.Trim(req.GetString("path_prefix", ""), "/")
+		includeUnconfigured := req.GetBool("include_unconfigured", false)
+		limit := req.GetInt("limit", 500)
+		if limit < 1 {
+			limit = 500
+		}
+		if limit > 2000 {
+			limit = 2000
+		}
+
+		allPages, err := deps.Sitemap.ListAllPages()
+		if err != nil {
+			return errorResult("list pages: " + err.Error()), nil
+		}
+
+		type row struct {
+			Path             string   `json:"path"`
+			IsFullyValidated bool     `json:"is_fully_validated"`
+			CurrentVersion   int64    `json:"current_version"`
+			ValidatedVersion int64    `json:"validated_version"`
+			OverdueRoles     []string `json:"overdue_roles,omitempty"`
+			HasReviewflow    bool     `json:"has_reviewflow"`
+		}
+		out := []row{}
+		scanned, skippedAcl := 0, 0
+		matchPrefix := prefix
+		if matchPrefix != "" {
+			matchPrefix += "/"
+		}
+
+		for _, p := range allPages {
+			if len(out) >= limit {
+				break
+			}
+			pagePath := strings.TrimPrefix(p.Path, "/")
+			if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != prefix {
+				continue
+			}
+			if !deps.canView(ctx, pagePath) {
+				skippedAcl++
+				continue
+			}
+			scanned++
+			st, err := deps.Reviewflow.GetStatus(pagePath)
+			if err != nil {
+				// Skip pages that fail to load rather than aborting the whole scan.
+				continue
+			}
+			configured := st != nil && len(st.Roles) > 0
+			if !configured && !includeUnconfigured {
+				continue
+			}
+			out = append(out, row{
+				Path:             "/" + pagePath,
+				IsFullyValidated: st.IsFullyValidated,
+				CurrentVersion:   st.CurrentPageVer,
+				ValidatedVersion: st.ValidatedVersion,
+				OverdueRoles:     st.OverdueRoles,
+				HasReviewflow:    configured,
+			})
+		}
+
+		return jsonResult(map[string]any{
+			"path_prefix":        "/" + prefix,
+			"rows":               out,
+			"scanned":            scanned,
+			"skipped_access":     skippedAcl,
+			"truncated_at_limit": len(out) >= limit,
+		}), nil
 	})
 }
 

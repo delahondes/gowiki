@@ -142,7 +142,8 @@ npx @modelcontextprotocol/inspector \
 | `read_pages_batch` | Read up to 20 pages in one call |
 | `get_page_meta` | Page title, version, tags, backlinks, reviewflow status |
 | `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
-| `get_reviewflow_status` | Reviewflow roles, confirmations, validation state |
+| `get_reviewflow_status` | Reviewflow roles, confirmations, validation state — single page |
+| `list_reviewflows` | Batch reviewflow status across every page under a `path_prefix`. One MCP call for a whole namespace — use this instead of a loop of `get_reviewflow_status` for corpus-wide compliance passes. |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page (full rewrite) — requires a summary |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption) |

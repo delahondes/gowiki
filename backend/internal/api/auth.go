@@ -4,11 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"gowiki/backend/internal/auth"
 )
+
+// formatRetryAfter renders a duration in the format RFC 9110 §10.2.3 asks
+// of the Retry-After header — an integer count of seconds. time.Duration
+// stringifies as e.g. "15.644403776s", which no HTTP client parses. Round
+// up (a client waiting a fraction less than the server said still hits
+// the closed window) and floor to 1 (a Retry-After of 0 tells the client
+// to retry immediately and reset a burst that just ran out).
+func formatRetryAfter(d time.Duration) string {
+	secs := int(math.Ceil(d.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	return strconv.Itoa(secs)
+}
 
 type contextKey string
 
@@ -301,11 +318,20 @@ func (s *Server) rateLimitToken(next http.Handler) http.Handler {
 		}
 
 		cfg := s.configStore.Get()
+		// Classify by HTTP verb for the AI Content API. MCP is JSON-RPC over
+		// POST, so a verb-based split would land every read tool (get_page,
+		// list_namespace, get_reviewflow_status, …) in the tighter write
+		// bucket and make a corpus-scale scan impossible. Bucket all MCP
+		// traffic against the read limit; per-tool write authorization
+		// remains enforced by each mutation tool's handler.
 		isWrite := r.Method != http.MethodGet && r.Method != http.MethodHead
+		if strings.HasPrefix(r.URL.Path, "/api/mcp/v1") {
+			isWrite = false
+		}
 
 		allowed, retryAfter := s.rateLimiter.Allow(tokenID, isWrite, cfg.AIAPI.RateLimitRead, cfg.AIAPI.RateLimitWrite)
 		if !allowed {
-			w.Header().Set("Retry-After", strings.TrimRight(strings.TrimRight(retryAfter.String(), "0"), "."))
+			w.Header().Set("Retry-After", formatRetryAfter(retryAfter))
 			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
