@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -113,6 +114,44 @@ func jsonResult(v any) *mcpgo.CallToolResult {
 		return errorResult("internal: failed to marshal response: " + err.Error())
 	}
 	return textResult(string(b))
+}
+
+// reviewflowStatusGetter is the minimum subset of reviewflow.Service the
+// validated-page guard needs. Split out so tests can drive the guard
+// with a fake that returns a canned Status.
+type reviewflowStatusGetter interface {
+	GetStatus(pagePath string) (*reviewflow.Status, error)
+}
+
+// refuseIfValidatedWithoutForce is the "don't invalidate signatures by
+// accident" gate shared by edit_page and write_page. When the target
+// page is fully validated by reviewflow, both tools refuse unless the
+// caller passed force=true — the writer opted in with eyes open. The
+// error names the signed roles so the LLM can surface the actual cost
+// (whose signature will disappear) to the human before retrying.
+//
+// Returns nil when the write is allowed to proceed.
+func refuseIfValidatedWithoutForce(rf reviewflowStatusGetter, pagePath string, force bool) *mcpgo.CallToolResult {
+	if force || rf == nil {
+		return nil
+	}
+	st, err := rf.GetStatus(pagePath)
+	if err != nil || st == nil || !st.IsFullyValidated {
+		return nil
+	}
+	signedRoles := make([]string, 0, len(st.Roles))
+	for role, user := range st.Roles {
+		signedRoles = append(signedRoles, fmt.Sprintf("%s=%s", role, user))
+	}
+	sort.Strings(signedRoles)
+	return errorResult(fmt.Sprintf(
+		"page is fully validated by reviewflow (v%d, tag %q): editing will invalidate every signature (%s). "+
+			"Pass force=true if the change is intentional and the reviewers will re-sign. "+
+			"If the intent was to touch a nearby page instead, double-check the path.",
+		st.CurrentPageVer,
+		st.VersionTag,
+		strings.Join(signedRoles, ", "),
+	))
 }
 
 // ── get_conventions ─────────────────────────────────────────────────────
@@ -694,6 +733,10 @@ func registerWritePageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithNumber("expected_version",
 			mcpgo.Description("Optional optimistic lock. If set, the write fails when the current page version differs."),
 		),
+		mcpgo.WithBoolean("force",
+			mcpgo.Description(
+				"Bypass the fully-validated-page guard. Default false: a write to a page that reviewflow considers fully validated (every role's signature is on the current version) is refused, because the write would invalidate all signatures. Pass force=true when the change is deliberate and the reviewers will re-sign. Ignored when the page has no reviewflow directive."),
+		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		pagePath := strings.TrimPrefix(strings.TrimSpace(req.GetString("path", "")), "/")
@@ -709,12 +752,20 @@ func registerWritePageTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult("summary is required — format '[AI: <tool>] <description>'"), nil
 		}
 		expectedVersion := int64(req.GetInt("expected_version", 0))
+		force := req.GetBool("force", false)
 
 		if deps.Store == nil {
 			return errorResult("page store not available"), nil
 		}
 		if !deps.canEdit(ctx, pagePath) {
 			return errorResult("edit permission denied"), nil
+		}
+
+		// Fully-validated-page guard: refuse writes that would silently
+		// invalidate every signature unless the caller opted in with
+		// force=true.
+		if refusal := refuseIfValidatedWithoutForce(deps.Reviewflow, pagePath, force); refusal != nil {
+			return refusal, nil
 		}
 
 		if deps.DraftState != nil {

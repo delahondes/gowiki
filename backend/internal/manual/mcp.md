@@ -145,8 +145,8 @@ npx @modelcontextprotocol/inspector \
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state — single page |
 | `list_reviewflows` | Batch reviewflow status across every page under a `path_prefix`. One MCP call for a whole namespace — use this instead of a loop of `get_reviewflow_status` for corpus-wide compliance passes. |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
-| `write_page` | Create/update a page (full rewrite) — requires a summary |
-| `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption) |
+| `write_page` | Create/update a page (full rewrite) — requires a summary; refuses fully-validated pages unless `force=true` (see the fully-validated-page guard below) |
+| `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption); same fully-validated-page guard as `write_page` |
 | `create_page_from_template` | Create a new page from a `{template}`-marked template. Resolves `{template-title}`/`{template-stamp}`/`{template-reviewflow}`; refuses when the template's reviewflow has open roles or when the destination exists. |
 | `render_page` | Return the FULLY rendered page as a browser sees it — every dynamic directive resolved. `format=text` (default, structured extraction) or `format=html`. Use when the answer depends on resolved data (databases, tag queries, template stamps) rather than raw source. Heavy call; not for bulk scans. |
 | `list_todos` | Todo tasks, filterable by status/assignee/namespace/due |
@@ -216,6 +216,8 @@ This uniqueness constraint is what makes the tool safe without line numbers: the
 **Atomicity.** Edits apply in array order — edit *n+1* sees the buffer produced by edit *n*, letting you chain rewrites. If any single edit fails validation, the whole call is refused and no version is written. Never partial.
 
 **Same gates as `write_page`.** Caller + `@ai` need `edit` permission. Optimistic locking via `expected_version` is honored. Draft locks by other users refuse the call. Summary follows the `[AI: <tool>] <description>` convention.
+
+**Fully-validated-page guard.** Both `edit_page` and `write_page` refuse when the target page is currently fully validated by reviewflow — i.e. every role's signature is on the current version — because the write would invalidate every signature at once. This is the "an innocuous overnight cleanup pass silently broke 37 signatures on the QMS" case; the guard exists precisely to prevent it. Pass `force=true` on the call when the change is deliberate and the reviewers are ready to re-sign. The refusal names the signed roles so the agent can surface the cost to the human before retrying. `dry_run: true` on `edit_page` skips the guard (no state change, so nothing to protect).
 
 **Preview.** Pass `dry_run: true` to get the resulting diff (added/removed lines + hunks, same shape as `preview_page_diff`) without writing.
 

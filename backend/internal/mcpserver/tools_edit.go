@@ -146,6 +146,10 @@ func registerEditPageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithNumber("context",
 			mcpgo.Description("For dry_run only: number of unchanged lines to keep around each change (like diff -U<N>). Default 0 returns the whole diff — appropriate for tiny pages, but a long page with a single-line change produces a huge equal-hunk tail. Pass e.g. 3 to keep only changes plus 3 lines of surrounding context; the number of omitted equal lines is returned as `diff.context_omitted`."),
 		),
+		mcpgo.WithBoolean("force",
+			mcpgo.Description(
+				"Bypass the fully-validated-page guard. Default false: an edit to a page that reviewflow considers fully validated (every role's signature is on the current version) is refused, because the edit would invalidate all signatures. Pass force=true when the change is deliberate and the reviewers will re-sign. Ignored when the page has no reviewflow directive."),
+		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		if deps.Store == nil {
@@ -161,6 +165,7 @@ func registerEditPageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 		expectedVersion := int64(req.GetInt("expected_version", 0))
 		dryRun := req.GetBool("dry_run", false)
+		force := req.GetBool("force", false)
 		contextLines := req.GetInt("context", 0)
 		if contextLines < 0 {
 			contextLines = 0
@@ -189,6 +194,16 @@ func registerEditPageTool(srv *mcpsrv.MCPServer, deps Deps) {
 
 		if !deps.canEdit(ctx, pagePath) {
 			return errorResult("edit permission denied"), nil
+		}
+
+		// Fully-validated-page guard: refuse edits that would silently
+		// invalidate every signature unless the caller opted in with
+		// force=true. dry_run skips the guard so an agent can still
+		// preview what an edit WOULD do without touching the page.
+		if !dryRun {
+			if refusal := refuseIfValidatedWithoutForce(deps.Reviewflow, pagePath, force); refusal != nil {
+				return refusal, nil
+			}
 		}
 
 		// Draft-lock guard, same as write_page — refuse when someone else is
