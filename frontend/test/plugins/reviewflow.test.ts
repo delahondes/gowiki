@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest"
 import type { Node as PMNode } from "prosemirror-model"
 import { roundTrip, countNodes } from "../helpers"
+import { rowMatchesUser } from "../../plugins/reviewflow"
 
 function firstReviewflow(doc: PMNode): Record<string, unknown> | null {
   let found: Record<string, unknown> | null = null
@@ -188,6 +189,138 @@ describe("reviewflow-query", () => {
     const rt = roundTrip("{reviewflow-query user=alice when=whenever}\n")
     expect(rt.isStable).toBe(true)
     expect(firstReviewflowQuery(rt.doc)!.when).toBe("any")
+  })
+})
+
+// The rowMatchesUser predicate is the runtime filter behind
+// `{reviewflow-query user=X when=Y}`. It runs client-side over the
+// fetched Status objects — pinning each `when` value individually so a
+// future refactor of the filter table can't silently break a `next` or
+// `overdue` dashboard without a test complaining.
+describe("rowMatchesUser predicate", () => {
+  // Helper to keep case bodies short. Only the fields the predicate
+  // actually reads (roles, missing_roles, next_roles, overdue_roles)
+  // are meaningful; the rest satisfy the type.
+  function mkStatus(overrides: Partial<any> = {}): any {
+    return {
+      roles: {},
+      missing_roles: {},
+      version_tag: "1.0",
+      current_page_version: 1,
+      validated_page_version: 0,
+      is_fully_validated: false,
+      ...overrides,
+    }
+  }
+
+  it("user with no role on the page never matches, regardless of when", () => {
+    const st = mkStatus({ roles: { author: "someone.else" } })
+    expect(rowMatchesUser(st, "alice", "any")).toBe(false)
+    expect(rowMatchesUser(st, "alice", "next")).toBe(false)
+    expect(rowMatchesUser(st, "alice", "missing")).toBe(false)
+    expect(rowMatchesUser(st, "alice", "overdue")).toBe(false)
+  })
+
+  it("when=any matches on role assignment alone (even if user already confirmed)", () => {
+    // Widest possible filter: role holder shows up on the "who has a
+    // stake in this page" dashboard even after they've signed.
+    const st = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: {}, // alice already confirmed
+    })
+    expect(rowMatchesUser(st, "alice", "any")).toBe(true)
+  })
+
+  it("when=missing narrows to roles that still need confirmation", () => {
+    const stillMissing = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: { reviewer: "alice" },
+    })
+    expect(rowMatchesUser(stillMissing, "alice", "missing")).toBe(true)
+
+    const alreadySigned = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: {},
+    })
+    expect(rowMatchesUser(alreadySigned, "alice", "missing")).toBe(false)
+  })
+
+  it("when=next matches only when the user's role is queue-actionable", () => {
+    // Sequential: author must confirm before reviewer's slot opens.
+    // NextRoles carries only "author" (queue head), so alice-as-reviewer
+    // is NOT actionable yet even though her role is missing.
+    const notYet = mkStatus({
+      roles: { author: "bob", reviewer: "alice" },
+      missing_roles: { author: "bob", reviewer: "alice" },
+      next_roles: ["author"],
+      parallel: false,
+    })
+    expect(rowMatchesUser(notYet, "alice", "next")).toBe(false)
+    // But `when=missing` still matches — she has a missing role, just
+    // not one she can act on yet.
+    expect(rowMatchesUser(notYet, "alice", "missing")).toBe(true)
+
+    // After author confirms, the queue advances; reviewer becomes next.
+    const actionable = mkStatus({
+      roles: { author: "bob", reviewer: "alice" },
+      missing_roles: { reviewer: "alice" },
+      next_roles: ["reviewer"],
+      parallel: false,
+    })
+    expect(rowMatchesUser(actionable, "alice", "next")).toBe(true)
+  })
+
+  it("when=next in parallel mode treats every missing role as actionable", () => {
+    // Parallel: all missing roles are in NextRoles — no queue.
+    const st = mkStatus({
+      roles: { author: "bob", reviewer: "alice", validator: "carol" },
+      missing_roles: { reviewer: "alice", validator: "carol" },
+      next_roles: ["reviewer", "validator"],
+      parallel: true,
+    })
+    expect(rowMatchesUser(st, "alice", "next")).toBe(true)
+    expect(rowMatchesUser(st, "carol", "next")).toBe(true)
+    // bob already confirmed → no missing role for him → no match.
+    expect(rowMatchesUser(st, "bob", "next")).toBe(false)
+  })
+
+  it("when=overdue requires BOTH missing AND overdue for the user's role", () => {
+    // Overdue for reviewer, alice IS reviewer, and role is missing → match.
+    const overdue = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: { reviewer: "alice" },
+      overdue_roles: ["reviewer"],
+    })
+    expect(rowMatchesUser(overdue, "alice", "overdue")).toBe(true)
+
+    // Overdue but for a different role — alice's own role isn't overdue.
+    const overdueElsewhere = mkStatus({
+      roles: { author: "bob", reviewer: "alice" },
+      missing_roles: { author: "bob", reviewer: "alice" },
+      overdue_roles: ["author"],
+    })
+    expect(rowMatchesUser(overdueElsewhere, "alice", "overdue")).toBe(false)
+
+    // Missing but not overdue yet — deadline not reached.
+    const missingButNotOverdue = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: { reviewer: "alice" },
+      overdue_roles: [],
+    })
+    expect(rowMatchesUser(missingButNotOverdue, "alice", "overdue")).toBe(false)
+  })
+
+  it("user holding two roles on the same page — any matching role wins", () => {
+    // Rare but real (a small team where one person is both author and
+    // reviewer). Match on the union: any role the user holds counts.
+    const st = mkStatus({
+      roles: { author: "alice", reviewer: "alice" },
+      missing_roles: { reviewer: "alice" }, // author already confirmed
+      next_roles: ["reviewer"],
+    })
+    expect(rowMatchesUser(st, "alice", "any")).toBe(true)
+    expect(rowMatchesUser(st, "alice", "missing")).toBe(true)
+    expect(rowMatchesUser(st, "alice", "next")).toBe(true)
   })
 })
 

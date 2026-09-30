@@ -192,7 +192,28 @@ And here is the rendered result with formulas computed:
 
 Formulas update live as you edit the table. In view mode, only the computed result is displayed. In edit mode, a formula indicator appears on computed cells.
 
+### Copy/paste — refs shift like a spreadsheet
+
+Copying a formula cell and pasting into another cell rewrites the refs by the delta between source and destination — the behaviour a spreadsheet user expects. Copy `=B2*A2` from row 2, paste into row 3 → the formula becomes `=B3*A3`. The same shift applies to ranges: `=SUM(A1:C3)` pasted two rows down and one column right becomes `=SUM(B3:D5)`.
+
+Pin a cell reference with `$` to freeze one axis or both, exactly like Excel:
+
+| Ref     | On copy                                       |
+| ------- | --------------------------------------------- |
+| `A1`    | both axes shift                               |
+| `$A1`   | column pinned (stays A), row shifts           |
+| `A$1`   | row pinned (stays 1), column shifts           |
+| `$A$1`  | both pinned — the ref never moves             |
+
+Classic "running total from a fixed anchor" pattern: `=SUM($A$1:A5)` pasted one row down becomes `=SUM($A$1:A6)` — the start of the range stays welded to A1, the end grows with the row.
+
+`LEFT` and `ABOVE` are already position-relative by construction, so they don't need `$` and don't shift on copy. A ref that would land off the grid (negative column, row < 1) becomes `#REF` so the broken paste is visible instead of silently wrong.
+
 ## 1. Limitations
 
 - Column alignment syntax from CommonMark (`|:---|`, `|:---:|`, `|---:|`) is not supported — use column rules instead
 - Multi-body tables (multiple `<tbody>` sections) are not supported
+
+### Type `|` inside a cell
+
+A literal `|` in a cell would otherwise close the cell prematurely. Type it in the visual editor as you would any other character — the serialiser escapes it as `\|`, which markdown-it's pipe-table parser reads back as literal text. You'll see `\|` in raw mode; the visual editor shows the bare `|`. Round-trip is stable both ways.

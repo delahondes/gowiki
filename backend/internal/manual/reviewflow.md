@@ -51,6 +51,22 @@ In parallel mode every assignee gets their task the moment the page is saved and
 4. Author bumps the version tag to "1.1" to start a new cycle
 5. Previous confirmations are cleared — the new version needs fresh approvals
 
+### Signatures that survive a discard-draft or a restore
+
+Signatures are computed over the page content's digest (SHA-256 of the markdown), not over the page-version integer. When an edit is later discarded and the page returns to the exact bytes a reviewer had signed, that signature is re-attached to the new page version automatically — same digest, same crypto, no re-signing round needed.
+
+The same rule applies to restoring an older version from the history page: if the restored content matches a version a reviewer signed, their signature moves onto the new page version. If the reviewer's role covered a fully-validated set, the page returns to fully-validated in one action.
+
+The re-attach is per-role, per-user. If the review had one signer left before the discard, only the completed signatures are recovered — the missing role still needs its confirmation. Signatures for a role whose assignee has changed since (a different person now holds that seat) do not carry over: the seat is what the current directive names, and the previous holder's endorsement no longer counts as that seat's signature.
+
+Partial signatures (confirmations that never reached a fully-validated set) are now preserved in the page's reviewflow history so an audit can trace who endorsed what content at every step, not only at the fully-validated milestones.
+
+### "Diff since your last signature" link
+
+When a page has a role assigned to you and your previous signature has been invalidated by a subsequent edit, a small `diff since v{N}` link appears next to the **Sign & Confirm** button. It opens a diff between the version you signed and the current version — the same diff view the history page uses — so you can see exactly what moved before re-signing.
+
+The link only appears for a cryptographic signature (X.509), not for click-only confirmations, because the whole point is showing the diff against the specific content you endorsed. First-time reviews (no prior signature) don't show the link.
+
 ## 1. Version history
 
 Validated versions are recorded in the page's reviewflow history. They appear in:

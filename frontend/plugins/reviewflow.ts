@@ -151,7 +151,7 @@ function findLastSignatureVersion(
 //             "queue-position-aware ready-to-sign" case.
 //   overdue — user's assigned role is overdue AND missing
 // A user with no role on a page never matches, regardless of `when`.
-function rowMatchesUser(status: ReviewflowStatus, user: string, when: string): boolean {
+export function rowMatchesUser(status: ReviewflowStatus, user: string, when: string): boolean {
   const rolesForUser: string[] = []
   for (const [role, assignee] of Object.entries(status.roles || {})) {
     if (assignee === user) rolesForUser.push(role)

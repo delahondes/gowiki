@@ -48,3 +48,10 @@ Properties panels stay open while you edit values — they only close when you m
 ## 1. Read-only zones
 
 Included content (from `{include}` directives) and the sidebar/footer are displayed as read-only zones. You cannot edit them inline — navigate to the source page to modify them.
+
+## 1. Editing around block atoms
+
+Some elements are **block atoms** — a single indivisible chunk of content that takes a whole line: todos, images, includes, mermaid diagrams, database blocks. When two block atoms sit right next to each other (e.g. a list of todos), the caret needs somewhere to sit *between* them; two behaviours make that painless:
+
+- **Arrow keys open a gap cursor between adjacent atoms.** Press → on a selected todo and the caret lands in the gap before the next todo, drawn as a thin blinking line spanning the space. Typing at a gap cursor starts a new paragraph between the two atoms.
+- **Typing while an atom is selected inserts a new paragraph after it** instead of replacing the atom with the typed character. Click on a todo, then type "note about this task": the todo stays, a new paragraph carrying "note about this task" appears right below it. The atom is never lost to an accidental keystroke.
