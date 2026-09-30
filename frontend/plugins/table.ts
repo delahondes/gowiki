@@ -277,7 +277,14 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
 
   const numRows = rows.length
   if (numRows === 0) return tableNode
-  const numCols = rows[0].length
+  // A well-formed pipe table has the same column count on every row, but
+  // recovery from malformed markdown (or from a serializer bug that lets a
+  // newline slip into an inline atom's stored text — see the footnote
+  // serializer for the concrete case that led to this guard) can leave rows
+  // with mismatched lengths. Use the WIDEST row as the target so we never
+  // index past the end of any row, and treat missing positions as empty.
+  let numCols = 0
+  for (const row of rows) if (row.length > numCols) numCols = row.length
 
   // Quick check: any merges?
   let hasMerges = false
@@ -294,14 +301,20 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
   if (!hasMerges) return tableNode
 
   // Owner grid: tracks which real cell owns each position
-  const owner: { r: number; c: number }[][] = rows.map((row, r) => row.map((_, c) => ({ r, c })))
-  const spans: { colspan: number; rowspan: number }[][] = rows.map((row) => row.map(() => ({ colspan: 1, rowspan: 1 })))
+  const owner: { r: number; c: number }[][] = Array.from({ length: numRows }, (_, r) =>
+    Array.from({ length: numCols }, (_, c) => ({ r, c }))
+  )
+  const spans: { colspan: number; rowspan: number }[][] = Array.from({ length: numRows }, () =>
+    Array.from({ length: numCols }, () => ({ colspan: 1, rowspan: 1 }))
+  )
   const removed = new Set<string>()
 
   // First pass: << (colspan)
   for (let r = 0; r < numRows; r++) {
     for (let c = 0; c < numCols; c++) {
-      if (getCellText(rows[r][c]).trim() === "<<" && c > 0) {
+      const cell = rows[r][c]
+      if (!cell) continue
+      if (getCellText(cell).trim() === "<<" && c > 0) {
         const o = owner[r][c - 1]
         spans[o.r][o.c].colspan++
         owner[r][c] = o
@@ -315,7 +328,9 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
     const extended = new Set<string>()
     for (let c = 0; c < numCols; c++) {
       if (removed.has(`${r},${c}`)) continue
-      if (getCellText(rows[r][c]).trim() === "^^" && r > 0) {
+      const cell = rows[r][c]
+      if (!cell) continue
+      if (getCellText(cell).trim() === "^^" && r > 0) {
         const o = owner[r - 1][c]
         const oKey = `${o.r},${o.c}`
         if (!extended.has(oKey)) {
@@ -335,6 +350,7 @@ function resolveMerges(tableNode: Node, schema: Schema): Node {
     for (let c = 0; c < numCols; c++) {
       if (removed.has(`${r},${c}`)) continue
       const cell = rows[r][c]
+      if (!cell) continue
       const { colspan, rowspan } = spans[r][c]
       if (colspan > 1 || rowspan > 1) {
         cells.push(cell.type.create({ ...cell.attrs, colspan, rowspan }, cell.content, cell.marks))

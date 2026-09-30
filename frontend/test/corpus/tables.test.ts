@@ -119,6 +119,29 @@ describe("formulas", () => {
   })
 })
 
+describe("footnote-in-cell (regression: publish crashed on tpl02)", () => {
+  // The parse-time gowiki_hardbreak_escape rule replaces every "\n" (backslash + n)
+  // in every inline token's content with a real newline, so it can be interpreted
+  // as a soft break by markdown-it's inline parser. That conversion also touches
+  // text inside "^[...]" — the footnote captured its content AFTER the swap and
+  // stored real newlines in its `content` attribute. Serializing that footnote
+  // back emitted the real newlines verbatim, which broke the row apart into two
+  // source lines and left resolveMerges reading past the end of the truncated row
+  // (cell = undefined → getCellText(undefined) → "cannot access property content").
+  // Fix: the footnote serializer escapes real newlines back to "\n" literal.
+  it("footnote containing a hard break inside a table cell round-trips on one line", () => {
+    const rt = roundTrip("| a | b |\n| --- | --- |\n| ^[one\\ntwo] | data |\n")
+    expect(rt.isStable).toBe(true)
+    // The serialized cell must stay on a single source line.
+    const firstDataRow = rt.first.split("\n").find((l) => l.startsWith("| ^["))
+    expect(firstDataRow).toBeDefined()
+    expect(firstDataRow!).not.toContain("\r")
+    // The footnote's stored content preserves the hard break; the serializer
+    // encodes it as the "\n" literal (backslash + n), never a raw newline.
+    expect(firstDataRow!).toContain("^[one\\ntwo]")
+  })
+})
+
 describe("backticks protect cells from directive/formula parsing", () => {
   it("backtick-wrapped `=formula` stays literal", () => {
     const rt = roundTrip("| a |\n| --- |\n| `=A1*2` |\n")

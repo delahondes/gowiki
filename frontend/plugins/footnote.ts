@@ -298,7 +298,17 @@ export const footnotePlugin: WikiPlugin = {
     // PM → Markdown: serialize footnote node
     reg.registerPMNode("footnote", {
       print(node) {
-        return `^[${node.attrs.content}]`
+        // The gowiki_hardbreak_escape parse-time rule converts every "\n"
+        // (backslash + n) in inline token content to a real newline before
+        // this footnote's captured text is stored. Emit real newlines back
+        // as the dialect's "\n" literal here so the footnote stays on one
+        // source line — a newline in the middle of "^[...]" splits the
+        // enclosing table row and triggers the resolveMerges crash on the
+        // next parse (uneven row cell counts). Any embedded backslash-n
+        // that the parser DIDN'T convert (rare — only inside table cells,
+        // and only when a bare backslash is followed by n) is left alone.
+        const content = String(node.attrs.content ?? "").replace(/\n/g, "\\n")
+        return `^[${content}]`
       },
     })
 
