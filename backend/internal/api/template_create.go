@@ -108,85 +108,14 @@ func (s *Server) createPageFromTemplate(req TemplateCreateRequest, author string
 		return nil, &TemplateCreateError{Kind: "template_not_found", Message: fmt.Sprintf("template %s not found: %v", tplPath, err)}
 	}
 
-	// Verify the source really is a template.
-	if !markdown.IsTemplatePage(tpl.Markdown) {
-		return nil, &TemplateCreateError{Kind: "not_template", Message: fmt.Sprintf("%s is not a template (no {template} directive)", tplPath)}
+	// Resolve (checks template marker, target pattern, reviewflow
+	// validation; splits + merges + stamps + resolves payload). Shared
+	// with the _template.md draft prefill in drafts.go so both entry
+	// points honor the same rules.
+	res, terr := s.resolveTemplateDoc(tplStorage, tpl.Markdown, tpl.Meta.Version, dstPath, title, req.ReviewflowOverride)
+	if terr != nil {
+		return nil, terr
 	}
-
-	// When the template pins a destination via `{template target=…}`,
-	// the caller's `path` must match the resolved pattern. This
-	// converts the target from a nice-to-have suggestion into a rule
-	// carried by the template itself. Refusing loudly beats letting a
-	// programmatic caller emit documents into the wrong namespace.
-	if targetPattern := markdown.TemplateTargetPattern(tpl.Markdown); targetPattern != "" {
-		wantPath := strings.TrimSpace(markdown.ResolveTemplateTargetPattern(targetPattern, title))
-		if wantPath != "" {
-			if !strings.HasPrefix(wantPath, "/") {
-				wantPath = "/" + wantPath
-			}
-			if wantPath != dstPath {
-				return nil, &TemplateCreateError{
-					Kind:    "invalid_target",
-					Message: fmt.Sprintf("template %s pins its target to %s (from `target=%s`); caller asked for %s", tplPath, wantPath, targetPattern, dstPath),
-				}
-			}
-		}
-	}
-
-	// Verify the template's reviewflow, when it has one, is fully validated.
-	// A template with NO reviewflow is legitimate (spec §5) — just skip the
-	// check and stamp with the page-version fallback.
-	templateOwnRF := markdown.ParseReviewflowArgs(tpl.Markdown)
-	hasReviewflow := len(templateOwnRF) > 0
-	versionTag := ""
-	if hasReviewflow {
-		if s.reviewflowService == nil {
-			return nil, &TemplateCreateError{Kind: "not_validated", Message: "reviewflow service unavailable"}
-		}
-		status, rfErr := s.reviewflowService.GetStatus(tplStorage)
-		if rfErr == nil && status != nil {
-			if !status.IsFullyValidated {
-				missing := sortedRoles(status.MissingRoles)
-				return nil, &TemplateCreateError{
-					Kind:    "not_validated",
-					Message: fmt.Sprintf("template %s is not fully validated — missing role(s): %s. Complete the review before issuing documents from it.", tplPath, strings.Join(missing, ", ")),
-				}
-			}
-			versionTag = status.VersionTag
-		}
-	}
-
-	// Split payload.
-	_, payload, ok := markdown.SplitTemplatePayload(tpl.Markdown)
-	if !ok {
-		// Shouldn't happen — IsTemplatePage said yes.
-		return nil, &TemplateCreateError{Kind: "not_template", Message: fmt.Sprintf("%s: {template} directive not found while splitting payload", tplPath)}
-	}
-
-	// Merge reviewflow args. Only produce args when the template actually
-	// carries {template-reviewflow} OR when the caller passed overrides.
-	// If neither, the created document has no reviewflow — the template
-	// may be one that doesn't want to require review.
-	tplRF, tplRFPresent := markdown.ParseTemplateReviewflowArgs(payload)
-	var mergedRF map[string]string
-	if tplRFPresent || len(req.ReviewflowOverride) > 0 {
-		mergedRF = markdown.MergeReviewflowArgs(req.ReviewflowOverride, tplRF, templateOwnRF)
-	}
-
-	// Compose the stamp.
-	stamp := markdown.TemplateStampArgs{
-		TemplatePath:        storage.CanonicalPath(tplStorage),
-		TemplateTitle:       markdown.ExtractTitle(tpl.Markdown),
-		TemplatePageVersion: tpl.Meta.Version,
-		VersionTag:          versionTag,
-	}
-
-	// Resolve.
-	resolved := markdown.ResolveTemplatePayload(payload, markdown.TemplateResolveOpts{
-		Stamp:          stamp,
-		Title:          title,
-		ReviewflowArgs: mergedRF,
-	})
 
 	// Write. Keep author and summary in separate storage fields —
 	// pre-concatenating them (an earlier version of this handler did)
@@ -195,7 +124,7 @@ func (s *Server) createPageFromTemplate(req TemplateCreateRequest, author string
 	// the UI reads the author field. The attic already stores
 	// summary separately.
 	summary := strings.TrimSpace(req.Summary)
-	put, err := s.store.PutWithSummary(dstStorage, resolved, author, summary)
+	put, err := s.store.PutWithSummary(dstStorage, res.Markdown, author, summary)
 	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", dstPath, err)
 	}
@@ -203,13 +132,13 @@ func (s *Server) createPageFromTemplate(req TemplateCreateRequest, author string
 	result := &TemplateCreateResult{
 		Path:               storage.CanonicalPath(dstStorage),
 		Version:            put.Page.Meta.Version,
-		TemplatePath:       stamp.TemplatePath,
-		TemplateVersion:    stamp.TemplatePageVersion,
-		TemplateVersionTag: stamp.VersionTag,
-		Stamp:              markdown.FormatTemplateStamp(stamp),
+		TemplatePath:       res.Stamp.TemplatePath,
+		TemplateVersion:    res.Stamp.TemplatePageVersion,
+		TemplateVersionTag: res.Stamp.VersionTag,
+		Stamp:              markdown.FormatTemplateStamp(res.Stamp),
 	}
-	if mergedRF != nil {
-		result.ReviewflowResolved = formatReviewflowKV(mergedRF)
+	if res.ReviewflowArgs != nil {
+		result.ReviewflowResolved = formatReviewflowKV(res.ReviewflowArgs)
 	}
 	return result, nil
 }

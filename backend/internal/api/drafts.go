@@ -106,8 +106,50 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 		if reqBody.InitialMarkdownSet {
 			published = reqBody.InitialMarkdown
 		} else if tmpl, ok := s.store.(TemplateResolver); ok {
-			if content, _, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
-				published = content
+			if content, tplPath, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
+				// An _template.md whose body carries a {template} marker
+				// is a full template: run it through the same resolution
+				// pipeline the explicit Create-from-template action uses
+				// (reviewflow validation gate, target-pattern enforcement,
+				// {template-*} directive substitution, stamp). An
+				// _template.md without the marker is a legacy DokuWiki-style
+				// snippet — copy it verbatim as today.
+				if markdown_pkg.IsTemplatePage(content) {
+					tplStorage := strings.TrimPrefix(tplPath, "/")
+					tplPage, perr := s.store.Get(tplStorage)
+					if perr != nil {
+						// ResolveTemplate just read it successfully — if Get
+						// now fails something is wrong with the store;
+						// surface the failure rather than silently serving
+						// a stale snapshot.
+						writeError(w, http.StatusInternalServerError, "load template: "+perr.Error())
+						return
+					}
+					res, terr := s.resolveTemplateDoc(
+						tplStorage,
+						tplPage.Markdown,
+						tplPage.Meta.Version,
+						storage.CanonicalPath(pagePath),
+						titleFromPagePath(pagePath),
+						nil,
+					)
+					if terr != nil {
+						// not_validated and invalid_target are hard refusals,
+						// same as on the explicit Create path: pre-filling
+						// from an un-reviewed template, or into a path the
+						// template pins elsewhere, would silently bypass
+						// the guard that the explicit action enforces.
+						writeJSON(w, http.StatusConflict, map[string]any{
+							"error":         terr.Message,
+							"kind":          terr.Kind,
+							"template_path": storage.CanonicalPath(tplStorage),
+						})
+						return
+					}
+					published = res.Markdown
+				} else {
+					published = content
+				}
 			}
 		}
 		// Apply tag mutations (e.g. strip "tpl" tags) to any template-derived
