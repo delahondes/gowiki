@@ -1,7 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Circular lifecycle: 3/4 ring + arrowhead closing the loop -->
-  <path d="M4 10 A6 6 0 1 1 10 16"/>
-  <polyline points="7.5,15.5 10,16 10.5,13.5"/>
-  <!-- Inner dot = the document being tracked -->
-  <circle cx="10" cy="10" r="1.3" fill="currentColor" stroke="none"/>
+  <!-- Classic triangular recycle: three arrows chasing clockwise around a triangle. -->
+  <!-- Arrow 1: top → bottom-right -->
+  <line x1="10" y1="4" x2="14.5" y2="12"/>
+  <polyline points="13,11.5 14.5,12 14,10.5"/>
+  <!-- Arrow 2: bottom-right → bottom-left (along the bottom) -->
+  <line x1="14.5" y1="14" x2="5.5" y2="14"/>
+  <polyline points="7,13 5.5,14 7,15"/>
+  <!-- Arrow 3: bottom-left → top -->
+  <line x1="5.5" y1="12" x2="10" y2="4"/>
+  <polyline points="8.5,4.5 10,4 10,5.5"/>
 </svg>
