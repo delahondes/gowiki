@@ -257,6 +257,16 @@ func main() {
 		} else if n > 0 {
 			log.Printf("reviewflow plugin: reconciled %d review task(s) — marked done on validated pages", n)
 		}
+		// Orphan sweep: pages deleted, pages fully validated, pages whose
+		// directive changed role assignments between tags. Historical
+		// drift accumulated before the lifecycle cleanups were in place
+		// (storage.Delete hook, always-cancel on version bump,
+		// finalize-also-cancels). Idempotent — a second run is a no-op.
+		if n, err := reviewflowService.ReconcileOrphanTasks(store.Exists); err != nil {
+			log.Printf("reviewflow plugin: orphan reconciliation failed: %v", err)
+		} else if n > 0 {
+			log.Printf("reviewflow plugin: reconciled orphan review tasks for %d page(s)", n)
+		}
 	}
 	reviewflowService.SetGroupResolver(func(username string) []string {
 		u, err := userStore.Get(username)

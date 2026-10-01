@@ -123,9 +123,12 @@ type PageRenamer interface {
 	RenamePageRows(oldPath, newPath string)
 }
 
-// ReviewflowSyncer is an optional hook for syncing reviewflow state on page save.
+// ReviewflowSyncer is an optional hook for syncing reviewflow state on page
+// save and delete. OnPageDelete runs on every page removal so stale open
+// review tasks and the reviewflow state file don't survive the page itself.
 type ReviewflowSyncer interface {
 	SyncFromMarkdown(pagePath string, pageVersion int64, markdown string) error
+	OnPageDelete(pagePath string) error
 }
 
 // LifecycleSyncer is an optional hook for extracting {lifecycle} directives
@@ -611,6 +614,13 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	// next scan pass.
 	if s.LifecycleSync != nil {
 		_ = s.LifecycleSync.RemovePageRules(normalized)
+	}
+
+	// Sync reviewflow: cancel pending review tasks and remove the state
+	// file. Without this the signature todos survive the page itself
+	// and show up forever in `list_todos` with a dead source_page.
+	if s.ReviewflowSync != nil {
+		_ = s.ReviewflowSync.OnPageDelete(normalized)
 	}
 
 	// Snapshot old media refs before removing from index.

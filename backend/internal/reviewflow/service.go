@@ -169,6 +169,91 @@ func (svc *Service) SetTodoIntegrator(ti TodoIntegrator) {
 	svc.todo = ti
 }
 
+// ReconcileOrphanTasks sweeps every reviewflow state file and brings its
+// open review todos back in sync with the current state of the world. It
+// handles three drift sources that accumulated before the lifecycle
+// cleanups were in place:
+//
+//  1. The page was deleted but its review tasks survived.
+//  2. The page is fully validated (ValidatedVersion == CurrentPageVersion)
+//     but tasks were never cancelled or completed.
+//  3. The page is still under review but its reviewflow directive changed
+//     role assignments or version tag — tasks for the old (role, user, tag)
+//     tuples are stale.
+//
+// For (1): cancel every open reviewflow task for the page AND delete the
+// state file.
+// For (2): cancel every open reviewflow task for the page (the page is
+// done; no open task is legitimate).
+// For (3): cancel every open task for the page and re-create one task per
+// role NOT already satisfied by a re-attached confirmation for the current
+// page version — the same end state a fresh SyncFromMarkdown would reach.
+//
+// The caller passes an `exists` predicate (storage.FileStore.Exists is the
+// natural fit). Returns the number of state files whose task set was
+// touched. Idempotent: a second run reports zero.
+func (svc *Service) ReconcileOrphanTasks(exists func(pagePath string) bool) (int, error) {
+	if svc.todo == nil || exists == nil {
+		return 0, nil
+	}
+	touched := 0
+	err := svc.store.WalkStates(func(pagePath string, st *State) error {
+		if st == nil {
+			return nil
+		}
+		// 1. Page gone.
+		if !exists(pagePath) {
+			_ = svc.todo.CancelReviewTasks(pagePath)
+			_ = svc.store.Delete(pagePath)
+			touched++
+			return nil
+		}
+		// 2. Fully validated — no open task should remain.
+		if st.CurrentPageVersion > 0 && st.ValidatedVersion == st.CurrentPageVersion {
+			_ = svc.todo.CancelReviewTasks(pagePath)
+			touched++
+			return nil
+		}
+		// 3. Live state: cancel everything, recreate only missing-role
+		//    tasks. Mirrors SyncFromMarkdown's version-bump branch so
+		//    the invariant is written once.
+		if len(st.Roles) == 0 {
+			// Dormant state (directive removed earlier) — SyncFromMarkdown
+			// already cancelled the tasks; nothing to do.
+			return nil
+		}
+		_ = svc.todo.CancelReviewTasks(pagePath)
+		satisfied := make(map[string]bool, len(st.Confirmations))
+		for _, c := range st.Confirmations {
+			if c.PageVersion == st.CurrentPageVersion {
+				satisfied[c.Role] = true
+			}
+		}
+		missing := make(map[string]string)
+		for role, user := range st.Roles {
+			if !satisfied[role] {
+				missing[role] = user
+			}
+		}
+		if len(missing) > 0 {
+			dueDate := svc.computeDueDate(st.Roles)
+			if st.Parallel {
+				_ = svc.todo.CreateReviewTasks(pagePath, missing, st.VersionTag, dueDate)
+			} else {
+				for _, role := range st.RoleOrder {
+					if user, ok := missing[role]; ok {
+						_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{role: user}, st.VersionTag, dueDate)
+						break
+					}
+				}
+			}
+		}
+		touched++
+		return nil
+	})
+	return touched, err
+}
+
 // ReconcileValidatedTasks scans every reviewflow state file and marks review
 // todo tasks done for each (role, user) confirmation recorded for the current
 // page version — including partial confirmations where not all roles have
@@ -200,6 +285,53 @@ func (svc *Service) ReconcileValidatedTasks() (int, error) {
 		return nil
 	})
 	return total, err
+}
+
+// rolesEqual reports whether two role→user maps are byte-for-byte equal.
+// Used by SyncFromMarkdown to tell "same directive, content changed"
+// (signatures must re-attach, tasks preserved) from "directive changed"
+// (old tasks are stale, rebuild from scratch).
+func rolesEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+// stringSliceEqual reports whether two string slices are element-by-element
+// equal. For reviewflow.State.RoleOrder: a reordering of the same roles is
+// a directive change (sequential-notification order differs).
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// OnPageDelete is called by the page store immediately after a page's
+// content and metadata have been removed. The two side-effects a reviewflow
+// state carries past the page's own lifetime are review todos (visible in
+// list_todos with a dead source_page) and the state file sitting in
+// data/meta/.../page.reviewflow.json. Both go here.
+func (svc *Service) OnPageDelete(pagePath string) error {
+	if svc.todo != nil {
+		_ = svc.todo.CancelReviewTasks(pagePath)
+	}
+	// Best-effort state removal. The caller already lost the page; a
+	// stray state file is cosmetic noise, not a correctness issue, so
+	// errors from Delete don't propagate.
+	_ = svc.store.Delete(pagePath)
+	return nil
 }
 
 // SyncFromMarkdown parses the reviewflow directive from page markdown and
@@ -258,20 +390,56 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 		newDigest := ComputeDigest([]byte(markdown))
 		st.Confirmations = reattachByDigest(st, pageVersion, newDigest)
 
-		// Only cancel + recreate review tasks when NOTHING re-attached
-		// (i.e. this is a genuine content change, not a same-digest
-		// restore). A restore that brought back a fully-validated set
-		// leaves the review dashboard alone — no phantom tasks for
-		// signatures that are already in place.
-		if svc.todo != nil && len(st.Confirmations) == 0 {
-			_ = svc.todo.CancelReviewTasks(pagePath)
-			dueDate := svc.computeDueDate(dir.Roles)
-			if dir.Parallel {
-				_ = svc.todo.CreateReviewTasks(pagePath, dir.Roles, dir.VersionTag, dueDate)
-			} else {
-				first := firstOrderedRole(dir.RoleOrder, dir.Roles)
-				if first != "" {
-					_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{first: dir.Roles[first]}, dir.VersionTag, dueDate)
+		// Review-task bookkeeping. Three cases:
+		//
+		// a) Directive changed (roles, tag, parallel, or order): the
+		//    existing task set may be stale — reviewer=bob at tag 2.1
+		//    becoming reviewer=alice at tag 3.0 leaves bob's task
+		//    dangling forever otherwise. Cancel every open task and
+		//    recreate only the missing-role ones.
+		//
+		// b) Directive unchanged but re-attach brought nothing back
+		//    (genuine content edit, confirmations wiped): same —
+		//    cancel + recreate.
+		//
+		// c) Directive unchanged and re-attach restored confirmations
+		//    (discard-draft / same-digest restore): the existing open
+		//    tasks for still-missing roles are still legitimate and
+		//    their IDs matter (users have them bookmarked). Leave the
+		//    task set alone. This is the signature-preservation path.
+		if svc.todo != nil {
+			directiveChanged := !rolesEqual(st.Roles, dir.Roles) ||
+				st.VersionTag != dir.VersionTag ||
+				st.Parallel != dir.Parallel ||
+				!stringSliceEqual(st.RoleOrder, dir.RoleOrder)
+			if directiveChanged || len(st.Confirmations) == 0 {
+				_ = svc.todo.CancelReviewTasks(pagePath)
+				// Roles already satisfied by a re-attached confirmation
+				// get no new task — the signature stands.
+				satisfied := make(map[string]bool, len(st.Confirmations))
+				for _, c := range st.Confirmations {
+					if c.PageVersion == pageVersion {
+						satisfied[c.Role] = true
+					}
+				}
+				missing := make(map[string]string)
+				for role, user := range dir.Roles {
+					if !satisfied[role] {
+						missing[role] = user
+					}
+				}
+				if len(missing) > 0 {
+					dueDate := svc.computeDueDate(dir.Roles)
+					if dir.Parallel {
+						_ = svc.todo.CreateReviewTasks(pagePath, missing, dir.VersionTag, dueDate)
+					} else {
+						for _, role := range dir.RoleOrder {
+							if user, ok := missing[role]; ok {
+								_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{role: user}, dir.VersionTag, dueDate)
+								break
+							}
+						}
+					}
 				}
 			}
 		}
@@ -293,32 +461,6 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 	}
 
 	return svc.store.Save(pagePath, st)
-}
-
-// firstOrderedRole returns the first role in `order` that also appears in
-// `roles`. Both are inputs from the same directive parse, so in practice
-// every entry in `order` is present in `roles`; the guard is there to
-// tolerate a state file whose RoleOrder was migrated from a nil legacy
-// value and might have drifted.
-func firstOrderedRole(order []string, roles map[string]string) string {
-	for _, r := range order {
-		if _, ok := roles[r]; ok {
-			return r
-		}
-	}
-	// Fallback: if the order slice is empty (old state file, first save
-	// after upgrade), pick any role deterministically so the flow can
-	// still make progress. Sorting means we don't depend on Go's random
-	// map iteration.
-	if len(order) == 0 && len(roles) > 0 {
-		var keys []string
-		for k := range roles {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		return keys[0]
-	}
-	return ""
 }
 
 // nextUnconfirmedRole returns the next role in state.RoleOrder that has
@@ -852,6 +994,13 @@ func (svc *Service) finalizeValidatedVersion(pagePath string, st *State) {
 
 	if svc.todo != nil {
 		_, _ = svc.todo.CompleteReviewTasks(pagePath, confirmedBy)
+		// Belt + suspenders: anything the Complete pass missed is a
+		// stale task (role reassigned, legacy signature, etc.). Once
+		// the page is fully validated no open review task is
+		// legitimate — cancel the rest. CancelReviewTasks ignores
+		// tasks already in done status, so the ones we just completed
+		// stay done.
+		_ = svc.todo.CancelReviewTasks(pagePath)
 	}
 	if svc.attic != nil {
 		meta := AtticMeta{
