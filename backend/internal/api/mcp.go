@@ -73,7 +73,7 @@ func siteBaseURL(s *Server) string {
 // HTTP handlers.
 type mcpRowWriter struct{ s *Server }
 
-func (w *mcpRowWriter) InsertRowWithPage(ctx context.Context, tableName string, fields map[string]any, author string) (*mcpserver.RowInsertResult, error) {
+func (w *mcpRowWriter) InsertRowWithPage(ctx context.Context, tableName string, fields map[string]any, author, summary string) (*mcpserver.RowInsertResult, error) {
 	if w.s.dataStore == nil || w.s.schemaStore == nil {
 		return nil, errors.New("database not connected")
 	}
@@ -95,7 +95,11 @@ func (w *mcpRowWriter) InsertRowWithPage(ctx context.Context, tableName string, 
 	}
 	row.PagePath = pagePath
 	markdown := w.s.buildPageContent(table, &row)
-	if _, err := w.s.store.Put(pagePath, markdown, author); err != nil {
+	// PutWithSummary keeps author and summary in SEPARATE attic fields;
+	// the pre-rc.3-polish concatenation leaked commit messages into
+	// PageMetadata.Author and polluted tag-query / history author
+	// columns on row-bound pages.
+	if _, err := w.s.store.PutWithSummary(pagePath, markdown, author, summary); err != nil {
 		return result, fmt.Errorf("write bound page: %w", err)
 	}
 	result.PagePath = pagePath
@@ -103,7 +107,7 @@ func (w *mcpRowWriter) InsertRowWithPage(ctx context.Context, tableName string, 
 	return result, nil
 }
 
-func (w *mcpRowWriter) UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author string) (*mcpserver.RowUpdateResult, error) {
+func (w *mcpRowWriter) UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author, summary string) (*mcpserver.RowUpdateResult, error) {
 	if w.s.dataStore == nil || w.s.schemaStore == nil {
 		return nil, errors.New("database not connected")
 	}
@@ -120,7 +124,7 @@ func (w *mcpRowWriter) UpdateRowWithPage(ctx context.Context, tableName string, 
 	}
 	result := &mcpserver.RowUpdateResult{Row: row}
 	if row.PagePath != "" {
-		w.s.syncRowToPage(table, row, author)
+		w.s.syncRowToPage(table, row, author, summary)
 		result.PagePath = row.PagePath
 		result.PageUpdated = true
 	}

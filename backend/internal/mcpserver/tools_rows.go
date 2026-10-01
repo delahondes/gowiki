@@ -88,7 +88,11 @@ func registerInsertDatabaseRowTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 
 		author := deps.ExtractUsername(ctx)
-		result, err := deps.RowWriter.InsertRowWithPage(ctx, tableName, rawFields, author)
+		// insert_database_row doesn't currently expose a `summary`
+		// parameter — rows are usually created via a template whose
+		// {template-stamp} already records provenance. Pass "" so the
+		// attic entry carries only the username as author.
+		result, err := deps.RowWriter.InsertRowWithPage(ctx, tableName, rawFields, author, "")
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}
@@ -199,10 +203,11 @@ func registerUpdateDatabaseRowTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 
 		author := deps.ExtractUsername(ctx)
-		if summary != "" {
-			author = author + " | " + summary
-		}
-		result, err := deps.RowWriter.UpdateRowWithPage(ctx, tableName, rowID, rawFields, author)
+		// Pass summary separately — the attic stores them in different
+		// fields; the earlier "author | summary" concatenation leaked
+		// commit messages into {tag-query} and change-history author
+		// columns.
+		result, err := deps.RowWriter.UpdateRowWithPage(ctx, tableName, rowID, rawFields, author, summary)
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}

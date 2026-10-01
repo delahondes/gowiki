@@ -27,9 +27,16 @@ const (
 )
 
 // PageStore is the minimal page storage surface needed by MCP tools.
+// PutWithSummary is used by write_page / edit_page / insert_database_row /
+// template creation / attachment upload — the five surfaces where an
+// agent passes a summary. The attic stores author and summary in
+// separate fields; pre-concatenating them into `author` pollutes
+// PageMetadata.Author (what {tag-query} and the UI's author columns
+// read).
 type PageStore interface {
 	Get(pagePath string) (storage.Page, error)
 	Put(pagePath, markdown, author string) (storage.PutResult, error)
+	PutWithSummary(pagePath, markdown, author, summary string) (storage.PutResult, error)
 	Delete(pagePath, author string) (storage.DeleteResult, error)
 	Exists(pagePath string) bool
 }
@@ -96,8 +103,11 @@ type RowUpdateResult struct {
 // the existing HTTP handlers share one code path.
 type RowWriter interface {
 	// InsertRowWithPage inserts a row and, for page-bound tables, creates
-	// the associated wiki page.
-	InsertRowWithPage(ctx context.Context, tableName string, fields map[string]any, author string) (*RowInsertResult, error)
+	// the associated wiki page. author and summary stay in SEPARATE
+	// storage fields — the earlier concatenated shape leaked commit
+	// messages into every author-facing surface ({tag-query}, change
+	// history author columns).
+	InsertRowWithPage(ctx context.Context, tableName string, fields map[string]any, author, summary string) (*RowInsertResult, error)
 	// DeleteRowWithPage deletes a row and, if the row had a bound page,
 	// deletes that page too (archiving it to the attic so the audit trail
 	// remains intact).
@@ -105,8 +115,8 @@ type RowWriter interface {
 	// UpdateRowWithPage patches the listed fields on a row and, for
 	// page-bound rows, rewrites the {database-row} block on the bound
 	// page so the two representations stay in step (same syncRowToPage
-	// path the HTTP handler uses).
-	UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author string) (*RowUpdateResult, error)
+	// path the HTTP handler uses). author and summary stay separate.
+	UpdateRowWithPage(ctx context.Context, tableName string, rowID int, fields map[string]any, author, summary string) (*RowUpdateResult, error)
 }
 
 // TemplateCreator produces a new page from a template. Implemented in

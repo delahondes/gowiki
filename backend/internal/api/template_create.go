@@ -188,13 +188,14 @@ func (s *Server) createPageFromTemplate(req TemplateCreateRequest, author string
 		ReviewflowArgs: mergedRF,
 	})
 
-	// Write.
+	// Write. Keep author and summary in separate storage fields —
+	// pre-concatenating them (an earlier version of this handler did)
+	// pollutes PageMetadata.Author with the commit message, which
+	// then surfaces in {tag-query} author columns and anywhere else
+	// the UI reads the author field. The attic already stores
+	// summary separately.
 	summary := strings.TrimSpace(req.Summary)
-	authorField := author
-	if summary != "" {
-		authorField = author + " | " + summary
-	}
-	put, err := s.store.Put(dstStorage, resolved, authorField)
+	put, err := s.store.PutWithSummary(dstStorage, resolved, author, summary)
 	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", dstPath, err)
 	}

@@ -426,7 +426,7 @@ func (s *Server) handleDatabaseUpdateRow(w http.ResponseWriter, r *http.Request)
 	// Sync changes to the page if this row is page-bound.
 	if row.PagePath != "" {
 		author := UsernameFromContext(r.Context())
-		s.syncRowToPage(table, row, author)
+		s.syncRowToPage(table, row, author, "")
 		// If this was a forced edit (draft existed), record the conflict.
 		if force {
 			s.inlineEditConflicts.Store(row.PagePath, tableName)
@@ -534,7 +534,7 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 
 	// Sync changes to the page.
 	author := UsernameFromContext(r.Context())
-	s.syncRowToPage(table, row, author)
+	s.syncRowToPage(table, row, author, "")
 
 	// If this was a forced edit (draft existed), record the conflict.
 	if force {
@@ -548,7 +548,11 @@ func (s *Server) handleDatabaseUpsertRowByPage(w http.ResponseWriter, r *http.Re
 // Writes a human-readable per-field diff into the page's changelog summary so
 // history entries for row-driven writes read like "row: update 2026-08-10 →
 // 2026-08-27, monitoring 1 → 0" instead of an empty line.
-func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, author string) {
+// syncRowToPage rewrites the {database-row} block on a page-bound page
+// so the two representations stay in step. summary is passed through
+// to the attic entry alongside author (not concatenated into it) —
+// see the PageStore comment on PutWithSummary for why.
+func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, author, summary string) {
 	if row.PagePath == "" {
 		return
 	}
@@ -580,8 +584,15 @@ func (s *Server) syncRowToPage(table *database.TableDef, row *database.Row, auth
 		return // no change
 	}
 
-	summary := buildRowChangeSummary(page.Markdown, table.Name, fieldNames, values)
-	if _, err := s.store.PutWithSummary(row.PagePath, updated, author, summary); err != nil {
+	// Caller-supplied summary (MCP tools) wins over the auto-generated
+	// field-diff — the explicit "[AI: tool] …" is more semantic than
+	// the per-field diff. The admin HTTP path passes "" so this
+	// falls back to buildRowChangeSummary.
+	effectiveSummary := summary
+	if effectiveSummary == "" {
+		effectiveSummary = buildRowChangeSummary(page.Markdown, table.Name, fieldNames, values)
+	}
+	if _, err := s.store.PutWithSummary(row.PagePath, updated, author, effectiveSummary); err != nil {
 		log.Printf("database sync→page: cannot save page %s: %v", row.PagePath, err)
 	}
 }

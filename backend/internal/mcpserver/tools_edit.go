@@ -280,11 +280,10 @@ func registerEditPageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 
 		username := deps.ExtractUsername(ctx)
-		author := username
-		if summary != "" {
-			author = author + " | " + summary
-		}
-		result, err := deps.Store.Put(pagePath, newMarkdown, author)
+		// Keep author and summary separate — see server.go PageStore
+		// comment on why PutWithSummary is the right call for the
+		// MCP write surfaces.
+		result, err := deps.Store.PutWithSummary(pagePath, newMarkdown, username, summary)
 		if err != nil {
 			return errorResult("write failed: " + err.Error()), nil
 		}

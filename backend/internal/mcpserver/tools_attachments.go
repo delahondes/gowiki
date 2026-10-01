@@ -492,9 +492,13 @@ func registerUploadAttachmentTool(srv *mcpsrv.MCPServer, deps Deps) {
 
 		overwrite := req.GetBool("overwrite", false)
 		author := deps.ExtractUsername(ctx)
-		if summary != "" {
-			author = author + " | " + summary
-		}
+		// The media attic (MediaAtticEntry) has no Summary field today,
+		// so there's nowhere clean to store the caller's summary and
+		// pre-concatenating it into `author` would pollute the author
+		// column everywhere media history is displayed. Drop the summary
+		// from the attic entry — accepted trade-off; a MediaAtticEntry.Summary
+		// field + MediaAttic.ArchiveWithSummary is a separate refactor.
+		_ = summary
 		entry, putErr := deps.Media.Put(ns, name, bytes.NewReader(raw), overwrite, author)
 		if errors.Is(putErr, storage.ErrMediaConflict) {
 			return errorResult("attachment already exists at /" + ns + "/" + name + " — pass overwrite: true to replace it"), nil

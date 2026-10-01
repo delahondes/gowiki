@@ -1045,12 +1045,16 @@ func registerWritePageTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 
 		username := deps.ExtractUsername(ctx)
-		author := username
-		if summary != "" {
-			author = author + " | " + summary
-		}
+		// Author and summary are stored in SEPARATE fields of the
+		// attic entry (see storage.AtticEntry). An earlier version
+		// of this handler concatenated them into one `author` string
+		// and called Put; that polluted PageMetadata.Author (what
+		// {tag-query} and other author-facing surfaces read), so a
+		// published QMS table ended up showing commit summaries in
+		// its Author column. PutWithSummary keeps them separate end
+		// to end.
 		existedBefore := deps.Store.Exists(pagePath)
-		result, err := deps.Store.Put(pagePath, newMarkdown, author)
+		result, err := deps.Store.PutWithSummary(pagePath, newMarkdown, username, summary)
 		if err != nil {
 			return errorResult("write failed: " + err.Error()), nil
 		}
