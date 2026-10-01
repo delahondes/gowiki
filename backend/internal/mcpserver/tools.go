@@ -29,6 +29,7 @@ func registerTools(srv *mcpsrv.MCPServer, deps Deps) {
 	registerSearchPagesTool(srv, deps)
 	registerGetReviewflowStatusTool(srv, deps)
 	registerListReviewflowsTool(srv, deps)
+	registerListBrokenLinksTool(srv, deps)
 	registerPreviewPageDiffTool(srv, deps)
 	registerWritePageTool(srv, deps)
 	registerListTodosTool(srv, deps)
@@ -653,6 +654,134 @@ func buildReviewflowList(a reviewflowScanArgs) (rows []reviewflowRow, scanned in
 		})
 	}
 	return rows, scanned, skippedAcl
+}
+
+// ── list_broken_links ───────────────────────────────────────────────────
+
+func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
+	tool := mcpgo.NewTool("list_broken_links",
+		mcpgo.WithDescription(
+			"Scan every page under a path prefix and return the internal links whose "+
+				"target page does not exist. One row per occurrence: "+
+				"{page, href, resolved, label, line}. href is the raw link as written "+
+				"in the markdown; resolved is the absolute page path that was looked up; "+
+				"label is the visible link text; line is the 1-based source line.\n\n"+
+				"Does NOT verify fragment anchors (`#heading`) against the target page's "+
+				"headings — a link to a real page whose anchor doesn't exist is reported "+
+				"as valid here (same semantics as the editor's gowiki-link-missing CSS "+
+				"class). Those are verified by hand.\n\n"+
+				"Pages the caller can't view are skipped — the per-page markdown load "+
+				"respects the dual-ACL model.",
+		),
+		mcpgo.WithString("path_prefix",
+			mcpgo.Description("Namespace prefix (leading slash optional). Empty scans the whole wiki."),
+		),
+		mcpgo.WithNumber("limit",
+			mcpgo.Description("Maximum rows to return (default 500, max 5000). The scan still walks every page under the prefix; `truncated_at_limit` is set when the limit was hit."),
+		),
+	)
+	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.Store == nil {
+			return errorResult("page store not available"), nil
+		}
+		if deps.Sitemap == nil {
+			return errorResult("namespace listing not available"), nil
+		}
+		prefix := strings.Trim(req.GetString("path_prefix", ""), "/")
+		limit := req.GetInt("limit", 500)
+		if limit < 1 {
+			limit = 500
+		}
+		if limit > 5000 {
+			limit = 5000
+		}
+
+		allPages, err := deps.Sitemap.ListAllPages()
+		if err != nil {
+			return errorResult("list pages: " + err.Error()), nil
+		}
+
+		type row struct {
+			Page     string `json:"page"`
+			Href     string `json:"href"`
+			Resolved string `json:"resolved"`
+			Label    string `json:"label"`
+			Line     int    `json:"line"`
+		}
+		broken := []row{}
+		scanned, skippedAcl, pagesWithBroken := 0, 0, 0
+		matchPrefix := prefix
+		if matchPrefix != "" {
+			matchPrefix += "/"
+		}
+		// Memoize existence checks — the same target page is often linked
+		// from many places (a central SOP), and FileStore.Exists is cheap
+		// but non-free. Also stabilises the response if the filesystem
+		// changes mid-scan.
+		existsCache := make(map[string]bool)
+
+		for _, p := range allPages {
+			pagePath := strings.TrimPrefix(p.Path, "/")
+			if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != prefix {
+				continue
+			}
+			if !deps.canView(ctx, pagePath) {
+				skippedAcl++
+				continue
+			}
+			scanned++
+			page, err := deps.Store.Get(pagePath)
+			if err != nil {
+				continue
+			}
+			// ExtractLinkOccurrences expects a leading-slash pagePath so
+			// path.Dir() produces an absolute namespace for relative hrefs
+			// like ./sibling. Store.Get above wants no leading slash; the
+			// resolver wants one. Both callers get what they expect.
+			occurrences := markdown.ExtractLinkOccurrences(page.Markdown, "/"+pagePath)
+			if len(occurrences) == 0 {
+				continue
+			}
+			hadBroken := false
+			for _, occ := range occurrences {
+				if len(broken) >= limit {
+					break
+				}
+				resolved := strings.TrimPrefix(occ.Resolved, "/")
+				exists, cached := existsCache[resolved]
+				if !cached {
+					exists = deps.Store.Exists(resolved)
+					existsCache[resolved] = exists
+				}
+				if exists {
+					continue
+				}
+				hadBroken = true
+				broken = append(broken, row{
+					Page:     "/" + pagePath,
+					Href:     occ.Href,
+					Resolved: "/" + resolved,
+					Label:    occ.Label,
+					Line:     occ.Line,
+				})
+			}
+			if hadBroken {
+				pagesWithBroken++
+			}
+			if len(broken) >= limit {
+				break
+			}
+		}
+
+		return jsonResult(map[string]any{
+			"path_prefix":        "/" + prefix,
+			"broken":             broken,
+			"scanned":            scanned,
+			"pages_with_broken":  pagesWithBroken,
+			"skipped_access":     skippedAcl,
+			"truncated_at_limit": len(broken) >= limit,
+		}), nil
+	})
 }
 
 // ── preview_page_diff ───────────────────────────────────────────────────

@@ -144,6 +144,7 @@ npx @modelcontextprotocol/inspector \
 | `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state — single page |
 | `list_reviewflows` | Batch reviewflow status across every page under a `path_prefix`. One MCP call for a whole namespace — use this instead of a loop of `get_reviewflow_status` for corpus-wide compliance passes. |
+| `list_broken_links` | Scan every page under a `path_prefix` and return the internal links whose target page doesn't exist, as `{page, href, resolved, label, line}` rows. One call for a whole subtree; cheaper than rendering each page to HTML and scraping `gowiki-link-missing`. Does NOT check fragment anchors (`#heading`) against the target's headings — same limitation as the editor's own link decorator. |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page (full rewrite) — requires a summary; refuses fully-validated pages unless `force=true` (see the fully-validated-page guard below) |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption); same fully-validated-page guard as `write_page` |
