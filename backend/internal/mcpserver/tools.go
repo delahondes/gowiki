@@ -701,87 +701,138 @@ func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
 			return errorResult("list pages: " + err.Error()), nil
 		}
 
-		type row struct {
-			Page     string `json:"page"`
-			Href     string `json:"href"`
-			Resolved string `json:"resolved"`
-			Label    string `json:"label"`
-			Line     int    `json:"line"`
-		}
-		broken := []row{}
-		scanned, skippedAcl, pagesWithBroken := 0, 0, 0
-		matchPrefix := prefix
-		if matchPrefix != "" {
-			matchPrefix += "/"
-		}
-		// Memoize existence checks — the same target page is often linked
-		// from many places (a central SOP), and FileStore.Exists is cheap
-		// but non-free. Also stabilises the response if the filesystem
-		// changes mid-scan.
-		existsCache := make(map[string]bool)
-
+		pagePaths := make([]string, 0, len(allPages))
 		for _, p := range allPages {
-			pagePath := strings.TrimPrefix(p.Path, "/")
-			if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != prefix {
-				continue
-			}
-			if !deps.canView(ctx, pagePath) {
-				skippedAcl++
-				continue
-			}
-			scanned++
-			page, err := deps.Store.Get(pagePath)
-			if err != nil {
-				continue
-			}
-			// ExtractLinkOccurrences expects a leading-slash pagePath so
-			// path.Dir() produces an absolute namespace for relative hrefs
-			// like ./sibling. Store.Get above wants no leading slash; the
-			// resolver wants one. Both callers get what they expect.
-			occurrences := markdown.ExtractLinkOccurrences(page.Markdown, "/"+pagePath)
-			if len(occurrences) == 0 {
-				continue
-			}
-			hadBroken := false
-			for _, occ := range occurrences {
-				if len(broken) >= limit {
-					break
-				}
-				resolved := strings.TrimPrefix(occ.Resolved, "/")
-				exists, cached := existsCache[resolved]
-				if !cached {
-					exists = deps.Store.Exists(resolved)
-					existsCache[resolved] = exists
-				}
-				if exists {
-					continue
-				}
-				hadBroken = true
-				broken = append(broken, row{
-					Page:     "/" + pagePath,
-					Href:     occ.Href,
-					Resolved: "/" + resolved,
-					Label:    occ.Label,
-					Line:     occ.Line,
-				})
-			}
-			if hadBroken {
-				pagesWithBroken++
-			}
-			if len(broken) >= limit {
-				break
-			}
+			pagePaths = append(pagePaths, p.Path)
 		}
+		result := buildBrokenLinksList(brokenLinksScanArgs{
+			pages:   pagePaths,
+			prefix:  prefix,
+			limit:   limit,
+			canView: func(p string) bool { return deps.canView(ctx, p) },
+			readMarkdown: func(p string) (string, bool) {
+				page, err := deps.Store.Get(p)
+				if err != nil {
+					return "", false
+				}
+				return page.Markdown, true
+			},
+			exists: deps.Store.Exists,
+		})
 
 		return jsonResult(map[string]any{
 			"path_prefix":        "/" + prefix,
-			"broken":             broken,
-			"scanned":            scanned,
-			"pages_with_broken":  pagesWithBroken,
-			"skipped_access":     skippedAcl,
-			"truncated_at_limit": len(broken) >= limit,
+			"broken":             result.Broken,
+			"scanned":            result.Scanned,
+			"pages_with_broken":  result.PagesWithBroken,
+			"skipped_access":     result.SkippedAccess,
+			"truncated_at_limit": result.TruncatedAtLimit,
 		}), nil
 	})
+}
+
+// brokenLinkRow is one dead-link occurrence in the list_broken_links
+// response. Kept at package scope so the pure buildBrokenLinksList
+// helper (and its tests) can share the shape with the tool handler.
+type brokenLinkRow struct {
+	Page     string `json:"page"`
+	Href     string `json:"href"`
+	Resolved string `json:"resolved"`
+	Label    string `json:"label"`
+	Line     int    `json:"line"`
+}
+
+// brokenLinksScanArgs bundles the inputs to buildBrokenLinksList. The
+// three callbacks let tests drive the scan with plain maps without
+// touching Store or ACL plumbing.
+type brokenLinksScanArgs struct {
+	pages        []string // every page known to the sitemap (leading slash form)
+	prefix       string   // trimmed path_prefix (no leading or trailing slash)
+	limit        int
+	canView      func(pagePath string) bool                // noLeading-slash pagePath → may view?
+	readMarkdown func(pagePath string) (markdown string, ok bool) // noLeading-slash → body
+	exists       func(pagePath string) bool                // noLeading-slash → page exists?
+}
+
+// brokenLinksScanResult is the aggregated response the handler wraps
+// into the JSON envelope.
+type brokenLinksScanResult struct {
+	Broken           []brokenLinkRow
+	Scanned          int
+	PagesWithBroken  int
+	SkippedAccess    int
+	TruncatedAtLimit bool
+}
+
+// buildBrokenLinksList is the pure core of the list_broken_links tool.
+// It walks the sitemap, applies prefix + ACL filtering, extracts page
+// links from every readable page, and records occurrences whose
+// resolved target is missing. Side-effect free so tests can drive it
+// with plain maps.
+//
+// existsCache is local to the call — the same target page is often
+// linked from many places (a central SOP), and the memo keeps that
+// cheap. Also stabilises the response if the filesystem changes
+// mid-scan: within one call every reference to the same target
+// returns the same answer.
+func buildBrokenLinksList(a brokenLinksScanArgs) brokenLinksScanResult {
+	result := brokenLinksScanResult{Broken: []brokenLinkRow{}}
+	matchPrefix := a.prefix
+	if matchPrefix != "" {
+		matchPrefix += "/"
+	}
+	existsCache := make(map[string]bool)
+
+	for _, raw := range a.pages {
+		if len(result.Broken) >= a.limit {
+			break
+		}
+		pagePath := strings.TrimPrefix(raw, "/")
+		if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != a.prefix {
+			continue
+		}
+		if a.canView != nil && !a.canView(pagePath) {
+			result.SkippedAccess++
+			continue
+		}
+		result.Scanned++
+		md, ok := a.readMarkdown(pagePath)
+		if !ok {
+			continue
+		}
+		occurrences := markdown.ExtractLinkOccurrences(md, "/"+pagePath)
+		if len(occurrences) == 0 {
+			continue
+		}
+		hadBroken := false
+		for _, occ := range occurrences {
+			if len(result.Broken) >= a.limit {
+				break
+			}
+			resolved := strings.TrimPrefix(occ.Resolved, "/")
+			exists, cached := existsCache[resolved]
+			if !cached {
+				exists = a.exists(resolved)
+				existsCache[resolved] = exists
+			}
+			if exists {
+				continue
+			}
+			hadBroken = true
+			result.Broken = append(result.Broken, brokenLinkRow{
+				Page:     "/" + pagePath,
+				Href:     occ.Href,
+				Resolved: "/" + resolved,
+				Label:    occ.Label,
+				Line:     occ.Line,
+			})
+		}
+		if hadBroken {
+			result.PagesWithBroken++
+		}
+	}
+	result.TruncatedAtLimit = len(result.Broken) >= a.limit
+	return result
 }
 
 // ── preview_page_diff ───────────────────────────────────────────────────

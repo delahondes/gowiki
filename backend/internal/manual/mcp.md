@@ -372,6 +372,39 @@ Attachments are non-`.md` files under `data/content/`, referenced from pages via
 
 **Version model.** Attachments are versioned exactly like pages: v1 on first upload, incremented on overwrite, previous bytes preserved in the media attic. The frontend serves the current file for `/path/to/file.ext`, and older versions via `?v=N` — unchanged by the MCP layer.
 
+## Broken-link scan
+
+`render_page` with `format=html` marks each unresolved reference with the `gowiki-link-missing` CSS class — exploitable page by page, but a 200-page corpus scan that way is 20 MB of HTML round-tripped for information the engine already has at render time. `list_broken_links(path_prefix, limit?)` returns the same answer directly, in one call.
+
+- **One row per dead-link OCCURRENCE** — `{page, href, resolved, label, line}`. No dedup within a page: the same href appearing twice reports twice, so the "which spot do I fix?" question has one answer per row. `href` is the raw link as written in the markdown; `resolved` is the absolute page path that was looked up; `label` is the visible link text; `line` is the 1-based source line of the hit.
+- **Envelope counters** — `scanned` (pages actually opened), `pages_with_broken` (distinct pages with ≥ 1 broken row, so "how many SOPs need fixing?" is a single number), `skipped_access` (pages hidden by ACL — the dual-ACL model is respected), `truncated_at_limit` (set when the row cap was hit; narrow the prefix or raise `limit` up to the 5000 hard cap and re-run).
+- **Default `limit` is 500.** Once the cap is hit, remaining pages are not even opened — the scan is cheap even on a wiki with 10 000 pages where a few handfuls are enough to fix.
+
+**Not checked:** fragment anchors inside existing pages (`/path/to/page#missing-section`). A link to a real page whose anchor doesn't exist is reported as valid here — same limitation as the editor's own `gowiki-link-missing` decorator. Those are the pass that stays manual.
+
+**Typical invocation:**
+
+```json
+{
+  "tool": "list_broken_links",
+  "arguments": { "path_prefix": "/regulatory/qms", "limit": 500 }
+}
+```
+
+A sample row from a real QMS scan:
+
+```json
+{
+  "page": "/regulatory/qms/soft/sop01",
+  "href": "./tpl14",
+  "resolved": "/regulatory/qms/soft/sop01/tpl14",
+  "label": "SOFT/SOP01/TPL14 : Review checklist",
+  "line": 128
+}
+```
+
+Use alongside the other two batched compliance scanners: `list_reviewflows` for signature state, `list_page_comments` for open discussions, and `list_broken_links` for integrity of internal cross-references. Together they answer the three questions an auditor opens with: *is it signed, is it discussed, does it still point at what it says it points at?*
+
 ## Comments
 
 Comments are sidebar annotations authors leave on a specific text selection in a page, without touching the page content. They live in a per-page JSON sidecar under `data/meta/`; the wiki manual has the full workflow at [Comments](./comments).
