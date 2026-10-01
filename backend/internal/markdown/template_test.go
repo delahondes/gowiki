@@ -381,7 +381,7 @@ func TestResolveTemplatePayload_TodoMultipleInOrder(t *testing.T) {
 	if idxRead < 0 || idxAck < 0 || idxVal < 0 {
 		t.Fatalf("one of the three template-todo lines was not resolved:\n%s", got)
 	}
-	if !(idxRead < idxAck && idxAck < idxVal) {
+	if idxRead >= idxAck || idxAck >= idxVal {
 		t.Errorf("order not preserved: read=%d ack=%d val=%d\n%s", idxRead, idxAck, idxVal, got)
 	}
 }

@@ -761,13 +761,13 @@ type brokenLinkRow struct {
 // link's TARGET page (heading slugs extracted) — one memoised Store.Get
 // per unique target.
 type brokenLinksScanArgs struct {
-	pages           []string // every page known to the sitemap (leading slash form)
-	prefix          string   // trimmed path_prefix (no leading or trailing slash)
-	limit           int
-	checkFragments  bool
-	canView         func(pagePath string) bool                        // noLeading-slash pagePath → may view?
-	readMarkdown    func(pagePath string) (markdown string, ok bool)  // noLeading-slash → body
-	exists          func(pagePath string) bool                        // noLeading-slash → page exists?
+	pages          []string // every page known to the sitemap (leading slash form)
+	prefix         string   // trimmed path_prefix (no leading or trailing slash)
+	limit          int
+	checkFragments bool
+	canView        func(pagePath string) bool                       // noLeading-slash pagePath → may view?
+	readMarkdown   func(pagePath string) (markdown string, ok bool) // noLeading-slash → body
+	exists         func(pagePath string) bool                       // noLeading-slash → page exists?
 }
 
 // brokenLinksScanResult is the aggregated response the handler wraps

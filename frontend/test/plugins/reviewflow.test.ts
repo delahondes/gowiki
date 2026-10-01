@@ -511,7 +511,9 @@ describe("isVersionTagAlreadyValidated predicate", () => {
     // the directive has since gained a validator role. The author
     // can still work toward re-validating under the same tag with
     // the richer role set.
-    const history = [{ page_version: 5, version_tag: "1.0", confirmed_by: { author: "x", reviewer: "y" }, timestamp: "" }]
+    const history = [
+      { page_version: 5, version_tag: "1.0", confirmed_by: { author: "x", reviewer: "y" }, timestamp: "" },
+    ]
     const biggerRoles = { ...roles } // adds validation
     expect(isVersionTagAlreadyValidated(history as any, "1.0", biggerRoles)).toBe(false)
   })

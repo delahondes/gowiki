@@ -149,11 +149,11 @@ func TestExtractLinkOccurrences_EmptyLabel(t *testing.T) {
 func TestSlugifyHeading_Basic(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"Hello":                "hello",
-		"Hello World":          "hello-world",
+		"Hello":                  "hello",
+		"Hello World":            "hello-world",
 		"  leading & trailing  ": "leading-trailing",
-		"UPPER case Mix":       "upper-case-mix",
-		"foo--bar___baz":       "foo-bar-baz",
+		"UPPER case Mix":         "upper-case-mix",
+		"foo--bar___baz":         "foo-bar-baz",
 	}
 	for in, want := range cases {
 		if got := SlugifyHeading(in); got != want {
@@ -170,9 +170,9 @@ func TestSlugifyHeading_NonAscii(t *testing.T) {
 	// hyphen), not "cafe-alpha". A past divergence here is exactly
 	// the kind of silent bug this test exists to prevent.
 	cases := map[string]string{
-		"Café Alpha":    "caf-alpha",
-		"éè à":          "heading", // all non-alnum after lowering → empty → default "heading"
-		"1. Objectifs":  "1-objectifs",
+		"Café Alpha":   "caf-alpha",
+		"éè à":         "heading", // all non-alnum after lowering → empty → default "heading"
+		"1. Objectifs": "1-objectifs",
 	}
 	for in, want := range cases {
 		if got := SlugifyHeading(in); got != want {

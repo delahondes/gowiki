@@ -312,4 +312,3 @@ func stripInlineMarkup(s string) string {
 	}
 	return b.String()
 }
-

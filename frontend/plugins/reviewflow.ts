@@ -332,9 +332,7 @@ class ReviewflowNodeView {
     // isVersionTagAlreadyValidated for the signal priority.
     const versionHistory = this.status?.version_history || []
     const versionTagStale =
-      !this.historyVersion &&
-      !isValidated &&
-      isVersionTagAlreadyValidated(versionHistory, version, roles)
+      !this.historyVersion && !isValidated && isVersionTagAlreadyValidated(versionHistory, version, roles)
 
     // Wrapper with border color
     const wrapper = document.createElement("div")

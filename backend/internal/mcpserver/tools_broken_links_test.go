@@ -22,14 +22,6 @@ type fakeCorpus struct {
 	acl             map[string]bool // true = visible, false/missing = hidden
 }
 
-func (c fakeCorpus) allPaths() []string {
-	paths := make([]string, 0, len(c.pageMarkdown))
-	for p := range c.pageMarkdown {
-		paths = append(paths, p)
-	}
-	return paths
-}
-
 func (c fakeCorpus) canView(p string) bool {
 	if c.acl == nil {
 		return true
@@ -145,7 +137,7 @@ func TestBuildBrokenLinksList_ExistsCacheDedupsLookups(t *testing.T) {
 	c := fakeCorpus{
 		pageMarkdown: map[string]string{
 			"p1": "[a](/central) [b](/central)\n", // same target twice on the same page
-			"p2": "[c](/central)\n",                // same target on a different page
+			"p2": "[c](/central)\n",               // same target on a different page
 			"p3": "[d](/other)\n",
 		},
 	}
