@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest"
 import type { Node as PMNode } from "prosemirror-model"
 import { roundTrip, countNodes } from "../helpers"
-import { rowMatchesUser, rowMatchesSignedBy } from "../../plugins/reviewflow"
+import { rowMatchesUser, rowMatchesSignedBy, isVersionTagAlreadyValidated } from "../../plugins/reviewflow"
 
 function firstReviewflow(doc: PMNode): Record<string, unknown> | null {
   let found: Record<string, unknown> | null = null
@@ -430,6 +430,90 @@ describe("rowMatchesSignedBy predicate", () => {
     expect(rowMatchesSignedBy(st, "alice")).toBe(true)
     expect(rowMatchesSignedBy(st, "bob")).toBe(false)
     expect(rowMatchesSignedBy(st, "carol")).toBe(false)
+  })
+})
+
+// Staleness check for a version tag. Regression against the
+// SOP01/TPL13 bug: a partial-signature snapshot (rc.3+ bookkeeping
+// for signatures that got wiped between edits) was mistaken for a
+// completed validation. The author who had just confirmed their own
+// role under tag "2.0" was then told "Version 2.0 was already
+// validated. Update the version tag before approving." — nope, they
+// were still mid-validation on their own choice of tag.
+describe("isVersionTagAlreadyValidated predicate", () => {
+  const roles = { author: "raynald.delahondes", reviewer: "michel.laborde", validation: "etienne.formstecher" }
+
+  it("returns false when version history is empty", () => {
+    expect(isVersionTagAlreadyValidated([], "1.0", roles)).toBe(false)
+  })
+
+  it("returns false when version tag is empty", () => {
+    const history = [{ page_version: 1, version_tag: "1.0", confirmed_by: roles, timestamp: "", is_validated: true }]
+    expect(isVersionTagAlreadyValidated(history as any, "", roles)).toBe(false)
+  })
+
+  it("returns true for a fully-validated snapshot of the same tag (new flag set)", () => {
+    const history = [
+      {
+        page_version: 5,
+        version_tag: "1.0",
+        confirmed_by: roles,
+        timestamp: "2026-01-01T00:00:00Z",
+        is_validated: true,
+      },
+    ]
+    expect(isVersionTagAlreadyValidated(history as any, "1.0", roles)).toBe(true)
+  })
+
+  it("returns true for a legacy fully-validated snapshot (is_validated unset, confirmed_by covers all roles)", () => {
+    // Pre-rc.3 records don't carry is_validated. Fall back to checking
+    // that confirmed_by covers every CURRENT role.
+    const history = [{ page_version: 5, version_tag: "1.0", confirmed_by: roles, timestamp: "" }]
+    expect(isVersionTagAlreadyValidated(history as any, "1.0", roles)).toBe(true)
+  })
+
+  it("returns FALSE for a partial-signature snapshot sharing the tag", () => {
+    // The exact SOP01/TPL13 shape: author has confirmed as part of a
+    // post-rc.3 partial snapshot. Reviewer and validator haven't.
+    // The tag must NOT be flagged stale.
+    const history = [
+      {
+        page_version: 14,
+        version_tag: "2.0",
+        confirmed_by: { author: "raynald.delahondes" }, // only one of three roles
+        timestamp: "2026-10-01T00:00:00Z",
+        // is_validated absent / undefined — new partials write omitempty
+      },
+    ]
+    expect(isVersionTagAlreadyValidated(history as any, "2.0", roles)).toBe(false)
+  })
+
+  it("returns true when any history entry (not necessarily the latest) matches a full validation of this tag", () => {
+    // Both a legacy full validation of 1.0 AND a partial snapshot of 2.0.
+    // Current tag 1.0 → stale (prior full validation on it). Current
+    // tag 2.0 → NOT stale (only a partial exists).
+    const history = [
+      { page_version: 5, version_tag: "1.0", confirmed_by: roles, timestamp: "" },
+      { page_version: 14, version_tag: "2.0", confirmed_by: { author: "raynald.delahondes" }, timestamp: "" },
+    ]
+    expect(isVersionTagAlreadyValidated(history as any, "1.0", roles)).toBe(true)
+    expect(isVersionTagAlreadyValidated(history as any, "2.0", roles)).toBe(false)
+  })
+
+  it("returns false when current page has no reviewflow (empty roles)", () => {
+    const history = [{ page_version: 5, version_tag: "1.0", confirmed_by: roles, timestamp: "", is_validated: true }]
+    expect(isVersionTagAlreadyValidated(history as any, "1.0", {})).toBe(false)
+  })
+
+  it("returns false when a role was ADDED since (legacy entry no longer covers all current roles)", () => {
+    // A legacy entry that covered the roles AT THE TIME of its
+    // validation (author + reviewer, say) doesn't lock the tag if
+    // the directive has since gained a validator role. The author
+    // can still work toward re-validating under the same tag with
+    // the richer role set.
+    const history = [{ page_version: 5, version_tag: "1.0", confirmed_by: { author: "x", reviewer: "y" }, timestamp: "" }]
+    const biggerRoles = { ...roles } // adds validation
+    expect(isVersionTagAlreadyValidated(history as any, "1.0", biggerRoles)).toBe(false)
   })
 })
 

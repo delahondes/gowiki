@@ -141,6 +141,43 @@ function findLastSignatureVersion(
   return latest
 }
 
+// isVersionTagAlreadyValidated returns true when the given version tag
+// has previously been FULLY VALIDATED in the page's history. Partial-
+// signature snapshots (rc.3+) also land in version_history but do NOT
+// count — they're bookkeeping for signatures that got wiped between
+// edits, not records of completed validations. Treating a partial as
+// a validation was the SOP01/TPL13 bug: an author who confirmed
+// their own role, got the next edit wipe, then saw "version 2.0 was
+// already validated" even though no one else had signed yet.
+//
+// Signal priority:
+//   is_validated === true   — new (rc.3+) snapshots carry this explicitly.
+//   legacy fallback          — pre-rc.3 fully-validated records lack the
+//                              flag; they're the ones whose confirmed_by
+//                              covers every CURRENT role. If any current
+//                              role is missing from confirmed_by the entry
+//                              can't have been a full validation.
+//
+// `currentRoles` is the live Roles map on the page (role → user). Empty
+// Roles means no reviewflow directive, in which case nothing can be
+// stale.
+export function isVersionTagAlreadyValidated(
+  versionHistory: NonNullable<ReviewflowStatus["version_history"]>,
+  versionTag: string,
+  currentRoles: Record<string, string>
+): boolean {
+  if (!versionTag) return false
+  const required = Object.keys(currentRoles)
+  if (required.length === 0) return false
+  for (const vr of versionHistory) {
+    if (vr.version_tag !== versionTag) continue
+    if (vr.is_validated === true) return true
+    const confirmed = vr.confirmed_by || {}
+    if (required.every((r) => r in confirmed)) return true
+  }
+  return false
+}
+
 // rowMatchesSignedBy is the `{reviewflow-query signed_by=X}` predicate.
 // A row survives when X holds a role on the page AND that role is NOT
 // in missing_roles for the current version — i.e. X's seat has been
@@ -289,11 +326,15 @@ class ReviewflowNodeView {
     const currentUser = (window as any).__gowikiCurrentUser?.username || ""
     const isValidated = backendHasState && this.status!.is_fully_validated === true
 
-    // Check if the current version tag was already validated in a previous cycle.
-    // If so, the version tag must be bumped before new approvals can proceed.
+    // Only flag a stale tag if a PRIOR fully-validated snapshot shared
+    // it. The predicate ignores partial snapshots so an author
+    // mid-validation isn't told to bump the tag. See
+    // isVersionTagAlreadyValidated for the signal priority.
     const versionHistory = this.status?.version_history || []
     const versionTagStale =
-      !this.historyVersion && !isValidated && version !== "" && versionHistory.some((vr) => vr.version_tag === version)
+      !this.historyVersion &&
+      !isValidated &&
+      isVersionTagAlreadyValidated(versionHistory, version, roles)
 
     // Wrapper with border color
     const wrapper = document.createElement("div")
