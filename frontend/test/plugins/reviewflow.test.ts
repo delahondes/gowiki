@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest"
 import type { Node as PMNode } from "prosemirror-model"
 import { roundTrip, countNodes } from "../helpers"
-import { rowMatchesUser } from "../../plugins/reviewflow"
+import { rowMatchesUser, rowMatchesSignedBy } from "../../plugins/reviewflow"
 
 function firstReviewflow(doc: PMNode): Record<string, unknown> | null {
   let found: Record<string, unknown> | null = null
@@ -190,6 +190,39 @@ describe("reviewflow-query", () => {
     expect(rt.isStable).toBe(true)
     expect(firstReviewflowQuery(rt.doc)!.when).toBe("any")
   })
+
+  // signed_by is INDEPENDENT of user/when — a dashboard like
+  // "docs waiting on me where Etienne already signed" is one query:
+  //   {reviewflow-query user=@me when=next signed_by=etienne.formstecher}
+  it("{reviewflow-query signed_by=etienne.formstecher} round-trips", () => {
+    const rt = roundTrip("{reviewflow-query signed_by=etienne.formstecher}\n")
+    expect(rt.isStable).toBe(true)
+    expect(firstReviewflowQuery(rt.doc)!.signed_by).toBe("etienne.formstecher")
+  })
+
+  it("{reviewflow-query signed_by=@me} round-trips (resolved at render time)", () => {
+    // @me is kept VERBATIM in source; the client resolves it from the
+    // viewer at render time. A fixed-login dashboard uses the full
+    // username; a personal "my sign-offs" dashboard uses @me.
+    const rt = roundTrip("{reviewflow-query signed_by=@me}\n")
+    expect(rt.isStable).toBe(true)
+    expect(firstReviewflowQuery(rt.doc)!.signed_by).toBe("@me")
+  })
+
+  it("empty signed_by drops on serialise", () => {
+    const rt = roundTrip("{reviewflow-query}\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).not.toMatch(/signed_by=/)
+  })
+
+  it("signed_by combines with user+when (the 'waiting on me where X signed' case)", () => {
+    const rt = roundTrip("{reviewflow-query user=@me when=next signed_by=etienne.formstecher}\n")
+    expect(rt.isStable).toBe(true)
+    const a = firstReviewflowQuery(rt.doc)!
+    expect(a.user).toBe("@me")
+    expect(a.when).toBe("next")
+    expect(a.signed_by).toBe("etienne.formstecher")
+  })
 })
 
 // The rowMatchesUser predicate is the runtime filter behind
@@ -321,6 +354,82 @@ describe("rowMatchesUser predicate", () => {
     expect(rowMatchesUser(st, "alice", "any")).toBe(true)
     expect(rowMatchesUser(st, "alice", "missing")).toBe(true)
     expect(rowMatchesUser(st, "alice", "next")).toBe(true)
+  })
+})
+
+// signed_by is the "has acted" mirror of when=missing's "has to act".
+// Both are "user holds a role on the page" filtered further; the
+// predicate below says the user's seat is NOT in missing_roles for
+// the current version.
+describe("rowMatchesSignedBy predicate", () => {
+  function mkStatus(overrides: Partial<any> = {}): any {
+    return {
+      roles: {},
+      missing_roles: {},
+      version_tag: "1.0",
+      current_page_version: 1,
+      validated_page_version: 0,
+      is_fully_validated: false,
+      ...overrides,
+    }
+  }
+
+  it("user with no role on the page never matches", () => {
+    const st = mkStatus({
+      roles: { reviewer: "bob" },
+      missing_roles: {},
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(false)
+  })
+
+  it("matches when the user's role has been confirmed on the current version", () => {
+    const st = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: {}, // confirmed
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(true)
+  })
+
+  it("does not match when the user's role is still missing", () => {
+    // "signed_by" is the mirror of "when=missing": one is "has to act",
+    // the other is "has acted". Both can't be true for the same row.
+    const st = mkStatus({
+      roles: { reviewer: "alice" },
+      missing_roles: { reviewer: "alice" },
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(false)
+  })
+
+  it("fully-validated page matches every holder", () => {
+    const st = mkStatus({
+      roles: { author: "alice", reviewer: "bob", validator: "carol" },
+      missing_roles: {},
+      is_fully_validated: true,
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(true)
+    expect(rowMatchesSignedBy(st, "bob")).toBe(true)
+    expect(rowMatchesSignedBy(st, "carol")).toBe(true)
+  })
+
+  it("user holding two seats — matches if ANY seat has been confirmed", () => {
+    // The rare case of one person holding multiple roles on the same
+    // page. If they've confirmed one but not the other, the "has
+    // acted" answer is still yes.
+    const st = mkStatus({
+      roles: { author: "alice", reviewer: "alice" },
+      missing_roles: { reviewer: "alice" }, // author already confirmed, reviewer not yet
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(true)
+  })
+
+  it("partial validation on a 3-role page: non-signer still missing, signer counts", () => {
+    const st = mkStatus({
+      roles: { author: "alice", reviewer: "bob", validator: "carol" },
+      missing_roles: { reviewer: "bob", validator: "carol" }, // only alice signed
+    })
+    expect(rowMatchesSignedBy(st, "alice")).toBe(true)
+    expect(rowMatchesSignedBy(st, "bob")).toBe(false)
+    expect(rowMatchesSignedBy(st, "carol")).toBe(false)
   })
 })
 

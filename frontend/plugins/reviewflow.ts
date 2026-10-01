@@ -141,6 +141,29 @@ function findLastSignatureVersion(
   return latest
 }
 
+// rowMatchesSignedBy is the `{reviewflow-query signed_by=X}` predicate.
+// A row survives when X holds a role on the page AND that role is NOT
+// in missing_roles for the current version — i.e. X's seat has been
+// confirmed since the last content change. Mirror image of
+// rowMatchesUser(when="missing"): one is "X still owes a signature on
+// this version", the other is "X has already signed on this version".
+//
+// A user with no role on the page never matches. The confirmation
+// counts regardless of whether it was a cryptographic signature or a
+// click-only confirmation; use the per-page SignedRoles field when
+// you need the crypto distinction (list_reviewflows exposes it
+// through the status payload).
+export function rowMatchesSignedBy(status: ReviewflowStatus, user: string): boolean {
+  const rolesForUser: string[] = []
+  for (const [role, assignee] of Object.entries(status.roles || {})) {
+    if (assignee === user) rolesForUser.push(role)
+  }
+  if (rolesForUser.length === 0) return false
+  const missing = status.missing_roles || {}
+  // At least one of the user's seats on this page is NOT in missing_roles.
+  return rolesForUser.some((r) => !(r in missing))
+}
+
 // rowMatchesUser is the `{reviewflow-query user=X when=Y}` predicate.
 // A row survives when the user holds a role on the page AND the row
 // meets the `when` narrowing:
@@ -778,6 +801,13 @@ class ReviewflowQueryNodeView {
     const currentUser = (window as any).__gowikiCurrentUser?.username || ""
     const userFilter = rawUser === "@me" ? currentUser : rawUser
     const whenFilter = String(this.node.attrs.when || "any").toLowerCase()
+    // signed_by is INDEPENDENT of user/when — it narrows to pages where
+    // the given user has already confirmed one of their assigned roles
+    // on the current version. Together they answer "docs waiting on me
+    // where Etienne already signed" as `user=@me when=next
+    // signed_by=etienne.formstecher`. @me resolves the same way.
+    const rawSignedBy = String(this.node.attrs.signed_by || "").trim()
+    const signedByFilter = rawSignedBy === "@me" ? currentUser : rawSignedBy
 
     this.dom.innerHTML = '<div class="gowiki-rfq-loading">Loading reviewflow status...</div>'
 
@@ -819,6 +849,11 @@ class ReviewflowQueryNodeView {
         filtered = filtered.filter((r) => rowMatchesUser(r.status, userFilter, whenFilter))
       }
 
+      // 5. Filter by signed_by (independent of user/when).
+      if (signedByFilter) {
+        filtered = filtered.filter((r) => rowMatchesSignedBy(r.status, signedByFilter))
+      }
+
       // 4. Sort by date (most recent first)
       filtered.sort((a, b) => {
         const da = a.page.last_modified || ""
@@ -849,6 +884,12 @@ class ReviewflowQueryNodeView {
                 ? "awaiting confirmation"
                 : "with an assigned role"
         headerText += ` — ${userLabel} · ${suffix}`
+      }
+      if (signedByFilter) {
+        // Independent clause (not combined with the user suffix with
+        // another dash) because it's a separate narrowing — reader
+        // sees exactly which filters are active.
+        headerText += ` · signed by ${getUserLabel(signedByFilter)}`
       }
       header.textContent = headerText
       this.dom.appendChild(header)
@@ -1275,6 +1316,15 @@ export const reviewflowPlugin: WikiPlugin = {
         ],
         helpText: "Combined with 'User filter'. Ignored when user is empty.",
       },
+      {
+        name: "signed_by",
+        label: "Signed by",
+        default: "",
+        parse: (raw: string) => raw.trim(),
+        serialize: (value: string | null) => String(value ?? ""),
+        helpText:
+          "Only pages where this user has already confirmed one of their roles on the current version. Use @me for the current viewer. Independent of 'User filter' — combine them to answer 'docs waiting on me where Etienne already signed'.",
+      },
     ]
 
     reg.registerSchema({
@@ -1287,6 +1337,7 @@ export const reviewflowPlugin: WikiPlugin = {
             status: { default: "draft" },
             user: { default: "" },
             when: { default: "any" },
+            signed_by: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -1297,6 +1348,7 @@ export const reviewflowPlugin: WikiPlugin = {
                 "data-status": node.attrs.status || "draft",
                 "data-user": node.attrs.user || "",
                 "data-when": node.attrs.when || "any",
+                "data-signed-by": node.attrs.signed_by || "",
               },
               `Reviewflow query: ${node.attrs.status || "draft"}`,
             ]
@@ -1310,6 +1362,7 @@ export const reviewflowPlugin: WikiPlugin = {
                   status: dom.getAttribute("data-status") || "draft",
                   user: dom.getAttribute("data-user") || "",
                   when: dom.getAttribute("data-when") || "any",
+                  signed_by: dom.getAttribute("data-signed-by") || "",
                 }
               },
             },
@@ -1333,6 +1386,7 @@ export const reviewflowPlugin: WikiPlugin = {
             status: attrs.status ?? "draft",
             user: attrs.user ?? "",
             when: attrs.when ?? "any",
+            signed_by: attrs.signed_by ?? "",
           })
         )
       },
@@ -1347,6 +1401,7 @@ export const reviewflowPlugin: WikiPlugin = {
         }
         if (node.attrs.user) parts.push(`user=${node.attrs.user}`)
         if (node.attrs.when && node.attrs.when !== "any") parts.push(`when=${node.attrs.when}`)
+        if (node.attrs.signed_by) parts.push(`signed_by=${node.attrs.signed_by}`)
         return parts.length ? `{reviewflow-query ${parts.join(" ")}}\n\n` : `{reviewflow-query}\n\n`
       },
     })

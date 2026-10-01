@@ -110,8 +110,9 @@ By default, it scans the current page's namespace and shows only **draft** docum
 | status | Filter: `draft`, `validated`, or `all` | `draft` |
 | user | Restrict to pages where this user has an assigned role. Use `@me` for the currently-logged-in viewer, or a username for a fixed dashboard. | (no filter) |
 | when | Narrows the `user` match further: `any` (all assignments), `missing` (user's role hasn't confirmed the current version), `next` (user's role is actionable **right now** — head of the sequential queue, or any missing role in parallel mode), `overdue` (user's role missed its deadline). Ignored when `user` is empty. | `any` |
+| signed_by | Restrict to pages where this user has **already confirmed** one of their assigned roles on the current version. Independent of `user` / `when` — combine them to answer "docs waiting on me where Etienne already signed". Use `@me` for the current viewer. | (no filter) |
 
-### Common `user` + `when` patterns
+### Common `user`, `when` and `signed_by` patterns
 
 - **"What must I sign right now?"** — a personal to-do list of the exact
   documents where the reviewflow chain is waiting on the viewer:
@@ -132,6 +133,24 @@ By default, it scans the current page's namespace and shows only **draft** docum
 
   ```markdown
   {reviewflow-query user=@me when=overdue}
+  ```
+
+- **"What have I already signed?"** — mirror of `user=@me when=missing`:
+  the docs where the viewer holds a role AND has already confirmed it on
+  the current version (click-only confirmation or crypto signature,
+  either counts):
+
+  ```markdown
+  {reviewflow-query user=@me signed_by=@me status=all}
+  ```
+
+- **"Docs waiting on me where Etienne already signed."** — the
+  "chain-of-approval visibility" case. `user`/`when` filters to the
+  docs where you still need to act, `signed_by` further narrows to
+  the ones where a specific other role is already confirmed:
+
+  ```markdown
+  {reviewflow-query path=/regulatory/qms user=@me when=next signed_by=etienne.formstecher}
   ```
 
 The table shows for each document:
