@@ -186,7 +186,12 @@ class TemplateTitleNodeView {
     return true
   }
 
-  stopEvent(): boolean {
+  stopEvent(event: Event): boolean {
+    // Let mouse events through so ProseMirror can create a NodeSelection
+    // when the user clicks the node — the properties panel is driven by
+    // selection. Keyboard/paste/input still blocked (contenteditable=false).
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
     return true
   }
   ignoreMutation(): boolean {
@@ -242,7 +247,9 @@ class TemplateStampNodeView {
     return true
   }
 
-  stopEvent(): boolean {
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
     return true
   }
   ignoreMutation(): boolean {
@@ -307,7 +314,9 @@ class TemplateReviewflowNodeView {
     return true
   }
 
-  stopEvent(): boolean {
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
     return true
   }
   ignoreMutation(): boolean {
@@ -369,7 +378,9 @@ class TemplateTodoNodeView {
     return true
   }
 
-  stopEvent(): boolean {
+  stopEvent(event: Event): boolean {
+    const type = event.type
+    if (type === "mousedown" || type === "mouseup" || type === "click") return false
     return true
   }
   ignoreMutation(): boolean {
@@ -716,9 +727,12 @@ const templateStyles = `
   padding: 2px 8px;
   font-size: 12px;
   border-radius: 3px;
+  border-left: 3px solid var(--gw-color-accent, #4e79a7);
+  background: var(--gw-color-surface-alt, #f5f8ff);
 }
 
 .gowiki-template-stamp-note {
+  display: block;
   color: var(--gw-color-muted);
   font-style: italic;
 }
