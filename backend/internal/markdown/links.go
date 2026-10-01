@@ -193,6 +193,15 @@ func SlugifyHeading(text string) string {
 	return out
 }
 
+// numberedHeadingPrefixRe matches the dialect's `N. ` numbering prefix
+// on a heading. The frontend parser strips this prefix at parse time
+// (see core_nodes.ts `gowiki_numbered_heading` core rule) so the
+// resulting node's textContent — and hence its slug — does NOT include
+// the number. The backend extractor must apply the same strip, otherwise
+// a href like `#documentation-effort` into a `## 1. Documentation effort`
+// heading would be reported as a dead fragment.
+var numberedHeadingPrefixRe = regexp.MustCompile(`^\d+\. `)
+
 // ExtractHeadingSlugs walks the markdown source and returns the set of
 // anchor slugs — one per ATX heading, with the frontend's "same slug
 // twice → suffix the duplicates with -1, -2, …" rule so the server
@@ -222,7 +231,14 @@ func ExtractHeadingSlugs(content string) map[string]struct{} {
 		if m == nil {
 			continue
 		}
-		base := SlugifyHeading(stripInlineMarkup(m[2]))
+		text := stripInlineMarkup(m[2])
+		// Numbered-heading prefix is syntactic, not part of the slug:
+		// `## 1. Documentation effort` slugifies as `documentation-effort`,
+		// not `1-documentation-effort`. The counter is re-computed at
+		// render time; two headings both marked "1." still produce
+		// distinct slugs via the duplicate-suffix rule below.
+		text = numberedHeadingPrefixRe.ReplaceAllString(text, "")
+		base := SlugifyHeading(text)
 		n := counts[base]
 		counts[base] = n + 1
 		slug := base

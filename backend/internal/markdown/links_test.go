@@ -282,6 +282,39 @@ func TestExtractHeadingSlugs_StripsInlineMarkup(t *testing.T) {
 	}
 }
 
+// Numbered-heading prefix (dialect's "## 1. Title" syntax) must be
+// stripped before slugifying — the frontend's gowiki_numbered_heading
+// parse rule removes "N. " from the heading text at parse time, so
+// the browser renders a heading whose textContent (and anchor slug)
+// doesn't include the number. A link to `#documentation-effort`
+// into a `## 1. Documentation effort` heading used to be reported
+// as a dead fragment; this pins the fix.
+func TestExtractHeadingSlugs_StripsNumberedPrefix(t *testing.T) {
+	t.Parallel()
+	md := `# 1. Overview
+
+## 1. Documentation effort
+
+### 3. Nested
+
+## 10. Double-digit still counts
+`
+	slugs := ExtractHeadingSlugs(md)
+	for _, want := range []string{"overview", "documentation-effort", "nested", "double-digit-still-counts"} {
+		if _, ok := slugs[want]; !ok {
+			t.Errorf("missing %q in %+v", want, slugs)
+		}
+	}
+	// None of the prefix-including slugs should leak in — a divergence
+	// here would silently miss real anchors or report false positives
+	// on scans of a QMS that uses numbered headings heavily.
+	for _, bad := range []string{"1-overview", "1-documentation-effort", "3-nested", "10-double-digit-still-counts"} {
+		if _, ok := slugs[bad]; ok {
+			t.Errorf("numbered prefix leaked into slug %q: %+v", bad, slugs)
+		}
+	}
+}
+
 func TestExtractHeadingSlugs_IgnoresSettextAndIndented(t *testing.T) {
 	t.Parallel()
 	// Dialect rejects setext headings and indented `#`. The slug
