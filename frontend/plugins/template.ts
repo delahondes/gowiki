@@ -858,6 +858,13 @@ const templateMarkerProperties = [
 ] as any[]
 const templateTitleProperties = [] as any[]
 const templateStampProperties = [] as any[]
+// {template-reviewflow} property surface mirrors {reviewflow}: a
+// `version` string and a multiline `roles` map (one `rolename=username`
+// per line, stored on the node as a JSON-encoded string). The ONE
+// semantic difference from {reviewflow} is inheritance — any role left
+// blank here falls back to the template's own {reviewflow} directive at
+// create time. The helpText spells that out so the editor is honest
+// about what empty means.
 const templateReviewflowProperties = [
   {
     name: "version",
@@ -866,6 +873,37 @@ const templateReviewflowProperties = [
     parse: (raw: string) => raw.trim(),
     serialize: (v: string | null) => String(v ?? ""),
     helpText: "Optional. Defaults to 1.0 at creation.",
+  },
+  {
+    name: "roles",
+    label: "Roles",
+    default: "{}",
+    multiline: true,
+    parse: (raw: string) => {
+      const roles: Record<string, string> = {}
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        const eq = trimmed.indexOf("=")
+        if (eq > 0) {
+          roles[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+        }
+      }
+      return JSON.stringify(roles)
+    },
+    serialize: (value: string | null) => {
+      try {
+        const roles = JSON.parse(value || "{}")
+        return Object.entries(roles)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, v]) => `${k}=${v}`)
+          .join("\n")
+      } catch {
+        return value || ""
+      }
+    },
+    helpText:
+      "One role per line: rolename=username. Any role left blank inherits from the template's own {reviewflow} at document creation.",
   },
 ]
 
