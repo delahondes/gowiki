@@ -159,3 +159,141 @@ func ExtractLinkOccurrences(content string, pagePath string) []LinkOccurrence {
 	}
 	return out
 }
+
+// SlugifyHeading mirrors the frontend compiler/slugify.ts: lowercase,
+// collapse any run of non-alnum characters to a single hyphen, trim
+// leading/trailing hyphens. Must agree with the frontend byte-for-byte
+// so a fragment anchor the browser accepts resolves the same way here
+// — otherwise this tool would report "dead" anchors that render fine
+// (or vice versa).
+//
+// The frontend uses `[^a-z0-9]+` on the already-lowercased string, so
+// any character outside ASCII [a-z0-9] is a separator (an é becomes
+// a hyphen, not an "e"). We do NOT ASCII-fold; that would diverge.
+func SlugifyHeading(text string) string {
+	var b strings.Builder
+	prevHyphen := true // treat the implicit start as a hyphen so leading runs collapse
+	for _, r := range strings.ToLower(text) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			prevHyphen = false
+			continue
+		}
+		if !prevHyphen {
+			b.WriteByte('-')
+			prevHyphen = true
+		}
+	}
+	out := b.String()
+	// Trim trailing hyphen (leading already handled by prevHyphen=true).
+	out = strings.TrimRight(out, "-")
+	if out == "" {
+		return "heading"
+	}
+	return out
+}
+
+// ExtractHeadingSlugs walks the markdown source and returns the set of
+// anchor slugs — one per ATX heading, with the frontend's "same slug
+// twice → suffix the duplicates with -1, -2, …" rule so the server
+// agrees with the browser on which anchors actually exist.
+// Skips headings inside fenced code blocks; `#` lines there are code,
+// not section headings.
+//
+// The result is a set (map to empty struct) so a caller can answer
+// "is this fragment a real anchor?" with one lookup. Called by the
+// list_broken_links tool when check_fragments is on.
+func ExtractHeadingSlugs(content string) map[string]struct{} {
+	headingRe := regexp.MustCompile(`^(#{1,6})\s+(.+?)\s*$`)
+	slugs := make(map[string]struct{})
+	counts := make(map[string]int)
+	inCodeBlock := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		if inCodeBlock {
+			continue
+		}
+		// Only ATX headings; the dialect doesn't support setext.
+		m := headingRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		base := SlugifyHeading(stripInlineMarkup(m[2]))
+		n := counts[base]
+		counts[base] = n + 1
+		slug := base
+		if n > 0 {
+			slug = base + "-" + itoa(n)
+		}
+		slugs[slug] = struct{}{}
+	}
+	return slugs
+}
+
+// itoa is a thin wrapper so the heading-slug code stays dep-free
+// (strconv is one import away but the single integer stringification
+// isn't worth pulling it in).
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
+// linkInHeadingRe matches a markdown link INSIDE a heading. We want to
+// keep only the visible label — the frontend slugifies heading
+// textContent, which the browser renders as the label without the URL.
+var linkInHeadingRe = regexp.MustCompile(`\[((?:[^\\\]]|\\.)*)\]\([^)]*\)`)
+
+// stripInlineMarkup turns a raw heading source into the plain text a
+// reader would see on the page — then SlugifyHeading can run on
+// something that matches the browser's `textContent` byte-for-byte.
+// Drops asterisks / underscores / backticks (bold / italic / code
+// delimiters) and reduces markdown links to their label.
+func stripInlineMarkup(s string) string {
+	// Reduce [label](url) to label first — order matters, otherwise
+	// stripping `[` and `]` leaves the URL and parens visible.
+	s = linkInHeadingRe.ReplaceAllString(s, "$1")
+
+	var b strings.Builder
+	skipNext := false
+	for _, r := range s {
+		if skipNext {
+			skipNext = false
+			b.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\\':
+			// Escape — keep the next literal char without re-interpreting it.
+			skipNext = true
+		case '*', '_', '`':
+			// Drop remaining markup punctuation; leave inner text.
+			continue
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+

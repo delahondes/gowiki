@@ -140,3 +140,169 @@ func TestExtractLinkOccurrences_EmptyLabel(t *testing.T) {
 		t.Errorf("resolved = %q", got[0].Resolved)
 	}
 }
+
+// SlugifyHeading must agree with the frontend compiler/slugify.ts
+// byte-for-byte — a slug mismatch would make the broken-link scan
+// report "dead" anchors that render fine in the browser (and the
+// opposite). Cases below mirror the frontend's rule set.
+
+func TestSlugifyHeading_Basic(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"Hello":                "hello",
+		"Hello World":          "hello-world",
+		"  leading & trailing  ": "leading-trailing",
+		"UPPER case Mix":       "upper-case-mix",
+		"foo--bar___baz":       "foo-bar-baz",
+	}
+	for in, want := range cases {
+		if got := SlugifyHeading(in); got != want {
+			t.Errorf("SlugifyHeading(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSlugifyHeading_NonAscii(t *testing.T) {
+	t.Parallel()
+	// Non-ASCII characters are separators, NOT folded to their ASCII
+	// equivalent — matches the frontend's `[^a-z0-9]+` rule exactly.
+	// A heading "Café Alpha" slugifies to "caf-alpha" (the é is a
+	// hyphen), not "cafe-alpha". A past divergence here is exactly
+	// the kind of silent bug this test exists to prevent.
+	cases := map[string]string{
+		"Café Alpha":    "caf-alpha",
+		"éè à":          "heading", // all non-alnum after lowering → empty → default "heading"
+		"1. Objectifs":  "1-objectifs",
+	}
+	for in, want := range cases {
+		if got := SlugifyHeading(in); got != want {
+			t.Errorf("SlugifyHeading(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSlugifyHeading_EmptyFallback(t *testing.T) {
+	t.Parallel()
+	// An all-punctuation heading collapses to empty, which the
+	// frontend falls back to the literal "heading" sentinel for so a
+	// fragment URL still works. Same fallback here.
+	if got := SlugifyHeading("***"); got != "heading" {
+		t.Errorf("empty-after-strip: got %q, want %q", got, "heading")
+	}
+	if got := SlugifyHeading(""); got != "heading" {
+		t.Errorf("empty input: got %q, want %q", got, "heading")
+	}
+}
+
+// ExtractHeadingSlugs mirrors the frontend's "same slug twice →
+// -1, -2, …" dedup rule. Must agree exactly so a fragment that
+// resolves in the browser also resolves here.
+
+func TestExtractHeadingSlugs_ATXAllLevels(t *testing.T) {
+	t.Parallel()
+	md := `# One
+
+## Two
+
+### Three
+
+#### Four
+
+##### Five
+
+###### Six
+`
+	slugs := ExtractHeadingSlugs(md)
+	for _, want := range []string{"one", "two", "three", "four", "five", "six"} {
+		if _, ok := slugs[want]; !ok {
+			t.Errorf("missing slug %q in %+v", want, slugs)
+		}
+	}
+}
+
+func TestExtractHeadingSlugs_DuplicateSuffix(t *testing.T) {
+	t.Parallel()
+	// Three headings sharing the same base — pin the -1, -2 suffixing
+	// so the server resolves #scope, #scope-1, #scope-2 the same
+	// three positions the browser does. The frontend's duplicate
+	// counter starts at 0 for the first and emits -N for subsequent
+	// occurrences, so the third match ends in -2 (not -3).
+	md := `## Scope
+
+## Scope
+
+## Scope
+`
+	slugs := ExtractHeadingSlugs(md)
+	for _, want := range []string{"scope", "scope-1", "scope-2"} {
+		if _, ok := slugs[want]; !ok {
+			t.Errorf("missing %q in %+v", want, slugs)
+		}
+	}
+	if _, bad := slugs["scope-3"]; bad {
+		t.Errorf("unexpected scope-3 in %+v", slugs)
+	}
+}
+
+func TestExtractHeadingSlugs_SkipsFencedCode(t *testing.T) {
+	t.Parallel()
+	// A `#` line in a fenced block is a shell comment / code sample,
+	// not a wiki heading. Reporting #commented-example as a real
+	// anchor would make the broken-link checker falsely accept dead
+	// fragments that happen to match code comments.
+	md := "# Real heading\n\n```\n# commented example\n## not a heading\n```\n\n# Another\n"
+	slugs := ExtractHeadingSlugs(md)
+	for _, want := range []string{"real-heading", "another"} {
+		if _, ok := slugs[want]; !ok {
+			t.Errorf("missing %q in %+v", want, slugs)
+		}
+	}
+	for _, bad := range []string{"commented-example", "not-a-heading"} {
+		if _, ok := slugs[bad]; ok {
+			t.Errorf("code-block %q leaked into slug set %+v", bad, slugs)
+		}
+	}
+}
+
+func TestExtractHeadingSlugs_StripsInlineMarkup(t *testing.T) {
+	t.Parallel()
+	// A heading like `## **Bold** text` slugifies on the rendered
+	// text content "Bold text", not on the raw source. The frontend
+	// extracts textContent from the DOM; we strip the markup before
+	// slugifying to match.
+	md := "## **Bold** text with `code`\n\n## [link label](http://x)\n"
+	slugs := ExtractHeadingSlugs(md)
+	// For the second heading only the LABEL slugifies — the URL is
+	// not visible on the rendered page, so including it in the slug
+	// would diverge from the browser.
+	for _, want := range []string{"bold-text-with-code", "link-label"} {
+		if _, ok := slugs[want]; !ok {
+			t.Errorf("missing %q in %+v", want, slugs)
+		}
+	}
+}
+
+func TestExtractHeadingSlugs_IgnoresSettextAndIndented(t *testing.T) {
+	t.Parallel()
+	// Dialect rejects setext headings and indented `#`. The slug
+	// extractor must ignore them too — otherwise a reader could
+	// link to #setext-style-heading and the scan would say it's
+	// fine, but the actual anchor wouldn't exist on the rendered page.
+	md := `Setext heading
+==============
+
+   # indented-looks-like-a-heading
+
+# real one
+`
+	slugs := ExtractHeadingSlugs(md)
+	if _, ok := slugs["real-one"]; !ok {
+		t.Errorf("missing real-one in %+v", slugs)
+	}
+	if _, bad := slugs["setext-heading"]; bad {
+		t.Errorf("setext leaked: %+v", slugs)
+	}
+	if _, bad := slugs["indented-looks-like-a-heading"]; bad {
+		t.Errorf("indented leaked: %+v", slugs)
+	}
+}

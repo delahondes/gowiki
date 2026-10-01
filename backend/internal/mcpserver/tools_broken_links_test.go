@@ -219,6 +219,154 @@ func TestBuildBrokenLinksList_EmptyPrefixMatchesAll(t *testing.T) {
 	}
 }
 
+// Fragment checks are opt-in via check_fragments=true. Default stays
+// off so the cheap path (page existence only) is cheap, and the
+// expensive one (also open every target page with fragments) is one
+// bool away. These cases pin the rows carry a reason + fragment field
+// AND that the per-target slug cache keeps the extra cost at one
+// readMarkdown per unique link target.
+
+func TestBuildBrokenLinksList_FragmentCheckOffByDefault(t *testing.T) {
+	t.Parallel()
+	// Target page exists, fragment is bogus. With fragments off, the
+	// row must NOT be reported — same semantics as the editor's own
+	// gowiki-link-missing decorator.
+	c := fakeCorpus{
+		pageMarkdown: map[string]string{
+			"src":    "[dead frag](/target#missing-section)\n",
+			"target": "# Real heading\n\n## Another\n",
+		},
+		existingTargets: map[string]bool{"target": true},
+	}
+	result := buildBrokenLinksList(brokenLinksScanArgs{
+		pages: []string{"/src", "/target"}, prefix: "", limit: 100,
+		// checkFragments: false (default)
+		canView: c.canView, readMarkdown: c.readMarkdown, exists: c.exists,
+	})
+	if len(result.Broken) != 0 {
+		t.Errorf("default (no fragment check) must not report; got %+v", result.Broken)
+	}
+}
+
+func TestBuildBrokenLinksList_FragmentCheckReportsMiss(t *testing.T) {
+	t.Parallel()
+	c := fakeCorpus{
+		pageMarkdown: map[string]string{
+			"src":    "Try [a real one](/target#real-heading) and [a dead one](/target#missing).\n",
+			"target": "# Real heading\n\n## Another\n",
+		},
+		existingTargets: map[string]bool{"target": true},
+	}
+	result := buildBrokenLinksList(brokenLinksScanArgs{
+		pages: []string{"/src", "/target"}, prefix: "", limit: 100,
+		checkFragments: true,
+		canView:        c.canView, readMarkdown: c.readMarkdown, exists: c.exists,
+	})
+	if len(result.Broken) != 1 {
+		t.Fatalf("want 1 broken row (fragment miss), got %+v", result.Broken)
+	}
+	r := result.Broken[0]
+	if r.Reason != "missing_fragment" {
+		t.Errorf("reason = %q, want missing_fragment", r.Reason)
+	}
+	if r.Fragment != "missing" {
+		t.Errorf("fragment = %q, want missing", r.Fragment)
+	}
+	if r.Resolved != "/target" {
+		t.Errorf("resolved = %q, want /target (page is real, only the anchor is dead)", r.Resolved)
+	}
+}
+
+func TestBuildBrokenLinksList_FragmentReasonFieldOnMissingPage(t *testing.T) {
+	t.Parallel()
+	// A page-level miss still carries reason=missing_page even with
+	// check_fragments on. The two reasons are mutually exclusive per
+	// row — one failure mode wins.
+	c := fakeCorpus{
+		pageMarkdown: map[string]string{
+			"src": "[dead](/no-such-page#any)\n",
+		},
+	}
+	result := buildBrokenLinksList(brokenLinksScanArgs{
+		pages: []string{"/src"}, prefix: "", limit: 100,
+		checkFragments: true,
+		canView:        c.canView, readMarkdown: c.readMarkdown, exists: c.exists,
+	})
+	if len(result.Broken) != 1 {
+		t.Fatalf("got %+v", result.Broken)
+	}
+	if result.Broken[0].Reason != "missing_page" {
+		t.Errorf("reason = %q, want missing_page (page miss wins over fragment check)", result.Broken[0].Reason)
+	}
+	if result.Broken[0].Fragment != "" {
+		t.Errorf("fragment field should stay empty for page misses, got %q", result.Broken[0].Fragment)
+	}
+}
+
+func TestBuildBrokenLinksList_FragmentCheckRespectsDuplicateHeadingSuffix(t *testing.T) {
+	t.Parallel()
+	// Three headings "## Scope" produce slugs scope / scope-1 / scope-2.
+	// A link to #scope-2 must be accepted (points at the third heading);
+	// #scope-3 must be reported. Guard against a slug-rule divergence
+	// from the frontend — the kind of silent bug that'd make the tool
+	// report "dead" anchors readers in the browser can click fine.
+	c := fakeCorpus{
+		pageMarkdown: map[string]string{
+			"src":    "[second](/target#scope-1) [third](/target#scope-2) [bogus](/target#scope-3)\n",
+			"target": "## Scope\n\n## Scope\n\n## Scope\n",
+		},
+		existingTargets: map[string]bool{"target": true},
+	}
+	result := buildBrokenLinksList(brokenLinksScanArgs{
+		pages: []string{"/src", "/target"}, prefix: "", limit: 100,
+		checkFragments: true,
+		canView:        c.canView, readMarkdown: c.readMarkdown, exists: c.exists,
+	})
+	if len(result.Broken) != 1 || result.Broken[0].Fragment != "scope-3" {
+		t.Fatalf("want only scope-3 reported, got %+v", result.Broken)
+	}
+}
+
+func TestBuildBrokenLinksList_FragmentCacheDedupsTargetReads(t *testing.T) {
+	t.Parallel()
+	// Many links at the same target page's fragment anchors must open
+	// the target ONCE across the whole scan — otherwise a central SOP
+	// referenced from 100 pages pays 100 Store.Get calls. The spy
+	// below counts how many times each target is read.
+	c := fakeCorpus{
+		pageMarkdown: map[string]string{
+			"p1":     "[a](/target#x) [b](/target#y)\n",
+			"p2":     "[c](/target#z)\n",
+			"p3":     "[d](/other#one)\n",
+			"target": "# X\n\n# Y\n",
+			"other":  "# One\n",
+		},
+		existingTargets: map[string]bool{"target": true, "other": true},
+	}
+	reads := map[string]int{}
+	spyRead := func(p string) (string, bool) {
+		reads[p]++
+		md, ok := c.pageMarkdown[strings.TrimPrefix(p, "/")]
+		return md, ok
+	}
+	buildBrokenLinksList(brokenLinksScanArgs{
+		pages: []string{"/p1", "/p2", "/p3", "/target", "/other"}, prefix: "", limit: 100,
+		checkFragments: true,
+		canView:        c.canView, readMarkdown: spyRead, exists: c.exists,
+	})
+	// Scanned pages (/p1, /p2, /p3, /target, /other) are read once each
+	// as sources, then /target is read ONCE more as a slug source,
+	// and /other is read ONCE more as a slug source. We can't easily
+	// distinguish "scan" vs "slug lookup" from the spy, but we can
+	// pin that each page is opened at most twice (once source, once
+	// target). Any central-SOP amplification would blow past 2.
+	for p, n := range reads {
+		if n > 2 {
+			t.Errorf("page %q read %d times, want ≤ 2 (one as source + one as fragment target)", p, n)
+		}
+	}
+}
+
 // readMarkdown returning ok=false (e.g. page was deleted mid-scan)
 // drops the page quietly rather than aborting the whole scan. The
 // page still counts as "scanned" — the operator knows the scan passed

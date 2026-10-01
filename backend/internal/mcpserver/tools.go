@@ -661,15 +661,18 @@ func buildReviewflowList(a reviewflowScanArgs) (rows []reviewflowRow, scanned in
 func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("list_broken_links",
 		mcpgo.WithDescription(
-			"Scan every page under a path prefix and return the internal links whose "+
-				"target page does not exist. One row per occurrence: "+
-				"{page, href, resolved, label, line}. href is the raw link as written "+
-				"in the markdown; resolved is the absolute page path that was looked up; "+
-				"label is the visible link text; line is the 1-based source line.\n\n"+
-				"Does NOT verify fragment anchors (`#heading`) against the target page's "+
-				"headings — a link to a real page whose anchor doesn't exist is reported "+
-				"as valid here (same semantics as the editor's gowiki-link-missing CSS "+
-				"class). Those are verified by hand.\n\n"+
+			"Scan every page under a path prefix and return every unresolved internal "+
+				"reference. One row per occurrence: "+
+				"{page, href, resolved, fragment, label, line, reason}. "+
+				"`reason` is `missing_page` (target page does not exist) or "+
+				"`missing_fragment` (target page exists, but the #anchor doesn't match "+
+				"any of its headings — only emitted when check_fragments=true). "+
+				"`fragment` is populated only on fragment misses.\n\n"+
+				"By default fragment anchors are NOT checked, matching the editor's "+
+				"gowiki-link-missing decorator — set check_fragments=true to turn the "+
+				"extra pass on. The extra cost is one memoised Store.Get per unique "+
+				"target page that has fragments pointing at it; well under a second on "+
+				"a 200-page corpus.\n\n"+
 				"Pages the caller can't view are skipped — the per-page markdown load "+
 				"respects the dual-ACL model.",
 		),
@@ -678,6 +681,9 @@ func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
 		),
 		mcpgo.WithNumber("limit",
 			mcpgo.Description("Maximum rows to return (default 500, max 5000). The scan still walks every page under the prefix; `truncated_at_limit` is set when the limit was hit."),
+		),
+		mcpgo.WithBoolean("check_fragments",
+			mcpgo.Description("When true, verify that `#anchor` fragments on links to existing pages match a heading slug in the target. Default false. Rows for fragment misses carry `reason: \"missing_fragment\"` and a `fragment` field with the unresolved anchor."),
 		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -706,10 +712,11 @@ func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
 			pagePaths = append(pagePaths, p.Path)
 		}
 		result := buildBrokenLinksList(brokenLinksScanArgs{
-			pages:   pagePaths,
-			prefix:  prefix,
-			limit:   limit,
-			canView: func(p string) bool { return deps.canView(ctx, p) },
+			pages:          pagePaths,
+			prefix:         prefix,
+			limit:          limit,
+			checkFragments: req.GetBool("check_fragments", false),
+			canView:        func(p string) bool { return deps.canView(ctx, p) },
 			readMarkdown: func(p string) (string, bool) {
 				page, err := deps.Store.Get(p)
 				if err != nil {
@@ -734,24 +741,33 @@ func registerListBrokenLinksTool(srv *mcpsrv.MCPServer, deps Deps) {
 // brokenLinkRow is one dead-link occurrence in the list_broken_links
 // response. Kept at package scope so the pure buildBrokenLinksList
 // helper (and its tests) can share the shape with the tool handler.
+// Reason distinguishes the two failure modes a caller may want to
+// filter on separately: the target page is absent, or the page exists
+// but the fragment anchor doesn't match any of its headings.
 type brokenLinkRow struct {
 	Page     string `json:"page"`
 	Href     string `json:"href"`
 	Resolved string `json:"resolved"`
+	Fragment string `json:"fragment,omitempty"` // the #anchor part, when a fragment check was performed
 	Label    string `json:"label"`
 	Line     int    `json:"line"`
+	Reason   string `json:"reason"` // "missing_page" or "missing_fragment"
 }
 
 // brokenLinksScanArgs bundles the inputs to buildBrokenLinksList. The
-// three callbacks let tests drive the scan with plain maps without
-// touching Store or ACL plumbing.
+// callbacks let tests drive the scan with plain maps without touching
+// Store or ACL plumbing. readMarkdown is used both for the page being
+// scanned (links extracted) AND, when checkFragments is set, for the
+// link's TARGET page (heading slugs extracted) — one memoised Store.Get
+// per unique target.
 type brokenLinksScanArgs struct {
-	pages        []string // every page known to the sitemap (leading slash form)
-	prefix       string   // trimmed path_prefix (no leading or trailing slash)
-	limit        int
-	canView      func(pagePath string) bool                // noLeading-slash pagePath → may view?
-	readMarkdown func(pagePath string) (markdown string, ok bool) // noLeading-slash → body
-	exists       func(pagePath string) bool                // noLeading-slash → page exists?
+	pages           []string // every page known to the sitemap (leading slash form)
+	prefix          string   // trimmed path_prefix (no leading or trailing slash)
+	limit           int
+	checkFragments  bool
+	canView         func(pagePath string) bool                        // noLeading-slash pagePath → may view?
+	readMarkdown    func(pagePath string) (markdown string, ok bool)  // noLeading-slash → body
+	exists          func(pagePath string) bool                        // noLeading-slash → page exists?
 }
 
 // brokenLinksScanResult is the aggregated response the handler wraps
@@ -782,6 +798,10 @@ func buildBrokenLinksList(a brokenLinksScanArgs) brokenLinksScanResult {
 		matchPrefix += "/"
 	}
 	existsCache := make(map[string]bool)
+	// slugCache[target] = heading slug set for target page.
+	// Only populated when checkFragments is on; keeps the Store.Get +
+	// SlugifyHeading cost at one call per unique link target per scan.
+	slugCache := make(map[string]map[string]struct{})
 
 	for _, raw := range a.pages {
 		if len(result.Broken) >= a.limit {
@@ -815,7 +835,40 @@ func buildBrokenLinksList(a brokenLinksScanArgs) brokenLinksScanResult {
 				exists = a.exists(resolved)
 				existsCache[resolved] = exists
 			}
-			if exists {
+			if !exists {
+				hadBroken = true
+				result.Broken = append(result.Broken, brokenLinkRow{
+					Page:     "/" + pagePath,
+					Href:     occ.Href,
+					Resolved: "/" + resolved,
+					Label:    occ.Label,
+					Line:     occ.Line,
+					Reason:   "missing_page",
+				})
+				continue
+			}
+			// Target page exists — if checkFragments is on AND the
+			// original href carried a #fragment, verify the fragment
+			// matches a heading slug in the target. Pure fragment
+			// refs (href="#x") resolve to the current page.
+			if !a.checkFragments {
+				continue
+			}
+			frag := extractFragment(occ.Href)
+			if frag == "" {
+				continue
+			}
+			slugs, cached := slugCache[resolved]
+			if !cached {
+				targetMd, ok := a.readMarkdown(resolved)
+				if !ok {
+					slugs = map[string]struct{}{}
+				} else {
+					slugs = markdown.ExtractHeadingSlugs(targetMd)
+				}
+				slugCache[resolved] = slugs
+			}
+			if _, hit := slugs[frag]; hit {
 				continue
 			}
 			hadBroken = true
@@ -823,8 +876,10 @@ func buildBrokenLinksList(a brokenLinksScanArgs) brokenLinksScanResult {
 				Page:     "/" + pagePath,
 				Href:     occ.Href,
 				Resolved: "/" + resolved,
+				Fragment: frag,
 				Label:    occ.Label,
 				Line:     occ.Line,
+				Reason:   "missing_fragment",
 			})
 		}
 		if hadBroken {
@@ -833,6 +888,21 @@ func buildBrokenLinksList(a brokenLinksScanArgs) brokenLinksScanResult {
 	}
 	result.TruncatedAtLimit = len(result.Broken) >= a.limit
 	return result
+}
+
+// extractFragment pulls the `#frag` segment out of a raw href, stripping
+// any query string. Returns "" for pure-fragment refs ("#x" → resolved
+// to current page, scan skipped these) and for refs without a fragment.
+func extractFragment(href string) string {
+	// Trim query first — a href like "/x?y=1#z" has the fragment AFTER
+	// the query. The link extractor already stripped the fragment and
+	// query before resolving to a page path, but kept the raw href here
+	// so we can read the fragment back off it.
+	idx := strings.Index(href, "#")
+	if idx < 0 || idx == 0 || idx == len(href)-1 {
+		return ""
+	}
+	return href[idx+1:]
 }
 
 // ── preview_page_diff ───────────────────────────────────────────────────

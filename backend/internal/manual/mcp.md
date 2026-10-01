@@ -144,7 +144,7 @@ npx @modelcontextprotocol/inspector \
 | `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state — single page |
 | `list_reviewflows` | Batch reviewflow status across every page under a `path_prefix`. One MCP call for a whole namespace — use this instead of a loop of `get_reviewflow_status` for corpus-wide compliance passes. |
-| `list_broken_links` | Scan every page under a `path_prefix` and return the internal links whose target page doesn't exist, as `{page, href, resolved, label, line}` rows. One call for a whole subtree; cheaper than rendering each page to HTML and scraping `gowiki-link-missing`. Does NOT check fragment anchors (`#heading`) against the target's headings — same limitation as the editor's own link decorator. |
+| `list_broken_links` | Scan every page under a `path_prefix` and return unresolved internal references as `{page, href, resolved, fragment, label, line, reason}` rows. One call for a whole subtree; cheaper than rendering each page to HTML and scraping `gowiki-link-missing`. Fragment anchors are not checked by default; pass `check_fragments=true` to also report `#heading` references whose target page exists but whose anchor doesn't match any heading. |
 | `preview_page_diff` | Dry-run edit — returns diff without saving |
 | `write_page` | Create/update a page (full rewrite) — requires a summary; refuses fully-validated pages unless `force=true` (see the fully-validated-page guard below) |
 | `edit_page` | Anchored search-and-replace edits — safer than `write_page` for any change smaller than a full rewrite (uniqueness constraint prevents accidental corruption); same fully-validated-page guard as `write_page` |
@@ -374,15 +374,18 @@ Attachments are non-`.md` files under `data/content/`, referenced from pages via
 
 ## Broken-link scan
 
-`render_page` with `format=html` marks each unresolved reference with the `gowiki-link-missing` CSS class — exploitable page by page, but a 200-page corpus scan that way is 20 MB of HTML round-tripped for information the engine already has at render time. `list_broken_links(path_prefix, limit?)` returns the same answer directly, in one call.
+`render_page` with `format=html` marks each unresolved reference with the `gowiki-link-missing` CSS class — exploitable page by page, but a 200-page corpus scan that way is 20 MB of HTML round-tripped for information the engine already has at render time. `list_broken_links(path_prefix, limit?, check_fragments?)` returns the same answer directly, in one call.
 
-- **One row per dead-link OCCURRENCE** — `{page, href, resolved, label, line}`. No dedup within a page: the same href appearing twice reports twice, so the "which spot do I fix?" question has one answer per row. `href` is the raw link as written in the markdown; `resolved` is the absolute page path that was looked up; `label` is the visible link text; `line` is the 1-based source line of the hit.
+- **One row per dead-link OCCURRENCE** — `{page, href, resolved, fragment, label, line, reason}`. No dedup within a page: the same href appearing twice reports twice, so the "which spot do I fix?" question has one answer per row. `href` is the raw link as written in the markdown; `resolved` is the absolute page path that was looked up; `label` is the visible link text; `line` is the 1-based source line of the hit.
+- **`reason`** distinguishes the two failure modes:
+  - `missing_page` — the target page itself doesn't exist (default behaviour, always on).
+  - `missing_fragment` — the target page exists but the `#anchor` after the href doesn't match any of its heading slugs. Only emitted when `check_fragments=true`. `fragment` carries the unresolved anchor so a human knows exactly which section they meant to link.
 - **Envelope counters** — `scanned` (pages actually opened), `pages_with_broken` (distinct pages with ≥ 1 broken row, so "how many SOPs need fixing?" is a single number), `skipped_access` (pages hidden by ACL — the dual-ACL model is respected), `truncated_at_limit` (set when the row cap was hit; narrow the prefix or raise `limit` up to the 5000 hard cap and re-run).
 - **Default `limit` is 500.** Once the cap is hit, remaining pages are not even opened — the scan is cheap even on a wiki with 10 000 pages where a few handfuls are enough to fix.
 
-**Not checked:** fragment anchors inside existing pages (`/path/to/page#missing-section`). A link to a real page whose anchor doesn't exist is reported as valid here — same limitation as the editor's own `gowiki-link-missing` decorator. Those are the pass that stays manual.
+**Fragment check cost.** Each unique target page with fragment references is opened once per scan (memoised); the heading-slug set is extracted via `ExtractHeadingSlugs` which agrees byte-for-byte with the frontend's slug rule (same lowercase / non-alnum-to-hyphen / `-N` suffixing on duplicates). On a QMS-sized corpus the extra pass adds a handful of `Store.Get` calls over the pre-check cost — well under a second.
 
-**Typical invocation:**
+**Typical invocations:**
 
 ```json
 {
@@ -391,7 +394,20 @@ Attachments are non-`.md` files under `data/content/`, referenced from pages via
 }
 ```
 
-A sample row from a real QMS scan:
+With fragment checks on:
+
+```json
+{
+  "tool": "list_broken_links",
+  "arguments": {
+    "path_prefix": "/regulatory/qms",
+    "check_fragments": true,
+    "limit": 500
+  }
+}
+```
+
+A sample row from a real QMS scan, each failure mode:
 
 ```json
 {
@@ -399,7 +415,20 @@ A sample row from a real QMS scan:
   "href": "./tpl14",
   "resolved": "/regulatory/qms/soft/sop01/tpl14",
   "label": "SOFT/SOP01/TPL14 : Review checklist",
-  "line": 128
+  "line": 128,
+  "reason": "missing_page"
+}
+```
+
+```json
+{
+  "page": "/regulatory/qms/soft/sop01",
+  "href": "/regulatory/qms/soft/sop01/tpl02#risk-matrix",
+  "resolved": "/regulatory/qms/soft/sop01/tpl02",
+  "fragment": "risk-matrix",
+  "label": "the risk matrix section",
+  "line": 42,
+  "reason": "missing_fragment"
 }
 ```
 
