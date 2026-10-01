@@ -219,6 +219,8 @@ let templateInsertCommand = null
 let templateTitleInsertCommand = null
 let templateStampInsertCommand = null
 let templateReviewflowInsertCommand = null
+let templateTodoInsertCommand = null
+let lifecycleInsertCommand = null
 
 registry.onCommand((namespace, name, cmd) => {
   if (namespace === "table") {
@@ -357,6 +359,17 @@ registry.onCommand((namespace, name, cmd) => {
   }
   if (namespace === "template-reviewflow" && name === "insert") {
     templateReviewflowInsertCommand = cmd
+    return
+  }
+  if (namespace === "template-todo" && name === "insert") {
+    templateTodoInsertCommand = cmd
+    return
+  }
+  // Lifecycle: not part of the template family but still a plugin-provided
+  // insert command that deserves an icon in the toolbar instead of the
+  // "lifecycle:insert" text fallback below.
+  if (namespace === "lifecycle" && name === "insert") {
+    lifecycleInsertCommand = cmd
     return
   }
   if (namespace === "favorites" && name === "insert") {
@@ -6352,6 +6365,24 @@ function buildMenubar() {
     })
   }
 
+  // Lifecycle — an admin-document directive that aggregates retention /
+  // review / archival rules into a single panel. Lives next to the
+  // regulatory family (reviewflow / version-link) in the toolbar.
+  if (lifecycleInsertCommand) {
+    addImgButton("/icons/lifecycle.svg", "Insert lifecycle", () => {
+      if (editMode === "visual" && editorView) {
+        lifecycleInsertCommand(editorView.state, editorView.dispatch, editorView)
+        editorView.focus()
+      } else if (editMode === "raw" && rawEditor) {
+        const snippet = "{lifecycle}"
+        const start = rawEditor.selectionStart
+        rawEditor.focus()
+        rawInsertText(rawEditor, snippet + "\n\n")
+        rawEditor.setSelectionRange(start + snippet.length, start + snippet.length)
+      }
+    })
+  }
+
   // Template family — cluster the four directives behind stroke icons
   // sharing a common page-with-folded-corner base so they read as one
   // group at a glance instead of four indistinguishable text buttons.
@@ -6379,6 +6410,12 @@ function buildMenubar() {
       icon: "template-reviewflow.svg",
       title: "Template reviewflow (resolved to {reviewflow} at creation)",
       snippet: "{template-reviewflow}",
+    },
+    {
+      cmd: templateTodoInsertCommand,
+      icon: "template-todo.svg",
+      title: "Template todo (resolved to {todo} at creation)",
+      snippet: "{template-todo}",
     },
   ]
   let templateGroupHasAny = false

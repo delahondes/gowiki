@@ -1255,6 +1255,31 @@ export const templatePlugin: WikiPlugin = {
       }
       return true
     })
+    // {template-todo}: insert and immediately open the properties
+    // panel. The default is a bare {template-todo} — the author fills
+    // title/assign/action/etc. in the panel, same as a {todo}.
+    reg.registerCommand("template-todo", "insert", (state, dispatch) => {
+      const type = reg.schema.nodes.template_todo
+      if (!type) return false
+      if (dispatch) {
+        const node = type.create({})
+        let tr = state.tr.replaceSelectionWith(node)
+        const approxPos = tr.mapping.map(state.selection.from)
+        tr.doc.nodesBetween(Math.max(0, approxPos - 5), Math.min(tr.doc.content.size, approxPos + 5), (n, pos) => {
+          if (n.type === type) {
+            try {
+              tr = tr.setSelection(NodeSelection.create(tr.doc, pos))
+              tr = enablePropertiesPanel(tr)
+            } catch {
+              /* ignore */
+            }
+            return false
+          }
+        })
+        dispatch(tr.scrollIntoView())
+      }
+      return true
+    })
 
     reg.registerStyle("template", templateStyles)
   },

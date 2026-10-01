@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Page with folded top-right corner (template family base) -->
+  <path d="M4 2 L12 2 L17 7 L17 17 Q17 18 16 18 L4 18 Q3 18 3 17 L3 3 Q3 2 4 2 Z"/>
+  <polyline points="12,2 12,7 17,7"/>
+  <!-- Checkbox + tick (todo payload) -->
+  <rect x="5.5" y="11" width="4" height="4" rx="0.5"/>
+  <polyline points="6.2,13 7.2,14 8.8,11.8"/>
+  <line x1="11" y1="13" x2="15" y2="13"/>
+</svg>
