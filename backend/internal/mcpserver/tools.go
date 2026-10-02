@@ -522,11 +522,18 @@ func registerGetReviewflowStatusTool(srv *mcpsrv.MCPServer, deps Deps) {
 func registerListReviewflowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("list_reviewflows",
 		mcpgo.WithDescription(
-			"Batch reviewflow status across every page under a path prefix. Returns one row per "+
-				"reviewflow-configured page: {path, is_fully_validated, current_version, "+
-				"validated_version, overdue_roles}. Skips pages the caller can't view. Use for "+
-				"corpus-wide compliance passes — the single-page get_reviewflow_status would "+
-				"require one MCP call per page and burn through the rate limit.",
+			"Batch reviewflow status across every page under a path prefix. One row per "+
+				"reviewflow-configured page:\n"+
+				"  path, is_fully_validated, current_version, validated_version, version_tag,\n"+
+				"  parallel, roles (role→assigned user), confirmed_by (role→user that signed),\n"+
+				"  missing_roles (role→user still owed), next_roles (actionable now; sequential\n"+
+				"  reviews only populate the head of queue, parallel ones populate every missing\n"+
+				"  role), signed_roles (roles with cryptographic signatures, not just click-\n"+
+				"  through), overdue_roles.\n"+
+				"Skips pages the caller can't view. Use for corpus-wide compliance passes — the "+
+				"single-page get_reviewflow_status would require one MCP call per page and burn "+
+				"through the rate limit. The signatory fields answer \"who should sign, who did, "+
+				"who still owes\" without a per-page follow-up.",
 		),
 		mcpgo.WithString("path_prefix",
 			mcpgo.Description("Namespace prefix (leading slash optional). Empty scans the whole wiki."),
@@ -590,13 +597,24 @@ func registerListReviewflowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 // reviewflowRow is one row of the list_reviewflows response; kept at
 // package scope so the pure buildReviewflowList helper (and its tests)
 // can share the shape with the tool handler above.
+//
+// Signatory fields (Roles, ConfirmedBy, MissingRoles, SignedRoles,
+// NextRoles) answer the "who should sign, who did, who still owes"
+// question without a follow-up get_reviewflow_status call per page.
 type reviewflowRow struct {
-	Path             string   `json:"path"`
-	IsFullyValidated bool     `json:"is_fully_validated"`
-	CurrentVersion   int64    `json:"current_version"`
-	ValidatedVersion int64    `json:"validated_version"`
-	OverdueRoles     []string `json:"overdue_roles,omitempty"`
-	HasReviewflow    bool     `json:"has_reviewflow"`
+	Path             string            `json:"path"`
+	IsFullyValidated bool              `json:"is_fully_validated"`
+	CurrentVersion   int64             `json:"current_version"`
+	ValidatedVersion int64             `json:"validated_version"`
+	VersionTag       string            `json:"version_tag,omitempty"`
+	Parallel         bool              `json:"parallel,omitempty"`
+	Roles            map[string]string `json:"roles,omitempty"`
+	ConfirmedBy      map[string]string `json:"confirmed_by,omitempty"`
+	MissingRoles     map[string]string `json:"missing_roles,omitempty"`
+	NextRoles        []string          `json:"next_roles,omitempty"`
+	SignedRoles      []string          `json:"signed_roles,omitempty"`
+	OverdueRoles     []string          `json:"overdue_roles,omitempty"`
+	HasReviewflow    bool              `json:"has_reviewflow"`
 }
 
 // reviewflowScanArgs bundles the inputs to buildReviewflowList. The
@@ -644,11 +662,33 @@ func buildReviewflowList(a reviewflowScanArgs) (rows []reviewflowRow, scanned in
 		if !configured && !a.includeUnconfigured {
 			continue
 		}
+		// Derive confirmed_by = Roles ∖ MissingRoles so the caller
+		// doesn't have to compute the difference. Nil map stays nil
+		// (JSON omits the field) when nothing has been signed yet.
+		var confirmed map[string]string
+		if len(st.Roles) > 0 {
+			confirmed = make(map[string]string, len(st.Roles))
+			for role, user := range st.Roles {
+				if _, pending := st.MissingRoles[role]; !pending {
+					confirmed[role] = user
+				}
+			}
+			if len(confirmed) == 0 {
+				confirmed = nil
+			}
+		}
 		rows = append(rows, reviewflowRow{
 			Path:             "/" + pagePath,
 			IsFullyValidated: st.IsFullyValidated,
 			CurrentVersion:   st.CurrentPageVer,
 			ValidatedVersion: st.ValidatedVersion,
+			VersionTag:       st.VersionTag,
+			Parallel:         st.Parallel,
+			Roles:            st.Roles,
+			ConfirmedBy:      confirmed,
+			MissingRoles:     st.MissingRoles,
+			NextRoles:        st.NextRoles,
+			SignedRoles:      st.SignedRoles,
 			OverdueRoles:     st.OverdueRoles,
 			HasReviewflow:    configured,
 		})

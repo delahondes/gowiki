@@ -217,3 +217,77 @@ func TestBuildReviewflowList_CarriesOverdueRoles(t *testing.T) {
 		t.Errorf("OverdueRoles = %+v, want [reviewer]", rows[0].OverdueRoles)
 	}
 }
+
+// Signatory fields: roles, confirmed_by, missing_roles, next_roles,
+// signed_roles, version_tag, parallel. The caller must be able to answer
+// "who signed, who still owes, who's up next" from one list_reviewflows
+// response — the whole point of the batch tool.
+func TestBuildReviewflowList_SurfacesSignatories(t *testing.T) {
+	t.Parallel()
+	// Parallel review on tag v1.2 — alice (author) signed, bob and cathy
+	// still owe; bob signed cryptographically earlier (prior version) so
+	// SignedRoles carries just [author] for the current page version.
+	st := &reviewflow.Status{
+		Roles:            map[string]string{"author": "alice", "reviewer": "bob", "validator": "cathy"},
+		VersionTag:       "v1.2",
+		Parallel:         true,
+		CurrentPageVer:   5,
+		ValidatedVersion: 4,
+		MissingRoles:     map[string]string{"reviewer": "bob", "validator": "cathy"},
+		NextRoles:        []string{"reviewer", "validator"},
+		SignedRoles:      []string{"author"},
+		IsFullyValidated: false,
+	}
+	rows, _, _ := buildReviewflowList(reviewflowScanArgs{
+		pages: []string{"/qms/sop07"}, prefix: "qms", limit: 10,
+		getStatus: func(p string) (*reviewflow.Status, error) { return st, nil },
+	})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.VersionTag != "v1.2" {
+		t.Errorf("VersionTag = %q, want v1.2", r.VersionTag)
+	}
+	if !r.Parallel {
+		t.Error("Parallel = false, want true")
+	}
+	if r.Roles["author"] != "alice" || r.Roles["reviewer"] != "bob" || r.Roles["validator"] != "cathy" {
+		t.Errorf("Roles = %+v", r.Roles)
+	}
+	// ConfirmedBy = Roles ∖ MissingRoles — the server derives it so callers
+	// don't have to do the set subtraction themselves.
+	if len(r.ConfirmedBy) != 1 || r.ConfirmedBy["author"] != "alice" {
+		t.Errorf("ConfirmedBy = %+v, want {author: alice}", r.ConfirmedBy)
+	}
+	if r.MissingRoles["reviewer"] != "bob" || r.MissingRoles["validator"] != "cathy" {
+		t.Errorf("MissingRoles = %+v", r.MissingRoles)
+	}
+	if len(r.NextRoles) != 2 {
+		t.Errorf("NextRoles = %+v, want 2 entries (parallel review)", r.NextRoles)
+	}
+	if len(r.SignedRoles) != 1 || r.SignedRoles[0] != "author" {
+		t.Errorf("SignedRoles = %+v, want [author]", r.SignedRoles)
+	}
+}
+
+// Nothing signed yet: ConfirmedBy is nil (JSON omits the field), not an
+// empty map that would clutter the response for the common "fresh
+// reviewflow, no signatures" case.
+func TestBuildReviewflowList_ConfirmedByNilWhenNothingSigned(t *testing.T) {
+	t.Parallel()
+	st := &reviewflow.Status{
+		Roles:        map[string]string{"author": "alice", "reviewer": "bob"},
+		MissingRoles: map[string]string{"author": "alice", "reviewer": "bob"},
+	}
+	rows, _, _ := buildReviewflowList(reviewflowScanArgs{
+		pages: []string{"/x"}, prefix: "", limit: 10,
+		getStatus: func(p string) (*reviewflow.Status, error) { return st, nil },
+	})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].ConfirmedBy != nil {
+		t.Errorf("ConfirmedBy = %+v, want nil when nothing is signed", rows[0].ConfirmedBy)
+	}
+}
