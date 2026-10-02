@@ -992,8 +992,30 @@ function registerMarkdownPrinters(reg: Registry) {
         continue
       }
 
-      // Outermost-first for correct nesting (PM stores inner-first).
-      const marks = [...node.marks].reverse()
+      // PM's mark order is schema-rank — no relationship to markdown
+      // outer/inner. For stable round-trips we pick serialization
+      // order dynamically: marks already open stay first (maximises
+      // common prefix, nests the new ones inside), then anything
+      // this node adds goes after. The old "always reverse PM order"
+      // treated em+strong as "strong is outer", so an italic sentence
+      // with a bold word closed em and re-opened it around strong
+      // every pass, growing the output two asterisks per side per
+      // round until publish-time round-trip validation refused it.
+      // Mirror of the fix in pm_to_markdown.ts:serializeInlineFragment.
+      const nodeMarkSet = node.marks
+      const kept: Mark[] = []
+      for (const a of active) {
+        if (nodeMarkSet.some((m) => m.eq(a))) {
+          kept.push(a)
+        } else {
+          break
+        }
+      }
+      const added: Mark[] = []
+      for (const m of nodeMarkSet) {
+        if (!kept.some((k) => k.eq(m))) added.push(m)
+      }
+      const marks = [...kept, ...added]
 
       // Common prefix — marks that are already open and stay open.
       let common = 0

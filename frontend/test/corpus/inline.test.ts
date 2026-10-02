@@ -94,6 +94,28 @@ describe("nested marks", () => {
     assertStrongMark(rt.doc, "strong")
   })
 
+  // User-reported: italic sentence with a bold word inside grew by two
+  // asterisks per side per round-trip pass. Root cause was in the
+  // serializer: the fixed "reversed PM mark order = outer-first" rule
+  // treated strong as outer when the previous text node had em already
+  // active, so em got closed and re-opened around strong instead of
+  // nesting strong inside em. Pins the stable form.
+  it("italic containing bold *italic **strong** italic*", () => {
+    const rt = roundTrip("*italic **strong** italic*\n")
+    expect(rt.isStable).toBe(true)
+    assertEmMark(rt.doc, "italic ")
+    assertStrongMark(rt.doc, "strong")
+    expect(rt.first.trim()).toBe("*italic **strong** italic*")
+  })
+
+  it("italic containing underline *italic _under_ italic*", () => {
+    const rt = roundTrip("*italic _under_ italic*\n")
+    expect(rt.isStable).toBe(true)
+    assertEmMark(rt.doc, "italic ")
+    assertUnderlineMark(rt.doc, "under")
+    expect(rt.first.trim()).toBe("*italic _under_ italic*")
+  })
+
   it("highlight containing underline ==high _under_ end==", () => {
     const rt = roundTrip("==high _under_ end==\n")
     expect(rt.isStable).toBe(true)

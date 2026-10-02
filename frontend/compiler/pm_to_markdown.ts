@@ -87,10 +87,36 @@ export function serializeInlineFragment(
       continue
     }
 
-    // ProseMirror stores marks inner-first (em before highlight).
-    // For serialization we need outermost-first so the prefix comparison
-    // keeps outer marks open while toggling inner marks.
-    const nodeMarks = [...node.marks].reverse()
+    // Mark order on a text node is just the schema-rank order PM
+    // imposes — it has NO relationship to which mark was the OUTER
+    // wrap in the source markdown. For stable round-trips we have to
+    // pick the serialization order dynamically, maximising the common
+    // prefix with the marks already open. That way, when the previous
+    // span's em is still active and this span adds strong, we open
+    // strong INSIDE the still-open em (nest cleanly) instead of
+    // closing em and re-opening it around strong (which produces the
+    // three-asterisk `***bold***` sequence that re-parses with one
+    // extra mark level, growing the output by two asterisks per side
+    // per round and failing publish-time validation).
+    const nodeMarkSet = node.marks
+    const kept: Mark[] = []
+    for (const a of activeMarks) {
+      if (nodeMarkSet.some((m) => m.eq(a))) {
+        kept.push(a)
+      } else {
+        // Prefix broken — any further active mark would have to be
+        // closed anyway when the inner mark it wraps around closes,
+        // so we stop extending the kept prefix here.
+        break
+      }
+    }
+    const added: Mark[] = []
+    for (const m of nodeMarkSet) {
+      if (!kept.some((k) => k.eq(m))) {
+        added.push(m)
+      }
+    }
+    const nodeMarks = [...kept, ...added]
 
     // Find the longest common prefix of active marks and this node's marks.
     let commonLen = 0
