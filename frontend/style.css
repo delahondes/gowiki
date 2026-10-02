@@ -582,6 +582,19 @@ a:hover {
   pointer-events: none;
 }
 
+/* Orange — the page is locked by SOMEONE ELSE. Distinct from the yellow
+   draft-dot which marks the user's OWN unpublished draft. */
+.gowiki-action-foreign-lock-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gw-color-warning, #f57f17);
+  pointer-events: none;
+}
+
 .gowiki-action-toast {
   position: fixed;
   right: 56px;

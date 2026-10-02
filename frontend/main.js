@@ -7373,12 +7373,22 @@ function renderActions() {
         makeActionIconBtn("discard", "Discard draft", () => void discardDraft(), "gowiki-action-delete")
       )
     } else if (pageLockInfo && pageLockInfo.locked_by && pageLockInfo.locked_by !== currentUser?.username) {
-      actionsRoot.appendChild(
-        makeActionIconBtn("edit", `Join ${pageLockInfo.locked_by}'s session`, (e) => {
+      const foreignEditBtn = makeActionIconBtn(
+        "edit",
+        `Being edited by ${pageLockInfo.locked_by} — click to join session`,
+        (e) => {
           if (e?.shiftKey) editMode = "raw"
           void joinCollabSession(pageLockInfo.locked_by)
-        })
+        }
       )
+      // Orange dot distinguishes "someone else is editing — join or wait"
+      // from the yellow dot the user's own unpublished draft shows. The
+      // tooltip above names the owner; the dot gives the at-a-glance cue
+      // so the user doesn't need to hover to notice the state.
+      const foreignDot = document.createElement("span")
+      foreignDot.className = "gowiki-action-foreign-lock-dot"
+      foreignEditBtn.appendChild(foreignDot)
+      actionsRoot.appendChild(foreignEditBtn)
     } else {
       const editHint = isMac ? "\u2318E" : "Ctrl+E"
       actionsRoot.appendChild(
