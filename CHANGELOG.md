@@ -9,7 +9,198 @@ project's design invariants and `specs/` for the dialect specification.
 
 ## [Unreleased]
 
-Nothing pending — the working tree matches `v1.0.0-rc.3`.
+Nothing pending — the working tree matches `v1.0.0-rc.4`.
+
+## [1.0.0-rc.4] — 2026-10-03
+
+Fourth release candidate. Four new MCP / editor surfaces plus a
+dense pass of correctness fixes against bugs the live corpus
+turned up after rc.3 shipped. Nothing in the RC window has
+required a reroll of a prior fix; the base version candidate
+remains viable.
+
+### Added
+
+- **Implicit templates** — an `_template.md` file carrying a
+  `{template}` marker now runs through the full template
+  resolution pipeline when a new page is created in its
+  namespace. `{template-title}` substitutes the heading,
+  `{template-stamp}` emits the frozen origin sentence,
+  `{template-reviewflow}` becomes `{reviewflow}` with merged
+  args, `{template-todo}` becomes `{todo}`. An `_template.md`
+  WITHOUT the marker still pre-fills raw (keeps imported
+  DokuWiki templates working untouched). Validation gate and
+  target-pattern enforcement are the same as the explicit
+  Create-from-template action — pre-filling can't bypass the
+  "fully validated before issuing" rule. The split/merge/
+  resolve pipeline is factored into one helper
+  (`(*Server).resolveTemplateDoc`) so both entry points call
+  the same code.
+- **`{template-todo}` directive.** Mirrors `{todo}`'s attribute
+  surface (title, assign, action, due, priority, …) and resolves
+  to a real `{todo}` on the created document. Prevents the trap
+  where a `{todo}` placed on the template page would fire against
+  every reader of the template itself. Toolbar icon in both edit
+  modes (page-with-folded-corner base + checkbox payload). The
+  properties panel for `{template-reviewflow}` now also surfaces
+  the roles map (multiline `rolename=username` per line, same
+  shape as `{reviewflow}`'s panel — previously roles could only
+  be edited by dropping to raw mode).
+- **`list_broken_links` MCP tool.** One pass over the corpus,
+  one row per unresolved internal reference:
+  `{page, href, resolved, fragment, label, line, reason}`.
+  `check_fragments=true` turns on `#anchor` validation — each
+  fragment is compared against the target page's heading slugs
+  (numbered-heading `N.` prefix stripped so an auto-numbered
+  heading matches both its slug and its anchor). Default off
+  for the cheap-and-fast case. Pages the caller can't view are
+  skipped — the dual-ACL model is honoured.
+- **`list_reviewflows` surfaces signatories.** Each row now
+  carries `roles` (role → assigned user), `confirmed_by`
+  (role → user that signed, derived server-side as
+  `roles ∖ missing_roles`), `missing_roles`, `next_roles`,
+  `signed_roles` (cryptographic signatures only), `version_tag`,
+  and `parallel`. Answers "who signed, who still owes, who's
+  up next" from one batch call rather than one `get_reviewflow_status`
+  per page. `confirmed_by` is nil (JSON-omitted) when nothing is
+  signed, so the fresh-reviewflow case stays compact.
+- **`{reviewflow-query user=X signed_by=Y}` filter.** Mirror of
+  `when=missing`: `signed_by` lists pages where Y has signed —
+  useful for compliance ("show me every doc Etienne has
+  endorsed"). Pairs cleanly with `user=@me` for the personal
+  dashboard case.
+- **Orange-dot visual cue on the Edit icon** when the current
+  page is locked by someone ELSE. Same 7×7 shape as the yellow
+  own-draft dot but `var(--gw-color-warning)` so dark mode flips
+  cleanly, and the two states stay visually distinct at a
+  glance. Tooltip promoted to `Being edited by X — click to
+  join session`.
+- **Toolbar icon for `{lifecycle}`.** The plugin already
+  registered an insert command but main.js had no capture
+  branch, so it fell through to the generic text-button fallback.
+  Capture branch added + distinct triangular 3-arrow recycle
+  symbol (solid-filled, respects `currentColor`) so it doesn't
+  read like the clock-based `{changes}` icon.
+- **`split-polluted-author` migration tool.** One-shot cleanup
+  of `data/meta/.../page.json` + `data/attic/.../index.json`
+  entries whose Author field held `"username | summary"` from
+  the pre-rc.4 MCP write path. Splits at the first ` | `; the
+  suffix moves into `AtticEntry.Summary` only when it was
+  empty. Idempotent — a second pass reports zero. Ran on prod
+  2026-10-01: 184 meta files + 798 attic entries fixed, no
+  errors, backup kept.
+
+### Fixed
+
+- **Reviewflow todos survived page delete, tag change, and
+  validation.** 23 stale tasks out of 88 on the live corpus
+  with no matching reviewflow state. Four drift sources closed:
+  `storage.FileStore.Delete` now calls a new
+  `ReviewflowSyncer.OnPageDelete` hook (cancels tasks + removes
+  state file); `SyncFromMarkdown`'s version-bump branch always
+  cancels then recreates missing-role tasks when the directive
+  changed between versions (was skipped whenever any
+  confirmation re-attached, leaving dangling tasks for
+  reassigned roles); `finalizeValidatedVersion` adds a belt-
+  and-suspenders `CancelReviewTasks` after `Complete`;
+  `ReconcileOrphanTasks(exists)` runs at startup and sweeps
+  historical drift (page gone / page fully validated / live
+  state rebuild). Signature-preservation path intact — "same
+  directive + re-attach = don't touch tasks" is preserved via
+  a byte-compare on the directive's roles / tag / order /
+  parallel.
+- **Nested emphasis round-trip grew by two asterisks per pass.**
+  `*italic **strong** italic*` serialised to
+  `*italic ***strong*** italic*`, which re-parsed with one
+  extra mark level and re-serialised to five asterisks, then
+  seven, until publish-time validation refused the save. Root
+  cause: both inline mark serializers reversed PM's mark set
+  under the (wrong) assumption that reversed order means
+  outer-first. PM order is schema-rank order — for
+  `em + strong` that reversal made strong appear outer, so em
+  got closed and re-opened AROUND strong at every text-node
+  boundary. The fix picks mark order dynamically: marks already
+  active that are also on this node come first (in
+  `activeMarks` order), new marks go after. em stays open
+  across the boundary, strong opens cleanly inside. Mirror of
+  the fix in both `pm_to_markdown.ts:serializeInlineFragment`
+  and `core_nodes.ts:serializeInline`. The "bold wrapping
+  italic" direction was never affected because strong sorts
+  after em in schema order (the reversed order happened to
+  match reality for that case).
+- **`author` field polluted with the commit summary.** The
+  `{tag-query}` Author column showed
+  `raynald.delahondes | [AI: edit_page] Change history: …` —
+  the five MCP write surfaces concatenated
+  `username + " | " + summary` into one string before calling
+  `Store.Put`, writing the whole mess into
+  `PageMetadata.Author`. Switched to `PutWithSummary`
+  end-to-end: `PageStore` grows the method, `RowWriter`'s
+  Insert / Update grow a summary parameter,
+  `syncRowToPage` forwards it to `Store.PutWithSummary`.
+  Attachment uploads drop the summary (the media attic has no
+  Summary field — follow-up refactor).
+- **Partial-signature snapshots wrongly flagged as "already
+  validated".** The rc.3 snapshot-before-wipe path stored
+  partial-signature records in `VersionHistory`, which then
+  tripped the "version tag X was already validated" warning on
+  the next tag bump. `isVersionTagAlreadyValidated` now requires
+  `is_validated === true` or legacy full-coverage, treating
+  partial-signature snapshots as bookkeeping, not completed
+  validations.
+- **Numbered-heading `N.` prefix leaked into
+  `list_broken_links`'s slug set.** `#documentation-effort` on
+  a page with `## 1. Documentation effort` was flagged as a
+  broken fragment because the slugifier kept the `1. ` prefix
+  (`1-documentation-effort`). `SlugifyHeading` now strips the
+  prefix before slug generation, matching the renderer.
+- **`{template-title}`, `{template-stamp}`,
+  `{template-reviewflow}`, `{template-todo}` could not be
+  selected in the visual editor** — their NodeView `stopEvent`
+  returned `true` for every event, including `mousedown`, so
+  PM couldn't form a `NodeSelection` and the properties panel
+  never opened. Let mouse events through, keep keyboard /
+  paste blocked. `{template-stamp}` in template context was
+  also visually indistinguishable from body text (bare italic
+  muted span); given the same `border-left + background`
+  styling as the other template-aux panels and promoted the
+  inner note to `display:block`.
+
+### Changed
+
+- **MCP write surfaces no longer concatenate author + summary.**
+  Call sites: `write_page`, `edit_page`, `template_create`,
+  `update_database_row`. All go through
+  `PageStore.PutWithSummary`. (The migration tool above cleans
+  historical records.)
+
+### Tests
+
+- Backend: 9 new in `task_lifecycle_test.go` (OnPageDelete,
+  role reassignment, content-edit-no-reattach, finalize cancel,
+  reconcile deleted / validated / live / dormant / idempotent);
+  2 new for `list_reviewflows` signatories (parallel review
+  with partial signatures, nil-vs-empty-map for the no-signatures
+  case); 6 new for `_template.md` prefill (raw fallback,
+  resolved payload, validation gate, target-pattern mismatch,
+  target-pattern match, title helper); 1 for the migration
+  tool's `splitAuthor` helper; 2 for the fragment-check slug
+  stripping; 7 extracted direct tests for `list_broken_links`.
+- Frontend: 2 for the nested-emphasis round-trip
+  (`*italic **strong** italic*`, `*italic _under_ italic*`);
+  template plugin test suite extended to 29 cases covering the
+  new `template-todo` command / properties / toolbar wiring.
+- **493 frontend tests, 10 backend packages, all green.
+  `golangci-lint` 0 issues, `gofmt`, `prettier` clean.**
+
+### Infra
+
+- Release workflow now has a `prepare-release` job that
+  auto-creates the GitHub Release before the upload jobs run —
+  prevents the "release not found" failure that cost us the
+  rc.3 cut.
+- CI cleanups: `gofmt`, `prettier`, `staticcheck` QF1001
+  rewrites, one unused `fakeCorpus.allPaths` helper removed.
 
 ## [1.0.0-rc.3] — 2026-09-30
 
@@ -565,4 +756,7 @@ Single-page correctness.
 ---
 
 [Unreleased]: /
+[1.0.0-rc.4]: /
+[1.0.0-rc.3]: /
+[1.0.0-rc.2]: /
 [1.0.0-rc.1]: /
