@@ -190,7 +190,7 @@ func NewFileStore(contentRoot string) (*FileStore, error) {
 	if err := os.MkdirAll(meta, 0o755); err != nil {
 		return nil, fmt.Errorf("create meta root: %w", err)
 	}
-	return &FileStore{
+	fs := &FileStore{
 		contentRoot:  content,
 		metaRoot:     meta,
 		dataDir:      dataDir,
@@ -200,7 +200,48 @@ func NewFileStore(contentRoot string) (*FileStore, error) {
 		Attic:        NewAttic(dataDir),
 		Changelog:    NewChangelog(dataDir),
 		Drafts:       NewDraftStore(dataDir, meta),
-	}, nil
+	}
+	// The draft store needs a disk-backed resolver to collapse the two
+	// URL forms of a namespace index onto a single lock file. Wire the
+	// FileStore (which can inspect the content tree) as that resolver —
+	// otherwise /foo and /foo/ would key under different lock files and
+	// one caller could clobber another's in-flight edit.
+	fs.Drafts.SetLockKeyResolver(fs)
+	return fs, nil
+}
+
+// LockKey implements storage.LockKeyResolver — folds any surface form
+// of a page path into the single storage-tree path the draft lock
+// files use. A leaf page foo.md keys under "foo"; a namespace index
+// foo/index.md keys under "foo/index". URL forms "/foo", "/foo/", or
+// a mix of leading slashes all resolve the same way.
+//
+// Mirrors the content-tree layout: lock file at
+// metaRoot/<LockKey>.lock.json lives next to the content file it
+// locks.
+func (s *FileStore) LockKey(pagePath string) string {
+	normalized, err := normalizePagePath(pagePath)
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimPrefix(normalized, "/")
+	// Prefer the resolved storage form when the page actually exists:
+	// it unambiguously says whether this is a leaf or an index, with no
+	// filename ambiguity.
+	if _, isIndex, resolveErr := s.resolveExistingContentPath(normalized); resolveErr == nil {
+		if isIndex {
+			return trimmed + "/index"
+		}
+		return trimmed
+	}
+	// Page doesn't exist yet (new-page edit). Fall back to the input
+	// form's intent: a trailing slash means the caller is creating a
+	// namespace index. normalizePagePath strips it, so look at the
+	// raw input.
+	if strings.HasSuffix(strings.TrimSpace(pagePath), "/") {
+		return trimmed + "/index"
+	}
+	return trimmed
 }
 
 func (s *FileStore) Get(pagePath string) (Page, error) {

@@ -37,17 +37,58 @@ type DraftLock struct {
 
 // DraftStore manages draft files and edit locking.
 type DraftStore struct {
-	mu       sync.RWMutex
-	dataDir  string // data/ root
-	metaRoot string
+	mu              sync.RWMutex
+	dataDir         string // data/ root
+	metaRoot        string
+	lockKeyResolver LockKeyResolver // set once by SetLockKeyResolver; nil = fallback to normalizePagePath
 }
 
 func NewDraftStore(dataDir, metaRoot string) *DraftStore {
 	return &DraftStore{dataDir: dataDir, metaRoot: metaRoot}
 }
 
+// LockKeyResolver folds any surface form of a page path into the single
+// storage path the draft store uses as the lock / draft file key. The
+// FileStore implements this by consulting the content tree so a leaf
+// page foo.md keys under "foo" and a namespace index foo/index.md keys
+// under "foo/index" — the two URL forms /foo and /foo/ for the same
+// page thus share one lock file. Without a resolver the draft store
+// falls back to normalizePagePath, which at least keeps "/foo" and
+// "/foo/" from drifting apart (good enough for test harnesses that
+// don't need namespace-index awareness).
+type LockKeyResolver interface {
+	LockKey(pagePath string) string
+}
+
+// SetLockKeyResolver wires the draft store to a canonicalizer. Called
+// exactly once by NewFileStore, before the store is handed to any
+// goroutine; no locking because the field is never written again.
+func (d *DraftStore) SetLockKeyResolver(r LockKeyResolver) {
+	d.lockKeyResolver = r
+}
+
+// resolveLockKey must NOT touch d.mu — most call sites (EnterEditMode,
+// SaveDraft, Publish, …) already hold d.mu.Lock, so reacquiring any
+// lock here would deadlock. The resolver pointer is set at init and
+// never written after, so an unlocked read is safe.
+func (d *DraftStore) resolveLockKey(pagePath string) string {
+	if d.lockKeyResolver != nil {
+		if key := d.lockKeyResolver.LockKey(pagePath); key != "" {
+			return key
+		}
+	}
+	// Fall back to normalizePagePath (strips trailing /, injects
+	// /index for the root). Doesn't distinguish a namespace index from
+	// a hypothetical sibling leaf, but the namespace constraint rules
+	// out that collision in practice.
+	if normalized, err := normalizePagePath(pagePath); err == nil {
+		return strings.TrimPrefix(normalized, "/")
+	}
+	return pagePath
+}
+
 func (d *DraftStore) draftPath(username, pagePath string) string {
-	return filepath.Join(d.dataDir, "drafts", username, filepath.FromSlash(pagePath)+".md")
+	return filepath.Join(d.dataDir, "drafts", username, filepath.FromSlash(d.resolveLockKey(pagePath))+".md")
 }
 
 // EnterEditMode creates or resumes a draft for the given page.
@@ -208,7 +249,7 @@ func (d *DraftStore) validateToken(pagePath, username, editToken string) error {
 }
 
 func (d *DraftStore) lockPath(pagePath string) string {
-	return filepath.Join(d.metaRoot, filepath.FromSlash(pagePath)+".lock.json")
+	return filepath.Join(d.metaRoot, filepath.FromSlash(d.resolveLockKey(pagePath))+".lock.json")
 }
 
 func (d *DraftStore) readLock(pagePath string) (DraftLock, error) {
