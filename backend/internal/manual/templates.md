@@ -1,10 +1,16 @@
 # Templates
 
-Templates let you create new pages with pre-filled content. A namespace can have a single default template, or several named alternatives — when more than one template applies to a new page the wiki shows a picker so you can choose (or start blank).
+Three kinds of templates in Gowiki. They share the same `{template-*}` directive family and the same variable resolver, but they differ in how a new page gets *attached* to the template:
 
-## 1. Creating a template
+- **Implicit templates** — files named `_template*.md`. Picked up by filename convention when a new page is created in the namespace. No action required on the user's part.
+- **Explicit templates** — any page carrying a `{template}` directive. Surfaced by a **Create document** button rendered on the template itself. The user clicks the button, names the destination, and the wiki copies the resolved payload into a new page.
+- **Row-bound page templates** — pointed at by a database table's `page_folder` + `page_template_path`. Applied to the page auto-created on every row insert. Documented in detail in [Database](./database); the parts of this page about variables and `{template-*}` directives still apply.
 
-A template is a regular page whose filename starts with `_template`, stored inside a namespace directory.
+The resolver that substitutes `{template-title}`, `{template-stamp}`, `{template-reviewflow}` and `{template-todo}` is the same in all three paths — one dialect rule across the whole system: a `{template-*}` directive has a defined meaning wherever it is parseable, whether a sibling `{template}` marker is present or not.
+
+## 1. Implicit templates (`_template*.md`)
+
+An implicit template is a regular page whose filename starts with `_template`, stored inside a namespace directory. The wiki pre-fills the editor with the template's content whenever a user starts a new page in that namespace.
 
 Three naming shapes are supported:
 
@@ -23,7 +29,7 @@ Examples:
 - `content/regulatory/qms/_template_ins.md` — appears only for pages starting with `ins`
 - `content/regulatory/qms/_templatemeeting.md` — always appears in the picker as "meeting"
 
-## 1. Using templates
+### 1. Using an implicit template
 
 When you navigate to a page that doesn't exist yet, the wiki collects every `_template*.md` that applies to that path (walking up the namespace tree) and filters the constrained ones by the filename-prefix rule.
 
@@ -35,7 +41,65 @@ Resolution walks up the tree and takes the **closest** version of each slug. A d
 
 Templates are hidden from the sitemap, orphan detection, and recent changes. They **are** indexed by full-text search so you can still find them via the search bar.
 
-## 1. Variables in templates
+### 1. Pre-fill content vs resolved directives
+
+Two behaviours depending on whether the `_template*.md` carries any `{template-*}` directive:
+
+- **No template directive** → the new page's draft starts out as a byte-for-byte copy of the template. This is the DokuWiki-compatible path and the right choice for a boilerplate snippet that just needs to be edited by hand.
+- **At least one `{template-*}` directive** (title, stamp, reviewflow, todo) → the resolver runs the same way as on an explicit template: titles substituted, stamps frozen in, `{template-reviewflow}` becomes `{reviewflow}`, `{template-todo}` becomes `{todo}`. The template file itself stays untouched.
+
+An implicit template with `{template-*}` directives is also the layout the **row-bound template** path expects. The row insertion flow treats the template file as a row-bound template whenever it lives at the table's `page_template_path`.
+
+The reviewflow validation gate from the explicit-template path applies here too: if the implicit template carries a `{reviewflow}` of its own and it's not fully validated, the pre-fill is refused rather than silently issuing an un-reviewed document.
+
+## 1. Explicit templates (`{template}` directive)
+
+An explicit template is any page carrying a `{template}` directive on its own line. The directive renders as a **Create document** button; clicking the button opens a dialog that asks for a destination path and title, offers optional reviewflow overrides, and refuses upfront when the template's own reviewflow isn't fully validated.
+
+Explicit templates can live anywhere in the wiki — the filename convention of `_template*.md` is for implicit templates. An explicit template under `/qms/campaigns/ca-pattern` is a perfectly ordinary page that happens to carry a `{template}` directive; it is itself editable, versioned, and reviewable like any other page.
+
+The five directives:
+
+| Directive | Where it lives | Fate at creation |
+| --- | --- | --- |
+| `{template}` | Template only | Not copied. Marks where the copiable payload begins, and carries the **Create document** action. Above the marker: tracking metadata that stays on the template (its own `{reviewflow}`, its own tags). Below: the payload that gets copied. |
+| `{template-title}` | Template and document | Prefixes the heading that becomes the document's title. Resolved to that heading, with the pattern replaced by the user's completed title. |
+| `{template-stamp}` | Template and document | Replaced by the origin sentence (`Created from template [Title](/path?v=N), version 1.0`). |
+| `{template-reviewflow …}` | Template only | Replaced by `{reviewflow …}` in the created document — actors default to the template's own `{reviewflow}`, version defaults to `1.0`. |
+| `{template-todo …}` | Template only | Replaced by `{todo …}` in the created document — args carry through verbatim. The template itself never fires the task. Use it for distribution lists ("`{template-todo action=read assign=@ops}`") that must trigger on every derived document but stay inert on the pattern. |
+
+Programmatic callers get the same guarantee via the MCP `create_page_from_template` tool.
+
+**Pinned destination — `{template target=…}`.** A template can pin the namespace its instances land in by adding `target=/some/path/{{slug}}` to the marker. When set, the create dialog pre-fills the destination field with the pattern and locks it (read-only). `{{title}}` and `{{slug}}` expand at creation time against the title the author types; `{{slug}}` is the lowercased, ASCII-folded, hyphenated form (e.g. "Alpha Beta" → `alpha-beta`). The MCP `create_page_from_template` tool refuses any caller-supplied `path` that doesn't match the resolved target — so a template that decides "instances live under `/qms/campaigns/`" carries that rule with it, whether the caller is a human clicking the dialog or an agent calling the tool.
+
+### 1. Behaviour we rely on
+
+- **The version is frozen at creation.** The `?v=N` link in the stamp points at the template's page-version *at that moment*. A document from 2024 keeps announcing the form as it stood in 2024, no matter what the template does afterwards. The reviewflow VERSIONTAG is used when present (`, version 1.0`); a template without a reviewflow falls back to the raw page revision (`, revision N`) — the wording deliberately differs so the two numbers don't look alike.
+- **Templates without a reviewflow are fine.** Some registers issue documents without a review-flow cycle; `{template}`, `{template-title}` and `{template-stamp}` work normally in that case, and `{template-reviewflow}` is simply omitted.
+- **`{template-todo}` replaces the "escape and un-escape" trap for distribution lists.** A template that needs every derived document to notify a group (`{todo action=read assign=@ops}`) used to force the author into escaping the directive (`\{todo …\}`) so it wouldn't fire against the template itself, then remembering to un-escape it on every copy — which nobody did. Wrap it as `{template-todo action=read assign=@ops}` instead: the template stays inert, every derived document carries a live `{todo}` from the moment it's created. Several `{template-todo}` lines can coexist on one template (multi-step flow like read → acknowledge → validate), and their order is preserved end-to-end.
+
+### 1. Migrating an existing hand-copy template
+
+Templates in a QMS that follow the hand-copy convention today can be converted mechanically:
+
+1. Replace the horizontal rule that separates the tracking block from the payload with `{template}`.
+2. Replace the hand-written "Source template: …" block with `{template-stamp}`.
+3. Replace the escaped `\{reviewflow …\}` on the payload side with `{template-reviewflow}` (arguments are optional — defaults inherit the template's own reviewflow).
+4. Add `{template-title}` on the line just above the payload's H1 heading.
+5. Replace any escaped `\{todo …\}` (the distribution-list workaround) with `{template-todo …}` carrying the same args — the created document then gets a live `{todo}` without the template itself firing.
+
+Nothing in the resulting template needs maintaining by hand: version numbers, actor lists, origin sentences and distribution tasks are all derived at creation time from the template's current state.
+
+## 1. Row-bound page templates
+
+A database table whose row-bound page definition points at a template file (via the table's `page_template_path` field) gets the resolver applied to every row-bound page the database auto-creates on insert. This is covered end-to-end in [Database](./database); the gotchas specific to templates in this role:
+
+- **Do NOT put `{template}` on a row-bound template.** The marker would render a Create document button on the template page, which would mislead a user into clicking "Create" to add a row — but rows get created via the database UI, not via the button. The `{template-*}` directives still resolve without `{template}` thanks to the "any template-family directive engages the resolver" rule.
+- **`{template-stamp}` works.** The row-bound page gets the standard origin sentence at insert time, with `?v=N` pointing at the template file's page-version at that moment — same freezing guarantee as the explicit-template path.
+- **`{template-todo}` works.** Each row's page carries any `{template-todo}` from the template as a live `{todo}`.
+- **`{template-title}` and `{template-reviewflow}` are generally ignored on this path.** The row supplies the title (via `page_title_field` on the table), and row-bound pages typically carry no reviewflow of their own — the table's own validation workflow owns review for row data.
+
+## 1. Variables (shared across all three kinds)
 
 Templates can include **global variables** that are resolved at render time (not at creation time). These use the `{{NAME}}` syntax with ALL_CAPS names:
 
@@ -49,7 +113,7 @@ Global variables remain as `{{NAME}}` in the stored markdown and update dynamica
 
 A fallback value can be specified with a colon: `{{AUTHORMAIL:no email provided}}`.
 
-### Global variable reference
+### 1. Global variable reference
 
 **Page variables:**
 
@@ -100,7 +164,7 @@ A fallback value can be specified with a colon: `{{AUTHORMAIL:no email provided}
 | `{{WIKI}}` | Site title | `Acme Wiki` |
 | `{{WIKIVERSION}}` | Gowiki software version | `0.9.5` |
 
-## 1. Database-bound variables
+### 1. Database-bound variables
 
 Templates are especially powerful with database-bound pages. When a page is linked to a database table row, **lowercase** template variables like `{{fieldname}}` resolve from the database row's fields:
 
@@ -110,43 +174,3 @@ Visit date: {{visit_date}}
 ```
 
 These are described in detail in [Database](./database).
-
-## 1. Regulatory templates and the stamp directives
-
-For documents that need to record which template produced them and in which version — the ISO 13485 §4.2.4 traceability question — a second, complementary template shape exists. Instead of `_template*` filename dispatch, these are ordinary pages that carry a `{template}` directive; the wiki performs the copy itself and freezes the template's version into the created document at the moment of the copy.
-
-Five directives make this up. They live alongside the tracking block on a template page and get resolved at document creation:
-
-| Directive | Where it lives | Fate at creation |
-| --- | --- | --- |
-| `{template}` | Template only | Not copied. Marks where the copiable payload begins, and carries the **Create document** action. |
-| `{template-title}` | Template and document | Prefixes the heading that becomes the document's title. Resolved to that heading, with the pattern replaced by the user's completed title. |
-| `{template-stamp}` | Template and document | Replaced by the origin sentence (`Created from template [Title](/path?v=N), version 1.0`). |
-| `{template-reviewflow …}` | Template only | Replaced by `{reviewflow …}` in the created document — actors default to the template's own, version defaults to `1.0`. |
-| `{template-todo …}` | Template only | Replaced by `{todo …}` in the created document — args carry through verbatim. The template itself never fires the task. Use it for distribution lists ("`{template-todo action=read assign=@ops}`") that must trigger on every derived document but stay inert on the pattern. |
-
-### The copy is performed by the wiki
-
-Every `{template-*}` directive above the horizontal rule in the old hand-copy model is replaced by a single click on the **Create document** button rendered next to the `{template}` marker. The dialog asks for a destination path and title, offers optional reviewflow overrides, and refuses upfront when the template's own reviewflow isn't fully validated. Programmatic callers get the same guarantee via the MCP `create_page_from_template` tool.
-
-**Pinned destination — `{template target=…}`.** A template can pin the namespace its instances land in by adding `target=/some/path/{{slug}}` to the marker. When set, the create dialog pre-fills the destination field with the pattern and locks it (read-only). `{{title}}` and `{{slug}}` expand at creation time against the title the author types; `{{slug}}` is the lowercased, ASCII-folded, hyphenated form (e.g. "Alpha Beta" → `alpha-beta`). The MCP `create_page_from_template` tool refuses any caller-supplied `path` that doesn't match the resolved target — so a template that decides "instances live under `/qms/campaigns/`" carries that rule with it, whether the caller is a human clicking the dialog or an agent calling the tool.
-
-### Behaviour we rely on
-
-- **The version is frozen at creation.** The `?v=N` link in the stamp points at the template's page-version *at that moment*. A document from 2024 keeps announcing the form as it stood in 2024, no matter what the template does afterwards. The reviewflow VERSIONTAG is used when present (`, version 1.0`); a template without a reviewflow falls back to the raw page revision (`, revision N`) — the wording deliberately differs so the two numbers don't look alike.
-- **A stamp outside a template is loud.** If you paste a `{template-stamp}` onto a page that has no `{template}` marker, it renders as a red error rather than silently. The failure would otherwise be caught at audit rather than at writing time.
-- **Templates without a reviewflow are fine.** Some registers issue documents without a review-flow cycle; `{template}`, `{template-title}` and `{template-stamp}` work normally in that case, and `{template-reviewflow}` is simply omitted.
-- **Row-bound-page templates also get the stamp.** A page created by inserting a row into a database table with a `page_template_path` inherits the same `{template-stamp}` resolution — the row-bound-page template gets stamped with its current page version at row-insert time. `{template-title}` and `{template-reviewflow}` are ignored on that path (the row supplies the title, and row-bound pages carry no reviewflow of their own).
-- **`{template-todo}` replaces the "escape and un-escape" trap for distribution lists.** A template that needs every derived document to notify a group (`{todo action=read assign=@ops}`) used to force the author into escaping the directive (`\{todo …\}`) so it wouldn't fire against the template itself, then remembering to un-escape it on every copy — which nobody did. Wrap it as `{template-todo action=read assign=@ops}` instead: the template stays inert, every derived document carries a live `{todo}` from the moment it's created. Several `{template-todo}` lines can coexist on one template (multi-step flow like read → acknowledge → validate), and their order is preserved end-to-end.
-
-### Migrating an existing template
-
-Templates in a QMS that follow the hand-copy convention today can be converted mechanically:
-
-1. Replace the horizontal rule that separates the tracking block from the payload with `{template}`.
-2. Replace the hand-written "Source template: …" block with `{template-stamp}`.
-3. Replace the escaped `\{reviewflow …\}` on the payload side with `{template-reviewflow}` (arguments are optional — defaults inherit the template's own reviewflow).
-4. Add `{template-title}` on the line just above the payload's H1 heading.
-5. Replace any escaped `\{todo …\}` (the distribution-list workaround) with `{template-todo …}` carrying the same args — the created document then gets a live `{todo}` without the template itself firing.
-
-Nothing in the resulting template needs maintaining by hand: version numbers, actor lists, origin sentences and distribution tasks are all derived at creation time from the template's current state.
