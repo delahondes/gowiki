@@ -141,7 +141,7 @@ npx @modelcontextprotocol/inspector \
 | `list_namespace` | Enumerate pages and sub-namespaces under a path |
 | `read_pages_batch` | Read up to 20 pages in one call |
 | `get_page_meta` | Page title, version, tags, backlinks, reviewflow status |
-| `search_pages` | Full-text, typo-tolerant search — pass `tag` to filter by tag instead (combine with `query` to narrow by substring) |
+| `search_pages` | Three modes: `query` for fuzzy full-text, `pattern` for grep-style RE2 regex (literal / structured matches, line + column), `tag` for tag listing. Composable: `tag` can scope `query` or `pattern`. |
 | `get_reviewflow_status` | Reviewflow roles, confirmations, validation state — single page |
 | `list_reviewflows` | Batch reviewflow status across every page under a `path_prefix`. One MCP call for a whole namespace — use this instead of a loop of `get_reviewflow_status` for corpus-wide compliance passes. |
 | `list_broken_links` | Scan every page under a `path_prefix` and return unresolved internal references as `{page, href, resolved, fragment, label, line, reason}` rows. One call for a whole subtree; cheaper than rendering each page to HTML and scraping `gowiki-link-missing`. Fragment anchors are not checked by default; pass `check_fragments=true` to also report `#heading` references whose target page exists but whose anchor doesn't match any heading. |
@@ -182,24 +182,30 @@ npx @modelcontextprotocol/inspector \
 | `publish_edit_draft` | Publish the draft: full server-side pipeline (inline-row-edit guard, validation, page store, todo auto-complete). Requires the edit_token from `enter_edit_session` |
 | `discard_edit_draft` | Throw away the caller's own draft and clear the lock |
 
-## Searching by tag
+## Searching — three modes
 
-`search_pages` accepts an optional `tag` parameter alongside `query`. At least one of the two must be set:
+`search_pages` carries three mutually-informative modes. At least one of `query`, `pattern`, or `tag` must be set.
 
-- `query` alone — full-text, typo-tolerant FTS over page bodies. Returns snippets.
-- `tag` alone — list every page bearing that tag (no snippets, no ranking).
-- `tag` + `query` — pages bearing the tag, narrowed to those whose path or title contains `query` (case-insensitive substring).
+- **`query` — fuzzy full-text.** Typo-tolerant FTS over page bodies. Returns ranked snippets. Right choice for the vague-recall case ("the page about reviewflow validation").
+- **`pattern` — grep-style regex.** The RE2 regex is scanned against every page's raw markdown. One row per occurrence: `{path, line, column, match, line_text}`. Agent-oriented: literal strings and structured directives match exactly, no ranking, no stemming. The right choice when you need to **find every page using `{template-stamp}`**, locate every `TODO(` marker, or confirm no page still carries a deprecated syntax. Options: `path_prefix` to scope the scan, `case_sensitive` (default true), `max_per_page` to cap per-page occurrences.
+- **`tag` — tag listing.** Every page bearing that tag. Composable: `tag` + `query` narrows by path/title substring; `tag` + `pattern` scopes the regex scan to tagged pages (useful for "find every TODO on `tag:sop` pages").
+
+`query` and `pattern` are mutually exclusive — pick fuzzy or exact; `tag` composes with either.
 
 All results are filtered by the caller's ACL.
 
 Examples:
 
 ```json
+{ "query": "reviewflow validation" }
+{ "pattern": "\\{template-stamp(?:\\s[^{}]*)?\\}" }
+{ "pattern": "TODO\\(", "path_prefix": "/regulatory/qms", "case_sensitive": false }
 { "tag": "sop" }
 { "tag": "sop", "query": "biomscope" }
+{ "tag": "sop", "pattern": "DEPRECATED" }
 ```
 
-This is the same syntax the wiki search bar exposes as `tag:NAME [substring]`. See [Tags](/wiki/manual/tags) and [Search](/wiki/manual/search) for the user-facing equivalent.
+`query` + `tag` is the same syntax the wiki search bar exposes as `tag:NAME [substring]`. See [Tags](/wiki/manual/tags) and [Search](/wiki/manual/search) for the user-facing equivalent. `pattern` is MCP-only — the user search bar stays fuzzy.
 
 ## Editing pages — prefer `edit_page` over `write_page`
 

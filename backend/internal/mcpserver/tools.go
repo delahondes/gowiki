@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -410,27 +411,129 @@ func registerGetPageMetaTool(srv *mcpsrv.MCPServer, deps Deps) {
 func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 	tool := mcpgo.NewTool("search_pages",
 		mcpgo.WithDescription(
-			"Search wiki pages. Use `query` for full-text search (typo-tolerant, ranked, returns snippets) "+
-				"or `tag` to list every page bearing a given tag. The two can be combined: when both are set, "+
-				"the tag-tagged pages are narrowed to those whose path or title contains `query` (case-insensitive). "+
-				"At least one of `query` or `tag` is required. All results respect the caller's ACL.",
+			"Search wiki pages. Three modes:\n"+
+				"  • `query` — full-text search (typo-tolerant, ranked, returns snippets). "+
+				"Human-oriented: good for 'find me the page about X'.\n"+
+				"  • `pattern` — RE2 regex scanned across every page's markdown, grep-style. "+
+				"Agent-oriented: exact substrings / structured directives are found reliably, "+
+				"no fuzzy ranking. Returns one row per occurrence with path + line + column + "+
+				"the matching text + the full line as context.\n"+
+				"  • `tag` — list every page bearing a given tag. Composable with `query` "+
+				"(narrows tag results by path/title substring) OR with `pattern` "+
+				"(narrows the regex scan to tagged pages).\n"+
+				"At least one of `query`, `pattern`, or `tag` is required. All results respect "+
+				"the caller's ACL.",
 		),
 		mcpgo.WithString("query",
-			mcpgo.Description("Full-text query string. Typo-tolerant. Required unless `tag` is set."),
+			mcpgo.Description("Full-text query string. Typo-tolerant. Mutually exclusive with `pattern`."),
+		),
+		mcpgo.WithString("pattern",
+			mcpgo.Description(
+				"RE2 regex (Go's regexp syntax) matched against every page's raw markdown. "+
+					"Use for exact substrings (plain text is a valid regex), named directives "+
+					"(e.g. `\\{template-stamp\\}`), or structural patterns. "+
+					"Mutually exclusive with `query`."),
 		),
 		mcpgo.WithString("tag",
-			mcpgo.Description("Tag name to filter by. When set, results come from the tag index (no snippets)."),
+			mcpgo.Description("Tag name to filter by. When set alone, returns pages from the tag index. Composable with `query` or `pattern` to narrow the scope."),
+		),
+		mcpgo.WithString("path_prefix",
+			mcpgo.Description("For `pattern` mode: namespace prefix to scope the scan (leading slash optional). Empty scans the whole wiki."),
+		),
+		mcpgo.WithBoolean("case_sensitive",
+			mcpgo.Description("For `pattern` mode: default true. False wraps the pattern in `(?i)`."),
+		),
+		mcpgo.WithNumber("max_per_page",
+			mcpgo.Description("For `pattern` mode: cap matches reported per page (0 = unlimited, default 0). The overall `limit` still applies across pages."),
 		),
 		mcpgo.WithNumber("limit",
-			mcpgo.Description("Maximum results to return (default 20, max 100)."),
+			mcpgo.Description("Maximum results (query/tag: default 20, max 100; pattern: default 50, max 500)."),
 		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		query := strings.TrimSpace(req.GetString("query", ""))
+		pattern := strings.TrimSpace(req.GetString("pattern", ""))
 		tag := strings.TrimSpace(req.GetString("tag", ""))
-		if query == "" && tag == "" {
-			return errorResult("either 'query' or 'tag' must be provided"), nil
+		if query == "" && pattern == "" && tag == "" {
+			return errorResult("one of 'query', 'pattern' or 'tag' must be provided"), nil
 		}
+		if query != "" && pattern != "" {
+			return errorResult("'query' and 'pattern' are mutually exclusive"), nil
+		}
+
+		// Pattern (grep) branch — handled before tag because tag can
+		// narrow it as a scope filter.
+		if pattern != "" {
+			limit := req.GetInt("limit", 50)
+			if limit < 1 {
+				limit = 50
+			}
+			if limit > 500 {
+				limit = 500
+			}
+			maxPerPage := req.GetInt("max_per_page", 0)
+			if maxPerPage < 0 {
+				maxPerPage = 0
+			}
+			caseSensitive := req.GetBool("case_sensitive", true)
+			prefix := strings.Trim(req.GetString("path_prefix", ""), "/")
+			raw := pattern
+			if !caseSensitive {
+				raw = "(?i)" + raw
+			}
+			re, err := regexp.Compile(raw)
+			if err != nil {
+				return errorResult("invalid pattern: " + err.Error()), nil
+			}
+			if deps.Sitemap == nil || deps.Store == nil {
+				return errorResult("page corpus not available"), nil
+			}
+			// Scope: either the tag-filtered set or the whole sitemap.
+			var paths []string
+			if tag != "" {
+				if deps.TagIndex == nil {
+					return errorResult("tag index not available"), nil
+				}
+				entries := deps.TagIndex.GetPagesForTag(tag, "", nil)
+				paths = make([]string, 0, len(entries))
+				for _, e := range entries {
+					paths = append(paths, e.Path)
+				}
+			} else {
+				all, err := deps.Sitemap.ListAllPages()
+				if err != nil {
+					return errorResult("list pages: " + err.Error()), nil
+				}
+				paths = make([]string, 0, len(all))
+				for _, p := range all {
+					paths = append(paths, p.Path)
+				}
+			}
+			matches, scanned, skipped := grepPages(grepScanArgs{
+				pages:      paths,
+				prefix:     prefix,
+				re:         re,
+				limit:      limit,
+				maxPerPage: maxPerPage,
+				canView:    func(p string) bool { return deps.canView(ctx, p) },
+				getMarkdown: func(p string) (string, error) {
+					page, err := deps.Store.Get(strings.TrimPrefix(p, "/"))
+					if err != nil {
+						return "", err
+					}
+					return page.Markdown, nil
+				},
+			})
+			return jsonResult(map[string]any{
+				"pattern":            pattern,
+				"path_prefix":        "/" + prefix,
+				"matches":            matches,
+				"scanned":            scanned,
+				"skipped_access":     skipped,
+				"truncated_at_limit": len(matches) >= limit,
+			}), nil
+		}
+
 		limit := req.GetInt("limit", 20)
 		if limit < 1 {
 			limit = 20
@@ -484,6 +587,85 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 		}
 		return jsonResult(map[string]any{"results": filtered}), nil
 	})
+}
+
+// grepMatch is one occurrence in the grep (pattern) response.
+type grepMatch struct {
+	Path     string `json:"path"`
+	Line     int    `json:"line"`      // 1-indexed
+	Column   int    `json:"column"`    // 1-indexed, byte offset in the line
+	Match    string `json:"match"`     // the exact substring the regex matched
+	LineText string `json:"line_text"` // the full line as context
+}
+
+// grepScanArgs bundles the inputs to grepPages so the pure helper can
+// be tested without wiring a server.
+type grepScanArgs struct {
+	pages       []string
+	prefix      string
+	re          *regexp.Regexp
+	limit       int // overall cap across all pages
+	maxPerPage  int // 0 = unlimited
+	canView     func(pagePath string) bool
+	getMarkdown func(pagePath string) (string, error)
+}
+
+// grepPages scans every page under `prefix` (empty = all) and reports
+// every occurrence of the compiled regex, up to `limit` across the
+// whole scan and at most `maxPerPage` per page. ACL-filtered pages
+// count toward `skipped`, not `scanned`.
+func grepPages(a grepScanArgs) (matches []grepMatch, scanned int, skipped int) {
+	matches = []grepMatch{}
+	matchPrefix := a.prefix
+	if matchPrefix != "" {
+		matchPrefix += "/"
+	}
+	for _, raw := range a.pages {
+		if len(matches) >= a.limit {
+			break
+		}
+		pagePath := strings.TrimPrefix(raw, "/")
+		if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != a.prefix {
+			continue
+		}
+		if a.canView != nil && !a.canView(pagePath) {
+			skipped++
+			continue
+		}
+		scanned++
+		md, err := a.getMarkdown(pagePath)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(md, "\n")
+		perPage := 0
+		for i, line := range lines {
+			locs := a.re.FindAllStringIndex(line, -1)
+			if locs == nil {
+				continue
+			}
+			for _, loc := range locs {
+				if a.maxPerPage > 0 && perPage >= a.maxPerPage {
+					break
+				}
+				matches = append(matches, grepMatch{
+					Path:     "/" + pagePath,
+					Line:     i + 1,
+					Column:   loc[0] + 1,
+					Match:    line[loc[0]:loc[1]],
+					LineText: line,
+				})
+				perPage++
+				if len(matches) >= a.limit {
+					return matches, scanned, skipped
+				}
+			}
+			if a.maxPerPage > 0 && perPage >= a.maxPerPage {
+				break
+			}
+		}
+	}
+	return matches, scanned, skipped
 }
 
 // ── get_reviewflow_status ───────────────────────────────────────────────
