@@ -88,18 +88,25 @@ describe("template_stamp NodeView", () => {
     }
   })
 
-  it("without a {template} marker: renders the unresolved-stamp error", () => {
-    // A {template-stamp} outside a template context is a real error —
-    // stamps are meant to be filled in at creation time from the template
-    // marker's presence.
+  it("without a {template} marker: still renders the stamp note", () => {
+    // Row-bound templates deliberately skip the {template} marker (so
+    // no "Create document" button appears on them) but still carry
+    // {template-stamp} so each row-bound page gets stamped on
+    // creation. The NodeView must therefore render the stamp as a
+    // benign placeholder in every context — "parseable syntax has a
+    // defined behaviour". The old "no marker → loud red error"
+    // branch was a safety net from when {template} gated resolution
+    // and has been removed.
     const doc = schema.nodes.doc.create(null, [schema.nodes.template_stamp.create({})])
     const { view, container } = mount(doc)
     try {
       const stamp = container.querySelector(".gowiki-template-stamp")
       expect(stamp).not.toBeNull()
-      const err = stamp!.querySelector(".gowiki-template-stamp-error")
-      expect(err).not.toBeNull()
-      expect(err!.textContent).toMatch(/Unresolved/i)
+      const note = stamp!.querySelector(".gowiki-template-stamp-note")
+      expect(note).not.toBeNull()
+      expect(note!.textContent).toMatch(/stamped on document creation/i)
+      // The old error class is gone from the DOM entirely.
+      expect(stamp!.querySelector(".gowiki-template-stamp-error")).toBeNull()
     } finally {
       view.destroy()
       container.remove()

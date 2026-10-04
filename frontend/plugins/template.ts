@@ -204,46 +204,38 @@ class TemplateTitleNodeView {
 // In a template context: a muted note. In a NON-template context (a page
 // that has no {template} directive): a loud error, per spec §5.
 
+// {template-stamp} is a placeholder for the frozen origin sentence
+// a resolver will substitute at creation / prefill time. The old
+// "page has no {template} marker → loud red error" branch was a
+// safety net from when {template} gated resolution; with the dialect
+// rule now "parseable syntax has a defined behaviour", a stamp
+// directive is always just a placeholder with a well-defined
+// substitution — showing it as an error on a page that happens not
+// to have a {template} marker (row-bound templates deliberately skip
+// {template}) was misleading. Always a muted note.
 class TemplateStampNodeView {
   dom: HTMLElement
   private node: PMNode
-  private isTemplateContext: boolean | null = null
 
-  constructor(node: PMNode, view: EditorView, _getPos: () => number | undefined) {
+  constructor(node: PMNode, _view: EditorView, _getPos: () => number | undefined) {
     this.node = node
     this.dom = document.createElement("div")
     this.dom.className = "gowiki-template-stamp"
     this.dom.contentEditable = "false"
-    this.isTemplateContext = docHasTemplateMarker(view.state.doc)
     this.render()
   }
 
   private render() {
     this.dom.innerHTML = ""
-    if (this.isTemplateContext) {
-      const note = document.createElement("span")
-      note.className = "gowiki-template-stamp-note"
-      note.textContent = "Created from template: stamped on document creation"
-      this.dom.appendChild(note)
-    } else {
-      const err = document.createElement("span")
-      err.className = "gowiki-template-stamp-error"
-      err.textContent =
-        "⚠ Unresolved {template-stamp} — this page has no {template} marker. Recreate the document from its template via the Create document button."
-      this.dom.appendChild(err)
-    }
+    const note = document.createElement("span")
+    note.className = "gowiki-template-stamp-note"
+    note.textContent = "Created from template: stamped on document creation"
+    this.dom.appendChild(note)
   }
 
-  update(node: PMNode, view?: EditorView): boolean {
+  update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
     this.node = node
-    if (view) {
-      const ctx = docHasTemplateMarker(view.state.doc)
-      if (ctx !== this.isTemplateContext) {
-        this.isTemplateContext = ctx
-        this.render()
-      }
-    }
     return true
   }
 
@@ -389,19 +381,6 @@ class TemplateTodoNodeView {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
-
-function docHasTemplateMarker(doc: PMNode): boolean {
-  let found = false
-  doc.descendants((n) => {
-    if (found) return false
-    if (n.type.name === "template_marker") {
-      found = true
-      return false
-    }
-    return true
-  })
-  return found
-}
 
 // Client-side twin of the Go markdown.ExtractTemplateTitlePattern helper.
 // Reads the pattern-text after the first {template-title} directive.
@@ -735,17 +714,6 @@ const templateStyles = `
   display: block;
   color: var(--gw-color-muted);
   font-style: italic;
-}
-
-.gowiki-template-stamp-error {
-  color: var(--gw-color-error, #b71c1c);
-  background: var(--gw-color-error-bg, #fce4ec);
-  padding: 6px 10px;
-  border-radius: 4px;
-  border: 1px solid var(--gw-color-error, #ef9a9a);
-  font-family: monospace;
-  font-size: 12px;
-  display: block;
 }
 
 .gowiki-template-reviewflow {

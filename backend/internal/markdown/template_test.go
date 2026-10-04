@@ -15,11 +15,43 @@ func TestIsTemplatePage(t *testing.T) {
 		{"no directive", "# hello\nplain text", false},
 		{"has marker alone", "# T\n\n{template}\n\npayload", true},
 		{"marker embedded in text is ignored", "some text with {template} inline", false},
+		// IsTemplatePage still gates the "Create document" button —
+		// a file carrying only {template-*} directives (row-bound
+		// template convention) must NOT show a Create button.
+		{"only template-* directives: no marker, no button", "{template-todo}\n", false},
 	}
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsTemplatePage(tc.content); got != tc.want {
 				t.Errorf("IsTemplatePage() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHasAnyTemplateDirective(t *testing.T) {
+	// HasAnyTemplateDirective is the "should the resolver engage"
+	// probe. Returns true for {template} OR any {template-*}; false
+	// only when the file has no template-family directive at all.
+	tt := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"empty", "", false},
+		{"plain prose", "# hello\nplain text\n", false},
+		{"only {template}", "{template}\n", true},
+		{"only {template-title}", "{template-title}\n# Title\n", true},
+		{"only {template-stamp}", "{template-stamp}\n", true},
+		{"only {template-reviewflow}", "{template-reviewflow author=alice}\n", true},
+		{"only {template-todo}", "{template-todo title=\"go\"}\n", true},
+		{"marker + payload directives", "{template}\n{template-todo}\n", true},
+		{"directive-shaped text inline is ignored", "{template} in a paragraph", false},
+	}
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasAnyTemplateDirective(tc.content); got != tc.want {
+				t.Errorf("HasAnyTemplateDirective() = %v, want %v", got, tc.want)
 			}
 		})
 	}

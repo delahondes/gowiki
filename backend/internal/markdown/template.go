@@ -66,10 +66,42 @@ var (
 
 // IsTemplatePage returns true when the page's markdown contains a
 // {template} directive. Only the marker matters; the tracking-block content
-// above it is not inspected.
+// above it is not inspected. Still the right probe for "does this file
+// show a Create document button" — the button is attached to the marker
+// node specifically — but NOT for "should this file be run through the
+// template resolver" (use HasAnyTemplateDirective for that).
 func IsTemplatePage(content string) bool {
 	for _, line := range strings.Split(content, "\n") {
 		if templateMarkerRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAnyTemplateDirective returns true when the page's markdown carries
+// either the {template} marker OR any of the {template-*} payload
+// directives ({template-title}, {template-stamp}, {template-reviewflow},
+// {template-todo}). Used by every "should the template resolver
+// process this file" code path. The lax check honours the dialect
+// principle "parseable syntax must have a defined behaviour": once a
+// {template-*} directive is on a file, the author's intent is clear and
+// the resolver must engage, with or without a {template} marker.
+//
+// The row-bound page template path lives on this difference. A table's
+// page_template_path points to a file carrying {template-title},
+// {template-todo} etc. but no {template} marker — the marker would
+// render a misleading "Create document" button on the template itself,
+// and rows get created through the database, not through the button.
+// HasAnyTemplateDirective lets the resolver still substitute the
+// {template-*} directives on each row-bound page.
+func HasAnyTemplateDirective(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if templateMarkerRe.MatchString(line) ||
+			templateTitleRe.MatchString(line) ||
+			templateStampRe.MatchString(line) ||
+			templateReviewflowRe.MatchString(line) ||
+			templateTodoRe.MatchString(line) {
 			return true
 		}
 	}

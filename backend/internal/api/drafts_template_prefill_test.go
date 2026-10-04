@@ -79,17 +79,15 @@ func callEnterEdit(t *testing.T, s *Server, pagePath, user string) *httptest.Res
 	return rec
 }
 
-// ── _template.md WITHOUT {template} marker: raw prefill (unchanged) ──
+// ── _template.md with NO template directives at all: raw prefill ─────
 
 func TestEnterEdit_LegacyUnderscoreTemplate_RawPrefill(t *testing.T) {
 	t.Parallel()
 	s, contentRoot := newDraftsPrefillTestServer(t)
-	// Legacy DokuWiki-style _template.md: no {template} marker, just
-	// a boilerplate snippet. The prefill must copy it verbatim —
-	// resolving nothing is the whole point of leaving these files
-	// alone until someone opts in with a {template} marker.
+	// Pure DokuWiki-style boilerplate — no {template}, no {template-*}.
+	// Prefill copies it verbatim; the resolver has nothing to do.
 	writeContentFile(t, contentRoot, "docs/_template.md",
-		"# Placeholder\n\n{template-todo title=\"should stay literal\" assign=alice}\n\nBody.\n")
+		"# Placeholder\n\nBody paragraph that mentions {something-else}.\n")
 
 	rec := callEnterEdit(t, s, "docs/newpage", "alice")
 	if rec.Code != http.StatusOK {
@@ -99,14 +97,55 @@ func TestEnterEdit_LegacyUnderscoreTemplate_RawPrefill(t *testing.T) {
 		Markdown string `json:"markdown"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	if !strings.Contains(body.Markdown, "{template-todo") {
-		t.Errorf("legacy _template.md should pass through verbatim; got %q", body.Markdown)
-	}
 	if !strings.Contains(body.Markdown, "# Placeholder") {
 		t.Errorf("heading should survive raw prefill; got %q", body.Markdown)
 	}
-	if strings.Contains(body.Markdown, "{todo") {
-		t.Errorf("directive must not have been resolved on legacy template; got %q", body.Markdown)
+	if !strings.Contains(body.Markdown, "{something-else}") {
+		t.Errorf("non-template directive-shaped text must pass through; got %q", body.Markdown)
+	}
+}
+
+// ── _template.md with ONLY {template-*} directives (row-bound-template
+//    convention): resolve the directives, no {template} marker needed ─
+
+func TestEnterEdit_UnderscoreTemplateWithoutMarker_StillResolves(t *testing.T) {
+	t.Parallel()
+	s, contentRoot := newDraftsPrefillTestServer(t)
+	// Row-bound template layout: no {template} marker (the Create
+	// button would be misleading on a template whose documents come
+	// from database row insertion), but {template-stamp} and
+	// {template-todo} still need to resolve on every row-bound page's
+	// prefill. New rule: ANY {template-*} is enough.
+	writeContentFile(t, contentRoot, "docs/_template.md",
+		"# Row page\n\n"+
+			"{template-stamp}\n\n"+
+			"{template-todo title=\"Fill in row data\" assign=alice}\n\n"+
+			"Row body.\n")
+
+	rec := callEnterEdit(t, s, "docs/newrow", "alice")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Markdown string `json:"markdown"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+
+	// Stamp substituted to the "Created from template..." sentence.
+	if !strings.Contains(body.Markdown, "Created from template") {
+		t.Errorf("stamp should have been resolved despite no {template} marker; got %q", body.Markdown)
+	}
+	// {template-todo} became a real {todo} with args passed through.
+	if !strings.Contains(body.Markdown, "{todo") || !strings.Contains(body.Markdown, "assign=alice") {
+		t.Errorf("{template-todo} should resolve to {todo}; got %q", body.Markdown)
+	}
+	if strings.Contains(body.Markdown, "{template-stamp}") || strings.Contains(body.Markdown, "{template-todo") {
+		t.Errorf("template-* placeholders must be consumed; got %q", body.Markdown)
+	}
+	// Entire file is payload — the heading above the first template-*
+	// directive survives (no {template} marker to split at).
+	if !strings.Contains(body.Markdown, "Row body.") {
+		t.Errorf("body text after the directives must survive; got %q", body.Markdown)
 	}
 }
 

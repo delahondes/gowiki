@@ -68,11 +68,17 @@ func (s *Server) resolveTemplateDoc(
 	title string,
 	overrides map[string]string,
 ) (*templateResolveResult, *TemplateCreateError) {
-	// 1. Must be a template.
-	if !markdown.IsTemplatePage(tplMarkdown) {
+	// 1. Must carry a template-family directive. {template} OR any
+	// {template-*} directive both qualify — the row-bound-template
+	// convention is to skip {template} on the template file (otherwise
+	// the Create button on it would mislead the user into creating
+	// rows outside the database), and we still want {template-title},
+	// {template-stamp}, {template-reviewflow}, {template-todo} to
+	// resolve on each row-bound page's prefill.
+	if !markdown.HasAnyTemplateDirective(tplMarkdown) {
 		return nil, &TemplateCreateError{
 			Kind:    "not_template",
-			Message: fmt.Sprintf("%s is not a template (no {template} directive)", tplStorage),
+			Message: fmt.Sprintf("%s has no template directive ({template} or any {template-*})", tplStorage),
 		}
 	}
 
@@ -120,14 +126,15 @@ func (s *Server) resolveTemplateDoc(
 		}
 	}
 
-	// 4. Split payload.
+	// 4. Split payload. With {template} present, the content above the
+	// marker is tracking metadata (reviewflow, tags on the template
+	// page itself) and only the content below is the payload. Without
+	// {template} — the row-bound-template convention — the file IS the
+	// payload, same shape SplitTemplatePayload would return for a
+	// marker on line 1.
 	_, payload, ok := markdown.SplitTemplatePayload(tplMarkdown)
 	if !ok {
-		// Shouldn't happen — IsTemplatePage said yes.
-		return nil, &TemplateCreateError{
-			Kind:    "not_template",
-			Message: fmt.Sprintf("%s: {template} directive not found while splitting payload", tplStorage),
-		}
+		payload = tplMarkdown
 	}
 
 	// 5. Merge reviewflow args. Only produce args when the template

@@ -107,14 +107,19 @@ func (s *Server) handleEnterEdit(w http.ResponseWriter, r *http.Request) {
 			published = reqBody.InitialMarkdown
 		} else if tmpl, ok := s.store.(TemplateResolver); ok {
 			if content, tplPath, resolveErr := tmpl.ResolveTemplate(pagePath); resolveErr == nil {
-				// An _template.md whose body carries a {template} marker
-				// is a full template: run it through the same resolution
-				// pipeline the explicit Create-from-template action uses
-				// (reviewflow validation gate, target-pattern enforcement,
-				// {template-*} directive substitution, stamp). An
-				// _template.md without the marker is a legacy DokuWiki-style
-				// snippet — copy it verbatim as today.
-				if markdown_pkg.IsTemplatePage(content) {
+				// An _template.md carrying ANY template directive —
+				// {template} OR any {template-*} — runs through the same
+				// resolution pipeline the explicit Create-from-template
+				// action uses (reviewflow validation gate, target-pattern
+				// enforcement, {template-*} directive substitution,
+				// stamp). The row-bound-template convention skips
+				// {template} itself so the Create button never appears
+				// on the template, but still wants {template-title},
+				// {template-todo} etc. to resolve on each row-bound
+				// page's prefill. A plain _template.md with no template
+				// directives at all is a legacy DokuWiki snippet — copy
+				// it verbatim as today.
+				if markdown_pkg.HasAnyTemplateDirective(content) {
 					tplStorage := strings.TrimPrefix(tplPath, "/")
 					tplPage, perr := s.store.Get(tplStorage)
 					if perr != nil {
