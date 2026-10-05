@@ -137,17 +137,44 @@ After filling in the form and clicking **Create**, the row appears in the query 
 
 For page-bound tables, submitting the form also creates a new wiki page from the table's template.
 
-### Pinned field values
+### Field prefills — pinned vs default
 
-Any attribute other than `table=` on `{database-newrow}` is treated as a **pinned field value** — the form pre-fills that field and locks it read-only. Values may reference `{{fieldname}}` tokens from the current page's context (same resolver as `{database-query filter=…}`), so a form on a page bound to one row can pin its own identity into the new row:
+Attributes other than `table=` and `fields=` are **field prefills**. Two shapes:
+
+| Syntax | Behaviour |
+| --- | --- |
+| `foo=bar` | **Pinned** — pre-filled AND locked read-only. The directive carries a rule. |
+| `foo=~bar` | **Default** — pre-filled, user can edit before submitting. The directive carries a suggestion. |
+
+Both forms resolve `{{fieldname}}` tokens from the current page's context (same resolver as `{database-query filter=…}`). Pinned values are always sent on submit, even if the DOM was tampered with — the directive is a rule. Default values travel with the submit only if the user leaves them unchanged.
+
+Example of a pinned prefill. On the page for software `gowiki`, this form pre-selects `software = gowiki` and prevents changing it:
 
 ```markdown
 {database-newrow table=software_validation software={{id}}}
 ```
 
-On the page for software `gowiki`, this form pre-selects `software = gowiki` and prevents changing it — so a validation campaign created from here CANNOT be silently attached to another software. The pinned value is always sent on submit, even if the DOM was tampered with; the directive is a rule.
+Example of a default prefill. On a QA ticket page, pre-fill the reporter with the current user but let them pick someone else:
 
-Pinned fields must exist on the target table's schema; unknown names are silently ignored (the server-side schema check catches the typo on submit).
+```markdown
+{database-newrow table=tickets reporter=~{{AUTHOR}}}
+```
+
+Pinned and defaulted fields must exist on the target table's schema; unknown names are silently ignored (the server-side schema check catches the typo on submit).
+
+**Edge case.** A pinned value whose first character is literally `~` cannot be written in the directive — the parser would read it as the default modifier. Use `{{var}}` interpolation to inject such values from the template context.
+
+### Picking which fields appear — `fields=`
+
+By default `{database-newrow}` shows every non-archived field of the table. A `fields=` attribute narrows the form to a comma-separated whitelist, in the order given:
+
+```markdown
+{database-newrow table=tickets fields=title,severity,reporter}
+```
+
+Pinned (`foo=bar`) and defaulted (`foo=~bar`) fields are **always** shown even when the whitelist omits them — the author's intent to prefill a field implies they want it in the form. Order: whitelist entries first in their given order, then any pinned / defaulted field the whitelist missed, appended at the end.
+
+The combination makes multi-path workflows direct to express. One record (one row) can have multiple entry points — each a distinct `{database-newrow}` on a distinct page, showing a different subset of fields seeded with path-appropriate defaults. The record is then completed through other views (`{database-query}`) that drive its lifecycle. The columns the author DIDN'T mention are hidden; the columns they listed appear in a predictable order; the columns they pinned or defaulted are always present even when they'd otherwise be hidden.
 
 ## 1. Page-bound rows
 

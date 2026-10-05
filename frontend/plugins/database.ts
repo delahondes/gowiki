@@ -153,6 +153,20 @@ const databaseNewRowProperties = [
     parse: (raw: string) => raw.trim() || null,
     serialize: (value: string | null) => String(value ?? ""),
   },
+  {
+    name: "fields",
+    label: "Fields (comma-separated whitelist, empty = all)",
+    default: "",
+    parse: (raw: string) =>
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "")
+        .join(","),
+    serialize: (value: string | null) => String(value ?? ""),
+    helpText:
+      "Which columns to show in the form, in that order. Pinned (foo=val) and default (foo=~val) fields are always shown even when omitted here.",
+  },
 ]
 
 // applyPinnedValue writes `value` into whatever input the newrow form
@@ -2018,14 +2032,25 @@ class DatabaseNewRowNodeView {
   // + database-row _fields). Called once per render — mirroring the
   // same policy database-query uses for its filter attr.
   private resolvedPinned(): Record<string, string> {
-    let raw: Record<string, string> = {}
+    return this.resolveJSONMap(this.node.attrs._pinned)
+  }
+
+  // resolvedDefaults does the same for the `_defaults` blob — field
+  // prefills written with the `foo=~value` modifier. Semantics match
+  // _pinned up to editability: the user is free to overwrite.
+  private resolvedDefaults(): Record<string, string> {
+    return this.resolveJSONMap(this.node.attrs._defaults)
+  }
+
+  private resolveJSONMap(raw: string | undefined): Record<string, string> {
+    let parsed: Record<string, string> = {}
     try {
-      raw = JSON.parse(this.node.attrs._pinned || "{}") as Record<string, string>
+      parsed = JSON.parse(raw || "{}") as Record<string, string>
     } catch {
-      raw = {}
+      parsed = {}
     }
     const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [k, v] of Object.entries(parsed)) {
       out[k] = expandTemplateVars(String(v ?? ""), this.view)
     }
     return out
@@ -2064,7 +2089,42 @@ class DatabaseNewRowNodeView {
   }
 
   private renderForm(schema: any) {
-    const fields = (schema.fields || []).filter((f: any) => !f.archived_at && f.type !== "auto_increment")
+    const allFields = (schema.fields || []).filter((f: any) => !f.archived_at && f.type !== "auto_increment")
+    // Apply the `fields=` whitelist when present. Pinned + default
+    // fields are always included even if the whitelist omits them —
+    // the author's intent to pre-fill a field implies they want it
+    // in the form. Order: whitelist order first, then any remaining
+    // forced-visible fields appended.
+    const whitelistCSV = String(this.node.attrs.fields || "").trim()
+    const pinnedMap = this.resolvedPinned()
+    const defaultMap = this.resolvedDefaults()
+    let fields: any[]
+    if (whitelistCSV === "") {
+      fields = allFields
+    } else {
+      const whitelist = whitelistCSV
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== "")
+      const forced = new Set([...Object.keys(pinnedMap), ...Object.keys(defaultMap)])
+      const byName = new Map<string, any>(allFields.map((f: any) => [f.name, f]))
+      const picked: any[] = []
+      const pickedNames = new Set<string>()
+      for (const name of whitelist) {
+        const f = byName.get(name)
+        if (f && !pickedNames.has(name)) {
+          picked.push(f)
+          pickedNames.add(name)
+        }
+      }
+      for (const f of allFields) {
+        if (forced.has(f.name) && !pickedNames.has(f.name)) {
+          picked.push(f)
+          pickedNames.add(f.name)
+        }
+      }
+      fields = picked
+    }
     const form = document.createElement("div")
     form.className = "gowiki-database-form"
 
@@ -2223,13 +2283,25 @@ class DatabaseNewRowNodeView {
     // if the author typo'd, and rendering an error inline for every
     // typo would be a lot of noise on the common case of a stale
     // directive.
-    const pinned = this.resolvedPinned()
+    const pinned = pinnedMap
     const pinnedForSubmit: Record<string, string> = {}
     for (const [key, value] of Object.entries(pinned)) {
       const el = inputs.get(key)
       if (!el) continue
       pinnedForSubmit[key] = value
       applyPinnedValue(el, value)
+    }
+    // Apply default field values (`foo=~value` modifier) — pre-filled
+    // but editable. Pinned always wins when both maps carry the same
+    // key (shouldn't happen in a sane directive; defensive). Values
+    // flow through the schema default_value fallback inputs got in
+    // the main loop, so we unconditionally overwrite — the directive's
+    // default takes precedence over the schema's.
+    for (const [key, value] of Object.entries(defaultMap)) {
+      if (key in pinnedForSubmit) continue
+      const el = inputs.get(key)
+      if (!el) continue
+      el.value = value
     }
 
     const actions = document.createElement("div")
@@ -2300,7 +2372,17 @@ class DatabaseNewRowNodeView {
 
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false
-    if (node.attrs.table !== this.node.attrs.table) {
+    // Re-render on any attr change the form depends on: table swap,
+    // whitelist edit, pin / default edit. Previously only `table`
+    // triggered a re-render, so editing the field whitelist in the
+    // properties panel left the form showing the OLD shape until the
+    // next page load.
+    if (
+      node.attrs.table !== this.node.attrs.table ||
+      node.attrs.fields !== this.node.attrs.fields ||
+      node.attrs._pinned !== this.node.attrs._pinned ||
+      node.attrs._defaults !== this.node.attrs._defaults
+    ) {
       this.node = node
       this.render()
       return true
@@ -3382,6 +3464,21 @@ export const databasePlugin: WikiPlugin = {
             // author's intent — "on THIS page you create against
             // THIS row" — becomes a rule, not a suggestion.
             _pinned: { default: "{}" },
+            // Same shape as _pinned but editable: the field is pre-
+            // filled with the default so the user starts from a
+            // reasonable baseline, but is free to change it. Written
+            // in the directive with the `=~` modifier
+            // (`field=~value`). Complements _pinned for workflows
+            // where a row has multiple entry paths and each path
+            // seeds different fields with different starting values.
+            _defaults: { default: "{}" },
+            // Comma-separated whitelist of field names to show in the
+            // form, in the given order. Empty = show every field
+            // (today's behaviour). Pinned and defaulted fields are
+            // ALWAYS shown even if the whitelist omits them — the
+            // author's intent to pre-fill a field implies they want
+            // it in the form.
+            fields: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -3390,6 +3487,8 @@ export const databasePlugin: WikiPlugin = {
                 class: "gowiki-database-newrow",
                 "data-table": node.attrs.table ?? "",
                 "data-pinned": node.attrs._pinned || "{}",
+                "data-defaults": node.attrs._defaults || "{}",
+                "data-fields": node.attrs.fields || "",
               },
               `New row form: ${node.attrs.table || "(no table)"}`,
             ]
@@ -3401,6 +3500,8 @@ export const databasePlugin: WikiPlugin = {
                 return {
                   table: dom.getAttribute("data-table") || "",
                   _pinned: dom.getAttribute("data-pinned") || "{}",
+                  _defaults: dom.getAttribute("data-defaults") || "{}",
+                  fields: dom.getAttribute("data-fields") || "",
                 }
               },
             },
@@ -3591,20 +3692,32 @@ export const databasePlugin: WikiPlugin = {
     reg.registerText("database_newrow", {
       run(ctx, tok) {
         const attrs = tok.meta?.attrs ?? {}
-        // Every attribute except `table` is treated as a pinned field
-        // value. The directive parser accepts arbitrary key=value
-        // pairs; the schema stores them as one JSON blob so the round
-        // trip is stable and the NodeView can apply them without
-        // enumerating column names in advance.
+        // Three reserved attribute slots: `table`, `fields` (the
+        // whitelist CSV), and `_args` (positional carry-over). Every
+        // other key is a field prefill. A leading `~` on the value is
+        // the "default" modifier — `foo=~bar` seeds the form field
+        // with `bar` but leaves it editable, whereas plain `foo=bar`
+        // locks the field. Pinned values that start with a literal
+        // `~` character cannot be expressed via the directive
+        // (documented limitation); use `{{var}}` interpolation to
+        // inject such values from the template context.
         const pinned: Record<string, string> = {}
+        const defaults: Record<string, string> = {}
         for (const [k, v] of Object.entries(attrs)) {
-          if (k === "table" || v == null) continue
-          pinned[k] = String(v)
+          if (k === "table" || k === "fields" || k === "_args" || v == null) continue
+          const value = String(v)
+          if (value.startsWith("~")) {
+            defaults[k] = value.slice(1)
+          } else {
+            pinned[k] = value
+          }
         }
         ctx.push(
           ctx.schema.nodes.database_newrow.create({
             table: attrs.table ?? "",
+            fields: attrs.fields ?? "",
             _pinned: JSON.stringify(pinned),
+            _defaults: JSON.stringify(defaults),
           })
         )
       },
@@ -3670,19 +3783,42 @@ export const databasePlugin: WikiPlugin = {
     reg.registerPMNode("database_newrow", {
       print(node) {
         const parts = [`table=${node.attrs.table}`]
-        // Emit pinned field attrs in sorted-key order so identical
-        // rules serialize identically (deterministic round-trip).
+        const fields = String(node.attrs.fields || "").trim()
+        if (fields) {
+          const needsQuote = /[\s"]/.test(fields)
+          parts.push(`fields=${needsQuote ? `"${fields.replace(/"/g, '\\"')}"` : fields}`)
+        }
+        // Pinned + default field attrs emit in sorted-key order so
+        // identical directives serialize identically (deterministic
+        // round-trip). Pinned wins when the same key appears in both
+        // maps (shouldn't happen in a sane directive; here as a
+        // safety net).
         let pinned: Record<string, string> = {}
+        let defaults: Record<string, string> = {}
         try {
           pinned = JSON.parse(node.attrs._pinned || "{}") as Record<string, string>
         } catch {
           pinned = {}
+        }
+        try {
+          defaults = JSON.parse(node.attrs._defaults || "{}") as Record<string, string>
+        } catch {
+          defaults = {}
         }
         for (const k of Object.keys(pinned).sort()) {
           const v = pinned[k]
           if (v == null || v === "") continue
           const needsQuote = /[\s"]/.test(v)
           parts.push(`${k}=${needsQuote ? `"${v.replace(/"/g, '\\"')}"` : v}`)
+        }
+        for (const k of Object.keys(defaults).sort()) {
+          if (k in pinned) continue
+          const v = defaults[k]
+          if (v == null) continue
+          // The `=~` modifier marks the value as a default (editable
+          // prefill). Quoting rules identical to pinned.
+          const needsQuote = /[\s"]/.test(v)
+          parts.push(`${k}=~${needsQuote ? `"${v.replace(/"/g, '\\"')}"` : v}`)
         }
         return `{database-newrow ${parts.join(" ")}}\n\n`
       },
