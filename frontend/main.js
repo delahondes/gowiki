@@ -8156,11 +8156,26 @@ function renderDiffView(hunks, fromVersion, toVersion, fromMediaRefs, toMediaRef
 
   const actions = document.createElement("div")
   actions.style.marginTop = "16px"
-  const backBtn = document.createElement("button")
-  backBtn.textContent = "Back to history"
-  backBtn.className = "gowiki-content-btn"
-  backBtn.addEventListener("click", () => void showHistory())
-  actions.appendChild(backBtn)
+  actions.style.display = "flex"
+  actions.style.gap = "8px"
+
+  const backToHistoryBtn = document.createElement("button")
+  backToHistoryBtn.textContent = "Back to history"
+  backToHistoryBtn.className = "gowiki-content-btn"
+  backToHistoryBtn.addEventListener("click", () => void showHistory())
+  actions.appendChild(backToHistoryBtn)
+
+  // "Back to page" short-circuits the two-click dance a reviewflow
+  // "diff since v{N}" visitor used to need (diff → history → page).
+  // renderView() redraws the page in whatever mode it was last in,
+  // without touching the browser history — history.back() would be
+  // wrong when the diff was opened directly from the reviewflow link
+  // (no sentinel on the stack to pop back to).
+  const backToPageBtn = document.createElement("button")
+  backToPageBtn.textContent = "Back to page"
+  backToPageBtn.className = "gowiki-content-btn"
+  backToPageBtn.addEventListener("click", () => renderView())
+  actions.appendChild(backToPageBtn)
 
   container.appendChild(actions)
   contentRoot.appendChild(container)
