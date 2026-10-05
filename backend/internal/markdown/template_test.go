@@ -1,8 +1,10 @@
 package markdown
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsTemplatePage(t *testing.T) {
@@ -471,5 +473,112 @@ func TestResolveTemplatePayload_TodoAlongsideOtherDirectives(t *testing.T) {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("marker %q leaked into output:\n%s", unwanted, got)
 		}
+	}
+}
+
+// {template-todo due=+N[d|m|y]} — a relative due date resolves to an
+// absolute YYYY-MM-DD at document-creation time (opts.Now). A template
+// written on 2024-01-01 with `due=+365` must produce `due=2026-10-05`
+// when a document is created from it on 2025-10-05 — frozen in the
+// created document, never re-computed on re-render.
+
+func TestResolveTemplatePayload_TodoRelativeDue_DaysDefault(t *testing.T) {
+	t.Parallel()
+	// Bare +N without a suffix defaults to days.
+	payload := "{template-todo action=read assign=@ops due=+30}\n"
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	want := "due=2026-11-04"
+	if !strings.Contains(got, want) {
+		t.Errorf("+30 should resolve to %q:\n%s", want, got)
+	}
+	// Other args untouched.
+	if !strings.Contains(got, "action=read") || !strings.Contains(got, "assign=@ops") {
+		t.Errorf("non-due args should be preserved:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoRelativeDue_DaysExplicit(t *testing.T) {
+	t.Parallel()
+	payload := "{template-todo due=+30d}\n"
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	if !strings.Contains(got, "due=2026-11-04") {
+		t.Errorf("+30d should resolve to 2026-11-04:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoRelativeDue_Months(t *testing.T) {
+	t.Parallel()
+	payload := "{template-todo due=+6m}\n"
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	if !strings.Contains(got, "due=2027-04-05") {
+		t.Errorf("+6m from 2026-10-05 should resolve to 2027-04-05:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoRelativeDue_Years(t *testing.T) {
+	t.Parallel()
+	payload := "{template-todo due=+1y}\n"
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	if !strings.Contains(got, "due=2027-10-05") {
+		t.Errorf("+1y from 2026-10-05 should resolve to 2027-10-05:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoAbsoluteDue_PassesThrough(t *testing.T) {
+	t.Parallel()
+	// An absolute YYYY-MM-DD due date is left exactly as the template
+	// author wrote it — the creation-time rewrite ONLY engages on the
+	// leading-plus form.
+	payload := "{template-todo due=2027-12-31}\n"
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	if !strings.Contains(got, "due=2027-12-31") {
+		t.Errorf("absolute due must pass through:\n%s", got)
+	}
+}
+
+func TestResolveTemplatePayload_TodoRelativeDue_MultipleOnSameTemplate(t *testing.T) {
+	t.Parallel()
+	// Distribution flow with three steps, each with its own relative
+	// due date. Each resolves independently against the SAME creation
+	// time so the deadlines stay consistent with the document's
+	// lifecycle.
+	payload := `{template-todo action=read assign=@ops due=+7}
+{template-todo action=acknowledge assign=@quality-team due=+14}
+{template-todo action=validate assign=@heads due=+30}
+`
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{Now: now})
+	for _, want := range []string{"due=2026-10-12", "due=2026-10-19", "due=2026-11-04"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
+func TestResolveTemplatePayload_TodoRelativeDue_ZeroNowFallsBackToTimeNow(t *testing.T) {
+	t.Parallel()
+	// opts.Now unset → the resolver uses time.Now(). We can't assert
+	// the exact date without being flaky, but we CAN assert that the
+	// `+N` placeholder is gone (replaced by a real YYYY-MM-DD) and
+	// that the result parses as a date.
+	payload := "{template-todo due=+1}\n"
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{}) // zero Now
+	if strings.Contains(got, "due=+") {
+		t.Errorf("+N placeholder should have been resolved against time.Now():\n%s", got)
+	}
+	// Extract the due= value and confirm it parses as a date. The
+	// character class stops at a brace / whitespace so we don't pick
+	// up the directive's closing `}`.
+	m := regexp.MustCompile(`due=([^\s}]+)`).FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("no due= in output:\n%s", got)
+	}
+	if _, err := time.Parse("2006-01-02", m[1]); err != nil {
+		t.Errorf("due value %q is not a valid YYYY-MM-DD: %v", m[1], err)
 	}
 }

@@ -28,8 +28,8 @@ All properties are specified within the curly braces. The description, if needed
 | --- | --- | --- |
 | title | Task title (required) | `title="Review document"` |
 | assign | Assignee (user or group:groupname) | `assign="alice"` or `assign="group:editors"` |
-| due | Due date | `due=2026-04-01` |
-| recur | Recurrence in days | `recur=30` |
+| due | Due date (`YYYY-MM-DD`) | `due=2026-04-01` |
+| recur | Recurrence: bare `N` or `Nd` = N days (delay since completion); `Nw` / `Nm` / `Ny` or `Nweeks` / `Nmonths` / `Nyears` = calendar interval; `daily` / `weekly` / `monthly` / `yearly` for the common cases | `recur=30`, `recur=6m`, `recur=1y`, `recur=weekly` |
 | priority | Priority level | `priority=high` |
 | action | Required action: read, edit, create, meta | `action=read` |
 | description | Longer description | `description="Details here"` |

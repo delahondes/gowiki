@@ -171,9 +171,18 @@ func TestGrepPages_Regex_StructuredDirective(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("matches = %d, want 2 (t1 + t3)", len(matches))
 	}
-	// t3's match keeps its trailing args, exactly as grep -o would.
-	if matches[1].Match != "{template-stamp foo=bar}" {
-		t.Errorf("Match on t3 = %q, want '{template-stamp foo=bar}'", matches[1].Match)
+	// Go map iteration order isn't deterministic, so look up matches by
+	// path rather than asserting a specific slice index. t1 → bare
+	// directive; t3 → directive with trailing args (grep -o keeps them).
+	byPath := map[string]string{}
+	for _, m := range matches {
+		byPath[m.Path] = m.Match
+	}
+	if byPath["/t1"] != "{template-stamp}" {
+		t.Errorf("Match on t1 = %q, want '{template-stamp}'", byPath["/t1"])
+	}
+	if byPath["/t3"] != "{template-stamp foo=bar}" {
+		t.Errorf("Match on t3 = %q, want '{template-stamp foo=bar}'", byPath["/t3"])
 	}
 }
 

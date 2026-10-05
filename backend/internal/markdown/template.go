@@ -3,7 +3,9 @@ package markdown
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ── Template directive machinery ─────────────────────────────────────────
@@ -347,6 +349,11 @@ type TemplateResolveOpts struct {
 	// {template-reviewflow} line is dropped without emitting a {reviewflow}
 	// (row-bound-page path).
 	ReviewflowArgs map[string]string
+	// Now is the reference time for resolving relative dates inside
+	// {template-todo} args (e.g. `due=+365`, `due=+6m`, `due=+1y`).
+	// Zero value falls back to time.Now() — set explicitly in tests
+	// so the output is deterministic.
+	Now time.Time
 }
 
 // ResolveTemplatePayload rewrites a template's payload into the markdown
@@ -406,14 +413,19 @@ func ResolveTemplatePayload(payload string, opts TemplateResolveOpts) string {
 		}
 
 		// {template-todo …} — the args after the directive name pass
-		// through verbatim as {todo …} args. A template with several
-		// distribution steps (read, acknowledge, validate) declares one
-		// {template-todo} per step; each becomes a real {todo} in the
-		// created document. The line loop preserves order — several
-		// distribution steps land in the same relative order the
-		// template author placed them.
+		// through as {todo …} args, with one creation-time rewrite:
+		// a relative due date `due=+N[d|m|y]` resolves to an absolute
+		// YYYY-MM-DD date based on opts.Now (default time.Now()). A
+		// template with several distribution steps (read, acknowledge,
+		// validate) declares one {template-todo} per step; each becomes
+		// a real {todo} in the created document. The line loop
+		// preserves order — several distribution steps land in the
+		// same relative order the template author placed them.
 		if m := templateTodoRe.FindStringSubmatch(line); m != nil {
 			args := strings.TrimSpace(m[1])
+			if args != "" {
+				args = resolveRelativeDateArgs(args, opts.Now)
+			}
 			if args == "" {
 				out = append(out, "{todo}")
 			} else {
@@ -427,6 +439,50 @@ func ResolveTemplatePayload(payload string, opts TemplateResolveOpts) string {
 		i++
 	}
 	return strings.Join(out, "\n")
+}
+
+// relativeDueRe matches a `due=+N[d|m|y]` token inside a directive arg
+// string. The absolute path (`due=2026-12-31`, `due=`) is left alone;
+// only the leading-`+` form triggers the creation-time rewrite.
+// Example matches: `due=+30`, `due=+30d`, `due=+6m`, `due=+1y`.
+var relativeDueRe = regexp.MustCompile(`\bdue=\+(\d+)([dmy]?)\b`)
+
+// resolveRelativeDateArgs rewrites every `due=+N[d|m|y]` inside a
+// {template-todo}'s arg string to an absolute YYYY-MM-DD date computed
+// against `now`. No suffix defaults to `d` (days). Non-matching due=
+// values pass through untouched, as do every other arg (title, assign,
+// recur, action, tags, description, …). When now is the zero value
+// the function falls back to time.Now().
+func resolveRelativeDateArgs(args string, now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return relativeDueRe.ReplaceAllStringFunc(args, func(match string) string {
+		m := relativeDueRe.FindStringSubmatch(match)
+		if m == nil {
+			return match
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return match
+		}
+		unit := m[2]
+		if unit == "" {
+			unit = "d"
+		}
+		var resolved time.Time
+		switch unit {
+		case "d":
+			resolved = now.AddDate(0, 0, n)
+		case "m":
+			resolved = now.AddDate(0, n, 0)
+		case "y":
+			resolved = now.AddDate(n, 0, 0)
+		default:
+			return match
+		}
+		return "due=" + resolved.Format("2006-01-02")
+	})
 }
 
 // renderReviewflowDirective writes a {reviewflow …} directive from an arg

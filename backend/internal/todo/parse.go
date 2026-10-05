@@ -72,7 +72,19 @@ func computeNodeKey(pagePath, title, assign string) string {
 }
 
 // parseRecur converts a recurrence string into a Recurrence struct.
-// Formats: "3d" (delay 3 days), "daily", "weekly", "monthly", "yearly", "3months".
+// Supported shapes:
+//
+//   - "daily", "weekly", "monthly", "yearly"       — calendar, every 1 unit
+//   - "3d"                                         — DELAY, 3 days after completion (legacy)
+//   - "3days", "3weeks", "3months", "3years"       — calendar, every N units
+//   - "3w", "3m", "3y"                             — calendar short forms (new)
+//   - bare "3"                                     — delay, 3 days (short of "3d", new)
+//
+// The "3d" oddball keeps delay semantics for backward compatibility —
+// authors who typed it meant "N days after completion", and quietly
+// changing them to calendar would shift fire times. New short forms
+// (`3w`, `3m`, `3y`) and bare `3` are calendar / delay respectively,
+// matching the keyword route.
 func parseRecur(raw string) Recurrence {
 	raw = strings.TrimSpace(strings.ToLower(raw))
 	if raw == "" {
@@ -90,14 +102,18 @@ func parseRecur(raw string) Recurrence {
 		return Recurrence{Type: "calendar", Every: 1, Unit: "year"}
 	}
 
-	// Try "Nd" format for delay days.
-	if strings.HasSuffix(raw, "d") {
+	// Try "Nd" format for delay days (historical shape).
+	if strings.HasSuffix(raw, "d") && !strings.HasSuffix(raw, "days") {
 		if n := parseInt(strings.TrimSuffix(raw, "d")); n > 0 {
 			return Recurrence{Type: "delay", Days: n}
 		}
 	}
 
-	// Try "Nmonths", "Nweeks", "Nyears", "Ndays" format.
+	// Try the full-word suffixes first, then the single-letter short
+	// forms. Order matters: `strings.HasSuffix("3months", "m")` is
+	// false (ends in `s`), but `strings.HasSuffix("3m", "m")` is true,
+	// so the full-word check doesn't fire for the long form and the
+	// short form only catches when nothing else did.
 	for _, unit := range []struct {
 		suffix string
 		name   string
@@ -106,12 +122,21 @@ func parseRecur(raw string) Recurrence {
 		{"weeks", "week"},
 		{"years", "year"},
 		{"days", "day"},
+		{"w", "week"},
+		{"m", "month"},
+		{"y", "year"},
 	} {
 		if strings.HasSuffix(raw, unit.suffix) {
 			if n := parseInt(strings.TrimSuffix(raw, unit.suffix)); n > 0 {
 				return Recurrence{Type: "calendar", Every: n, Unit: unit.name}
 			}
 		}
+	}
+
+	// Bare integer: default to delay days, matching the `+N` default
+	// in {template-todo}'s due= syntax.
+	if n := parseInt(raw); n > 0 {
+		return Recurrence{Type: "delay", Days: n}
 	}
 
 	return Recurrence{}

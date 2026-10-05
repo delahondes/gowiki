@@ -162,6 +162,43 @@ func TestParseRecur_DelayAndCounted(t *testing.T) {
 	}
 }
 
+// Short-form suffixes (`3w`, `3m`, `3y`) added to match the
+// {template-todo} due= syntax where `+Nm` means N months and `+Ny`
+// means N years. Semantics are CALENDAR (every N units), same as the
+// long-form `3weeks`/`3months`/`3years`, NOT delay — only `Nd` is
+// historically delay. A bare `N` is delay-days, matching the `+N`
+// default on the due= side.
+func TestParseRecur_ShortSuffixesAndBareN(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   string
+		want Recurrence
+	}{
+		{"3w", Recurrence{Type: "calendar", Every: 3, Unit: "week"}},
+		{"3m", Recurrence{Type: "calendar", Every: 3, Unit: "month"}},
+		{"3y", Recurrence{Type: "calendar", Every: 3, Unit: "year"}},
+		{"1y", Recurrence{Type: "calendar", Every: 1, Unit: "year"}},
+		{"12m", Recurrence{Type: "calendar", Every: 12, Unit: "month"}},
+		// Long-form keywords still beat the short form (longest-match
+		// semantics via the suffix order in parseRecur).
+		{"3weeks", Recurrence{Type: "calendar", Every: 3, Unit: "week"}},
+		{"3months", Recurrence{Type: "calendar", Every: 3, Unit: "month"}},
+		{"3years", Recurrence{Type: "calendar", Every: 3, Unit: "year"}},
+		// Bare integer: default to delay days.
+		{"3", Recurrence{Type: "delay", Days: 3}},
+		{"365", Recurrence{Type: "delay", Days: 365}},
+		// Garbage single letters: no match, zero value.
+		{"m", Recurrence{}},
+		{"xm", Recurrence{}},
+	}
+	for _, tc := range cases {
+		got := parseRecur(tc.in)
+		if got != tc.want {
+			t.Errorf("parseRecur(%q) = %+v, want %+v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestParseAction_Shapes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

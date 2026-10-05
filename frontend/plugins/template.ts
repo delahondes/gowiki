@@ -880,7 +880,22 @@ const templateReviewflowProperties = [
 // todo plugin's list means "add a field to todo" automatically propagates
 // to template-todo, so a template author can pin any todo attribute the
 // runtime supports.
-const templateTodoProperties = todoProperties
+//
+// One override: the `due` field's help text points out the relative-
+// date syntax (`+N`, `+Nd`, `+Nm`, `+Ny`) that resolves at document
+// creation. This is a {template-todo}-only feature — on a plain {todo}
+// the `due` value is stored literal, so the todo plugin's own help text
+// stays as "YYYY-MM-DD" to avoid giving regular todo users a syntax
+// that won't fire for them.
+const templateTodoProperties = todoProperties.map((p) =>
+  p.name === "due"
+    ? {
+        ...p,
+        helpText:
+          "YYYY-MM-DD, or +N / +Nd / +Nm / +Ny for a creation-time offset (days / months / years, default days).",
+      }
+    : p
+)
 
 // ── Plugin registration ──────────────────────────────────────────────
 
