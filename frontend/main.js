@@ -7773,9 +7773,10 @@ function renderHistoryPage(versions, draft, tombstones) {
     const banner = document.createElement("div")
     banner.className = "gowiki-tombstone-banner"
     const count = tombstones.length
-    const label = count === 1
-      ? "A previous page lived at this URL before and was deleted."
-      : `${count} previous pages lived at this URL before and were deleted.`
+    const label =
+      count === 1
+        ? "A previous page lived at this URL before and was deleted."
+        : `${count} previous pages lived at this URL before and were deleted.`
     const text = document.createElement("span")
     text.textContent = label + " "
     banner.appendChild(text)
@@ -8092,9 +8093,7 @@ function renderArchivedHistory(tombstones) {
         const viewBtn = document.createElement("button")
         viewBtn.textContent = "View"
         viewBtn.className = "gowiki-history-btn"
-        viewBtn.addEventListener("click", () =>
-          void viewTombstonedVersion(tomb.id, v.version, when, tombstones)
-        )
+        viewBtn.addEventListener("click", () => void viewTombstonedVersion(tomb.id, v.version, when, tombstones))
         tdActions.appendChild(viewBtn)
         tr.appendChild(tdActions)
         tbody.appendChild(tr)

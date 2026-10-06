@@ -68,10 +68,10 @@ func (a *Attic) TombstonePath(pagePath string, deletedAt time.Time) string {
 // TombstoneRecord describes one past life of a page path — the full
 // archive captured when that life ended in a Delete().
 type TombstoneRecord struct {
-	ID       string       // the @deleted-<ts> directory name
-	Dir      string       // absolute path to the tombstone dir
-	DeletedAt time.Time   // parsed from the ID; zero if unparseable
-	Entries  []AtticEntry // index.json of that past life
+	ID        string       // the @deleted-<ts> directory name
+	Dir       string       // absolute path to the tombstone dir
+	DeletedAt time.Time    // parsed from the ID; zero if unparseable
+	Entries   []AtticEntry // index.json of that past life
 }
 
 // ListTombstones returns every @deleted-* subdir under the page's

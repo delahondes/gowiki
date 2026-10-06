@@ -349,9 +349,9 @@ func TestHandlePageTombstones_AfterDelete_ReturnsEntries(t *testing.T) {
 	}
 	var body struct {
 		Tombstones []struct {
-			ID        string                `json:"id"`
-			DeletedAt string                `json:"deleted_at"`
-			Versions  []storage.AtticEntry  `json:"versions"`
+			ID        string               `json:"id"`
+			DeletedAt string               `json:"deleted_at"`
+			Versions  []storage.AtticEntry `json:"versions"`
 		} `json:"tombstones"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
