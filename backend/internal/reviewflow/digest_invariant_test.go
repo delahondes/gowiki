@@ -2,6 +2,8 @@ package reviewflow
 
 import (
 	"testing"
+
+	"gowiki/backend/internal/storage"
 )
 
 // User-reported bug: a page was moved and then edited through MCP; the
@@ -170,6 +172,68 @@ func TestDigestInvariant_FullyValidatedPageInvalidated_ClearsValidatedVersion(t 
 	st, _ = svc.store.Load("/doc")
 	if st.ValidatedVersion != 0 {
 		t.Errorf("ValidatedVersion = %d, want 0 — all signatures dropped, page is no longer validated", st.ValidatedVersion)
+	}
+}
+
+func TestReconcileStaleSignatures_InvalidatesMismatchedSignatures(t *testing.T) {
+	t.Parallel()
+	svc, _, reader := newSvcWithSpy(t)
+
+	// Seed: page with signed Confirmation whose Digest doesn't match
+	// the current page content. Simulates the shape every pre-fix
+	// state file could be in — the one-shot reconciler at startup
+	// drains them.
+	st := &State{
+		Roles:              map[string]string{"author": "alice", "reviewer": "bob"},
+		VersionTag:         "1.0",
+		CurrentPageVersion: 5,
+		Confirmations: []Confirmation{
+			{
+				PageVersion: 5,
+				Role:        "author",
+				User:        "alice",
+				Digest:      "stale-digest-does-not-match-current-content",
+				Signature:   "sig-a",
+			},
+		},
+	}
+	if err := svc.store.Save("/doc", st); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// Current page content hashes to something else; the reader just
+	// needs to return SOME markdown — its digest won't match.
+	reader.pages["/doc"] = storage.Page{
+		Path:     "/doc",
+		Markdown: "content that doesn't hash to the stale digest\n",
+	}
+
+	n, err := svc.ReconcileStaleSignatures()
+	if err != nil {
+		t.Fatalf("ReconcileStaleSignatures: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("touched = %d, want 1 (one page had a stale signature)", n)
+	}
+
+	after, _ := svc.store.Load("/doc")
+	if len(after.Confirmations) != 0 {
+		t.Errorf("stale signature survived reconciliation: %+v", after.Confirmations)
+	}
+	// Audit trail preserved.
+	foundSnapshot := false
+	for _, vr := range after.VersionHistory {
+		if vr.PageVersion == 5 && vr.ConfirmedBy["author"] == "alice" {
+			foundSnapshot = true
+		}
+	}
+	if !foundSnapshot {
+		t.Errorf("snapshot of the invalidated state missing from VersionHistory")
+	}
+
+	// Idempotent: a second run reports zero.
+	n2, _ := svc.ReconcileStaleSignatures()
+	if n2 != 0 {
+		t.Errorf("second run touched %d pages, want 0 (idempotence)", n2)
 	}
 }
 

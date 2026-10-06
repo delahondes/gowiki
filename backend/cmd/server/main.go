@@ -279,6 +279,15 @@ func main() {
 			log.Printf("reviewflow plugin: reconciled orphan review tasks for %d page(s)", n)
 		}
 	}
+	// Stale-signature sweep: catches signatures whose stored digest no
+	// longer matches current page content. SyncFromMarkdown enforces
+	// the invariant on every write going forward, but states already
+	// in the stale shape need the one-shot. Idempotent.
+	if n, err := reviewflowService.ReconcileStaleSignatures(); err != nil {
+		log.Printf("reviewflow plugin: stale-signature reconciliation failed: %v", err)
+	} else if n > 0 {
+		log.Printf("reviewflow plugin: invalidated stale signatures on %d page(s)", n)
+	}
 	reviewflowService.SetGroupResolver(func(username string) []string {
 		u, err := userStore.Get(username)
 		if err != nil {

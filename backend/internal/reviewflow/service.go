@@ -169,6 +169,71 @@ func (svc *Service) SetTodoIntegrator(ti TodoIntegrator) {
 	svc.todo = ti
 }
 
+// ReconcileStaleSignatures sweeps every reviewflow state and invalidates
+// signed Confirmations whose stored Digest doesn't match the current
+// page content. One-shot cleanup for states where some write path
+// landed new content without going through SyncFromMarkdown's version-
+// change branch — the digest-invariance check added to SyncFromMarkdown
+// prevents the drift GOING FORWARD, but pre-existing stale signatures
+// stay in state files until the next normal save of the page triggers
+// a sync. Running this at startup fixes them all in one pass.
+//
+// Mirrors the SyncFromMarkdown invariant: a signed Confirmation whose
+// Digest doesn't equal the current content's digest is removed; the
+// pre-wipe state is snapshotted so the audit trail is kept;
+// ValidatedVersion drops to 0 when the dropped set would otherwise
+// leave a "validated with no signatures" state.
+//
+// Returns the number of state files that had at least one signature
+// invalidated. Idempotent — a second run reports zero.
+func (svc *Service) ReconcileStaleSignatures() (int, error) {
+	if svc.pageReader == nil {
+		return 0, nil
+	}
+	touched := 0
+	err := svc.store.WalkStates(func(pagePath string, st *State) error {
+		if st == nil || len(st.Confirmations) == 0 {
+			return nil
+		}
+		page, err := svc.pageReader.Get(pagePath)
+		if err != nil {
+			// Page gone or unreadable — orphan-task reconciler handles
+			// the state file, nothing more to do here.
+			return nil
+		}
+		currentDigest := ComputeDigest([]byte(page.Markdown))
+		staleCount := 0
+		for _, c := range st.Confirmations {
+			if c.Signature != "" && c.Digest != "" && c.Digest != currentDigest {
+				staleCount++
+			}
+		}
+		if staleCount == 0 {
+			return nil
+		}
+		if findVersionRecord(st.VersionHistory, st.CurrentPageVersion) < 0 {
+			st.VersionHistory = append(st.VersionHistory, snapshotVersionRecord(st))
+		}
+		kept := st.Confirmations[:0]
+		for _, c := range st.Confirmations {
+			if c.Signature != "" && c.Digest != "" && c.Digest != currentDigest {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		st.Confirmations = kept
+		if st.ValidatedVersion > 0 && st.ValidatedVersion == st.CurrentPageVersion && !svc.allConfirmed(st) {
+			st.ValidatedVersion = 0
+		}
+		if err := svc.store.Save(pagePath, st); err != nil {
+			return nil
+		}
+		touched++
+		return nil
+	})
+	return touched, err
+}
+
 // ReconcileOrphanTasks sweeps every reviewflow state file and brings its
 // open review todos back in sync with the current state of the world. It
 // handles three drift sources that accumulated before the lifecycle
