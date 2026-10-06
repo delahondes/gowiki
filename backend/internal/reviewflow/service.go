@@ -615,6 +615,27 @@ func (svc *Service) GetStatus(pagePath string) (*Status, error) {
 
 // GetStatusForVersion returns the reviewflow status as of a specific page version.
 // Used when viewing historical versions.
+//
+// Two subtleties the pre-rc.3 version missed:
+//
+//  1. VersionHistory holds BOTH fully-validated snapshots AND partial-
+//     signature snapshots (bookkeeping entries written when an edit is
+//     about to wipe mid-review confirmations — see snapshotVersionRecord
+//     in SyncFromMarkdown). The all-roles-confirmed short-circuit must
+//     check VersionRecord.IsValidated, not just "a snapshot for this
+//     version exists". Otherwise a partial snapshot for v67 made the
+//     historical view show every role as "Confirmed" and the panel as
+//     "Validated" even though the API's own validated_page_version was
+//     still 0.
+//
+//  2. The confirmation source for a historical version is the SNAPSHOT'S
+//     ConfirmedBy map, not st.Confirmations. The live Confirmations slice
+//     gets wiped at the next edit (unless re-attach brings signatures
+//     back by digest match), so for an edited-past version it holds
+//     nothing. The snapshot is the only record of who had signed what
+//     at the moment the edit landed. Fall back to st.Confirmations only
+//     when no snapshot exists — the no-snapshot case covers unedited
+//     mid-review views where the live confirmations ARE the truth.
 func (svc *Service) GetStatusForVersion(pagePath string, version int64) (*Status, error) {
 	st, err := svc.store.Load(pagePath)
 	if err != nil {
@@ -627,27 +648,46 @@ func (svc *Service) GetStatusForVersion(pagePath string, version int64) (*Status
 		}, nil
 	}
 
-	// Check if this version was fully validated in history.
-	for _, vr := range st.VersionHistory {
-		if vr.PageVersion == version {
-			// Fully validated version — all roles confirmed.
-			return &Status{
-				Roles:            st.Roles,
-				VersionTag:       vr.VersionTag,
-				CurrentPageVer:   version,
-				ValidatedVersion: version,
-				MissingRoles:     make(map[string]string),
-				IsFullyValidated: true,
-				VersionHistory:   st.VersionHistory,
-			}, nil
+	// Locate the snapshot for this version, if any.
+	var snapshot *VersionRecord
+	for i := range st.VersionHistory {
+		if st.VersionHistory[i].PageVersion == version {
+			snapshot = &st.VersionHistory[i]
+			break
 		}
 	}
 
-	// Not fully validated — check which roles had confirmations for this version.
+	// Fully-validated short-circuit: only when the snapshot explicitly
+	// says so. Partial snapshots fall through to the per-role path.
+	if snapshot != nil && snapshot.IsValidated {
+		return &Status{
+			Roles:            st.Roles,
+			VersionTag:       snapshot.VersionTag,
+			CurrentPageVer:   version,
+			ValidatedVersion: version,
+			MissingRoles:     make(map[string]string),
+			IsFullyValidated: true,
+			VersionHistory:   st.VersionHistory,
+		}, nil
+	}
+
+	// Compute the confirmed-by set from the authoritative source:
+	// snapshot.ConfirmedBy if the snapshot exists (edited-past view),
+	// else the live Confirmations slice (unedited mid-review view).
 	confirmed := make(map[string]bool)
-	for _, c := range st.Confirmations {
-		if c.PageVersion == version {
-			confirmed[c.Role] = true
+	versionTag := st.VersionTag
+	if snapshot != nil {
+		for role := range snapshot.ConfirmedBy {
+			confirmed[role] = true
+		}
+		if snapshot.VersionTag != "" {
+			versionTag = snapshot.VersionTag
+		}
+	} else {
+		for _, c := range st.Confirmations {
+			if c.PageVersion == version {
+				confirmed[c.Role] = true
+			}
 		}
 	}
 
@@ -660,7 +700,7 @@ func (svc *Service) GetStatusForVersion(pagePath string, version int64) (*Status
 
 	return &Status{
 		Roles:            st.Roles,
-		VersionTag:       st.VersionTag,
+		VersionTag:       versionTag,
 		CurrentPageVer:   version,
 		ValidatedVersion: st.ValidatedVersion,
 		MissingRoles:     missing,
