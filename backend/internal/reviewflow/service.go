@@ -365,6 +365,52 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 		st = &State{}
 	}
 
+	// Belt-and-suspenders digest check. The version-change branch
+	// below handles the normal "content edited → version bumped →
+	// snapshot + reattach-by-digest + wipe non-matching" flow. But
+	// trusting the version-change proxy alone leaves a hole: any
+	// write path that lands new content under the SAME page
+	// version (e.g. buggy, concurrent writes, or a store caller
+	// that forgets to bump) would leave signed Confirmations
+	// unchanged — yet their stored Digest no longer covers the
+	// page. Enforce the invariant directly: a signed Confirmation
+	// is valid iff its Digest matches the current content digest.
+	// Mismatches get snapshotted and dropped BEFORE the version-
+	// change logic runs so the two paths don't fight.
+	currentDigest := ComputeDigest([]byte(markdown))
+	staleSigned := 0
+	for _, c := range st.Confirmations {
+		if c.Signature != "" && c.Digest != "" && c.Digest != currentDigest {
+			staleSigned++
+		}
+	}
+	if staleSigned > 0 {
+		// Snapshot once so the audit trail keeps the invalidated
+		// signatures. findVersionRecord guards against double-
+		// writing a snapshot on top of a prior one for the same
+		// version (defensive — happens if the invariant fires more
+		// than once for the same version due to repeated same-
+		// version writes).
+		if findVersionRecord(st.VersionHistory, st.CurrentPageVersion) < 0 {
+			st.VersionHistory = append(st.VersionHistory, snapshotVersionRecord(st))
+		}
+		kept := st.Confirmations[:0]
+		for _, c := range st.Confirmations {
+			if c.Signature != "" && c.Digest != "" && c.Digest != currentDigest {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		st.Confirmations = kept
+		// ValidatedVersion may have been pinned to the current
+		// version by the dropped set. Clear it if the surviving
+		// Confirmations no longer cover every role — the page is
+		// no longer fully validated.
+		if st.ValidatedVersion > 0 && st.ValidatedVersion == st.CurrentPageVersion && !svc.allConfirmed(st) {
+			st.ValidatedVersion = 0
+		}
+	}
+
 	// If page version changed, reset confirmations (content changed) —
 	// but first snapshot the outgoing partial-signature state to history
 	// so a same-digest restore (discard-draft or restore-from-history)
@@ -383,12 +429,13 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 			st.VersionHistory = append(st.VersionHistory, snapshotVersionRecord(st))
 		}
 
-		// Recompute the incoming digest and pull any historical
-		// confirmation that matches into the new version. Empty digest
-		// means the caller confirmed without signing, so those never
-		// re-attach — they wouldn't survive a real audit anyway.
-		newDigest := ComputeDigest([]byte(markdown))
-		st.Confirmations = reattachByDigest(st, pageVersion, newDigest)
+		// Pull any historical confirmation whose stored digest matches
+		// the current page content and carry it forward onto the new
+		// page version. currentDigest was computed above for the
+		// belt-and-suspenders stale-digest check; reuse it. Empty
+		// digest means the caller confirmed without signing, so those
+		// never re-attach — they wouldn't survive a real audit anyway.
+		st.Confirmations = reattachByDigest(st, pageVersion, currentDigest)
 
 		// Review-task bookkeeping. Three cases:
 		//
