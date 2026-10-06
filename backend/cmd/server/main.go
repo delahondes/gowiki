@@ -213,6 +213,17 @@ func main() {
 			})
 			todoService = todo.NewService(todoStore, todoHub, dispatcher)
 			store.TodoSync = todo.NewTodoSyncer(todoStore, todoHub, dispatcher)
+			// Wire the post-save hook so EVERY write path (HTTP save,
+			// MCP write_page / edit_page / create_page_from_template,
+			// database row insert / update that touches a bound page)
+			// fires the action-trigger fan-out. Fire-and-forget: the
+			// handler path shouldn't wait for todo bookkeeping.
+			savedTodoService := todoService
+			store.OnPageSaved = func(pagePath, author string) {
+				go savedTodoService.AutoCompleteWikiAction(context.Background(), "edit", pagePath, author)
+				go savedTodoService.AutoCompleteCreateAction(context.Background(), pagePath, author)
+				go savedTodoService.ReopenReadTasks(context.Background(), pagePath)
+			}
 			go todo.RunScheduler(context.Background(), todoStore, dispatcher)
 			log.Printf("todo plugin: active")
 		}

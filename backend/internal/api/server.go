@@ -816,12 +816,12 @@ func (s *Server) handlePutPage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	// Auto-complete "edit" wiki action tasks.
-	if s.todoService != nil {
-		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, author)
-		go s.todoService.AutoCompleteCreateAction(context.Background(), result.Page.Path, author)
-		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
-	}
+	// Auto-complete of read / edit / create action tasks happens via
+	// store.OnPageSaved (set in main.go). We used to fire the three
+	// calls here, but that left the MCP write paths (write_page,
+	// edit_page, create_page_from_template, row writers) silent —
+	// moving the dispatch into the storage layer means every write
+	// path fires the same hook regardless of transport.
 
 	writeJSON(w, http.StatusOK, result)
 }

@@ -146,6 +146,24 @@ type CommentRenamer interface {
 	Rename(oldPath, newPath string) error
 }
 
+// PageWriteHook is a post-save side-effect fired by Put / PutWithSummary
+// after a page is written. Receives the canonical page path AND the
+// author of the save, so downstream consumers (today: the todo
+// service's AutoCompleteWikiAction / AutoCompleteCreateAction /
+// ReopenReadTasks fan-out) can act with full context.
+//
+// The hook runs AFTER every successful write regardless of transport
+// — direct HTTP save, MCP write_page, MCP edit_page, MCP
+// create_page_from_template, database row inserts and updates that
+// touch a bound page. Previously these auto-completes were wired
+// per-handler and only the browser-save path fired them; moving the
+// hook into the storage layer closes the gap so adding a new write
+// surface picks it up automatically.
+//
+// The hook is called synchronously; implementations wanting fire-and-
+// forget semantics (e.g. the todo fan-out) start their own goroutine.
+type PageWriteHook func(pagePath, author string)
+
 type FileStore struct {
 	contentRoot       string
 	metaRoot          string
@@ -164,6 +182,9 @@ type FileStore struct {
 	ReviewflowSync    ReviewflowSyncer
 	LifecycleSync     LifecycleSyncer
 	CommentStore      CommentRenamer
+	// OnPageSaved runs after every successful page write. See
+	// PageWriteHook for the contract.
+	OnPageSaved PageWriteHook
 
 	// Per-page write mutex. Serializes concurrent Put/Move on the same path
 	// so we can't observe a state where content is written but meta.Version
@@ -565,6 +586,15 @@ func (s *FileStore) putWithSummary(pagePath, markdownContent, author, summary st
 
 	// --- Compute newly orphaned media ---
 	orphaned := s.RefIndex.FindNewlyOrphaned(oldMediaRefs, newMediaRefs)
+
+	// Post-save hook: fired AFTER every write regardless of caller.
+	// The hook implementation is responsible for making itself async
+	// (the todo fan-out does `go` internally); storage keeps the call
+	// synchronous so a test that writes a page can observe the hook
+	// in the same goroutine.
+	if s.OnPageSaved != nil {
+		s.OnPageSaved(normalized, author)
+	}
 
 	return PutResult{
 		Page: Page{

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -292,11 +291,11 @@ func (s *Server) PublishDraft(pagePath, username, editToken string, forcePublish
 		return nil, &PublishDraftError{Kind: PublishErrInternal, Message: err.Error()}
 	}
 
-	if s.todoService != nil {
-		go s.todoService.AutoCompleteWikiAction(context.Background(), "edit", result.Page.Path, username)
-		go s.todoService.AutoCompleteCreateAction(context.Background(), result.Page.Path, username)
-		go s.todoService.ReopenReadTasks(context.Background(), result.Page.Path)
-	}
+	// Action-trigger fan-out (AutoCompleteWikiAction / AutoCompleteCreateAction /
+	// ReopenReadTasks) is now dispatched by storage.FileStore.OnPageSaved,
+	// wired in main.go. This handler used to fire the three calls directly;
+	// MCP write paths that bypassed PublishDraft silently skipped them —
+	// moving the hook into storage closes that gap for every transport.
 	return &result, nil
 }
 
