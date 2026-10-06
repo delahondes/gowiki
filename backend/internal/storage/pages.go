@@ -647,6 +647,8 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 	}
 
 	// Archive current version with summary "deleted", preserving frozen media refs.
+	// Archive first so the "deleted" marker lands as the final live entry
+	// before Tombstone moves everything into the per-deletion subdir.
 	if s.Attic != nil {
 		if archiveErr := s.Attic.Archive(normalized, meta.Version, content, author, "deleted", meta.MediaRefs); archiveErr != nil {
 			return DeleteResult{}, fmt.Errorf("archive before delete: %w", archiveErr)
@@ -658,13 +660,46 @@ func (s *FileStore) Delete(pagePath, author string) (DeleteResult, error) {
 		s.Changelog.Append(normalized, meta.Version, author, "deleted", "delete")
 	}
 
+	// Tombstone the attic + meta sidecars BEFORE wiping live content.
+	// A page recreated at this path later must start from a clean
+	// namespace — its own version 1, empty attic, no stale reviewflow
+	// state. The tombstone directory preserves everything the old page
+	// carried so a future UI can surface "a previous page lived here".
+	//
+	// Must run before os.Remove(contentPath) so a crash between the
+	// archive and the tombstone leaves the content in place — the next
+	// reconcile sweep will finish the job rather than hand the user a
+	// deleted content file with no attic to show for it.
+	//
+	// Must run before ReviewflowSync.OnPageDelete so the reviewflow
+	// state file is tombstoned instead of deleted (OnPageDelete's
+	// internal state-file delete then no-ops; the task cancellation it
+	// also performs still runs).
+	var tombDir string
+	if s.Attic != nil {
+		td, tombErr := s.Attic.Tombstone(normalized, time.Now())
+		if tombErr != nil {
+			return DeleteResult{}, fmt.Errorf("tombstone attic: %w", tombErr)
+		}
+		tombDir = td
+	}
+	if tombDir != "" {
+		if err := tombstoneMetaSidecars(metaPath, tombDir); err != nil {
+			return DeleteResult{}, fmt.Errorf("tombstone meta: %w", err)
+		}
+	}
+
 	// Remove the .md file.
 	if err := os.Remove(contentPath); err != nil {
 		return DeleteResult{}, fmt.Errorf("remove page file: %w", err)
 	}
 
-	// Remove the metadata .json file (best effort).
-	os.Remove(metaPath)
+	// Meta file already moved into the tombstone (if tombstoning
+	// happened). On the off-chance Attic is nil (tests only), fall back
+	// to the old behaviour: just remove it.
+	if tombDir == "" {
+		os.Remove(metaPath)
+	}
 
 	// Clean up empty parent directories for content and meta paths.
 	cleanEmptyParents(filepath.Dir(contentPath), s.contentRoot)
@@ -1334,6 +1369,52 @@ func (s *FileStore) Move(oldPath, newPath string, moveMedia, updateLinks bool, a
 		UpdatedPages: updatedPages,
 		MovedMedia:   movedMediaPaths,
 	}, nil
+}
+
+// tombstoneMetaSidecars moves every meta file belonging to a page
+// (`<prefix>.json` and every `<prefix>.<kind>.json`) into tombDir with
+// a stable, prefix-stripped name: `.json` becomes `meta.json`, every
+// `.<kind>.json` becomes `<kind>.json`. The result in the tombstone
+// directory is self-contained — reading it back later doesn't require
+// knowing whether the page lived at `foo.md` or `foo/index.md`.
+//
+// Only files are moved; a sibling directory inside metaDir (a sub-
+// namespace's meta tree) is left alone. Best-effort per file: a rename
+// error aborts and bubbles up so Delete() can roll back.
+func tombstoneMetaSidecars(metaPath, tombDir string) error {
+	metaDir := filepath.Dir(metaPath)
+	oldBase := strings.TrimSuffix(metaPath, ".json")
+	prefix := filepath.Base(oldBase)
+	entries, err := os.ReadDir(metaDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read meta dir: %w", err)
+	}
+	if err := os.MkdirAll(tombDir, 0o755); err != nil {
+		return fmt.Errorf("create tombstone dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix+".") {
+			continue
+		}
+		suffix := strings.TrimPrefix(name, prefix) // ".json" or ".reviewflow.json"
+		destName := strings.TrimPrefix(suffix, ".")
+		if destName == "json" {
+			destName = "meta.json"
+		}
+		src := filepath.Join(metaDir, name)
+		dst := filepath.Join(tombDir, destName)
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("tombstone meta sidecar %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // cleanEmptyParents removes empty directories from dir up to (but not including) stopAt.

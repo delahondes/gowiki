@@ -46,6 +46,178 @@ func (a *Attic) versionFile(pagePath string, version int64) string {
 	return filepath.Join(a.pageDir(pagePath), fmt.Sprintf("%d.md.gz", version))
 }
 
+// tombstonesDir is the subdir inside a page's attic directory that
+// holds per-deletion snapshots of the previous life of that path.
+// Kept inside the page dir so a single `rm -rf attic/<path>/` nukes
+// both live attic and all tombstones — operability over micro-tidiness.
+const tombstonesSubdir = "@tombstones"
+
+// IsTombstoneName reports whether a filesystem entry name under a page's
+// attic directory is the tombstones holder (not a version file).
+func IsTombstoneName(name string) bool { return name == tombstonesSubdir }
+
+// TombstonePath returns the directory a Tombstone call will write to for
+// the given page and deletion time. Deterministic and callable before
+// the actual tombstone exists — used by the sweep to detect "already
+// tombstoned" state.
+func (a *Attic) TombstonePath(pagePath string, deletedAt time.Time) string {
+	stamp := deletedAt.UTC().Format("2006-01-02T15-04-05Z")
+	return filepath.Join(a.pageDir(pagePath), tombstonesSubdir, "@deleted-"+stamp)
+}
+
+// TombstoneRecord describes one past life of a page path — the full
+// archive captured when that life ended in a Delete().
+type TombstoneRecord struct {
+	ID       string       // the @deleted-<ts> directory name
+	Dir      string       // absolute path to the tombstone dir
+	DeletedAt time.Time   // parsed from the ID; zero if unparseable
+	Entries  []AtticEntry // index.json of that past life
+}
+
+// ListTombstones returns every @deleted-* subdir under the page's
+// @tombstones holder, oldest first. The returned Entries slice is the
+// full index.json for that past life — reconstructable with
+// ReadTombstonedVersion. Returns nil (no error) if the page has no
+// tombstones.
+//
+// This is the regulatory-audit entry point: ListVersions on a live
+// page returns only its current life, so a reader asking "what did
+// this URL ever contain" must also consult ListTombstones.
+func (a *Attic) ListTombstones(pagePath string) ([]TombstoneRecord, error) {
+	holder := filepath.Join(a.pageDir(pagePath), tombstonesSubdir)
+	entries, err := os.ReadDir(holder)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read tombstones dir: %w", err)
+	}
+	var out []TombstoneRecord
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "@deleted-") {
+			continue
+		}
+		tombDir := filepath.Join(holder, name)
+		idx, _ := readTombstoneIndex(tombDir)
+		rec := TombstoneRecord{
+			ID:      name,
+			Dir:     tombDir,
+			Entries: idx,
+		}
+		if t, parseErr := time.Parse("2006-01-02T15-04-05Z", strings.TrimPrefix(name, "@deleted-")); parseErr == nil {
+			rec.DeletedAt = t
+		}
+		out = append(out, rec)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID // ISO timestamps sort chronologically
+	})
+	return out, nil
+}
+
+// ReadTombstonedVersion returns the markdown content of a specific
+// version from a specific tombstone. tombID is the directory name
+// (`@deleted-<ts>`) returned in TombstoneRecord.ID.
+func (a *Attic) ReadTombstonedVersion(pagePath, tombID string, version int64) ([]byte, error) {
+	if !strings.HasPrefix(tombID, "@deleted-") {
+		return nil, fmt.Errorf("invalid tombstone id %q", tombID)
+	}
+	vPath := filepath.Join(a.pageDir(pagePath), tombstonesSubdir, tombID, fmt.Sprintf("%d.md.gz", version))
+	data, err := os.ReadFile(vPath)
+	if err != nil {
+		return nil, fmt.Errorf("read tombstoned version: %w", err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("gzip open: %w", err)
+	}
+	defer gz.Close()
+	content, err := io.ReadAll(gz)
+	if err != nil {
+		return nil, fmt.Errorf("gzip read: %w", err)
+	}
+	return content, nil
+}
+
+func readTombstoneIndex(tombDir string) ([]AtticEntry, error) {
+	data, err := os.ReadFile(filepath.Join(tombDir, "index.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read tombstone index: %w", err)
+	}
+	var entries []AtticEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse tombstone index: %w", err)
+	}
+	return entries, nil
+}
+
+// LatestEntrySummary returns the summary of the last entry in the live
+// attic index, or empty string if the index is missing/empty. Used by
+// the reconciler to detect "the previous life of this path ended in a
+// deletion" (summary == "deleted") without re-reading every version.
+func (a *Attic) LatestEntrySummary(pagePath string) string {
+	entries, err := a.readIndex(pagePath)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+	return entries[len(entries)-1].Summary
+}
+
+// Tombstone moves every live attic entry for `pagePath` (the .md.gz
+// version files and the index.json) into a per-deletion subdir. After
+// the move, a.pageDir(pagePath) retains only the @tombstones holder;
+// a subsequent Archive() call for the same path lands on a clean
+// namespace, so a page recreated at the same URL doesn't collide with
+// the deleted document's version numbers.
+//
+// Returns the tombstone directory path (same shape as TombstonePath)
+// for the caller to also drop per-page sidecar files (meta,
+// reviewflow, comments) into. The caller is responsible for moving
+// those; Attic owns only the attic directory.
+//
+// Idempotent: if the live attic has nothing to tombstone (empty or
+// already-tombstoned), returns the computed path without erroring.
+// Second tombstone call for the same (page, timestamp) returns the
+// existing path unmodified.
+func (a *Attic) Tombstone(pagePath string, deletedAt time.Time) (string, error) {
+	pageDir := a.pageDir(pagePath)
+	tombDir := a.TombstonePath(pagePath, deletedAt)
+	if err := os.MkdirAll(tombDir, 0o755); err != nil {
+		return "", fmt.Errorf("create tombstone dir: %w", err)
+	}
+	entries, err := os.ReadDir(pageDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return tombDir, nil
+		}
+		return "", fmt.Errorf("read attic dir: %w", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		// Skip the @tombstones holder (we don't nest tombstones into
+		// each other) and any other reserved sentinels.
+		if strings.HasPrefix(name, "@") {
+			continue
+		}
+		// Only move the two known file shapes: N.md.gz and index.json.
+		// Future files (plugin snapshots, etc.) land here on an opt-in
+		// basis — explicit skip of @-prefixed names handles sentinels.
+		src := filepath.Join(pageDir, name)
+		dst := filepath.Join(tombDir, name)
+		if err := os.Rename(src, dst); err != nil {
+			return "", fmt.Errorf("tombstone %s: %w", name, err)
+		}
+	}
+	return tombDir, nil
+}
+
 // Archive stores a version of a page as a gzipped markdown file and updates the per-page index.
 // If the version file already exists, it is a no-op (dedup).
 // mediaRefs is optional: if non-nil, it records the media path -> media version at time of archive.

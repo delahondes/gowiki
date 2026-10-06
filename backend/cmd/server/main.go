@@ -288,6 +288,17 @@ func main() {
 	} else if n > 0 {
 		log.Printf("reviewflow plugin: invalidated stale signatures on %d page(s)", n)
 	}
+	// Tombstone-drift sweep: catches pages that were deleted before
+	// Delete() learned to tombstone and then had new content created
+	// at the same path (or whose sidecars survived their deletion for
+	// any other reason). Delete() enforces the invariant on every
+	// deletion going forward; this one-shot drains the pre-fix drift.
+	// Idempotent.
+	if n, err := store.ReconcileTombstones(); err != nil {
+		log.Printf("storage: tombstone reconciliation failed: %v", err)
+	} else if n > 0 {
+		log.Printf("storage: tombstoned drift history for %d page(s)", n)
+	}
 	reviewflowService.SetGroupResolver(func(username string) []string {
 		u, err := userStore.Get(username)
 		if err != nil {

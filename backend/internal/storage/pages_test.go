@@ -240,13 +240,22 @@ func TestFileStore_Delete(t *testing.T) {
 	}
 	// The delete result should be non-nil (fields OK to be empty here).
 	_ = res
-	// The archived content must survive the delete (audit trail).
-	data, err := s.Attic.ReadVersion("/page", 1)
+	// The archived content must survive the delete (audit trail) —
+	// now inside the per-deletion tombstone rather than at the live
+	// attic path.
+	tombs, err := s.Attic.ListTombstones("/page")
 	if err != nil {
-		t.Errorf("attic entry missing after Delete: %v", err)
+		t.Fatalf("ListTombstones after Delete: %v", err)
+	}
+	if len(tombs) != 1 {
+		t.Fatalf("want 1 tombstone after Delete, got %d", len(tombs))
+	}
+	data, err := s.Attic.ReadTombstonedVersion("/page", tombs[0].ID, 1)
+	if err != nil {
+		t.Errorf("tombstoned v1 missing after Delete: %v", err)
 	}
 	if string(data) != "hi" {
-		t.Errorf("attic content after Delete = %q, want %q", data, "hi")
+		t.Errorf("tombstoned content after Delete = %q, want %q", data, "hi")
 	}
 }
 
@@ -277,13 +286,19 @@ func TestFileStore_Delete_PreservesEveryHistoricalVersion(t *testing.T) {
 		t.Errorf("Get after Delete: got %v, want ErrPageNotFound", err)
 	}
 	// Every historical version stays retrievable with its bytes AND
-	// its audit metadata (author + summary + timestamp).
-	versions, err := s.Attic.ListVersions("/rec/10")
+	// its audit metadata (author + summary + timestamp). Delete now
+	// moves the full archive into a per-deletion tombstone; the audit
+	// trail is read back via ListTombstones + ReadTombstonedVersion.
+	tombs, err := s.Attic.ListTombstones("/rec/10")
 	if err != nil {
-		t.Fatalf("ListVersions after Delete: %v", err)
+		t.Fatalf("ListTombstones after Delete: %v", err)
 	}
+	if len(tombs) != 1 {
+		t.Fatalf("want 1 tombstone after Delete, got %d", len(tombs))
+	}
+	versions := tombs[0].Entries
 	if len(versions) < 3 {
-		t.Fatalf("want at least v1..v3 in attic after delete, got %d entries", len(versions))
+		t.Fatalf("want at least v1..v3 in tombstone after delete, got %d entries", len(versions))
 	}
 	byVersion := map[int64]AtticEntry{}
 	for _, v := range versions {
@@ -300,9 +315,9 @@ func TestFileStore_Delete_PreservesEveryHistoricalVersion(t *testing.T) {
 		{3, "v3 body", "carol", "final wording"},
 	}
 	for _, c := range cases {
-		got, err := s.Attic.ReadVersion("/rec/10", c.ver)
+		got, err := s.Attic.ReadTombstonedVersion("/rec/10", tombs[0].ID, c.ver)
 		if err != nil {
-			t.Errorf("ReadVersion v%d after Delete: %v", c.ver, err)
+			t.Errorf("ReadTombstonedVersion v%d after Delete: %v", c.ver, err)
 			continue
 		}
 		if string(got) != c.body {
@@ -310,7 +325,7 @@ func TestFileStore_Delete_PreservesEveryHistoricalVersion(t *testing.T) {
 		}
 		entry, ok := byVersion[c.ver]
 		if !ok {
-			t.Errorf("v%d missing from ListVersions after Delete", c.ver)
+			t.Errorf("v%d missing from tombstone index after Delete", c.ver)
 			continue
 		}
 		if entry.Author != c.author {
