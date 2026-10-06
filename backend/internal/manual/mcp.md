@@ -187,7 +187,7 @@ npx @modelcontextprotocol/inspector \
 `search_pages` carries three mutually-informative modes. At least one of `query`, `pattern`, or `tag` must be set.
 
 - **`query` — fuzzy full-text.** Typo-tolerant FTS over page bodies. Returns ranked snippets. Right choice for the vague-recall case ("the page about reviewflow validation").
-- **`pattern` — grep-style regex.** The RE2 regex is scanned against every page's raw markdown. One row per occurrence: `{path, line, column, match, line_text}`. Agent-oriented: literal strings and structured directives match exactly, no ranking, no stemming. The right choice when you need to **find every page using `{template-stamp}`**, locate every `TODO(` marker, or confirm no page still carries a deprecated syntax. Options: `path_prefix` to scope the scan, `case_sensitive` (default true), `max_per_page` to cap per-page occurrences.
+- **`pattern` — grep-style regex.** The RE2 regex is scanned against every page's raw markdown. One row per occurrence: `{path, line, column, match, line_text}`. Agent-oriented: literal strings and structured directives match exactly, no ranking, no stemming. The right choice when you need to **find every page using `{template-stamp}`**, locate every `TODO(` marker, or confirm no page still carries a deprecated syntax. Options: `path_prefix` to scope the scan, `case_sensitive` (default true), `max_per_page` to cap per-page occurrences. Response envelope carries `scan_complete` (true iff every eligible page was walked), `eligible_pages` (universe size), and `total_matches` so a caller can detect at a glance when the result is partial — `scan_complete=false` means `limit` was hit mid-scan and additional matches exist beyond the ones returned. Pass **`count_only=true`** for a cheap end-to-end tally: scans every eligible page regardless of `limit`, returns one `{path, count}` row per matching page, no bodies — the right call when the question is "how many pages / how many hits" rather than "show me the hits".
 - **`tag` — tag listing.** Every page bearing that tag. Composable: `tag` + `query` narrows by path/title substring; `tag` + `pattern` scopes the regex scan to tagged pages (useful for "find every TODO on `tag:sop` pages").
 
 `query` and `pattern` are mutually exclusive — pick fuzzy or exact; `tag` composes with either.
@@ -200,6 +200,7 @@ Examples:
 { "query": "reviewflow validation" }
 { "pattern": "\\{template-stamp(?:\\s[^{}]*)?\\}" }
 { "pattern": "TODO\\(", "path_prefix": "/regulatory/qms", "case_sensitive": false }
+{ "pattern": "DEPRECATED", "count_only": true, "path_prefix": "/regulatory/qms" }
 { "tag": "sop" }
 { "tag": "sop", "query": "biomscope" }
 { "tag": "sop", "pattern": "DEPRECATED" }

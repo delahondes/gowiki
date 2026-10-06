@@ -417,7 +417,14 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 				"  • `pattern` — RE2 regex scanned across every page's markdown, grep-style. "+
 				"Agent-oriented: exact substrings / structured directives are found reliably, "+
 				"no fuzzy ranking. Returns one row per occurrence with path + line + column + "+
-				"the matching text + the full line as context.\n"+
+				"the matching text + the full line as context. Response includes "+
+				"`scan_complete` (true iff every eligible page was walked), `eligible_pages` "+
+				"(the universe size), and `total_matches` (the number collected before any cap) "+
+				"so a caller can tell at a glance whether the result is partial. "+
+				"Pass `count_only=true` for a cheap end-to-end count: scans every eligible "+
+				"page regardless of `limit` and returns one `{path, count}` row per matching "+
+				"page, no bodies — the right choice when the question is 'how many pages / "+
+				"how many hits' rather than 'show me the hits'.\n"+
 				"  • `tag` — list every page bearing a given tag. Composable with `query` "+
 				"(narrows tag results by path/title substring) OR with `pattern` "+
 				"(narrows the regex scan to tagged pages).\n"+
@@ -446,8 +453,11 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 		mcpgo.WithNumber("max_per_page",
 			mcpgo.Description("For `pattern` mode: cap matches reported per page (0 = unlimited, default 0). The overall `limit` still applies across pages."),
 		),
+		mcpgo.WithBoolean("count_only",
+			mcpgo.Description("For `pattern` mode: scan every eligible page regardless of `limit` and return one `{path, count}` row per page that matches, no bodies. Fast end-to-end — the right choice when the question is \"how many pages / how many hits\" rather than \"show me the hits\"."),
+		),
 		mcpgo.WithNumber("limit",
-			mcpgo.Description("Maximum results (query/tag: default 20, max 100; pattern: default 50, max 500)."),
+			mcpgo.Description("Maximum results (query/tag: default 20, max 100; pattern: default 50, max 500). Ignored in `count_only` mode."),
 		),
 	)
 	srv.AddTool(tool, func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
@@ -509,12 +519,14 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 					paths = append(paths, p.Path)
 				}
 			}
-			matches, scanned, skipped := grepPages(grepScanArgs{
+			countOnly := req.GetBool("count_only", false)
+			res := grepPages(grepScanArgs{
 				pages:      paths,
 				prefix:     prefix,
 				re:         re,
 				limit:      limit,
 				maxPerPage: maxPerPage,
+				countOnly:  countOnly,
 				canView:    func(p string) bool { return deps.canView(ctx, p) },
 				getMarkdown: func(p string) (string, error) {
 					page, err := deps.Store.Get(strings.TrimPrefix(p, "/"))
@@ -524,14 +536,25 @@ func registerSearchPagesTool(srv *mcpsrv.MCPServer, deps Deps) {
 					return page.Markdown, nil
 				},
 			})
-			return jsonResult(map[string]any{
-				"pattern":            pattern,
-				"path_prefix":        "/" + prefix,
-				"matches":            matches,
-				"scanned":            scanned,
-				"skipped_access":     skipped,
-				"truncated_at_limit": len(matches) >= limit,
-			}), nil
+			envelope := map[string]any{
+				"pattern":        pattern,
+				"path_prefix":    "/" + prefix,
+				"scanned":        res.Scanned,
+				"skipped_access": res.SkippedAccess,
+				"eligible_pages": res.EligiblePages,
+				"total_matches":  res.TotalMatches,
+				"scan_complete":  res.ScanComplete,
+			}
+			if countOnly {
+				envelope["match_counts"] = res.MatchCounts
+				envelope["count_only"] = true
+			} else {
+				envelope["matches"] = res.Matches
+				// Legacy name kept for clients that already read it;
+				// scan_complete is the new, unambiguous signal.
+				envelope["truncated_at_limit"] = res.TruncatedAtCap
+			}
+			return jsonResult(envelope), nil
 		}
 
 		limit := req.GetInt("limit", 20)
@@ -604,68 +627,135 @@ type grepScanArgs struct {
 	pages       []string
 	prefix      string
 	re          *regexp.Regexp
-	limit       int // overall cap across all pages
-	maxPerPage  int // 0 = unlimited
+	limit       int // overall cap across all pages (ignored when countOnly)
+	maxPerPage  int // 0 = unlimited (ignored when countOnly)
+	countOnly   bool
 	canView     func(pagePath string) bool
 	getMarkdown func(pagePath string) (string, error)
 }
 
+// grepPageCount is one row of the count_only response: a page and the
+// number of regex matches it contains. Pages with zero matches are
+// omitted — the result is a compact "pages that hit".
+type grepPageCount struct {
+	Path  string `json:"path"`
+	Count int    `json:"count"`
+}
+
+// grepResult is the full response envelope. It bundles counters that
+// let the caller detect a mid-scan truncation (ScanComplete==false)
+// AND the universe size (EligiblePages) so a scanned<eligible result
+// is unambiguous — the old shape made callers believe they'd seen
+// every match when the scanner had actually stopped early.
+type grepResult struct {
+	Matches        []grepMatch     // nil when countOnly
+	MatchCounts    []grepPageCount // nil when !countOnly
+	Scanned        int             // pages that were actually read
+	SkippedAccess  int             // pages ACL-filtered
+	EligiblePages  int             // pages in-scope (post-prefix, pre-ACL)
+	TotalMatches   int             // sum of per-page counts (countOnly) OR total matches found before any cap
+	ScanComplete   bool            // iterator walked every eligible page (no early break)
+	TruncatedAtCap bool            // Matches slice was cut off at `limit` (!countOnly only)
+}
+
 // grepPages scans every page under `prefix` (empty = all) and reports
-// every occurrence of the compiled regex, up to `limit` across the
-// whole scan and at most `maxPerPage` per page. ACL-filtered pages
-// count toward `skipped`, not `scanned`.
-func grepPages(a grepScanArgs) (matches []grepMatch, scanned int, skipped int) {
-	matches = []grepMatch{}
+// occurrences of the compiled regex. Two modes:
+//
+//   - Default: fill the Matches slice up to `limit` across the whole
+//     scan, at most `maxPerPage` per page. May stop before every page
+//     is seen when the overall limit is hit — set ScanComplete=false
+//     so the caller can tell.
+//   - countOnly==true: scan every page in scope regardless of counts,
+//     fill MatchCounts with {path, count} for pages that match. No
+//     match bodies, no limit, no early exit. Cheap end-to-end and
+//     answers "which pages contain X" completely.
+//
+// ACL-filtered pages count toward SkippedAccess, not Scanned.
+// EligiblePages is set in both modes so the caller can verify "every
+// in-scope page was accounted for" without having to recompute the
+// prefix filter themselves.
+func grepPages(a grepScanArgs) grepResult {
+	res := grepResult{
+		Matches:      []grepMatch{},
+		MatchCounts:  []grepPageCount{},
+		ScanComplete: true,
+	}
 	matchPrefix := a.prefix
 	if matchPrefix != "" {
 		matchPrefix += "/"
 	}
 	for _, raw := range a.pages {
-		if len(matches) >= a.limit {
-			break
-		}
 		pagePath := strings.TrimPrefix(raw, "/")
 		if matchPrefix != "" && !strings.HasPrefix(pagePath, matchPrefix) && pagePath != a.prefix {
 			continue
 		}
-		if a.canView != nil && !a.canView(pagePath) {
-			skipped++
+		res.EligiblePages++
+		// Default mode respects the limit — once it's hit, we stop
+		// walking so a 10,000-page corpus doesn't burn I/O to produce
+		// a result the caller only reads the first 50 lines of.
+		// countOnly mode intentionally keeps going.
+		if !a.countOnly && len(res.Matches) >= a.limit {
+			res.ScanComplete = false
 			continue
 		}
-		scanned++
+		if a.canView != nil && !a.canView(pagePath) {
+			res.SkippedAccess++
+			continue
+		}
+		res.Scanned++
 		md, err := a.getMarkdown(pagePath)
 		if err != nil {
 			continue
 		}
 		lines := strings.Split(md, "\n")
-		perPage := 0
+		pageCount := 0
+		pagePerPageCap := a.maxPerPage
+		if a.countOnly {
+			pagePerPageCap = 0 // uncapped — we want the real total
+		}
 		for i, line := range lines {
 			locs := a.re.FindAllStringIndex(line, -1)
 			if locs == nil {
 				continue
 			}
 			for _, loc := range locs {
-				if a.maxPerPage > 0 && perPage >= a.maxPerPage {
+				if pagePerPageCap > 0 && pageCount >= pagePerPageCap {
 					break
 				}
-				matches = append(matches, grepMatch{
-					Path:     "/" + pagePath,
-					Line:     i + 1,
-					Column:   loc[0] + 1,
-					Match:    line[loc[0]:loc[1]],
-					LineText: line,
-				})
-				perPage++
-				if len(matches) >= a.limit {
-					return matches, scanned, skipped
+				pageCount++
+				res.TotalMatches++
+				if !a.countOnly {
+					res.Matches = append(res.Matches, grepMatch{
+						Path:     "/" + pagePath,
+						Line:     i + 1,
+						Column:   loc[0] + 1,
+						Match:    line[loc[0]:loc[1]],
+						LineText: line,
+					})
+					if len(res.Matches) >= a.limit {
+						// Hit the overall cap mid-page; the current
+						// page's remaining lines aren't scanned.
+						// ScanComplete gets flipped on the next
+						// iteration when another eligible page is
+						// skipped.
+						res.TruncatedAtCap = true
+						goto nextPage
+					}
 				}
 			}
-			if a.maxPerPage > 0 && perPage >= a.maxPerPage {
+			if pagePerPageCap > 0 && pageCount >= pagePerPageCap {
 				break
 			}
 		}
+	nextPage:
+		if a.countOnly && pageCount > 0 {
+			res.MatchCounts = append(res.MatchCounts, grepPageCount{
+				Path:  "/" + pagePath,
+				Count: pageCount,
+			})
+		}
 	}
-	return matches, scanned, skipped
+	return res
 }
 
 // ── get_reviewflow_status ───────────────────────────────────────────────
