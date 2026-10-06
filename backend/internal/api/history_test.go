@@ -303,3 +303,142 @@ func renderHunks(hunks []storage.DiffHunk) string {
 	}
 	return sb.String()
 }
+
+// deletePage runs FileStore.Delete via the server's typed store so the
+// tombstone tests can set up a prior-life state the same way production
+// would.
+func deletePage(t *testing.T, s *Server, pagePath string) {
+	t.Helper()
+	pageStore, ok := s.store.(*storage.FileStore)
+	if !ok {
+		t.Fatal("store is not FileStore")
+	}
+	if _, err := pageStore.Delete(pagePath, "tester"); err != nil {
+		t.Fatalf("Delete %s: %v", pagePath, err)
+	}
+}
+
+// ── handlePageTombstones ───────────────────────────────────
+
+func TestHandlePageTombstones_NoHistory_ReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	s := newHistoryServer(t)
+	rec := urlWithParam(s.handlePageTombstones, http.MethodGet, "/api/tombstones/nope", "nope", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Tombstones []map[string]any `json:"tombstones"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Tombstones) != 0 {
+		t.Errorf("tombstones = %v, want []", body.Tombstones)
+	}
+}
+
+func TestHandlePageTombstones_AfterDelete_ReturnsEntries(t *testing.T) {
+	t.Parallel()
+	s := newHistoryServer(t)
+	putPage(t, s, "/rec01", "# Rec\n\nold v1\n")
+	putPage(t, s, "/rec01", "# Rec\n\nold v2\n")
+	deletePage(t, s, "/rec01")
+
+	rec := urlWithParam(s.handlePageTombstones, http.MethodGet, "/api/tombstones/rec01", "rec01", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Tombstones []struct {
+			ID        string                `json:"id"`
+			DeletedAt string                `json:"deleted_at"`
+			Versions  []storage.AtticEntry  `json:"versions"`
+		} `json:"tombstones"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body=%s)", err, rec.Body.String())
+	}
+	if len(body.Tombstones) != 1 {
+		t.Fatalf("tombstones = %d, want 1", len(body.Tombstones))
+	}
+	tomb := body.Tombstones[0]
+	if !strings.HasPrefix(tomb.ID, "@deleted-") {
+		t.Errorf("tomb.id = %q, want @deleted-… prefix", tomb.ID)
+	}
+	if tomb.DeletedAt == "" {
+		t.Errorf("tomb.deleted_at empty")
+	}
+	// Two Puts landed v1 + v2; Delete's archive marker dedups against v2
+	// (same content, same version — Archive is a no-op), so the tombstone
+	// carries v1 + v2. The deletion itself is recorded by the tombstone
+	// container's ID (`@deleted-<ts>`) and the deleted_at field, both
+	// already asserted above.
+	if len(tomb.Versions) != 2 {
+		t.Errorf("versions = %d, want 2", len(tomb.Versions))
+	}
+	// Version numbers survive the move: v1 and v2 are both present.
+	seen := map[int64]bool{}
+	for _, v := range tomb.Versions {
+		seen[v.Version] = true
+	}
+	for _, want := range []int64{1, 2} {
+		if !seen[want] {
+			t.Errorf("version %d missing from tombstoned index", want)
+		}
+	}
+}
+
+// ── handleTombstonedVersion ────────────────────────────────
+
+func TestHandleTombstonedVersion_RoundTrip(t *testing.T) {
+	t.Parallel()
+	s := newHistoryServer(t)
+	putPage(t, s, "/rec01", "# Rec\n\nancient body\n")
+	deletePage(t, s, "/rec01")
+
+	// Discover the tombstone id via the list handler.
+	listRec := urlWithParam(s.handlePageTombstones, http.MethodGet, "/api/tombstones/rec01", "rec01", nil)
+	var listed struct {
+		Tombstones []struct {
+			ID string `json:"id"`
+		} `json:"tombstones"`
+	}
+	_ = json.Unmarshal(listRec.Body.Bytes(), &listed)
+	if len(listed.Tombstones) != 1 {
+		t.Fatalf("expected 1 tombstone, got %d", len(listed.Tombstones))
+	}
+	tombID := listed.Tombstones[0].ID
+
+	url := fmt.Sprintf("/api/tombstone-version/rec01?tomb=%s&v=1", tombID)
+	rec := urlWithParam(s.handleTombstonedVersion, http.MethodGet, url, "rec01", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Path     string `json:"path"`
+		Tomb     string `json:"tomb"`
+		Version  int64  `json:"version"`
+		Markdown string `json:"markdown"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Tomb != tombID {
+		t.Errorf("tomb = %q, want %q", body.Tomb, tombID)
+	}
+	if body.Version != 1 {
+		t.Errorf("version = %d, want 1", body.Version)
+	}
+	if !strings.Contains(body.Markdown, "ancient body") {
+		t.Errorf("markdown = %q, want to contain 'ancient body'", body.Markdown)
+	}
+}
+
+func TestHandleTombstonedVersion_RejectsBadTombID(t *testing.T) {
+	t.Parallel()
+	s := newHistoryServer(t)
+	// No prior delete; even without data the handler rejects a bad id
+	// before touching the store.
+	rec := urlWithParam(s.handleTombstonedVersion, http.MethodGet,
+		"/api/tombstone-version/doc?tomb=../etc/passwd&v=1", "doc", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}

@@ -165,6 +165,78 @@ func (s *Server) handlePageDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handlePageTombstones lists every past life this URL has carried — one
+// entry per prior Delete() call. The response matches the live
+// /api/history shape (versions[]) so the frontend can reuse row
+// rendering, grouped under per-deletion wrappers.
+//
+// GET /api/tombstones/{path}
+func (s *Server) handlePageTombstones(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+
+	tombs, err := s.atticStore.ListTombstones(pagePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	out := make([]map[string]any, 0, len(tombs))
+	for _, t := range tombs {
+		entry := map[string]any{
+			"id":       t.ID,
+			"versions": t.Entries,
+		}
+		if !t.DeletedAt.IsZero() {
+			entry["deleted_at"] = t.DeletedAt.UTC().Format("2006-01-02T15:04:05Z")
+		}
+		out = append(out, entry)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tombstones": out})
+}
+
+// handleTombstonedVersion returns the markdown content of a single
+// version inside a specific tombstone.
+//
+// GET /api/tombstone-version/{path}?tomb=<id>&v=<n>
+func (s *Server) handleTombstonedVersion(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if pagePath == "" {
+		writeError(w, http.StatusBadRequest, "missing page path")
+		return
+	}
+
+	tombID := strings.TrimSpace(r.URL.Query().Get("tomb"))
+	if tombID == "" || !strings.HasPrefix(tombID, "@deleted-") {
+		writeError(w, http.StatusBadRequest, "missing or invalid tomb id")
+		return
+	}
+	vStr := r.URL.Query().Get("v")
+	version, err := strconv.ParseInt(vStr, 10, 64)
+	if err != nil || version < 1 {
+		writeError(w, http.StatusBadRequest, "invalid version number")
+		return
+	}
+
+	content, err := s.atticStore.ReadTombstonedVersion(pagePath, tombID, version)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "tombstoned version not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":      pagePath,
+		"tomb":      tombID,
+		"version":   version,
+		"markdown":  string(content),
+	})
+}
+
 func (s *Server) handlePageVersion(w http.ResponseWriter, r *http.Request) {
 	// URL: /api/versions/{pagepath}?v=N
 	pagePath := strings.TrimSpace(chi.URLParam(r, "*"))

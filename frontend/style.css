@@ -1967,6 +1967,57 @@ a.gowiki-link-missing {
   font-size: 14px;
 }
 
+.gowiki-tombstone-banner {
+  background: var(--gw-color-info-bg, #e3f2fd);
+  color: var(--gw-color-info, #1565c0);
+  border: 1px solid var(--gw-color-info, #1565c0);
+  border-radius: var(--gw-radius-sm);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gowiki-tombstone-banner-link {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: var(--gw-radius-sm);
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gowiki-tombstone-banner-link:hover {
+  background: var(--gw-color-info, #1565c0);
+  color: #fff;
+}
+
+.gowiki-tombstone-intro {
+  color: var(--gw-color-muted);
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.gowiki-tombstone-section {
+  margin-bottom: 28px;
+  padding: 14px 16px;
+  background: var(--gw-color-surface-alt, #fafafa);
+  border: 1px solid var(--gw-color-border, #e0e0e0);
+  border-radius: var(--gw-radius-sm);
+}
+
+.gowiki-tombstone-section-title {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  color: var(--gw-color-muted);
+  font-weight: 600;
+}
+
 /* ── Reviewflow history badges ────────────────────── */
 
 .gowiki-history-validated-badge {

@@ -91,6 +91,8 @@ type AtticStore interface {
 	ListVersions(pagePath string) ([]storage.AtticEntry, error)
 	ReadVersion(pagePath string, version int64) ([]byte, error)
 	GetEntry(pagePath string, version int64) (*storage.AtticEntry, error)
+	ListTombstones(pagePath string) ([]storage.TombstoneRecord, error)
+	ReadTombstonedVersion(pagePath, tombID string, version int64) ([]byte, error)
 }
 
 type BacklinkProvider interface {
@@ -291,6 +293,8 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 		r.Get("/api/history/*", s.handlePageHistory)
 		r.Get("/api/versions/*", s.handlePageVersion)
 		r.Get("/api/diff/*", s.handlePageDiff)
+		r.Get("/api/tombstones/*", s.handlePageTombstones)
+		r.Get("/api/tombstone-version/*", s.handleTombstonedVersion)
 		r.Get("/api/media", s.handleListMedia)
 		r.Get("/api/media/", s.handleListMedia)
 		r.Get("/api/media/*", s.handleListMedia)

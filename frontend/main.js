@@ -7658,15 +7658,29 @@ document.addEventListener("gowiki-database-row-updated", (e) => {
 
 async function showHistory() {
   try {
-    const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
-    if (!resp.ok) {
+    const [histResp, tombResp] = await Promise.all([
+      fetch(`/api/history/${encodePagePath(pagePath)}`),
+      fetch(`/api/tombstones/${encodePagePath(pagePath)}`),
+    ])
+    if (!histResp.ok) {
       setStatus("Failed to load history")
       return
     }
-    const data = await resp.json()
+    const data = await histResp.json()
     const versions = data.versions || []
+    // Tombstones endpoint is best-effort — a 404 or network error must
+    // not block the live history view. Empty array if anything fails.
+    let tombstones = []
+    if (tombResp.ok) {
+      try {
+        const tombData = await tombResp.json()
+        tombstones = tombData.tombstones || []
+      } catch {
+        tombstones = []
+      }
+    }
     enterHistoryView()
-    renderHistoryPage(versions, data.draft || null)
+    renderHistoryPage(versions, data.draft || null, tombstones)
   } catch {
     setStatus("Failed to load history")
   }
@@ -7742,7 +7756,7 @@ function renderBacklinksPage(backlinks) {
   contentRoot.appendChild(container)
 }
 
-function renderHistoryPage(versions, draft) {
+function renderHistoryPage(versions, draft, tombstones) {
   clearContent()
   mode = "view"
   appRoot.classList.remove("gowiki-editing")
@@ -7753,6 +7767,26 @@ function renderHistoryPage(versions, draft) {
   const title = document.createElement("h2")
   title.textContent = `History: ${pageDisplayPath}`
   container.appendChild(title)
+
+  // Tombstone banner: previous lives of this URL exist.
+  if (tombstones && tombstones.length > 0) {
+    const banner = document.createElement("div")
+    banner.className = "gowiki-tombstone-banner"
+    const count = tombstones.length
+    const label = count === 1
+      ? "A previous page lived at this URL before and was deleted."
+      : `${count} previous pages lived at this URL before and were deleted.`
+    const text = document.createElement("span")
+    text.textContent = label + " "
+    banner.appendChild(text)
+    const link = document.createElement("button")
+    link.type = "button"
+    link.className = "gowiki-tombstone-banner-link"
+    link.textContent = count === 1 ? "View archived history" : "View archived histories"
+    link.addEventListener("click", () => renderArchivedHistory(tombstones))
+    banner.appendChild(link)
+    container.appendChild(banner)
+  }
 
   // Draft notice for non-owners.
   if (draft && draft.is_own === false) {
@@ -7987,6 +8021,149 @@ function rewriteMediaToVersioned(container, mediaRefs) {
     if (ver != null) {
       img.setAttribute("src", `/media/${mediaPath}?v=${ver}`)
     }
+  }
+}
+
+// renderArchivedHistory shows the per-deletion snapshots of a page's
+// previous lives. Called from the tombstone banner on the live history
+// page.
+function renderArchivedHistory(tombstones) {
+  clearContent()
+  mode = "view"
+  appRoot.classList.remove("gowiki-editing")
+
+  const container = document.createElement("div")
+  container.className = "gowiki-history"
+
+  const title = document.createElement("h2")
+  title.textContent = `Archived history: ${pageDisplayPath}`
+  container.appendChild(title)
+
+  const intro = document.createElement("p")
+  intro.className = "gowiki-tombstone-intro"
+  intro.textContent =
+    "These versions belong to one or more previous pages that lived at this URL and were deleted. " +
+    "They are kept for audit purposes and are not part of the current page's history."
+  container.appendChild(intro)
+
+  // Oldest tombstone first (chronological), with each tombstone as its
+  // own section. Inside each section, versions are shown newest-first to
+  // match the live history convention.
+  for (const tomb of tombstones) {
+    const section = document.createElement("div")
+    section.className = "gowiki-tombstone-section"
+
+    const header = document.createElement("h3")
+    header.className = "gowiki-tombstone-section-title"
+    const when = tomb.deleted_at ? new Date(tomb.deleted_at).toLocaleString() : "unknown date"
+    header.textContent = `Deleted on ${when}`
+    section.appendChild(header)
+
+    const versions = tomb.versions || []
+    if (versions.length === 0) {
+      const empty = document.createElement("p")
+      empty.textContent = "No versions recorded in this tombstone."
+      empty.style.color = "var(--gw-color-muted)"
+      section.appendChild(empty)
+    } else {
+      const table = document.createElement("table")
+      table.className = "gowiki-history-table"
+      const thead = document.createElement("thead")
+      thead.innerHTML = "<tr><th>Version</th><th>Date</th><th>Author</th><th>Summary</th><th>Actions</th></tr>"
+      table.appendChild(thead)
+      const tbody = document.createElement("tbody")
+      const sorted = [...versions].sort((a, b) => b.version - a.version)
+      for (const v of sorted) {
+        const tr = document.createElement("tr")
+        const tdVer = document.createElement("td")
+        tdVer.textContent = `v${v.version}`
+        tr.appendChild(tdVer)
+        const tdDate = document.createElement("td")
+        tdDate.textContent = v.timestamp ? new Date(v.timestamp).toLocaleString() : "—"
+        tr.appendChild(tdDate)
+        const tdAuthor = document.createElement("td")
+        tdAuthor.textContent = v.author || "—"
+        tr.appendChild(tdAuthor)
+        const tdSummary = document.createElement("td")
+        tdSummary.textContent = v.summary || "—"
+        tr.appendChild(tdSummary)
+        const tdActions = document.createElement("td")
+        tdActions.className = "gowiki-history-actions"
+        const viewBtn = document.createElement("button")
+        viewBtn.textContent = "View"
+        viewBtn.className = "gowiki-history-btn"
+        viewBtn.addEventListener("click", () =>
+          void viewTombstonedVersion(tomb.id, v.version, when, tombstones)
+        )
+        tdActions.appendChild(viewBtn)
+        tr.appendChild(tdActions)
+        tbody.appendChild(tr)
+      }
+      table.appendChild(tbody)
+      section.appendChild(table)
+    }
+    container.appendChild(section)
+  }
+
+  const backBtn = document.createElement("button")
+  backBtn.textContent = "Back to history"
+  backBtn.className = "gowiki-content-btn"
+  backBtn.style.marginTop = "16px"
+  backBtn.addEventListener("click", () => void showHistory())
+  container.appendChild(backBtn)
+
+  contentRoot.appendChild(container)
+}
+
+// viewTombstonedVersion renders a single version from a specific
+// tombstone, read-only. No restore button — tombstoned content belongs
+// to a different page life than the one currently at this URL, so
+// restoring it would mix identities.
+async function viewTombstonedVersion(tombID, version, deletedWhen, tombstones) {
+  try {
+    const url = `/api/tombstone-version/${encodePagePath(pagePath)}?tomb=${encodeURIComponent(tombID)}&v=${version}`
+    const resp = await fetch(url)
+    if (!resp.ok) {
+      setStatus("Failed to load archived version")
+      return
+    }
+    const data = await resp.json()
+    clearContent()
+
+    const container = document.createElement("div")
+    container.className = "gowiki-version-view"
+
+    const header = document.createElement("div")
+    header.className = "gowiki-version-header"
+    header.textContent = `Archived version v${version} — from a previous page deleted on ${deletedWhen}`
+
+    const content = document.createElement("div")
+    content.className = "gowiki-version-content"
+    mountReadOnlyView(content, data.markdown, "gowiki-view")
+
+    const actions = document.createElement("div")
+    actions.style.marginTop = "16px"
+    actions.style.display = "flex"
+    actions.style.gap = "8px"
+
+    const backBtn = document.createElement("button")
+    backBtn.textContent = "Back to archived history"
+    backBtn.className = "gowiki-content-btn"
+    backBtn.addEventListener("click", () => renderArchivedHistory(tombstones))
+    actions.appendChild(backBtn)
+
+    const liveBtn = document.createElement("button")
+    liveBtn.textContent = "Back to current history"
+    liveBtn.className = "gowiki-content-btn"
+    liveBtn.addEventListener("click", () => void showHistory())
+    actions.appendChild(liveBtn)
+
+    container.appendChild(header)
+    container.appendChild(content)
+    container.appendChild(actions)
+    contentRoot.appendChild(container)
+  } catch {
+    setStatus("Failed to load archived version")
   }
 }
 
