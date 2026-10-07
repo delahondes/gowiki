@@ -2713,13 +2713,33 @@ function renderView() {
     // If the attic has versions for this path, the page was deleted (not
     // never-created). Surface a link so the previous content is discoverable
     // without having to know the history button still works on missing pages.
+    //
+    // Two sources count:
+    //   /api/history → non-empty only for a page whose live attic survived
+    //                  (pre-tombstone-fix state, or a page that was deleted
+    //                  via a legacy code path).
+    //   /api/tombstones → populated whenever Delete() ran under the current
+    //                     code, which moves the full history into
+    //                     @tombstones/@deleted-<ts>/.
+    // Either one proves "a page lived here before" and justifies the link.
     void (async () => {
       try {
-        const resp = await fetch(`/api/history/${encodePagePath(pagePath)}`)
-        if (!resp.ok) return
-        const data = await resp.json()
-        const versions = Array.isArray(data?.versions) ? data.versions : []
-        if (versions.length === 0 || !banner.isConnected) return
+        const [histResp, tombResp] = await Promise.all([
+          fetch(`/api/history/${encodePagePath(pagePath)}`),
+          fetch(`/api/tombstones/${encodePagePath(pagePath)}`),
+        ])
+        let versionCount = 0
+        let tombstoneCount = 0
+        if (histResp.ok) {
+          const data = await histResp.json()
+          if (Array.isArray(data?.versions)) versionCount = data.versions.length
+        }
+        if (tombResp.ok) {
+          const data = await tombResp.json()
+          if (Array.isArray(data?.tombstones)) tombstoneCount = data.tombstones.length
+        }
+        if (versionCount === 0 && tombstoneCount === 0) return
+        if (!banner.isConnected) return
         const note = document.createElement("div")
         note.style.marginTop = "6px"
         note.append("This page has been deleted, you can consult older versions if needed by clicking on ")
@@ -7810,7 +7830,10 @@ function renderHistoryPage(versions, draft, tombstones) {
 
   if (versions.length === 0 && !(draft && draft.is_own)) {
     const empty = document.createElement("p")
-    empty.textContent = "No version history available."
+    empty.textContent =
+      tombstones && tombstones.length > 0
+        ? "No current version of this page — see the archived history above for the previous life."
+        : "No version history available."
     empty.style.color = "var(--gw-color-muted)"
     container.appendChild(empty)
   } else {
