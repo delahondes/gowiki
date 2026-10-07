@@ -43,16 +43,37 @@ type TableDef struct {
 
 ### Page folder and page naming
 
-When `page_folder` is set, creating a row auto-generates a wiki page. The `page_folder` value determines how the page path is derived from the row:
+When `page_folder` is set, creating a row auto-generates a wiki page. The `page_folder` value determines how the page path is derived from the row. There are two modes:
 
-- **Plain folder** (no `@` tokens): page path = `{page_folder}/{id}`. Example: `page_folder = "/regulatory/capa"` → row 3 creates page `/regulatory/capa/3`.
-- **Pattern with `@` tokens**: tokens like `@id` or `@field_name` are replaced by the row's id or field values. Example: `page_folder = "/regulatory/interviews/@name-@year"` with `name=john` and `year=2024` → creates page `/regulatory/interviews/john-2024`.
+- **Plain folder** (the string contains no `@`): page path = `{page_folder}/{id}`.  
+  Example: `page_folder = "/regulatory/capa"` → row 3 creates page `/regulatory/capa/3`.
+- **Pattern** (the string contains at least one `@`): every `@token` is replaced; the surrounding literal characters are kept verbatim. The row id is NOT appended automatically — any id in the result comes from an explicit `@id` or a fallback (see below).  
+  Example: `page_folder = "/regulatory/interviews/@name-@year"` with `name="John Doe"` and `year="2024"` → creates page `/regulatory/interviews/john-doe-2024`.
 
-Supported tokens:
-- `@id` — the row's system integer id
-- `@field_name` — the value of the named field (must be a non-empty text/date/integer field)
+#### Tokens
 
-The reverse binding (page → row) uses the `page_path` column stored on each row. When a page has `{database-row table=...}`, the system looks up the row by its `page_path`.
+A token is `@` followed by an identifier matching `[a-z][a-z0-9_]*` — lowercase start, lowercase letters, digits, and `_` after. Anything that does not match (uppercase, dot, dash) is left as literal text in the path.
+
+- `@id` — the row's system integer id. Reserved.
+- `@<field_name>` — the value of a column, matched by exact lowercase name. The field must exist on the table; `@id` is the only system column exposed as a token.
+
+A pattern may use several tokens in one segment: the literal characters between them (dashes, underscores, parentheses, etc.) survive unchanged.
+
+#### Slugification
+
+Each `@<field_name>` value is slugified independently before it is spliced in: lowercased, every run of characters outside `[a-z0-9_-]` is replaced by a single `-`, and leading/trailing `-` is trimmed. `@id` is spliced as its decimal representation and is not slugified. Slugification is per-token, not per-segment: `@name-@year` with `name="John Doe"` keeps the literal `-` between the two tokens, producing `john-doe-2024`, not a double-dashed form.
+
+#### Empty-value fallback
+
+When a `@<field_name>` resolves to a missing key, a `nil` value, or a slug that collapses to the empty string, the token substitutes the row id for that one position. This keeps the path well-formed under all data states — never an empty segment, never an unsubstituted `@token` in the URL — but it means a URL containing the id where you expected a field value is the signal that the field was empty or non-slugifiable at insert time, not a bug.
+
+#### Normalisation
+
+The resulting path always starts with `/` (one is prepended if missing) and never ends with `/` (a trailing `/` on `page_folder` is stripped before token substitution).
+
+#### Reverse binding
+
+The page → row direction uses the `page_path` column stored on each row. When a page has `{database-row table=...}`, the system looks up the row by its stored `page_path`, not by re-expanding the pattern — so a row whose field values changed after its page was created continues to bind to its original URL. Changing `page_folder` on an existing table does not rename past pages; `POST /api/admin/database/tables/{id}/migrate-page-paths` (dry-run by default, with `update_links` to rewrite inbound links) is what regenerates them against the current pattern.
 
 ## 4. Field definition
 

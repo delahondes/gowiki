@@ -88,9 +88,36 @@ Tables can be linked to wiki pages by setting a **Page folder**. When a row is c
 3. Creates the page from the **Page template** if configured
 4. Binds the row to the page via the `page_path` column
 
-The page folder supports tokens:
-- `@id` — the row's auto-incremented integer ID
-- `@field_name` — value of a named field (e.g. `@name`, `@year`)
+### Page folder patterns
+
+**Plain folder** (no `@` anywhere in the value) — the row's integer id is appended automatically:
+
+| Page folder | Row | Page created |
+| --- | --- | --- |
+| `/projects/custcomplaints` | id=3 | `/projects/custcomplaints/3` |
+
+**Pattern with `@` tokens** — every `@token` is replaced; the surrounding characters are kept verbatim. The id is NOT appended automatically: if you want it, include `@id` yourself.
+
+| Page folder | Row fields | Page created |
+| --- | --- | --- |
+| `/hr/interviews/@name-@year` | `name="John Doe"`, `year="2024"` | `/hr/interviews/john-doe-2024` |
+| `/incidents/@id-@component` | `id=42`, `component="auth"` | `/incidents/42-auth` |
+
+### Token rules
+
+- A token is `@` followed by a lowercase identifier (`a-z`, `0-9`, `_`; must start with a letter). Uppercase or dotted names do not match and stay as literal text — field names in the pattern must match the column name's exact lowercase spelling.
+- `@id` is reserved for the row's integer id.
+- `@field_name` substitutes the column value, slugified: lowercased, every run of characters outside `a-z 0-9 _ -` collapses to a single `-`, and leading/trailing `-` is trimmed. `"John Doe"` becomes `john-doe`, `"R&D (2024)"` becomes `r-d-2024`.
+- Slugification runs per token, not per path segment. Literal characters between adjacent tokens (dashes, underscores, parentheses) survive as-is.
+- Several tokens in one segment is fine (`@name-@year` is one segment).
+
+### When a field is empty
+
+If a `@field_name` resolves to an empty, missing, or non-slugifiable value, that one token falls back to the row id. The page URL is always well-formed; an id turning up where you expected a field value is the signal that the field was empty at insert time, not a bug.
+
+### Changing the pattern later
+
+Changing **Page folder** on an existing table does not rename past pages — they keep the URL they were created at. To re-align existing rows with the current pattern, POST to `/api/admin/database/tables/{id}/migrate-page-paths` (defaults to dry-run; pass `{"dry_run": false, "update_links": true}` to execute and rewrite inbound links). There is no admin-UI button for this yet.
 
 ## 1. Row identity
 
