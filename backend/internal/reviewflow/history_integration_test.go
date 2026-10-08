@@ -56,6 +56,10 @@ func (s *todoSpy) CompleteReviewTasks(pagePath string, confirmedByRole map[strin
 	return len(c), nil
 }
 
+func (s *todoSpy) ListOpenPagesWithReviewTasks() ([]string, error) {
+	return nil, nil
+}
+
 // pageReaderStub returns pre-canned pages, backing EnsureState.
 type pageReaderStub struct {
 	pages map[string]storage.Page

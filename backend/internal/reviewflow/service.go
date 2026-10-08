@@ -29,6 +29,10 @@ type TodoIntegrator interface {
 	// appears in confirmedByRole as done. Used when all roles confirm and the
 	// version becomes fully validated — the review actually happened.
 	CompleteReviewTasks(pagePath string, confirmedByRole map[string]string) (int, error)
+	// ListOpenPagesWithReviewTasks returns the distinct source_page values
+	// of every open or in-progress reviewflow task. Used by the orphan-task
+	// reconciler to find tasks whose state file no longer exists.
+	ListOpenPagesWithReviewTasks() ([]string, error)
 }
 
 // Service implements reviewflow business logic.
@@ -350,6 +354,65 @@ func (svc *Service) ReconcileValidatedTasks() (int, error) {
 		return nil
 	})
 	return total, err
+}
+
+// ReconcileStatelessReviewTasks cancels open reviewflow tasks whose
+// source_page has no live state file AND no live content file. These
+// are tasks the state-file-walking reconciler cannot see: the page
+// was deleted (and its state file with it, in older code paths that
+// didn't tombstone) before the OnPageDelete hook existed, leaving
+// zombie tasks forever showing in the todo calendar as "pending
+// signatures" for a page that no longer exists.
+//
+// Both slash forms of the page path are checked, so a legacy task
+// stored under /foo while the current content lives at /foo/
+// (namespace index) is kept — matched by exists OR state. Only tasks
+// whose page truly has no state anywhere get cancelled.
+//
+// Idempotent. Returns the number of tasks cancelled.
+func (svc *Service) ReconcileStatelessReviewTasks(exists func(pagePath string) bool) (int, error) {
+	if svc.todo == nil || exists == nil {
+		return 0, nil
+	}
+	pages, err := svc.todo.ListOpenPagesWithReviewTasks()
+	if err != nil {
+		return 0, err
+	}
+	cancelled := 0
+	for _, pagePath := range pages {
+		if pageHasAnyLiveState(pagePath, exists, svc.store) {
+			continue
+		}
+		if err := svc.todo.CancelReviewTasks(pagePath); err != nil {
+			continue
+		}
+		cancelled++
+	}
+	return cancelled, nil
+}
+
+// pageHasAnyLiveState reports whether a page path still has either a
+// content file or a reviewflow state file on disk, in either slash
+// form. Used by ReconcileStatelessReviewTasks to spare pages that are
+// alive under the "other" spelling.
+func pageHasAnyLiveState(pagePath string, exists func(string) bool, store *Store) bool {
+	candidates := []string{pagePath}
+	if pagePath != "" && pagePath != "/" {
+		if pagePath[len(pagePath)-1] == '/' {
+			candidates = append(candidates, pagePath[:len(pagePath)-1])
+		} else {
+			candidates = append(candidates, pagePath+"/")
+		}
+	}
+	for _, p := range candidates {
+		if exists(p) {
+			return true
+		}
+		if st, _ := store.Load(p); st != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // rolesEqual reports whether two role→user maps are byte-for-byte equal.

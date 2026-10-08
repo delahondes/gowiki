@@ -576,6 +576,35 @@ func (s *TodoStore) ListMine(ctx context.Context, userID string, groups []string
 	return collectTasks(rows)
 }
 
+// ListOpenReviewflowTasks returns every open or in-progress task tagged
+// as reviewflow, across all pages. Used by the orphan-task reconciler
+// to catch tasks whose page or state file has disappeared — a situation
+// ReconcileOrphanTasks (which walks state files) cannot see because
+// there's no state file left to anchor the task to.
+func (s *TodoStore) ListOpenReviewflowTasks(ctx context.Context) ([]*Task, error) {
+	p := s.pool.GetPool()
+	if p == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+	rows, err := p.Query(ctx, `
+		SELECT id, title, description, status, source, source_page, node_key,
+			assignee_type, assignee_target, assignee_resolution,
+			due_date, recur_type, recur_days, recur_every, recur_unit,
+			recurrence_group_id,
+			wiki_action_type, wiki_action_page, wiki_action_pattern,
+			wiki_action_template, wiki_action_schema, wiki_action_field, wiki_action_value,
+			tags, priority, created_by, created_at, updated_at
+		FROM todo_tasks
+		WHERE tags = 'reviewflow'
+		  AND status IN ('open', 'in_progress')
+		ORDER BY source_page, created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("list open reviewflow tasks: %w", err)
+	}
+	defer rows.Close()
+	return collectTasks(rows)
+}
+
 // ListCompletions returns all completions for a task.
 func (s *TodoStore) ListCompletions(ctx context.Context, taskID string) ([]*Completion, error) {
 	p := s.pool.GetPool()

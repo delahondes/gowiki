@@ -135,6 +135,27 @@ func (a *TodoAdapter) CompleteReviewTasks(pagePath string, confirmedByRole map[s
 	return n, nil
 }
 
+// ListOpenPagesWithReviewTasks returns the distinct source_page values
+// of every open or in-progress reviewflow task.
+func (a *TodoAdapter) ListOpenPagesWithReviewTasks() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tasks, err := a.todoService.Store().ListOpenReviewflowTasks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(tasks))
+	out := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		if t.SourcePage == "" || seen[t.SourcePage] {
+			continue
+		}
+		seen[t.SourcePage] = true
+		out = append(out, t.SourcePage)
+	}
+	return out, nil
+}
+
 // altPagePath returns the alternate slash form of a namespace page
 // path — mirrors store.pagePathAltForm, kept local to avoid an
 // exported path helper leaking cross-package.

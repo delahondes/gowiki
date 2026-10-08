@@ -278,6 +278,16 @@ func main() {
 		} else if n > 0 {
 			log.Printf("reviewflow plugin: reconciled orphan review tasks for %d page(s)", n)
 		}
+		// Stateless-task sweep: catches reviewflow tasks whose page AND
+		// state file have both disappeared (page deleted before the
+		// OnPageDelete hook was wired). The state-file reconciler can
+		// never see these because there's no state file left to anchor
+		// them to. Walks tasks instead. Idempotent.
+		if n, err := reviewflowService.ReconcileStatelessReviewTasks(store.Exists); err != nil {
+			log.Printf("reviewflow plugin: stateless-task reconciliation failed: %v", err)
+		} else if n > 0 {
+			log.Printf("reviewflow plugin: cancelled stateless review tasks on %d page(s)", n)
+		}
 	}
 	// Stale-signature sweep: catches signatures whose stored digest no
 	// longer matches current page content. SyncFromMarkdown enforces
