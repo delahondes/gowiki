@@ -81,10 +81,18 @@ func (a *TodoAdapter) CancelReviewTasks(pagePath string) error {
 	return nil
 }
 
-// CompleteReviewTasks marks the reviewflow task for each confirmed (role, user)
-// pair as done. It looks up tasks by node_key (deterministic from page+role+user)
-// and picks the most recent match when multiple exist. Tasks already in done
-// status are left untouched. Returns the number of tasks transitioned.
+// CompleteReviewTasks marks the reviewflow task for each confirmed
+// (role, user) pair as done. Looks up tasks by node_key (deterministic
+// from page+role+user) and marks every matching open/in-progress task
+// as done — not just the most recent. The multi-match pass is needed
+// because namespace-index pages have been created with two different
+// path spellings (/foo and /foo/) over the project's history, so a
+// single (role, user) can have multiple surviving open tasks under
+// different node_keys that all deserve to close when the confirmation
+// lands.
+//
+// Tasks already in done or cancelled state are skipped. Returns the
+// total number of tasks transitioned.
 func (a *TodoAdapter) CompleteReviewTasks(pagePath string, confirmedByRole map[string]string) (int, error) {
 	if len(confirmedByRole) == 0 {
 		return 0, nil
@@ -100,24 +108,42 @@ func (a *TodoAdapter) CompleteReviewTasks(pagePath string, confirmedByRole map[s
 
 	n := 0
 	for role, user := range confirmedByRole {
-		key := reviewTaskNodeKey(pagePath, role, user)
-		var target *todo.Task
+		// Build the set of node_keys that could identify this
+		// confirmation. Both path forms are checked so legacy tasks
+		// created under a different spelling of the namespace index
+		// are still matched.
+		keys := map[string]bool{
+			reviewTaskNodeKey(pagePath, role, user): true,
+		}
+		if alt := altPagePath(pagePath); alt != pagePath {
+			keys[reviewTaskNodeKey(alt, role, user)] = true
+		}
 		for _, t := range tasks {
-			if t.NodeKey != key || t.Tags != "reviewflow" {
+			if t.Tags != "reviewflow" || !keys[t.NodeKey] {
 				continue
 			}
-			if target == nil || t.CreatedAt.After(target.CreatedAt) {
-				target = t
+			if t.Status == todo.StatusDone || t.Status == todo.StatusCancelled {
+				continue
 			}
+			if _, err := store.MarkDone(ctx, t.ID); err != nil {
+				log.Printf("reviewflow: failed to mark todo %s done: %v", t.ID, err)
+				continue
+			}
+			n++
 		}
-		if target == nil || target.Status == todo.StatusDone {
-			continue
-		}
-		if _, err := store.MarkDone(ctx, target.ID); err != nil {
-			log.Printf("reviewflow: failed to mark todo %s done: %v", target.ID, err)
-			continue
-		}
-		n++
 	}
 	return n, nil
+}
+
+// altPagePath returns the alternate slash form of a namespace page
+// path — mirrors store.pagePathAltForm, kept local to avoid an
+// exported path helper leaking cross-package.
+func altPagePath(pagePath string) string {
+	if pagePath == "" || pagePath == "/" {
+		return pagePath
+	}
+	if len(pagePath) > 0 && pagePath[len(pagePath)-1] == '/' {
+		return pagePath[:len(pagePath)-1]
+	}
+	return pagePath + "/"
 }

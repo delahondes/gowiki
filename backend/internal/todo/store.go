@@ -497,11 +497,23 @@ func (s *TodoStore) List(ctx context.Context, opts ListOptions) ([]*Task, string
 }
 
 // ListForPage returns all tasks associated with a page.
+//
+// A namespace index page has two live representations in the codebase
+// — `/foo` and `/foo/` — and historical tasks were persisted under
+// whichever form the caller happened to pass at creation time. This
+// function matches BOTH forms so a reconciler or sync hook called
+// with the canonical trailing-slash form still finds tasks that were
+// created with the no-slash form (and vice versa). Without this,
+// reviewflow todos created in early 2026 under `/foo` were invisible
+// to the current code paths that normalise to `/foo/` for namespace
+// indexes, so they stayed open forever.
 func (s *TodoStore) ListForPage(ctx context.Context, pagePath string) ([]*Task, error) {
 	p := s.pool.GetPool()
 	if p == nil {
 		return nil, fmt.Errorf("database not connected")
 	}
+
+	alt := pagePathAltForm(pagePath)
 
 	rows, err := p.Query(ctx, `
 		SELECT id, title, description, status, source, source_page, node_key,
@@ -511,14 +523,28 @@ func (s *TodoStore) ListForPage(ctx context.Context, pagePath string) ([]*Task, 
 			wiki_action_type, wiki_action_page, wiki_action_pattern,
 			wiki_action_template, wiki_action_schema, wiki_action_field, wiki_action_value,
 			tags, priority, created_by, created_at, updated_at
-		FROM todo_tasks WHERE source_page = $1
-		ORDER BY created_at ASC`, pagePath)
+		FROM todo_tasks WHERE source_page = $1 OR source_page = $2
+		ORDER BY created_at ASC`, pagePath, alt)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks for page: %w", err)
 	}
 	defer rows.Close()
 
 	return collectTasks(rows)
+}
+
+// pagePathAltForm returns the "other" representation of a canonical
+// page path — appending or stripping a trailing slash. The two forms
+// refer to the same namespace index. For the root ("/") and the empty
+// string the function returns the input unchanged (no ambiguity).
+func pagePathAltForm(pagePath string) string {
+	if pagePath == "" || pagePath == "/" {
+		return pagePath
+	}
+	if strings.HasSuffix(pagePath, "/") {
+		return strings.TrimSuffix(pagePath, "/")
+	}
+	return pagePath + "/"
 }
 
 // ListMine returns tasks assigned to a user directly or via group membership.
