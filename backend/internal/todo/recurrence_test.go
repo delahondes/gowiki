@@ -163,3 +163,166 @@ func TestSpawnNext_UsesOriginalIDAsFallbackGroup(t *testing.T) {
 		t.Errorf("delay-1 from 2026-06-10 = %q, want 2026-06-11", req.DueDate)
 	}
 }
+
+// ────────────────────────────────────────────────────────────
+// Mode + Tolerance semantics (ships with the mode= / tolerance=
+// directive attributes). These lock in the agreed behaviour: default
+// mode is "at-least", default tolerance is 10% of the period (floor
+// 1 day).
+// ────────────────────────────────────────────────────────────
+
+// Default (at-least) behaviour. 1-year cadence; completion 1 day early
+// is "within tolerance" (default tol = 36 days for 1y), so the next
+// due stays anchored to the original schedule — no drift when the user
+// consistently finishes a day or two early.
+func TestNextDueDate_AtLeast_WithinTolerance_NoDrift(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-12-31"))
+	if got != "2028-01-01" {
+		t.Errorf("at-least within tolerance = %q, want 2028-01-01 (no drift)", got)
+	}
+}
+
+// at-least + 10%-of-1y (= 36 days). Completion 7 months early is
+// clearly outside tolerance → next re-anchors to completedAt + N.
+func TestNextDueDate_AtLeast_OutsideTolerance_Reanchors(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-06-01"))
+	if got != "2027-06-01" {
+		t.Errorf("at-least outside tolerance = %q, want 2027-06-01 (re-anchor to completedAt+1y)", got)
+	}
+}
+
+// at-least late: lateness never shifts the cadence (that's the
+// cadence promise). currentDue + N regardless of how late.
+func TestNextDueDate_AtLeast_Late_StaysAnchored(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2027-04-01"))
+	if got != "2028-01-01" {
+		t.Errorf("at-least late = %q, want 2028-01-01", got)
+	}
+}
+
+// Fixed within tolerance behaves exactly like at-least within
+// tolerance: the completion satisfies the cycle, next = currentDue + N.
+func TestNextDueDate_Fixed_WithinTolerance_AdvancesLikeNormal(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-12-31"))
+	if got != "2028-01-01" {
+		t.Errorf("fixed within tolerance = %q, want 2028-01-01", got)
+	}
+}
+
+// Fixed outside tolerance is the semantic that triggered this feature:
+// the completion is recorded, but the schedule is NOT satisfied — the
+// next instance keeps the original due date, so the user still gets
+// the alert on 2027-01-01.
+func TestNextDueDate_Fixed_OutsideTolerance_KeepsOriginalDue(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-06-01"))
+	if got != "2027-01-01" {
+		t.Errorf("fixed outside tolerance = %q, want 2027-01-01 (schedule unchanged)", got)
+	}
+}
+
+// Fixed + late: cycle is satisfied, advance as usual.
+func TestNextDueDate_Fixed_Late_Advances(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2027-04-01"))
+	if got != "2028-01-01" {
+		t.Errorf("fixed late = %q, want 2028-01-01", got)
+	}
+}
+
+// Custom tolerance as absolute days overrides the default.
+// 1y cadence with tolerance=60d: 2026-11-15 is 47 days early, within
+// tolerance → cycle satisfied, next = currentDue + N.
+func TestNextDueDate_Fixed_CustomToleranceDays(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed", Tolerance: "60d"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-11-15"))
+	if got != "2028-01-01" {
+		t.Errorf("tolerance=60d / 47 days early = %q, want 2028-01-01", got)
+	}
+}
+
+// Same as above but completion is just outside the 60-day window
+// (62 days early → outside). Fixed → schedule unchanged.
+func TestNextDueDate_Fixed_CustomTolerance_JustOutside(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed", Tolerance: "60d"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-10-31"))
+	if got != "2027-01-01" {
+		t.Errorf("tolerance=60d / 62 days early = %q, want 2027-01-01", got)
+	}
+}
+
+// Strict fixed (tolerance=0d): any day early is outside tolerance.
+func TestNextDueDate_Fixed_StrictZeroTolerance(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "year", Mode: "fixed", Tolerance: "0d"}
+	got := NextDueDate("2027-01-01", r, mustDate(t, "2026-12-31"))
+	if got != "2027-01-01" {
+		t.Errorf("strict fixed 1 day early = %q, want 2027-01-01 (not satisfied)", got)
+	}
+}
+
+// Custom tolerance as percentage.
+// 1-month cadence (30 days). tolerance=50% → 15 days. Completion
+// 10 days early is within tolerance → advance.
+func TestNextDueDate_AtLeast_PercentTolerance(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "month", Tolerance: "50%"}
+	got := NextDueDate("2027-02-15", r, mustDate(t, "2027-02-05"))
+	if got != "2027-03-15" {
+		t.Errorf("tolerance=50%% / 10 days early = %q, want 2027-03-15", got)
+	}
+}
+
+// Tolerance floor: a 1-day cadence × default 10% = 0.1 days, but the
+// floor is 1 day. A 1-day-early completion must count as "within
+// tolerance".
+func TestNextDueDate_AtLeast_DailyTolerance_FloorsAtOneDay(t *testing.T) {
+	t.Parallel()
+	r := Recurrence{Type: "calendar", Every: 1, Unit: "day"}
+	got := NextDueDate("2027-02-15", r, mustDate(t, "2027-02-14"))
+	if got != "2027-02-16" {
+		t.Errorf("daily cadence 1 day early = %q, want 2027-02-16 (floor tolerance = 1d)", got)
+	}
+}
+
+// ToleranceDays helper: direct unit test for the parsing table.
+func TestToleranceDays(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		r    Recurrence
+		want int
+	}{
+		{"default 10% of 1y", Recurrence{Type: "calendar", Every: 1, Unit: "year"}, 36},
+		{"default 10% of 3m", Recurrence{Type: "calendar", Every: 3, Unit: "month"}, 9},
+		{"default 10% of 1w → floor 1d", Recurrence{Type: "calendar", Every: 1, Unit: "week"}, 1},
+		{"explicit 30d", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "30d"}, 30},
+		{"explicit 0d strict", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "0d"}, 0},
+		{"explicit 25%", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "25%"}, 91},
+		{"explicit 0% strict", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "0%"}, 0},
+		{"clamped: 500% of 1y → 365 (= period)", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "500%"}, 365},
+		{"unparseable → default", Recurrence{Type: "calendar", Every: 1, Unit: "year", Tolerance: "garbage"}, 36},
+		{"delay type → 0", Recurrence{Type: "delay", Days: 7, Tolerance: "30d"}, 0},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.r.ToleranceDays(); got != tc.want {
+				t.Errorf("ToleranceDays() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

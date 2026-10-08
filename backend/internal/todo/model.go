@@ -161,11 +161,18 @@ func BuildTargetsArray(userID string, groups []string) []string {
 }
 
 // Recurrence describes how a task repeats after completion.
+//
+// Mode and Tolerance apply only to calendar recurrences. Mode governs
+// what an early completion does to the schedule; Tolerance defines the
+// window around the due date in which early completion is treated as
+// on-time. See recurrence.go for the full semantics.
 type Recurrence struct {
-	Type  string `json:"type,omitempty"`  // "delay" or "calendar"
-	Days  int    `json:"days,omitempty"`  // for delay type
-	Every int    `json:"every,omitempty"` // for calendar type
-	Unit  string `json:"unit,omitempty"`  // "day", "week", "month", "year"
+	Type      string `json:"type,omitempty"`      // "delay" or "calendar"
+	Days      int    `json:"days,omitempty"`      // for delay type
+	Every     int    `json:"every,omitempty"`     // for calendar type
+	Unit      string `json:"unit,omitempty"`      // "day", "week", "month", "year"
+	Mode      string `json:"mode,omitempty"`      // "" or "at-least" (default), "fixed"
+	Tolerance string `json:"tolerance,omitempty"` // "" (default: 10% of period), "N%", or "Nd"
 }
 
 // IsZero returns true if no recurrence is configured.
@@ -261,6 +268,8 @@ type ParsedDirective struct {
 	Resolution  string
 	Due         string
 	Recur       string
+	Mode        string // "" or "fixed" or "at-least"; empty = at-least (default)
+	Tolerance   string // "" or "N%" or "Nd"; empty = 10% of period (calendar only)
 	Priority    string
 	Action      string
 	Tags        string

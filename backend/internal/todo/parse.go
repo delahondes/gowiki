@@ -32,6 +32,8 @@ func ExtractTodoDirectives(markdown string) []ParsedDirective {
 			Resolution:  kv["resolution"],
 			Due:         kv["due"],
 			Recur:       kv["recur"],
+			Mode:        kv["mode"],
+			Tolerance:   kv["tolerance"],
 			Priority:    kv["priority"],
 			Action:      kv["action"],
 			Tags:        kv["tags"],
@@ -69,6 +71,37 @@ func parseKeyValues(body string) map[string]string {
 func computeNodeKey(pagePath, title, assign string) string {
 	h := sha1.Sum([]byte(pagePath + ":" + title + ":" + assign))
 	return hex.EncodeToString(h[:])
+}
+
+// Recurrence returns the Recurrence struct for this directive, bringing
+// in Mode and Tolerance from the directive attributes. Mode and
+// Tolerance apply only to calendar recurrences; a delay recurrence
+// discards them silently (completion is the only anchor delay knows
+// about).
+//
+// Unknown Mode values fall back to the default ("at-least"); unknown
+// Tolerance values fall back to the default (10% of period) at
+// evaluation time in ToleranceDays.
+func (d ParsedDirective) Recurrence() Recurrence {
+	r := parseRecur(d.Recur)
+	if r.IsZero() || r.Type != "calendar" {
+		return r
+	}
+	switch strings.ToLower(strings.TrimSpace(d.Mode)) {
+	case "fixed":
+		r.Mode = "fixed"
+	case "at-least", "":
+		// Leave Mode empty → default (at-least). Keeps serialized
+		// state tidy for the common case.
+	default:
+		// Unknown mode: treat as default. Deliberately not an error —
+		// the directive is a user-facing text field and we don't want
+		// a typo to drop the task.
+	}
+	if tol := strings.TrimSpace(d.Tolerance); tol != "" {
+		r.Tolerance = strings.ToLower(tol)
+	}
+	return r
 }
 
 // parseRecur converts a recurrence string into a Recurrence struct.

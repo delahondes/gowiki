@@ -118,9 +118,9 @@ Group membership is re-evaluated live from the ACL/user plugin — roster change
 
 The plugin uses a deliberately simple recurrence model covering the two patterns useful in practice:
 
-**Fixed delay** — after the task is marked done, reopen it after N days. Useful for "check the backup logs every 3 days".
+**Fixed delay** — after the task is marked done, reopen it after N days. Useful for "check the backup logs every 3 days". The next due date is always `completedAt + N days`; mode and tolerance don't apply.
 
-**Calendar repetition** — reopen at the next calendar unit boundary after completion. Useful for "renew the SSL certificate every year" or "send the monthly report every 3 months". As soon as a recurring task is marked done, the engine creates the next instance immediately.
+**Calendar repetition** — reopen at the next calendar unit boundary after completion. Useful for "renew the SSL certificate every year" or "send the monthly report every 3 months". Behavior on early or late completion is governed by `mode` and `tolerance` (see 3.3.1).
 
 ```jsonc
 {
@@ -131,14 +131,53 @@ The plugin uses a deliberately simple recurrence model covering the two patterns
     "days":   3
 
     // Option B — calendar repetition:
-    // "type":     "calendar",
-    // "every":    1,            // N units (e.g. 3 for "every 3 months")
-    // "unit":     "day" | "week" | "month" | "year"
+    // "type":      "calendar",
+    // "every":     1,            // N units (e.g. 3 for "every 3 months")
+    // "unit":      "day" | "week" | "month" | "year",
+    // "mode":      "at-least" | "fixed",   // optional; default "at-least"
+    // "tolerance": "10%"         // optional; default "10%" of period (floor 1 day)
   }
 }
 ```
 
 When a recurring task is marked `done`, the engine computes the next due date and creates a fresh task linked to the same `recurrence_group_id`. The assignee is notified of the new instance.
+
+#### 3.3.1 Calendar recurrence modes
+
+The next-due computation depends on when the task was completed relative to its due date. Let `tol` = the tolerance window (default 10% of the period, floor 1 day). The completion is **early beyond tolerance** when `completedAt < currentDue − tol`; otherwise it is **within tolerance** (which covers on-time and late).
+
+**`at-least` (default)** — guarantees that the gap between completions never exceeds the period. Prevents the classic QMS "no more than every 3 years" rule from being silently violated when someone finishes early.
+
+| Case | Next due |
+|---|---|
+| Within tolerance / on-time / late | `currentDue + N units` |
+| Early beyond tolerance | `completedAt + N units` (re-anchor) |
+
+Rationale for the within-tolerance rule: using `completedAt` here would drift the schedule earlier each cycle (a user who consistently finishes one day early would see the schedule shift one day earlier each period). Anchoring on `currentDue` keeps the planned cadence stable while a genuinely early completion still re-anchors.
+
+**`fixed`** — the calendar schedule is sacred: early completion beyond tolerance does **not** satisfy the current cycle, so the next instance keeps the original due date and the user still gets the alert on the scheduled day.
+
+| Case | Next due |
+|---|---|
+| Within tolerance / on-time / late | `currentDue + N units` (cycle satisfied) |
+| Early beyond tolerance | `currentDue` (cycle **not** satisfied — new instance inherits the schedule) |
+
+The completion is still recorded in task history; only the schedule treatment differs.
+
+#### 3.3.2 Tolerance
+
+`tolerance` controls the window around `currentDue` in which an early completion is treated as on-time. Two forms:
+
+- `N%` — percentage of the period. Floored at 1 day when N > 0.
+- `Nd` — absolute days.
+
+Default when omitted: `10%` of the period, floor 1 day. For a yearly cadence this is ~36 days; for a 3-month cadence, 9 days; for a weekly cadence, 1 day.
+
+Edge rules:
+- `tolerance=0d` or `tolerance=0%` = strict (every day of early is "early beyond tolerance").
+- A tolerance that exceeds the period is clamped to the period, so "within tolerance" and "outside tolerance" stay meaningful.
+- Unparseable values fall back to the default rather than silently disabling tolerance.
+- `tolerance` has no effect on `delay` recurrences and is ignored there.
 
 ### 3.4 WikiAction
 
@@ -227,6 +266,8 @@ By default, a bare name in `assign` is treated as a **user**. To explicitly spec
 | `resolution` | `any` \| `all` | Only for group assignees; default `any` |
 | `due` | `YYYY-MM-DD` | Optional |
 | `recur` | `Nd` (e.g. `3d`) \| `daily` \| `weekly` \| `monthly` \| `yearly` \| `NM` (e.g. `3months`) | Requires `due` |
+| `mode` | `at-least` \| `fixed` | Default `at-least`; applies to calendar recurrences only. See 3.3.1 |
+| `tolerance` | `N%` or `Nd` | Default `10%` of period (floor 1 day); applies to calendar recurrences only. See 3.3.2 |
 | `priority` | `low` \| `normal` \| `high` \| `urgent` | Default `normal` |
 | `action` | `read:path`, `edit:path`, `create:pattern`, `set_meta:path:schema:field:value` | Optional |
 | `tags` | comma-separated strings | Optional |

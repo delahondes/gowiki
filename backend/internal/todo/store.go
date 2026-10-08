@@ -671,7 +671,7 @@ func (s *TodoStore) UpsertForPage(ctx context.Context, pagePath string, directiv
 			if d.Description != existing.Description {
 				patch.Description = &d.Description
 			}
-			rec := parseRecur(d.Recur)
+			rec := d.Recurrence()
 			if rec != existing.Recurrence {
 				patch.Recurrence = &rec
 			}
@@ -691,7 +691,7 @@ func (s *TodoStore) UpsertForPage(ctx context.Context, pagePath string, directiv
 			NodeKey:     nodeKey,
 			Assignee:    assignee,
 			DueDate:     d.Due,
-			Recurrence:  parseRecur(d.Recur),
+			Recurrence:  d.Recurrence(),
 			WikiAction:  action,
 			Tags:        d.Tags,
 			Priority:    priority,

@@ -104,6 +104,76 @@ func TestExtractTodoDirectives_AllAttrs(t *testing.T) {
 	}
 }
 
+// Mode + Tolerance round-trip through ExtractTodoDirectives and the
+// ParsedDirective.Recurrence() helper. Covers both the extraction
+// (string survives into the directive) and the promotion (mode gets
+// normalised, tolerance is lower-cased, both land on the Recurrence
+// struct ready for NextDueDate to interpret).
+func TestExtractTodoDirectives_ModeAndTolerance(t *testing.T) {
+	t.Parallel()
+	md := `{todo title=X assign=alice due=2027-01-01 recur=1y mode=fixed tolerance=30d}` + "\n"
+	got := ExtractTodoDirectives(md)
+	if len(got) != 1 {
+		t.Fatalf("got %d directives, want 1", len(got))
+	}
+	d := got[0]
+	if d.Mode != "fixed" {
+		t.Errorf("Mode = %q, want fixed", d.Mode)
+	}
+	if d.Tolerance != "30d" {
+		t.Errorf("Tolerance = %q, want 30d", d.Tolerance)
+	}
+	r := d.Recurrence()
+	if r.Mode != "fixed" {
+		t.Errorf("Recurrence.Mode = %q, want fixed", r.Mode)
+	}
+	if r.Tolerance != "30d" {
+		t.Errorf("Recurrence.Tolerance = %q, want 30d", r.Tolerance)
+	}
+	if r.Type != "calendar" || r.Every != 1 || r.Unit != "year" {
+		t.Errorf("Recurrence base = %+v, want calendar/1/year", r)
+	}
+}
+
+// Default mode is at-least — the Recurrence helper leaves Mode empty
+// in that case so serialized state stays minimal.
+func TestParsedDirective_Recurrence_DefaultModeStaysEmpty(t *testing.T) {
+	t.Parallel()
+	d := ParsedDirective{Recur: "1y"}
+	r := d.Recurrence()
+	if r.Mode != "" {
+		t.Errorf("default Mode = %q, want empty (at-least)", r.Mode)
+	}
+	if r.Tolerance != "" {
+		t.Errorf("default Tolerance = %q, want empty (10%% default)", r.Tolerance)
+	}
+}
+
+// Delay recurrences discard mode and tolerance — they have no meaning
+// for a completion-anchored recurrence.
+func TestParsedDirective_Recurrence_DelayIgnoresModeAndTolerance(t *testing.T) {
+	t.Parallel()
+	d := ParsedDirective{Recur: "7d", Mode: "fixed", Tolerance: "30d"}
+	r := d.Recurrence()
+	if r.Type != "delay" {
+		t.Fatalf("Type = %q, want delay", r.Type)
+	}
+	if r.Mode != "" || r.Tolerance != "" {
+		t.Errorf("delay recurrence should drop mode/tolerance, got mode=%q tolerance=%q", r.Mode, r.Tolerance)
+	}
+}
+
+// Unknown mode falls back to default silently — a typo in the directive
+// shouldn't drop the task.
+func TestParsedDirective_Recurrence_UnknownModeFallsBack(t *testing.T) {
+	t.Parallel()
+	d := ParsedDirective{Recur: "1y", Mode: "whenever-i-feel-like-it"}
+	r := d.Recurrence()
+	if r.Mode != "" {
+		t.Errorf("unknown mode should fall back to default, got %q", r.Mode)
+	}
+}
+
 func TestExtractTodoDirectives_UnknownAttrsIgnored(t *testing.T) {
 	t.Parallel()
 	md := `{todo title=X mystery=42 assign=alice}` + "\n"
