@@ -996,11 +996,19 @@ class TodoCalendarNodeView {
             label.className = "gowiki-todo-cal-chip-label"
             label.textContent = t.title
             chip.appendChild(label)
+            // Custom tooltip via data-tooltip attribute (styled in CSS).
+            // Native `title` worked only intermittently inside the PM
+            // editor; data-tooltip is positioned relative to the chip
+            // and always shows on hover.
             const assignee = formatAssigneeSync(t.assignee?.target || "")
-            chip.title = `${t.title} (${t.status})\n${assignee}`
+            const tooltipText = `${t.title}\n${t.status} · ${assignee}${t.due_date ? " · due " + t.due_date.slice(0, 10) : ""}`
+            chip.setAttribute("data-tooltip", tooltipText)
             if (t.assignee?.target) {
               resolveAssigneeLabels(t.assignee.target).then((resolved) => {
-                chip.title = `${t.title} (${t.status})\n${resolved}`
+                chip.setAttribute(
+                  "data-tooltip",
+                  `${t.title}\n${t.status} · ${resolved}${t.due_date ? " · due " + t.due_date.slice(0, 10) : ""}`
+                )
               })
             }
             td.appendChild(chip)
@@ -1404,17 +1412,43 @@ const todoStyles = `
   gap: 3px;
   font-size: 11px;
   line-height: 1.3;
-  overflow: hidden;
+  /* No overflow:hidden here — the label clips itself with
+     -webkit-line-clamp, and overflow:hidden on the chip would clip
+     the tooltip pseudo-element too. */
+  position: relative;
 }
 
 .gowiki-todo-cal-chip-label {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   overflow-wrap: anywhere;
+  min-width: 0;
   color: #555;
+}
+
+/* Custom tooltip — more reliable than the native title attribute
+   inside the PM editor, where selection/hover handlers can suppress
+   the browser tooltip. Shown on hover of the chip; positioned above
+   the chip so it doesn't block the cell content. */
+.gowiki-todo-cal-chip[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  background: #333;
+  color: #fff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre;
+  max-width: 320px;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .gowiki-todo-cal-chip-overdue .gowiki-todo-cal-chip-label {
