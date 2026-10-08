@@ -1400,17 +1400,20 @@ const todoStyles = `
 
 .gowiki-todo-cal-chip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
   font-size: 11px;
   line-height: 1.3;
-  white-space: nowrap;
   overflow: hidden;
 }
 
 .gowiki-todo-cal-chip-label {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
   color: #555;
 }
 
