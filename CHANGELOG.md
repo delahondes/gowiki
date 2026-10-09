@@ -9,7 +9,175 @@ project's design invariants and `specs/` for the dialect specification.
 
 ## [Unreleased]
 
-Nothing pending — the working tree matches `v1.0.0-rc.4`.
+Nothing pending — the working tree matches `v1.0.0-rc.5`.
+
+## [1.0.0-rc.5] — 2026-10-09
+
+Fifth release candidate. Two user-visible additions (tombstone-on-delete
+with archived-history UI; calendar-recurrence modes + tolerance) sit
+alongside a dense pass of correctness fixes against reviewflow drift
+and signature-trust bugs the live QMS corpus continues to turn up as
+pages age through multiple edits, moves, and deletes.
+
+### Added
+
+- **Tombstone-on-delete.** `FileStore.Delete` now moves the entire
+  page history (attic entries + every meta sidecar: `meta.json`,
+  `reviewflow.json`, `comments.json`, …) into
+  `data/attic/<path>/@tombstones/@deleted-<ISO-ts>/` before removing
+  live content. A page recreated at the same URL afterwards starts
+  from a clean slate — Version=1, no inherited reviewflow deadlines,
+  no attic-version collision. Previous lives are recoverable through
+  `Attic.ListTombstones` / `ReadTombstonedVersion`; regulatory audit
+  guarantee preserved. One-shot `FileStore.ReconcileTombstones`
+  startup sweep drains pre-fix drift. Multiple deletions on the same
+  path pile up multiple `@deleted-<ts>` subdirs.
+- **Archived-history banner + view.** The history page of a page
+  that lived here before (one or more tombstones present) shows a
+  blue info banner above the version table ("A previous page lived
+  at this URL before and was deleted — [View archived history]").
+  The archived view renders one section per tombstone (deleted-on
+  header + version table matching the live-history shape); each row
+  has a View button that opens the archived markdown read-only. No
+  restore button — restoring would mix identities with the current
+  page's life. Also surfaced on the "page does not exist" view
+  through the "consult older versions" link, so a page deleted and
+  not recreated is still discoverable.
+- **Calendar recurrence modes + tolerance.** `recur=1y` and
+  friends now accept `mode=at-least` (default) or `mode=fixed`, and
+  an optional `tolerance=N%` (default 10% of period, floor 1 day)
+  or `tolerance=Nd`. `at-least` guarantees max gap ≤ N units
+  (early-beyond-tolerance re-anchors to completion); `fixed` keeps
+  the schedule sacred (early-beyond-tolerance records the completion
+  but leaves the next instance's due date unchanged, so the user
+  still gets the alert on the scheduled day). Behaviour change: the
+  previous implicit semantic was "advance by N units regardless of
+  when completion landed"; new default re-anchors on genuinely early
+  completions and is the regulatorily-safer choice for QMS cycles.
+  Delay recurrences (`+Nd`, bare `N`) remain unchanged — completion
+  is the only anchor they know about. Spec section 3.3.1-3.3.2 and
+  the user manual have the full matrix and worked examples.
+- **Relative due dates in `{template-todo}`.** `due=+30d`,
+  `due=+3m`, `due=+1y` resolve to an absolute YYYY-MM-DD at page
+  creation time, so a template that says "due 30 days after the
+  document is created" works without the author doing calendar
+  math. Pure `due=YYYY-MM-DD` continues to pass through verbatim.
+- **`{database-newrow fields=}` whitelist + `=~` default modifier.**
+  `fields=a,b,c` restricts the insert form to the listed columns in
+  the order given; `fields=a=~alice` sets a default without
+  disabling the field (`=` alone makes the field read-only, as
+  before). Lets a template say "the author field defaults to the
+  current user but the user can still change it" in one directive.
+- **`search_pages` `scan_complete` + `count_only`.** The MCP tool
+  now surfaces `scan_complete`, `eligible_pages`, and `total_matches`
+  on every response so a caller can tell "we're done" from "we hit
+  the limit, there's more". `count_only=true` returns the counts
+  without the page bodies, cheap enough to use for the common
+  "roughly how many hits" question before deciding to paginate.
+- **Diff view: Back-to-page button.** Next to the existing "Back to
+  history" button on the diff view, so a reviewer who clicked
+  through from history to inspect a change can return directly to
+  the live page without bouncing through history.
+
+### Fixed
+
+- **Signed signatures survived content changes under the same
+  version.** `SyncFromMarkdown` only invalidated signatures when the
+  version changed; a write path that landed new content under the
+  SAME version number (buggy, racy, or bypassing the normal path)
+  left the signatures claiming to cover content they no longer
+  matched. New belt-and-suspenders digest check at the top of
+  `SyncFromMarkdown` enforces the invariant on every call. One-shot
+  `ReconcileStaleSignatures` startup sweep drains pre-fix states.
+  The signed Confirmation goes to the version snapshot (audit trail
+  preserved) and the live Confirmations are rebuilt from re-attach
+  — exactly what the version-bump branch already does.
+- **`GetStatusForVersion` fabricated "validated" for partial
+  snapshots.** User-reported bug: `/qara/sop09` at v67 displayed
+  the reviewflow panel as "✓ Validated" with all three roles
+  Confirmed, but the live state said `validated_page_version=0`
+  and only one role had signed. The historical-view code short-
+  circuited on any `VersionHistory` entry, ignoring the
+  `IsValidated` flag that distinguishes genuine validations from
+  partial-signature bookkeeping snapshots. Gate the short-circuit
+  on `IsValidated=true`; fall-through reads `ConfirmedBy` from the
+  snapshot (not the live Confirmations, which have been wiped by
+  the newer version). Historical versions now report the shape
+  they actually had.
+- **Reviewflow todos stayed open after signing.** User-reported
+  drift on `/regulatory/qms/dir/sop02/` and several QMS pages: open
+  "Review (1.1): raynald as author" tasks on pages where raynald had
+  already signed. Root cause: historical tasks persisted their
+  `source_page` without a trailing slash, while namespace indexes
+  canonicalise to the slash form. `TodoStore.ListForPage` and
+  `CompleteReviewTasks`' node-key check now accept both slash
+  forms. Companion `ReconcileStatelessReviewTasks` reconciler
+  walks tasks (not state files), cancels any whose page AND state
+  file have both vanished — zombie-task cleanup from pages deleted
+  before the OnPageDelete hook existed.
+- **MCP write paths skipped action triggers.** A `write_page` or
+  `edit_page` through the MCP server that satisfied an action
+  todo (`action="read:..."`, `action="edit:..."`, `action="create:..."`)
+  left the todo open — the auto-complete hook ran only from the
+  REST handlers. Moved the hook to `storage.FileStore.OnPageSaved`
+  so every write path (HTTP, MCP, migration tool) fires it.
+- **Deleted-then-recreated pages carried the old page's identity
+  forward.** Delete+Put at the same URL gave the recreated page
+  the previous life's version numbering (v12+ instead of v1) and
+  silently resurrected its reviewflow state with 2024-stamped
+  deadlines on 2026 content. Fixed by the tombstone-on-delete work
+  above; the sweep cleared one page of pre-fix drift
+  (`CPM/SOP01/REC01`) on first startup after the fix shipped.
+- **Lock-key drift across URL forms.** A page accessed as `/foo/`
+  (namespace index) and `/foo` (its leaf form) would acquire two
+  separate draft locks, each invisible to the other. New
+  `LockKeyResolver` interface canonicalises the lock key so
+  concurrent edits from the two forms contend on the same key.
+- **Nested emphasis grew by two asterisks per round-trip.** 
+  Serialiser used a fixed reversed mark order; corrected to
+  dynamic ordering based on PM's schema rank, matching the
+  parser's reconstruction order. (Shipped as a mid-rc fix after
+  publish-time validation started refusing some re-serialised
+  documents.)
+- **todo-calendar labels truncated too aggressively; hover tooltip
+  flaky.** The calendar chip's single-line `white-space: nowrap`
+  cut labels at ~10-12 characters; the native `title` tooltip
+  only fired intermittently inside the PM editor. Chip label now
+  wraps up to 3 lines (`-webkit-line-clamp: 3`) with the status
+  icon aligned to the first line, and the tooltip is a custom CSS
+  pseudo-element driven by `data-tooltip` — fires reliably on
+  hover, carries title + status + assignee + due date.
+- **`search_pages` scanner stopped silently at the first non-match
+  prefix.** A keyword with no hits in the first batch of pages
+  returned early; combined with the lack of a `scan_complete`
+  signal, the caller had no way to tell "no results" from "hit
+  the batch limit". Scan now completes the full eligible set
+  before returning (unless `limit` fires), and `scan_complete`
+  tells the caller which outcome they got.
+- **Docs: `page_folder` naming semantics tightened.** The database
+  spec and admin manual mentioned `@id`/`@field` tokens but left
+  readers guessing on the slug rules, the per-token (not
+  per-segment) behaviour, the empty-value fallback to row-id, and
+  the `migrate-page-paths` endpoint for after-the-fact renames.
+  Full matrix now in `specs/database.md` section 3.3 and
+  `backend/internal/manual/admin-database.md` with worked examples
+  (`"John Doe"` → `john-doe`, `"R&D (2024)"` → `r-d-2024`).
+
+### Internal
+
+- `reviewflow.OnPageDelete` hook split out from the generic
+  delete path and wired to `FileStore.Delete`; cancels review
+  tasks and removes the state file in one place rather than
+  letting the todo-sync and state-file cleanup drift.
+- `storage.ReconcileTombstones`, `reviewflow.ReconcileStaleSignatures`,
+  and `reviewflow.ReconcileStatelessReviewTasks` run at startup
+  alongside the existing `ReconcileValidatedTasks` and
+  `ReconcileOrphanTasks` — one-shot sweeps for each class of
+  known drift, all idempotent.
+- `OnPageSaved` and `OnPageDelete` hooks on `storage.FileStore`
+  let plugins observe writes and deletes without routing through
+  HTTP; action-todo auto-complete and reviewflow task cancellation
+  both ride on them now.
 
 ## [1.0.0-rc.4] — 2026-10-03
 
