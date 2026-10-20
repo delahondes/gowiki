@@ -87,5 +87,24 @@ CREATE TABLE IF NOT EXISTS todo_notifications_sent (
 		return fmt.Errorf("create todo_notifications_sent: %w", err)
 	}
 
+	// Per-(user, page) daily cap on outgoing notification emails. One
+	// row per (user, page_key); updated on each send. Enforces the
+	// "max once per 24h per document" rule across all notification
+	// kinds (assigned, due_reminder, overdue, completed_all,
+	// recurrence_spawned) so a user who already got an email for a
+	// page within the window stays quiet until the window elapses.
+	_, err = p.Exec(ctx, `
+CREATE TABLE IF NOT EXISTS todo_notification_sends (
+    user_id      TEXT NOT NULL,
+    page_key     TEXT NOT NULL,
+    last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, page_key)
+);
+CREATE INDEX IF NOT EXISTS idx_todo_notification_sends_sent_at ON todo_notification_sends(last_sent_at);
+`)
+	if err != nil {
+		return fmt.Errorf("create todo_notification_sends: %w", err)
+	}
+
 	return nil
 }

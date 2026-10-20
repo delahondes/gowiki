@@ -46,6 +46,7 @@ Access: Admin > Configuration
 
 - **Disable** — deactivate the todo plugin (requires restart)
 - **Reminder hours** — hours before due date to send reminders
+- **Notification batch window (seconds)** — trailing debounce that groups a user's notifications into a single digest email. When an event lands, send is delayed by this many seconds; another event for the same user within the window extends the clock and joins the pending batch. Default `300` (5 min); setting to `0` disables batching and sends immediately. A hard **24h per-(user, document) cap** applies regardless of the window — once a document has reached a user, no further notification about that same document reaches that user for 24 hours.
 
 ## 1. Email / SMTP
 

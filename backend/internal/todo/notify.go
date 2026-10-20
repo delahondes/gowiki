@@ -32,9 +32,18 @@ type EmailResolver func(username string) string
 // Dispatcher sends notifications via email and webhooks.
 // It reads configuration live from the config store so that admin UI
 // changes take effect immediately without a restart.
+//
+// Email delivery is routed through a NotificationBatcher that
+// debounces + groups per-user and enforces a 24h cap per (user,
+// page). Webhook delivery is NOT batched — webhooks are machine-to-
+// machine channels where the downstream system typically wants every
+// event in real time; batching there would hide the signal the
+// webhook consumer is subscribed to. The 24h cap also does not apply
+// to webhooks for the same reason.
 type Dispatcher struct {
 	configReader  ConfigReader
 	emailResolver EmailResolver
+	batcher       *NotificationBatcher
 	// Fallback for when no config reader is available (e.g. tests).
 	notifyCfg *config.TodoNotifyConfig
 	siteTitle string
@@ -48,6 +57,23 @@ func NewDispatcher(configReader ConfigReader, emailResolver EmailResolver) *Disp
 // NewDispatcherStatic creates a dispatcher with a fixed config snapshot (for tests).
 func NewDispatcherStatic(notifyCfg config.TodoNotifyConfig, siteTitle string) *Dispatcher {
 	return &Dispatcher{notifyCfg: &notifyCfg, siteTitle: siteTitle}
+}
+
+// AttachBatcher wires up the throttling + batching layer. Dispatcher
+// stays usable without a batcher (every email ships immediately,
+// no cap) so test helpers and startup-time code can call Notify
+// before the database is open.
+func (d *Dispatcher) AttachBatcher(b *NotificationBatcher) {
+	d.batcher = b
+}
+
+// Shutdown flushes the batcher synchronously so a graceful restart
+// doesn't drop queued notifications. Safe to call even with no
+// attached batcher.
+func (d *Dispatcher) Shutdown() {
+	if d.batcher != nil {
+		d.batcher.Shutdown()
+	}
 }
 
 func (d *Dispatcher) getConfig() (config.TodoNotifyConfig, string, string) {
@@ -64,14 +90,6 @@ func (d *Dispatcher) getConfig() (config.TodoNotifyConfig, string, string) {
 // Notify sends a notification for a task event.
 // If any webhook is enabled, email is suppressed.
 func (d *Dispatcher) Notify(event NotifyEvent) {
-	// Resolve username → email if an email resolver is available.
-	if event.Recipient != "" && d.emailResolver != nil && !strings.Contains(event.Recipient, "@") {
-		email := d.emailResolver(event.Recipient)
-		if email != "" {
-			event.Recipient = email
-		}
-	}
-
 	notifyCfg, _, _ := d.getConfig()
 	hasWebhook := false
 	for _, wh := range notifyCfg.Webhooks {
@@ -80,26 +98,99 @@ func (d *Dispatcher) Notify(event NotifyEvent) {
 			d.sendWebhook(wh, event)
 		}
 	}
-
-	if !hasWebhook && notifyCfg.Email.Enabled {
-		d.sendEmail(event)
-	}
-}
-
-func (d *Dispatcher) sendEmail(event NotifyEvent) {
-	notifyCfg, _, _ := d.getConfig()
-	cfg := notifyCfg.Email
-	if cfg.SMTPHost == "" || cfg.From == "" || event.Recipient == "" {
+	if hasWebhook {
 		return
 	}
 
+	if !notifyCfg.Email.Enabled {
+		return
+	}
+
+	// Preserve the username (UserID) for batching + 24h cap keying.
+	// Recipient gets resolved to an email either here (no batcher) or
+	// at send time inside SendBatch (batcher path), so by the time we
+	// touch SMTP the recipient is always an address.
+	if d.batcher != nil {
+		d.batcher.Enqueue(event)
+		return
+	}
+	if event.Recipient != "" && d.emailResolver != nil && !strings.Contains(event.Recipient, "@") {
+		email := d.emailResolver(event.Recipient)
+		if email != "" {
+			event.Recipient = email
+		}
+	}
+	d.sendEmail(event)
+}
+
+// SendBatch implements NotificationSender. Called by the batcher
+// when a user's debounce window elapses. events are already
+// cap-filtered and de-duped by page_key; the dispatcher's job is to
+// render them into one email and ship it.
+func (d *Dispatcher) SendBatch(user string, events []NotifyEvent) {
+	if len(events) == 0 {
+		return
+	}
+	recipient := user
+	if d.emailResolver != nil && !strings.Contains(recipient, "@") {
+		if email := d.emailResolver(recipient); email != "" {
+			recipient = email
+		}
+	}
+	if !strings.Contains(recipient, "@") {
+		// Nothing we can send to. Drop silently; the cap record is
+		// updated by the batcher regardless, so a user with a missing
+		// email address won't retry-storm.
+		return
+	}
+	notifyCfg, _, _ := d.getConfig()
+	if !notifyCfg.Email.Enabled {
+		return
+	}
+	// Point every event at the resolved address before rendering so
+	// the single-event path (one call to sendEmail) still works.
+	if len(events) == 1 {
+		ev := events[0]
+		ev.Recipient = recipient
+		d.sendEmail(ev)
+		return
+	}
+	d.sendBatchedEmail(recipient, events)
+}
+
+func (d *Dispatcher) sendEmail(event NotifyEvent) {
 	subject, body := d.renderEmailTemplate(event)
 	if subject == "" {
 		return
 	}
+	d.shipSMTP(event.Recipient, subject, body)
+}
+
+// sendBatchedEmail collapses several events for one recipient into a
+// single message. Called by the batcher when its debounce window
+// elapses with more than one event queued for the user; single-event
+// batches go through the regular sendEmail path to preserve the
+// pre-existing one-task email shape.
+func (d *Dispatcher) sendBatchedEmail(recipient string, events []NotifyEvent) {
+	subject, body := d.renderBatchedEmail(events)
+	if subject == "" {
+		return
+	}
+	d.shipSMTP(recipient, subject, body)
+}
+
+// shipSMTP is the SMTP transport common to both single and batched
+// emails. Rendering happens upstream; this function knows nothing
+// about event types, only addresses and bytes.
+func (d *Dispatcher) shipSMTP(recipient, subject, body string) {
+	notifyCfg, _, _ := d.getConfig()
+	cfg := notifyCfg.Email
+	if cfg.SMTPHost == "" || cfg.From == "" || recipient == "" {
+		return
+	}
 
 	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
-		cfg.From, event.Recipient, subject, body)
+		cfg.From, recipient, subject, body)
 
 	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 
@@ -144,7 +235,7 @@ func (d *Dispatcher) sendEmail(event NotifyEvent) {
 		log.Printf("todo notify: SMTP MAIL FROM failed: %v", err)
 		return
 	}
-	if err := client.Rcpt(event.Recipient); err != nil {
+	if err := client.Rcpt(recipient); err != nil {
 		log.Printf("todo notify: SMTP RCPT TO failed: %v", err)
 		return
 	}
@@ -265,6 +356,63 @@ func (d *Dispatcher) renderEmailTemplate(event NotifyEvent) (string, string) {
 			renderTemplate(recurrenceSpawnedTmpl, data)
 	}
 	return "", ""
+}
+
+// renderBatchedEmail collapses multiple events (already cap-filtered
+// and de-duped by page_key upstream) into one email. The subject
+// counts the events; the body lists one line per event with its type,
+// title, and link.
+func (d *Dispatcher) renderBatchedEmail(events []NotifyEvent) (string, string) {
+	if len(events) == 0 {
+		return "", ""
+	}
+	_, siteTitle, baseURL := d.getConfig()
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "You have %d task updates on %s:\n\n", len(events), siteTitle)
+	for _, ev := range events {
+		if ev.Task == nil {
+			continue
+		}
+		label := batchedEventLabel(ev.Type)
+		pageURL := ev.Task.SourcePage
+		if baseURL != "" && ev.Task.SourcePage != "" {
+			pageURL = baseURL + ev.Task.SourcePage
+		}
+		fmt.Fprintf(&sb, "- [%s] %s", label, ev.Task.Title)
+		if ev.Task.DueDate != "" {
+			fmt.Fprintf(&sb, " (due %s)", ev.Task.DueDate)
+		}
+		if pageURL != "" {
+			fmt.Fprintf(&sb, "\n  %s", pageURL)
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	sb.WriteString("This digest batches updates that landed in a short window to keep your inbox quiet. " +
+		"You will receive at most one email per document per day.\n")
+
+	subject := fmt.Sprintf("[%s] %d task updates", siteTitle, len(events))
+	return subject, sb.String()
+}
+
+// batchedEventLabel maps a NotifyEvent.Type to a short human label
+// for the digest email's bullet points.
+func batchedEventLabel(t string) string {
+	switch t {
+	case "assigned":
+		return "Assigned"
+	case "due_reminder":
+		return "Due soon"
+	case "overdue":
+		return "Overdue"
+	case "completed_all":
+		return "Completed"
+	case "recurrence_spawned":
+		return "New instance"
+	}
+	return t
 }
 
 func (d *Dispatcher) sendWebhook(wh config.TodoWebhookConfig, event NotifyEvent) {

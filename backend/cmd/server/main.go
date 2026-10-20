@@ -195,6 +195,7 @@ func main() {
 	// Initialize todo plugin: auto-enabled when database is connected,
 	// unless explicitly disabled via todo.disabled config flag.
 	var todoService *todo.TodoService
+	var todoDispatcher *todo.Dispatcher
 	todoEnabled := dbPool.IsConnected() && (cfg.Todo.Enabled || !cfg.Todo.Disabled)
 	if todoEnabled {
 		todoCtx, todoCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -211,6 +212,23 @@ func main() {
 				}
 				return u.Email
 			})
+			// Throttle outbound notifications: trailing debounce +
+			// 24h per-(user, page) cap. The window reads live from
+			// config.yaml so an admin UI edit takes effect without a
+			// restart; a 0 or negative value disables batching, in
+			// which case the cap still applies on the single-event
+			// path.
+			capStore := todo.NewDBCapStore(dbPool)
+			batcher := todo.NewNotificationBatcher(
+				func() time.Duration {
+					sec := configStore.Get().Todo.Notify.BatchWindowSeconds
+					return time.Duration(sec) * time.Second
+				},
+				capStore,
+				dispatcher,
+			)
+			dispatcher.AttachBatcher(batcher)
+			todoDispatcher = dispatcher
 			todoService = todo.NewService(todoStore, todoHub, dispatcher)
 			store.TodoSync = todo.NewTodoSyncer(todoStore, todoHub, dispatcher)
 			// Wire the post-save hook so EVERY write path (HTTP save,
@@ -595,6 +613,11 @@ func main() {
 
 		<-shutdown
 		log.Printf("shutting down...")
+		// Flush any queued notification batches synchronously so a
+		// graceful restart doesn't drop pending digests.
+		if todoDispatcher != nil {
+			todoDispatcher.Shutdown()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		httpsServer.Shutdown(ctx)
@@ -615,6 +638,9 @@ func main() {
 
 		<-shutdown
 		log.Printf("shutting down...")
+		if todoDispatcher != nil {
+			todoDispatcher.Shutdown()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		server.Shutdown(ctx)

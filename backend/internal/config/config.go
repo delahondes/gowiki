@@ -123,9 +123,20 @@ type TodoConfig struct {
 }
 
 // TodoNotifyConfig holds notification channel settings.
+//
+// BatchWindowSeconds is a trailing debounce + daily cap on outgoing
+// notifications. When a trigger lands, the dispatcher waits
+// BatchWindowSeconds (default 300 = 5 min) before sending; another
+// trigger for the same user within the window resets the clock and
+// is folded into the same email. A hard cap of 24h per (user, page)
+// stops the same document re-notifying the same person more than
+// once per day.
+//
+// 0 disables batching — notifications send immediately with no cap.
 type TodoNotifyConfig struct {
-	Email    TodoEmailConfig     `yaml:"email" json:"email"`
-	Webhooks []TodoWebhookConfig `yaml:"webhook" json:"webhook"`
+	Email              TodoEmailConfig     `yaml:"email" json:"email"`
+	Webhooks           []TodoWebhookConfig `yaml:"webhook" json:"webhook"`
+	BatchWindowSeconds int                 `yaml:"batch_window_seconds" json:"batch_window_seconds"`
 }
 
 // TodoEmailConfig holds SMTP email notification settings.

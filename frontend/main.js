@@ -11999,6 +11999,21 @@ async function renderAdminConfigTab(container) {
     form.appendChild(smtpHeading)
 
     const emailConfig = (todoConfig.notify && todoConfig.notify.email) || {}
+    const notifyConfig = todoConfig.notify || {}
+
+    // Trailing-debounce window for grouping notifications. Every
+    // trigger within the window gets folded into one email; a hard
+    // 24h cap per (user, document) applies regardless. 0 disables
+    // batching (notifications send immediately, cap still applies).
+    const batchWindowInput = adminFormField(
+      form,
+      "Notification batch window (seconds — groups messages so a user gets at most one email per burst; " +
+        "0 disables batching. A 24h-per-document cap applies regardless.)",
+      "number",
+      String(notifyConfig.batch_window_seconds ?? 300)
+    )
+    batchWindowInput.min = "0"
+    batchWindowInput.max = "3600"
 
     const smtpEnabledCheckbox = document.createElement("input")
     smtpEnabledCheckbox.type = "checkbox"
@@ -12572,6 +12587,7 @@ async function renderAdminConfigTab(container) {
               smtp_pass: smtpPassInput.value,
             },
             webhook: savedWebhooks,
+            batch_window_seconds: Math.max(0, parseInt(batchWindowInput.value, 10) || 0),
           },
         },
         bibliography: config.bibliography || {},

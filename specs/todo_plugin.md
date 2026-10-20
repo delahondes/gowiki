@@ -559,6 +559,29 @@ This is intentionally transport-agnostic: Zulip, Slack, Mattermost, a custom HTT
 
 If at least one webhook target is enabled, **email is suppressed** for that notification event to avoid duplicates. The operator controls which channel takes precedence by enabling/disabling targets.
 
+### 7.3 Throttling and batching
+
+Outbound email notifications pass through a trailing-debounce layer backed by a 24h per-(user, document) suppression cap. The intent is to protect a user from receiving several alerts in quick succession about the same document.
+
+Behaviour:
+
+- **Debounce window** — When a notification event arrives for a user, send is delayed by `plugin.todo.notify.batch_window_seconds` (default `300` = 5 min). Every subsequent event for that user within the window extends the clock and joins the pending batch. When the window elapses with no new events, one email is sent covering every page the batch touched. Admin UI exposes the setting under **Admin → Todo → Notification batch window**; `0` disables batching and sends immediately.
+- **24h per-(user, document) cap** — Independent of the debounce window. After an email reaches a user for a given document, no further notification about that same document reaches that same user for 24 hours — regardless of event type (assigned, due_reminder, overdue, completed_all, recurrence_spawned). The cap is enforced in the `todo_notification_sends` table so it survives restarts.
+- **Deduplication** — Multiple events for the same document inside a single debounce window collapse to one entry in the digest (the most recently queued event wins, so an `assigned → due_reminder → overdue` sequence lands as "Overdue" in the digest).
+- **Shutdown flush** — The dispatcher flushes any pending batches synchronously on graceful shutdown so a restart doesn't drop queued digests.
+- **Scope** — The batcher wraps every email notification kind the todo plugin emits. Webhook notifications are NOT batched or capped — webhook consumers typically want every event in real time, and the batching semantics are email-shaped (one subject, one body).
+
+Config example:
+
+```toml
+[plugin.todo.notify]
+  batch_window_seconds = 600   # 10 minutes
+
+[plugin.todo.notify.email]
+  enabled = true
+  from    = "wiki@example.org"
+```
+
 ---
 
 ## 8. Interaction with Other Plugins
