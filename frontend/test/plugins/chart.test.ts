@@ -40,10 +40,7 @@ describe("chart: basic fenced block", () => {
 describe("chart: multi-series", () => {
   it('series="A,B" + pipe-separated values round-trip', () => {
     const src =
-      '```chart bar "Mice vs Men" series="Mice,Men"\n' +
-      "Height = 2.5 | 180\n" +
-      "Weight = 25 | 75\n" +
-      "```\n"
+      '```chart bar "Mice vs Men" series="Mice,Men"\n' + "Height = 2.5 | 180\n" + "Weight = 25 | 75\n" + "```\n"
     const rt = roundTrip(src)
     expect(rt.isStable).toBe(true)
     const a = firstChart(rt.doc)
