@@ -14,7 +14,6 @@ The **Chart plugin** renders simple data charts (pie, bar, line, etc.) directly 
 
 ### Non-Goals
 
-- Complex multi-series charts (use a dedicated tool and embed as image)
 - Interactive drill-down, zoom, animations beyond Chart.js defaults
 - Server-side rendering or image export (may be added in a future milestone)
 
@@ -56,6 +55,7 @@ Options appear after the type on the opening fence line, in any order:
 |---|---|---|---|
 | Size | `<width>x<height>` | `400x250` | Canvas size in pixels |
 | Title | `"My Title"` | (none) | Chart title, displayed above the chart |
+| Series | `series="A,B,…"` | (`Series N` fallback) | Names for multi-series data; one entry per `|`-separated value on each line |
 | Legend | `legend` / `nolegend` | `legend` | Show or hide the legend |
 | Values | `values` | (hidden) | Display data values on the chart |
 | Align | `left` / `center` / `right` | `center` | Horizontal alignment of the chart block |
@@ -101,14 +101,33 @@ No = 25
 ```
 ```
 
+**Multi-series grouped bars:**
+```
+```chart bar "Mice vs Men" series="Mice,Men"
+Height = 2.5 | 180
+Weight = 25 | 75
+Age = 2 | 35
+```
+```
+
 ### Data format
 
-- One entry per line: `Label = Value`
+- One entry per line: `Label = Value`, or `Label = v1 | v2 | …` for multi-series
 - Value must be a number (integer or decimal, negative allowed)
-- Label is trimmed whitespace; value is trimmed and parsed as float
-- Lines that don't match `<text> = <number>` are ignored (with a console warning)
+- Label is trimmed whitespace; each value is trimmed and parsed as float
+- Lines that don't match `<text> = <number>[ | <number> …]` are ignored (with a console warning)
 - Blank lines and lines starting with `#` are silently skipped
 - Minimum 1 data entry required; maximum 50 (soft limit, for rendering sanity)
+
+### Multi-series
+
+A chart has multiple series when any data line contains a `|`. The number of series is the maximum pipe count across all lines; shorter lines are padded with 0 so the rendered dataset is rectangular. Series names come from `series="A,B,…"` on the fence line; when the attribute is missing or names fewer series than the data carries, the remaining series fall back to `Series 1`, `Series 2`, … .
+
+Colour semantics change with the mode:
+- **Single series** — the palette colours each data point (the pre-multi-series behaviour).
+- **Multi series** — the palette colours each series (one uniform fill per dataset) so the legend reads "A vs B vs C" and the groups are visually distinct.
+
+Multi-series is natively supported on `bar`, `hbar`, `line`, and `radar`. On `pie`, `doughnut`, and `polar` the chart renders only the first series and logs a console warning — those shapes carry one dataset by construction.
 
 ---
 
@@ -128,7 +147,8 @@ No = 25
 | `attrs.values` | `boolean`, default `false` |
 | `attrs.align` | `string \| null`, default `null` (= `center`) |
 | `attrs.colors` | `string`, default `""` (comma-separated hex colors) |
-| `attrs.data` | `string`, default `""` (raw body text: the `name=value` lines) |
+| `attrs.series` | `string`, default `""` (comma-separated series names; applies when the body carries pipe-separated values) |
+| `attrs.data` | `string`, default `""` (raw body text: the `name=value` lines, or `name = v1 | v2 | …` for multi-series) |
 
 The node is **atomic** — the chart body is not editable inline. The data is stored as a raw string in the `data` attribute, not as ProseMirror content children. This avoids the complexity of making the `name = value` lines into PM paragraphs and back.
 
@@ -163,7 +183,7 @@ Unlike the spoiler plugin, the chart body is **not tokenized** as markdown — i
 ```
 ```
 
-Options are serialized in a canonical order: size, title, legend/nolegend, values, align, colors. Only non-default options are emitted.
+Options are serialized in a canonical order: size, title, series, legend/nolegend, values, align, colors. Only non-default options are emitted.
 
 Canonical order ensures deterministic round-trip. Example:
 
@@ -246,6 +266,7 @@ When a chart node is selected in the editor, the property panel shows:
 | Values | checkbox | |
 | Align | dropdown | left, center, right |
 | Colors | text input | comma-separated hex colors |
+| Series | text input | comma-separated series names (multi-series only) |
 
 Changes update the node attrs immediately and re-render the chart.
 
@@ -312,7 +333,7 @@ Chart.js is bundled as part of the chart plugin's independent bundle (not in the
 
 3. **Fenced block syntax** — Consistent with code blocks and spoilers. The alternative (property/directive syntax like `{chart type=pie}`) would require storing data in the directive, which is awkward for multi-line data. The fenced approach keeps the data visually clear and naturally extends the existing fence pattern.
 
-4. **No multi-series support** — Single data series keeps the syntax simple. Users needing complex charts should use a dedicated charting tool and embed the result as an image.
+4. **Multi-series opt-in via `|`-separated values.** The pattern recurs often (two cohorts, two thresholds, before/after), and splitting into separate single-series charts makes direct comparison harder than the one-grouped-chart form. The syntax stays opt-in: a body without `|` on any line behaves exactly as the single-series form always did, and the `series=` attribute only reaches the serializer when it's set. Users needing fundamentally richer charts (stacked, mixed types, dual axes) should still use a dedicated tool and embed as an image.
 
 5. **Dynamic import for Chart.js** — The library is ~60 KB gzipped. Loading it only when a chart node exists avoids penalizing pages without charts.
 

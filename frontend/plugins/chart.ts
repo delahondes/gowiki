@@ -35,6 +35,7 @@ interface ChartAttrs {
   values: string
   align: string
   colors: string
+  series: string
 }
 
 function parseChartInfo(info: string): ChartAttrs {
@@ -47,9 +48,19 @@ function parseChartInfo(info: string): ChartAttrs {
     values: "false",
     align: "",
     colors: "",
+    series: "",
   }
 
-  // Extract quoted title first (may contain spaces)
+  // Extract series="A,B,C" first (quoted so names can contain spaces),
+  // so the title matcher below can safely grab any surviving "..." as
+  // the chart title without having to disambiguate against key="value".
+  const seriesMatch = info.match(/\bseries\s*=\s*"([^"]*)"/i)
+  if (seriesMatch) {
+    attrs.series = seriesMatch[1].trim()
+    info = info.slice(0, seriesMatch.index) + info.slice(seriesMatch.index! + seriesMatch[0].length)
+  }
+
+  // Extract quoted title (may contain spaces).
   const titleMatch = info.match(/"([^"]*)"/)
   if (titleMatch) {
     attrs.title = titleMatch[1]
@@ -94,12 +105,14 @@ function serializeChartHeader(attrs: Record<string, any>): string {
   // Type always emitted
   parts.push(attrs.type || "pie")
 
-  // Canonical order: size, title, legend/nolegend, values, align, colors
+  // Canonical order: size, title, series, legend/nolegend, values, align, colors
   const w = attrs.width ?? DEFAULT_WIDTH
   const h = attrs.height ?? DEFAULT_HEIGHT
   if (w !== DEFAULT_WIDTH || h !== DEFAULT_HEIGHT) parts.push(`${w}x${h}`)
 
   if (attrs.title) parts.push(`"${attrs.title}"`)
+
+  if (attrs.series) parts.push(`series="${attrs.series}"`)
 
   if (attrs.legend === "false") parts.push("nolegend")
 
@@ -120,19 +133,67 @@ function serializeChartHeader(attrs: Record<string, any>): string {
 
 // ── Data parsing ──
 
-function parseChartData(raw: string): { labels: string[]; values: number[] } {
+const NUMBER_RE = /^-?\d+(?:\.\d+)?$/
+
+// parseChartData parses the raw body of a ```chart fence into labels and
+// per-series value arrays. A line can carry one value (`Label = 10`) or
+// multiple pipe-separated values (`Label = 10 | 20 | 30`) — one slot per
+// series. The number of series is the maximum pipe count across all
+// lines; shorter lines are padded with 0 so Chart.js receives rectangular
+// data. A chart with no `|` anywhere yields exactly one series, matching
+// the pre-multi-series behaviour byte-for-byte.
+function parseChartData(raw: string): { labels: string[]; series: number[][] } {
   const labels: string[] = []
-  const values: number[] = []
+  const rows: number[][] = []
   for (const line of raw.split("\n")) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith("#")) continue
-    const m = trimmed.match(/^(.+?)\s*=\s*(-?\d+(?:\.\d+)?)$/)
-    if (m) {
-      labels.push(m[1].trim())
-      values.push(parseFloat(m[2]))
+    const eqIdx = trimmed.indexOf("=")
+    if (eqIdx < 0) continue
+    const label = trimmed.slice(0, eqIdx).trim()
+    const rhs = trimmed.slice(eqIdx + 1).trim()
+    if (!label) continue
+    const parts = rhs.split("|").map((p) => p.trim())
+    const nums: number[] = []
+    let ok = true
+    for (const p of parts) {
+      if (!NUMBER_RE.test(p)) {
+        ok = false
+        break
+      }
+      nums.push(parseFloat(p))
     }
+    if (!ok) continue
+    labels.push(label)
+    rows.push(nums)
   }
-  return { labels, values }
+  if (labels.length === 0) return { labels: [], series: [] }
+
+  const seriesCount = rows.reduce((m, r) => Math.max(m, r.length), 1)
+  const series: number[][] = []
+  for (let s = 0; s < seriesCount; s++) {
+    const col: number[] = []
+    for (let i = 0; i < rows.length; i++) {
+      col.push(rows[i][s] ?? 0)
+    }
+    series.push(col)
+  }
+  return { labels, series }
+}
+
+// parseSeriesNames turns a `series="A,B,C"` attribute into display
+// names, padding with "Series N" when the attribute names fewer series
+// than the data carries, and clipping when it names more.
+function parseSeriesNames(raw: string, count: number): string[] {
+  const declared = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const names: string[] = []
+  for (let i = 0; i < count; i++) {
+    names.push(declared[i] || `Series ${i + 1}`)
+  }
+  return names
 }
 
 // ── Property definitions ──
@@ -228,6 +289,15 @@ const chartProperties: NodePropertySpec[] = [
     wide: true,
   },
   {
+    name: "series",
+    label: "Series",
+    default: "",
+    parse: (raw: string) => raw.trim(),
+    serialize: (v: string | null) => String(v ?? ""),
+    helpText: "Comma-separated names for multi-series (|-separated values)",
+    wide: true,
+  },
+  {
     name: "data",
     label: "Data",
     default: "",
@@ -235,7 +305,7 @@ const chartProperties: NodePropertySpec[] = [
     serialize: (v: string | null) => String(v ?? ""),
     multiline: true,
     wide: true,
-    helpText: "One entry per line: Label = Value",
+    helpText: "One entry per line: Label = Value (or Label = v1 | v2 for multi-series)",
   },
 ]
 
@@ -298,7 +368,7 @@ class ChartNodeView {
       this.chartInstance = null
     }
 
-    const { labels, values } = parseChartData(this.node.attrs.data || "")
+    const { labels, series } = parseChartData(this.node.attrs.data || "")
     if (labels.length === 0) {
       this.canvas.width = 200
       this.canvas.height = 40
@@ -314,6 +384,18 @@ class ChartNodeView {
     const attrs = this.node.attrs
     const chartType = attrs.type === "hbar" ? "bar" : attrs.type === "polar" ? "polarArea" : attrs.type
 
+    // Pie / doughnut / polar read one dataset per chart. Multi-series on
+    // those shapes is meaningless, so collapse to the first series. The
+    // user sees Series 1; a console warning tells them why.
+    const singleSeriesOnly = attrs.type === "pie" || attrs.type === "doughnut" || attrs.type === "polar"
+    const effectiveSeries = singleSeriesOnly ? series.slice(0, 1) : series
+    if (singleSeriesOnly && series.length > 1) {
+      console.warn(
+        `chart: ${attrs.type} charts are single-series — ignoring series 2..${series.length}. ` +
+          `Use bar, hbar, line or radar for multi-series.`
+      )
+    }
+
     let palette: string[]
     if (attrs.colors) {
       palette = String(attrs.colors)
@@ -323,7 +405,33 @@ class ChartNodeView {
     } else {
       palette = [...DEFAULT_PALETTE]
     }
-    const bgColors = labels.map((_: string, i: number) => palette[i % palette.length])
+
+    const multiSeries = effectiveSeries.length > 1
+    const seriesNames = parseSeriesNames(attrs.series || "", effectiveSeries.length)
+
+    // Single series: palette colours each data point (today's shape).
+    // Multi series: palette colours each series (one uniform fill per
+    // dataset) so grouped bars / overlaid lines read as "A vs B vs C".
+    const datasets = effectiveSeries.map((values: number[], si: number) => {
+      if (multiSeries) {
+        const c = palette[si % palette.length]
+        return {
+          label: seriesNames[si],
+          data: values,
+          backgroundColor: c,
+          borderColor: c,
+          borderWidth: 1,
+        }
+      }
+      const bgColors = values.map((_: number, i: number) => palette[i % palette.length])
+      return {
+        label: seriesNames[si],
+        data: values,
+        backgroundColor: bgColors,
+        borderColor: bgColors,
+        borderWidth: 1,
+      }
+    })
 
     const plugins: any[] = []
     if (attrs.values === "true") {
@@ -336,30 +444,35 @@ class ChartNodeView {
           ctx2d.textAlign = "center"
           ctx2d.textBaseline = "middle"
           ctx2d.fillStyle = "#333"
-          const meta = chart.getDatasetMeta(0)
-          for (let i = 0; i < meta.data.length; i++) {
-            const el = meta.data[i]
-            const val = chart.data.datasets[0].data[i]
-            const { x, y } = el.tooltipPosition()
-            ctx2d.fillText(String(val), x, y)
+          // Draw values for every dataset so grouped bars / overlaid
+          // lines each get their own labels.
+          for (let d = 0; d < chart.data.datasets.length; d++) {
+            const meta = chart.getDatasetMeta(d)
+            for (let i = 0; i < meta.data.length; i++) {
+              const el = meta.data[i]
+              const val = chart.data.datasets[d].data[i]
+              const { x, y } = el.tooltipPosition()
+              ctx2d.fillText(String(val), x, y)
+            }
           }
           ctx2d.restore()
         },
       })
     }
 
+    // Multi-series charts need the per-dataset legend (series names);
+    // single-series pie/bar historically hid the legend of the lone
+    // "Series 1" dataset and used the point-level palette instead.
+    // Preserve that default by falling back to point-palette rendering
+    // (datasets[0].label stays "Series 1" but the legend is driven by
+    // labels, as before).
+    const legendDisplay = attrs.legend !== "false"
+
     this.chartInstance = new Chart(this.canvas, {
       type: chartType,
       data: {
         labels,
-        datasets: [
-          {
-            data: values,
-            backgroundColor: bgColors,
-            borderColor: bgColors,
-            borderWidth: 1,
-          },
-        ],
+        datasets,
       },
       options: {
         responsive: false,
@@ -372,7 +485,7 @@ class ChartNodeView {
             text: attrs.title || "",
           },
           legend: {
-            display: attrs.legend !== "false",
+            display: legendDisplay,
           },
         },
       },
@@ -459,6 +572,7 @@ export const chartPlugin: WikiPlugin = {
             values: { default: "false" },
             align: { default: "" },
             colors: { default: "" },
+            series: { default: "" },
             data: { default: "" },
           },
           toDOM(node: any) {
@@ -474,6 +588,7 @@ export const chartPlugin: WikiPlugin = {
                 "data-chart-values": node.attrs.values,
                 "data-chart-align": node.attrs.align,
                 "data-chart-colors": node.attrs.colors,
+                "data-chart-series": node.attrs.series,
                 "data-chart-data": node.attrs.data,
               },
               `Chart: ${node.attrs.type}${node.attrs.title ? " — " + node.attrs.title : ""}`,
@@ -492,6 +607,7 @@ export const chartPlugin: WikiPlugin = {
                   values: dom.getAttribute("data-chart-values") || "false",
                   align: dom.getAttribute("data-chart-align") || "",
                   colors: dom.getAttribute("data-chart-colors") || "",
+                  series: dom.getAttribute("data-chart-series") || "",
                   data: dom.getAttribute("data-chart-data") || "",
                 }
               },
@@ -573,6 +689,7 @@ export const chartPlugin: WikiPlugin = {
             values: meta.values ?? "false",
             align: meta.align ?? "",
             colors: meta.colors ?? "",
+            series: meta.series ?? "",
             data: meta.data ?? "",
           })
         )
