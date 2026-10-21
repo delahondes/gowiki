@@ -14,6 +14,8 @@ import (
 type todoSpy struct {
 	cancels        []string       // pagePath
 	creates        []createCall   // pagePath + roles
+	ensures        []ensureCall   // pagePath + want + versionTag
+	ensureResult   *ensureResult  // optional canned return for EnsureReviewTasks
 	completes      []completeCall // pagePath + confirmedByRole
 	completeReturn map[string]int // per-pagePath count returned by CompleteReviewTasks
 }
@@ -22,6 +24,16 @@ type createCall struct {
 	pagePath   string
 	roles      map[string]string
 	versionTag string
+}
+
+type ensureCall struct {
+	pagePath   string
+	want       map[string]string
+	versionTag string
+}
+
+type ensureResult struct {
+	kept, cancelled, created int
 }
 
 type completeCall struct {
@@ -58,6 +70,20 @@ func (s *todoSpy) CompleteReviewTasks(pagePath string, confirmedByRole map[strin
 
 func (s *todoSpy) ListOpenPagesWithReviewTasks() ([]string, error) {
 	return nil, nil
+}
+
+func (s *todoSpy) EnsureReviewTasks(pagePath string, want map[string]string, versionTag, _ string) (int, int, int, error) {
+	w := make(map[string]string, len(want))
+	for k, v := range want {
+		w[k] = v
+	}
+	s.ensures = append(s.ensures, ensureCall{pagePath: pagePath, want: w, versionTag: versionTag})
+	if s.ensureResult != nil {
+		return s.ensureResult.kept, s.ensureResult.cancelled, s.ensureResult.created, nil
+	}
+	// Default to "nothing changed" so tests can opt into movement by
+	// setting ensureResult explicitly.
+	return len(w), 0, 0, nil
 }
 
 // pageReaderStub returns pre-canned pages, backing EnsureState.

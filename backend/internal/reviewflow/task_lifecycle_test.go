@@ -175,27 +175,57 @@ func TestReconcileOrphanTasks_FullyValidatedPage(t *testing.T) {
 func TestReconcileOrphanTasks_LivePageRebuildsTaskSet(t *testing.T) {
 	t.Parallel()
 	svc, spy, _ := newSvcWithSpy(t)
-	// Parallel directive — every missing role gets a task.
+	// Parallel directive — every missing role gets a task via the
+	// normal SyncFromMarkdown flow before the reconciler runs.
 	_ = svc.SyncFromMarkdown("/live", 1, "{reviewflow parallel=true author=alice reviewer=bob}\n")
 	spy.cancels = nil
 	spy.creates = nil
+	spy.ensures = nil
 
 	exists := func(p string) bool { return true }
 	n, err := svc.ReconcileOrphanTasks(exists)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
+	// Reconciler now routes through EnsureReviewTasks, which diffs
+	// the live task set against the desired set and returns
+	// kept=2/cancelled=0/created=0 for an already-correct page. The
+	// touched counter counts PAGES WHERE A CHANGE LANDED, so a
+	// no-drift page does not increment it — the whole point is
+	// stopping an email-emitting rebuild on every restart.
+	if n != 0 {
+		t.Errorf("touched = %d, want 0 (page is already in the desired shape)", n)
+	}
+	if len(spy.cancels) != 0 {
+		t.Errorf("no Cancel should fire on a no-drift reconcile; got %+v", spy.cancels)
+	}
+	if len(spy.creates) != 0 {
+		t.Errorf("no Create should fire on a no-drift reconcile; got %+v", spy.creates)
+	}
+	if len(spy.ensures) != 1 || spy.ensures[0].pagePath != "/live" {
+		t.Fatalf("expected one Ensure for /live; got %+v", spy.ensures)
+	}
+	if spy.ensures[0].want["author"] != "alice" || spy.ensures[0].want["reviewer"] != "bob" {
+		t.Errorf("Ensure want = %+v, want author=alice reviewer=bob", spy.ensures[0].want)
+	}
+}
+
+// Drift case: when EnsureReviewTasks reports a change (cancelled >0
+// or created >0), touched counts the page. Exercised via the spy's
+// canned ensureResult.
+func TestReconcileOrphanTasks_DriftTouched(t *testing.T) {
+	t.Parallel()
+	svc, spy, _ := newSvcWithSpy(t)
+	_ = svc.SyncFromMarkdown("/drifted", 1, "{reviewflow parallel=true author=alice reviewer=bob}\n")
+	spy.cancels = nil
+	spy.creates = nil
+	spy.ensures = nil
+	spy.ensureResult = &ensureResult{kept: 1, cancelled: 0, created: 1}
+
+	exists := func(p string) bool { return true }
+	n, _ := svc.ReconcileOrphanTasks(exists)
 	if n != 1 {
-		t.Errorf("touched = %d, want 1", n)
-	}
-	if len(spy.cancels) != 1 || spy.cancels[0] != "/live" {
-		t.Errorf("expected Cancel; got %+v", spy.cancels)
-	}
-	if len(spy.creates) != 1 {
-		t.Errorf("expected one Create for the two live roles; got %+v", spy.creates)
-	}
-	if spy.creates[0].roles["author"] != "alice" || spy.creates[0].roles["reviewer"] != "bob" {
-		t.Errorf("recreated roles = %+v, want author=alice reviewer=bob", spy.creates[0].roles)
+		t.Errorf("touched = %d, want 1 (page was in drift, Ensure created one task)", n)
 	}
 }
 
@@ -221,31 +251,46 @@ func TestReconcileOrphanTasks_DormantStateUntouched(t *testing.T) {
 	}
 }
 
-// Reconciler is idempotent: a second run after a first does nothing new.
+// Reconciler is idempotent: once SyncFromMarkdown has produced the
+// desired task set, the reconciler diffs against it and sees no drift
+// — zero cancels, zero creates, touched stays 0. Second run is the
+// same shape. The invariant that matters most: no "assigned" email
+// fires on either run because no new task row is written.
 func TestReconcileOrphanTasks_Idempotent(t *testing.T) {
 	t.Parallel()
 	svc, spy, _ := newSvcWithSpy(t)
 	_ = svc.SyncFromMarkdown("/a", 1, directive2)
 	_ = svc.SyncFromMarkdown("/b", 1, directive3)
+	// SyncFromMarkdown emits its own Cancel + Create; wipe the spy so
+	// the assertions below measure ONLY what the reconciler does.
+	spy.cancels = nil
+	spy.creates = nil
+	spy.ensures = nil
 
 	exists := func(p string) bool { return true }
-	// First run touches both.
+	// First run: both pages ARE already in the desired shape, so the
+	// reconciler should report zero drift.
 	n1, _ := svc.ReconcileOrphanTasks(exists)
-	if n1 != 2 {
-		t.Fatalf("first run touched %d, want 2", n1)
+	if n1 != 0 {
+		t.Fatalf("first run touched %d, want 0 (no drift)", n1)
+	}
+	if len(spy.cancels) != 0 || len(spy.creates) != 0 {
+		t.Errorf("first run should emit no Cancel/Create; got cancels=%v creates=%v", spy.cancels, spy.creates)
+	}
+	// Both pages did get an Ensure call so the diff could run.
+	if len(spy.ensures) != 2 {
+		t.Errorf("first run should have one Ensure per page; got %d", len(spy.ensures))
 	}
 	spy.cancels = nil
 	spy.creates = nil
+	spy.ensures = nil
 
-	// Second run touches both again (the rebuild path is deterministic
-	// — same end state — but the counter counts touches, not changes).
-	// The tasks that come out are the same set as what went in.
+	// Second run: same shape, same result.
 	n2, _ := svc.ReconcileOrphanTasks(exists)
-	if n2 != 2 {
-		t.Errorf("second run touched %d, want 2", n2)
+	if n2 != 0 {
+		t.Errorf("second run touched %d, want 0", n2)
 	}
-	// Both runs produce the same create set — stable rebuild.
-	if len(spy.creates) != 2 {
-		t.Errorf("second run should have recreated 2 Create calls; got %d", len(spy.creates))
+	if len(spy.cancels) != 0 || len(spy.creates) != 0 {
+		t.Errorf("second run should emit no Cancel/Create; got cancels=%v creates=%v", spy.cancels, spy.creates)
 	}
 }

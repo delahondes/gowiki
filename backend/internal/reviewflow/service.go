@@ -33,6 +33,12 @@ type TodoIntegrator interface {
 	// of every open or in-progress reviewflow task. Used by the orphan-task
 	// reconciler to find tasks whose state file no longer exists.
 	ListOpenPagesWithReviewTasks() ([]string, error)
+	// EnsureReviewTasks reconciles the live open-task set for a page
+	// against the desired (role → user) map, cancelling what no
+	// longer belongs and creating only genuinely new tasks. Returns
+	// (kept, cancelled, created). Idempotent: a second call with the
+	// same arguments touches nothing.
+	EnsureReviewTasks(pagePath string, want map[string]string, versionTag string, dueDate string) (int, int, int, error)
 }
 
 // Service implements reviewflow business logic.
@@ -291,7 +297,6 @@ func (svc *Service) ReconcileOrphanTasks(exists func(pagePath string) bool) (int
 			// already cancelled the tasks; nothing to do.
 			return nil
 		}
-		_ = svc.todo.CancelReviewTasks(pagePath)
 		satisfied := make(map[string]bool, len(st.Confirmations))
 		for _, c := range st.Confirmations {
 			if c.PageVersion == st.CurrentPageVersion {
@@ -304,20 +309,36 @@ func (svc *Service) ReconcileOrphanTasks(exists func(pagePath string) bool) (int
 				missing[role] = user
 			}
 		}
-		if len(missing) > 0 {
-			dueDate := svc.computeDueDate(st.Roles)
-			if st.Parallel {
-				_ = svc.todo.CreateReviewTasks(pagePath, missing, st.VersionTag, dueDate)
-			} else {
-				for _, role := range st.RoleOrder {
-					if user, ok := missing[role]; ok {
-						_ = svc.todo.CreateReviewTasks(pagePath, map[string]string{role: user}, st.VersionTag, dueDate)
-						break
-					}
+		// Build the desired "live task" set and let the adapter
+		// diff it against what already exists. If the current open
+		// set already matches, nothing moves and no "assigned"
+		// notification fires — a graceful restart stops burning
+		// through inboxes.
+		want := make(map[string]string)
+		if st.Parallel {
+			for role, user := range missing {
+				want[role] = user
+			}
+		} else {
+			for _, role := range st.RoleOrder {
+				if user, ok := missing[role]; ok {
+					want[role] = user
+					break
 				}
 			}
 		}
-		touched++
+		dueDate := svc.computeDueDate(st.Roles)
+		if _, c, cr, err := svc.todo.EnsureReviewTasks(pagePath, want, st.VersionTag, dueDate); err != nil {
+			// Fall back to the hard cancel + recreate so a diff
+			// failure never leaves the page silently out of sync.
+			_ = svc.todo.CancelReviewTasks(pagePath)
+			if len(want) > 0 {
+				_ = svc.todo.CreateReviewTasks(pagePath, want, st.VersionTag, dueDate)
+			}
+			touched++
+		} else if c > 0 || cr > 0 {
+			touched++
+		}
 		return nil
 	})
 	return touched, err
