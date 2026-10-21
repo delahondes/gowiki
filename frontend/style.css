@@ -2086,14 +2086,19 @@ a.gowiki-link-missing {
   font-size: 13px;
   border: 1px solid var(--gw-color-border);
   border-radius: 4px;
-  overflow-x: auto;
   background: var(--gw-color-surface);
   color: var(--gw-color-text);
 }
 
+/* Markdown paragraphs are single long source lines, so lines wrap
+   rather than scroll sideways. The hanging indent keeps continuation
+   lines aligned after the one-character +/- prefix, and each line's
+   insert/delete background covers its whole wrapped block. */
 .gowiki-diff-line {
-  padding: 1px 12px;
-  white-space: pre;
+  padding: 1px 12px 1px calc(12px + 1ch);
+  text-indent: -1ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   min-height: 1.4em;
 }
 
