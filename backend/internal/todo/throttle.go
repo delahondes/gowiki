@@ -10,12 +10,6 @@ import (
 	"gowiki/backend/internal/database"
 )
 
-// batchWindowFallback is the window used when the config says 0 or
-// negative (someone forgot to set it). Chosen conservatively so a
-// forgotten knob still delivers the "one email per burst" behaviour
-// that triggered this feature.
-const batchWindowFallback = 300 * time.Second
-
 // dailyCapWindow is the per-(user, page) suppression window. A user
 // who already got an email for this page within this long ago gets
 // nothing — not an abbreviated reminder, not a nudge, nothing. The
