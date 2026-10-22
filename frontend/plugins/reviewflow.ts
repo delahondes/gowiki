@@ -36,19 +36,51 @@ const reviewflowProperties = [
     },
     serialize: (value: string | null) => {
       // Convert JSON string back to "rolename=username\n..." lines
+      // Keep the declared order: it is the signing order.
       try {
         const roles = JSON.parse(value || "{}")
         return Object.entries(roles)
-          .sort(([a], [b]) => a.localeCompare(b))
           .map(([k, v]) => `${k}=${v}`)
           .join("\n")
       } catch {
         return value || ""
       }
     },
-    helpText: "One role per line: rolename=username",
+    helpText: "One role per line: rolename=username, in signing order",
+  },
+  {
+    name: "parallel",
+    label: "Signing order",
+    default: "",
+    parse: (raw: string) => (isTruthy(raw) ? "true" : ""),
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "One signer at a time, in the order listed" },
+      { value: "true", label: "All signers at once" },
+    ],
+  },
+  {
+    name: "manual_release",
+    label: "Signing starts",
+    default: "",
+    parse: (raw: string) => (isTruthy(raw) ? "yes" : ""),
+    serialize: (value: string | null) => String(value ?? ""),
+    options: [
+      { value: "", label: "As soon as the page is saved" },
+      { value: "yes", label: 'When someone ticks "Ready for signature"' },
+    ],
   },
 ]
+
+function isTruthy(raw: string | null | undefined): boolean {
+  const v = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+  return v === "true" || v === "1" || v === "yes"
+}
+
+// Directive keys that are options, not role assignments.
+const OPTION_KEYS = new Set(["version", "parallel", "manual_release", "_args"])
 
 // --- API Gate ---
 
@@ -93,6 +125,12 @@ interface ReviewflowStatus {
   signing_enabled?: boolean
   signing_required?: boolean
   signed_roles?: string[]
+  // manual_release=yes pages: no signer is alerted until someone ticks
+  // "Ready for signature".
+  manual_release?: boolean
+  released?: boolean
+  released_by?: string
+  released_at?: string
 }
 
 // User display name cache
@@ -267,6 +305,20 @@ const gate = {
     }
     return resp.json()
   },
+
+  async setReleased(pagePath: string, released: boolean): Promise<ReviewflowStatus> {
+    const cleanPath = pagePath.replace(/^\/+/, "")
+    const resp = await fetch(`${API_BASE}/release/${cleanPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ released }),
+    })
+    if (!resp.ok) {
+      const b = await resp.json().catch(() => ({}))
+      throw new Error(b.error || `reviewflow release: ${resp.status}`)
+    }
+    return resp.json()
+  },
 }
 
 // --- NodeView ---
@@ -318,13 +370,16 @@ class ReviewflowNodeView {
     }
 
     const version = this.node.attrs.version || ""
-    const roleEntries = Object.entries(roles).sort(([a], [b]) => a.localeCompare(b))
+    // Declared order = signing order.
+    const roleEntries = Object.entries(roles)
     // If the backend has no state yet (no roles in status), treat all roles as pending.
     const backendHasState = this.status != null && Object.keys(this.status.roles || {}).length > 0
     const missingRoles = backendHasState ? this.status!.missing_roles || {} : roles
     const overdueSet = new Set(this.status?.overdue_roles || [])
     const currentUser = (window as any).__gowikiCurrentUser?.username || ""
     const isValidated = backendHasState && this.status!.is_fully_validated === true
+    const manualRelease = this.status?.manual_release ?? isTruthy(this.node.attrs.manual_release)
+    const awaitingRelease = manualRelease && !this.status?.released
 
     // Only flag a stale tag if a PRIOR fully-validated snapshot shared
     // it. The predicate ignores partial snapshots so an author
@@ -402,6 +457,10 @@ class ReviewflowNodeView {
     // point is that the reader shouldn't confuse this WIP with the
     // authoritative version.
 
+    if (manualRelease && !isValidated && !this.historyVersion && roleEntries.length > 0) {
+      wrapper.appendChild(this.renderReleaseBar(roleEntries, missingRoles, currentUser, awaitingRelease))
+    }
+
     // Table
     if (roleEntries.length > 0) {
       const table = document.createElement("table")
@@ -442,6 +501,9 @@ class ReviewflowNodeView {
         if (isOverdue) {
           tdStatus.className = "gowiki-rf-status--overdue"
           tdStatus.textContent = "\u26A0 Overdue"
+        } else if (isMissing && awaitingRelease) {
+          tdStatus.className = "gowiki-rf-status--unreleased"
+          tdStatus.textContent = "Not released"
         } else if (isMissing) {
           tdStatus.className = "gowiki-rf-status--pending"
           tdStatus.textContent = "\u23F3 Pending"
@@ -454,7 +516,7 @@ class ReviewflowNodeView {
 
         // Action
         const tdAction = document.createElement("td")
-        if (isMissing && user === currentUser && !versionTagStale && !this.historyVersion) {
+        if (isMissing && user === currentUser && !versionTagStale && !this.historyVersion && !awaitingRelease) {
           const btn = document.createElement("button")
           btn.className = "gowiki-rf-confirm-btn"
           // Show "Sign & Confirm" if signing is enabled and user has a key.
@@ -506,6 +568,65 @@ class ReviewflowNodeView {
     }
 
     this.dom.appendChild(wrapper)
+  }
+
+  // "Ready for signature" control for manual_release pages. The backend
+  // decides who may toggle it (first signer or edit rights) and refuses
+  // withdrawal once a signature exists on the current version; the
+  // checkbox mirrors that last rule so it doesn't offer a dead action.
+  private renderReleaseBar(
+    roleEntries: [string, string][],
+    missingRoles: Record<string, string>,
+    currentUser: string,
+    awaitingRelease: boolean
+  ): HTMLElement {
+    const bar = document.createElement("div")
+    bar.className = "gowiki-rf-release"
+    if (awaitingRelease) bar.classList.add("gowiki-rf-release--pending")
+
+    const label = document.createElement("label")
+    label.className = "gowiki-rf-release-label"
+    const cb = document.createElement("input")
+    cb.type = "checkbox"
+    cb.checked = !awaitingRelease
+    const anySigned = roleEntries.some(([role]) => !(role in missingRoles))
+    if (!currentUser) {
+      cb.disabled = true
+      label.title = "Log in to release this document for signature."
+    } else if (!awaitingRelease && anySigned) {
+      cb.disabled = true
+      label.title = "A signature is already recorded on this version, so the release can no longer be withdrawn."
+    }
+    cb.addEventListener("change", (e) => {
+      e.stopPropagation()
+      void this.doSetReleased(cb.checked)
+    })
+    label.appendChild(cb)
+    label.appendChild(document.createTextNode(" Ready for signature"))
+    bar.appendChild(label)
+
+    const note = document.createElement("span")
+    note.className = "gowiki-rf-release-note"
+    if (awaitingRelease) {
+      note.textContent = "Draft \u2014 not yet released for signature. Signers are notified once this box is ticked."
+    } else {
+      const by = this.status?.released_by ? getUserLabel(this.status.released_by) : ""
+      const at = this.status?.released_at ? new Date(this.status.released_at).toLocaleDateString() : ""
+      note.textContent = by ? `Released by ${by}${at ? " on " + at : ""}` : "Released for signature"
+    }
+    bar.appendChild(note)
+    return bar
+  }
+
+  private async doSetReleased(released: boolean) {
+    try {
+      this.status = await gate.setReleased(window.location.pathname, released)
+    } catch (err: any) {
+      alert((released ? "Release failed: " : "Withdraw failed: ") + (err?.message || err))
+    }
+    if (this.status?.released_by) await resolveUserLabels([this.status.released_by])
+    this.render()
+    this.updatePageBackground()
   }
 
   private async fetchStatus() {
@@ -620,6 +741,39 @@ class ReviewflowNodeView {
 const reviewflowStyles = `
 .gowiki-reviewflow {
   margin: 8px 0;
+}
+
+.gowiki-rf-release {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 6px 0 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--gw-color-surface-alt, rgba(0, 0, 0, 0.03));
+  font-size: 13px;
+}
+
+.gowiki-rf-release--pending {
+  background: var(--gw-color-warning-bg);
+}
+
+.gowiki-rf-release-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gowiki-rf-release-note {
+  color: var(--gw-color-muted);
+}
+
+.gowiki-rf-status--unreleased {
+  color: var(--gw-color-muted);
+  font-style: italic;
 }
 
 .gowiki-rf-wrapper {
@@ -1176,6 +1330,8 @@ export const reviewflowPlugin: WikiPlugin = {
           attrs: {
             version: { default: "" },
             roles: { default: "{}" },
+            parallel: { default: "" },
+            manual_release: { default: "" },
           },
           toDOM(node: PMNode) {
             return [
@@ -1216,9 +1372,11 @@ export const reviewflowPlugin: WikiPlugin = {
         const attrs = tok.meta?.attrs ?? {}
         // Separate version from roles
         const version = attrs.version ?? ""
+        // Roles keep source order: the backend hands out review tasks
+        // in that order.
         const roles: Record<string, string> = {}
         for (const [k, v] of Object.entries(attrs)) {
-          if (k !== "version" && k !== "_args") {
+          if (!OPTION_KEYS.has(k)) {
             roles[k] = String(v)
           }
         }
@@ -1226,6 +1384,8 @@ export const reviewflowPlugin: WikiPlugin = {
           ctx.schema.nodes.reviewflow.create({
             version,
             roles: JSON.stringify(roles),
+            parallel: isTruthy(attrs.parallel as string) ? "true" : "",
+            manual_release: isTruthy(attrs.manual_release as string) ? "yes" : "",
           })
         )
       },
@@ -1242,7 +1402,8 @@ export const reviewflowPlugin: WikiPlugin = {
           parts.push(`version=${version}`)
         }
 
-        // roles alphabetically sorted
+        // Roles in declared order — it is the signing order, so it
+        // must survive a visual-mode save unchanged.
         let roles: Record<string, string> = {}
         try {
           roles = JSON.parse(node.attrs.roles || "{}")
@@ -1250,9 +1411,13 @@ export const reviewflowPlugin: WikiPlugin = {
           /* ignore */
         }
 
-        for (const key of Object.keys(roles).sort()) {
+        for (const key of Object.keys(roles)) {
           parts.push(`${key}=${roles[key]}`)
         }
+
+        // Options after the roles, in a fixed order.
+        if (isTruthy(node.attrs.parallel)) parts.push("parallel=true")
+        if (isTruthy(node.attrs.manual_release)) parts.push("manual_release=yes")
 
         if (parts.length === 0) {
           return "{reviewflow}\n\n"

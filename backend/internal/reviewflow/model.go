@@ -65,6 +65,22 @@ type State struct {
 	Confirmations      []Confirmation    `json:"confirmations"`
 	VersionHistory     []VersionRecord   `json:"version_history,omitempty"`
 	ValidatedVersion   int64             `json:"validated_page_version"`
+
+	// ManualRelease mirrors the directive's manual_release flag.
+	// Released records the "Ready for signature" tick; it survives
+	// content edits and is only cleared by an explicit untick (allowed
+	// before the first signature on the current version) or by the
+	// directive dropping manual_release.
+	ManualRelease bool       `json:"manual_release,omitempty"`
+	Released      bool       `json:"released,omitempty"`
+	ReleasedBy    string     `json:"released_by,omitempty"`
+	ReleasedAt    *time.Time `json:"released_at,omitempty"`
+}
+
+// AwaitingRelease reports whether the page holds its review tasks back
+// until someone ticks "Ready for signature".
+func (st *State) AwaitingRelease() bool {
+	return st != nil && st.ManualRelease && !st.Released
 }
 
 // Status is the computed response sent to the frontend.
@@ -90,6 +106,10 @@ type Status struct {
 	SigningEnabled   bool              `json:"signing_enabled,omitempty"`
 	SigningRequired  bool              `json:"signing_required,omitempty"`
 	SignedRoles      []string          `json:"signed_roles,omitempty"`
+	ManualRelease    bool              `json:"manual_release,omitempty"`
+	Released         bool              `json:"released,omitempty"`
+	ReleasedBy       string            `json:"released_by,omitempty"`
+	ReleasedAt       *time.Time        `json:"released_at,omitempty"`
 }
 
 // UserCertificate holds a user's X.509 signing certificate.

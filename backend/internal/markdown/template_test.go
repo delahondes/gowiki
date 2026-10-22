@@ -582,3 +582,33 @@ func TestResolveTemplatePayload_TodoRelativeDue_ZeroNowFallsBackToTimeNow(t *tes
 		t.Errorf("due value %q is not a valid YYYY-MM-DD: %v", m[1], err)
 	}
 }
+
+// The created document's {reviewflow} keeps the template's declared
+// role order — it is the signing order — and renders the options in
+// the same canonical form as the frontend serializer.
+func TestResolveTemplatePayload_ReviewflowKeepsSigningOrder(t *testing.T) {
+	t.Parallel()
+	tpl := "{template}\n{template-reviewflow responsable=zoe employee=adam manual_release=yes}\n\n# Interview\n"
+	_, payload, _ := SplitTemplatePayload(tpl)
+	args, _ := ParseTemplateReviewflowArgs(payload)
+	merged := MergeReviewflowArgs(nil, args, nil)
+	order := MergeReviewflowOrder(TemplateReviewflowKeyOrder(payload), ReviewflowKeyOrder(tpl))
+
+	got := ResolveTemplatePayload(payload, TemplateResolveOpts{ReviewflowArgs: merged, ReviewflowOrder: order})
+	want := "{reviewflow version=1.0 responsable=zoe employee=adam manual_release=yes}"
+	if !strings.Contains(got, want) {
+		t.Errorf("resolved payload = %q, want it to contain %q", got, want)
+	}
+}
+
+// Roles that appear only through a create-action override (not in any
+// declared order) follow the declared ones alphabetically.
+func TestRenderReviewflowDirective_UnlistedRolesFollowAlphabetically(t *testing.T) {
+	t.Parallel()
+	args := map[string]string{"version": "1.0", "reviewer": "bob", "author": "alice", "qa": "carol", "zeta": "z", "parallel": "yes"}
+	got := renderReviewflowDirective(args, []string{"reviewer", "author"})
+	want := "{reviewflow version=1.0 reviewer=bob author=alice qa=carol zeta=z parallel=true}"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

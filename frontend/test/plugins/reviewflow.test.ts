@@ -3,8 +3,10 @@
 // The reviewflow directive carries a version + arbitrary role
 // assignments (author, reviewer, validator, and any other role name
 // the wiki configures). Roles are stored as a JSON string on the
-// node's `roles` attr; on serialize they emit in alphabetical order
-// (a determinism-preserving choice worth pinning).
+// node's `roles` attr and serialize in their declared order: the
+// backend hands out review tasks in that order, so it must survive a
+// visual-mode save. `parallel` and `manual_release` are options, not
+// roles, and serialize after the roles in a fixed order.
 import { describe, it, expect } from "vitest"
 import type { Node as PMNode } from "prosemirror-model"
 import { roundTrip, countNodes } from "../helpers"
@@ -88,17 +90,10 @@ describe("reviewflow: role assignments", () => {
     expect(roles.legal).toBe("dave")
   })
 
-  it("roles emit in alphabetical order on serialize (determinism)", () => {
-    const rt = roundTrip("{reviewflow zebra=z alpha=a mango=m}\n")
+  it("roles keep their declared (signing) order on serialize", () => {
+    const rt = roundTrip("{reviewflow responsable=zoe employee=adam hr=mia}\n")
     expect(rt.isStable).toBe(true)
-    // The serialised order must be alphabetical regardless of input order.
-    const rendered = rt.first
-    const alphaIdx = rendered.indexOf("alpha=")
-    const mangoIdx = rendered.indexOf("mango=")
-    const zebraIdx = rendered.indexOf("zebra=")
-    expect(alphaIdx).toBeGreaterThan(-1)
-    expect(mangoIdx).toBeGreaterThan(alphaIdx)
-    expect(zebraIdx).toBeGreaterThan(mangoIdx)
+    expect(rt.first).toBe("{reviewflow responsable=zoe employee=adam hr=mia}")
   })
 
   it("version always emits first when present", () => {
@@ -106,6 +101,29 @@ describe("reviewflow: role assignments", () => {
     expect(rt.isStable).toBe(true)
     const rendered = rt.first
     expect(rendered.indexOf("version=")).toBeLessThan(rendered.indexOf("author="))
+  })
+})
+
+describe("reviewflow: options", () => {
+  it("manual_release and parallel are options, not roles", () => {
+    const rt = roundTrip("{reviewflow version=1.0 author=alice reviewer=bob parallel=true manual_release=yes}\n")
+    expect(rt.isStable).toBe(true)
+    const a = firstReviewflow(rt.doc)!
+    expect(a._rolesParsed).toEqual({ author: "alice", reviewer: "bob" })
+    expect(a.parallel).toBe("true")
+    expect(a.manual_release).toBe("yes")
+  })
+
+  it("options serialize after the roles in a fixed order", () => {
+    const rt = roundTrip("{reviewflow manual_release=yes version=1.0 parallel=true author=alice}\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).toBe("{reviewflow version=1.0 author=alice parallel=true manual_release=yes}")
+  })
+
+  it("falsy option values are dropped", () => {
+    const rt = roundTrip("{reviewflow author=alice manual_release=no parallel=false}\n")
+    expect(rt.isStable).toBe(true)
+    expect(rt.first).toBe("{reviewflow author=alice}")
   })
 })
 

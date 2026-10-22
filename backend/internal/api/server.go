@@ -549,6 +549,12 @@ func NewRouter(store PageStore, mediaStore MediaStore, orphanDetector OrphanDete
 				r.Use(s.requireAuth)
 				reviewflow.RegisterAuditRoutes(r, s.reviewflowService, extractUsername, s.aclStore.CheckPermission, s.getUserGroups)
 			})
+			// "Ready for signature" toggle — auth + ACL (edit rights are
+			// one of the two ways to be allowed to toggle).
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireAuth)
+				reviewflow.RegisterReleaseRoutes(r, s.reviewflowService, extractUsername, s.aclStore.CheckPermission, s.getUserGroups)
+			})
 			// CA management — admin only.
 			if s.caStore != nil {
 				r.Group(func(r chi.Router) {

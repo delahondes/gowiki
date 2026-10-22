@@ -71,7 +71,9 @@ Reviewflow uses a self-contained directive on its own line:
 | Attribute | Required | Notes |
 |---|---|---|
 | `version` | Recommended | Version tag string (e.g. `2.1`, `v3.0`). Used for history labeling. |
-| Any other key | At least one | Role assignment: `rolename=username`. Any key that is not `version` is treated as a role. |
+| `parallel` | Optional | `parallel=true` alerts every signer at once. Default: one signer at a time, in the order the roles are written. |
+| `manual_release` | Optional | `manual_release=yes` holds every review task back until someone ticks **Ready for signature** on the page (see 5.6). Default: signing starts as soon as the page is saved. |
+| Any other key | At least one | Role assignment: `rolename=username`. Any key other than `version`, `parallel` and `manual_release` is a role. |
 
 ### Rules
 
@@ -80,7 +82,8 @@ Reviewflow uses a self-contained directive on its own line:
 - `group:editors` syntax is reserved for future group assignment (not yet implemented).
 - Values may be quoted: `author="alice smith"` (for usernames with spaces, though uncommon).
 - One directive per page — if multiple directives exist, only the first is recognized.
-- The `version` key always serializes first, followed by roles in alphabetical order (deterministic round-trip).
+- **Roles are written in signing order.** The first role signs first; each signature hands the task to the next role. The order is part of the document, so every serializer keeps it exactly as written.
+- Canonical serialization: `version`, then the roles in their written order, then `parallel=true`, then `manual_release=yes`. Option values other than `true`/`1`/`yes` read as off and are dropped on the first save.
 
 ### Examples
 
@@ -90,6 +93,8 @@ Reviewflow uses a self-contained directive on its own line:
 {reviewflow version=3.2 author=alice reviewer=bob validator=carol approver=dave}
 
 {reviewflow author=alice reviewer=bob}
+
+{reviewflow version=1.0 responsable=zoe employee=adam manual_release=yes}
 ```
 
 ---
@@ -108,6 +113,11 @@ Stored at `data/meta/{pagePath}.reviewflow.json`:
 | `confirmations` | `[]Confirmation` | All confirmations for the current version |
 | `version_history` | `[]VersionRecord` | Append-only log of fully validated versions |
 | `validated_page_version` | `int64` | Last fully validated page version |
+| `role_order` | `[]string` | Role names in written (signing) order |
+| `parallel` | `bool` | Mirrors the directive's `parallel` option |
+| `manual_release` | `bool` | Mirrors the directive's `manual_release` option |
+| `released` | `bool` | **Ready for signature** is ticked |
+| `released_by`, `released_at` | `string`, timestamp | Who ticked it and when (audit trail) |
 
 ### 4.2 Confirmation
 
@@ -166,17 +176,18 @@ On every page save, the backend:
 
 1. Parses the `{reviewflow ...}` directive from the markdown.
 2. If the directive was **removed**: clears transient state (roles, confirmations), preserves version history, cancels any open todo tasks.
-3. If the **page version changed** (content modified): resets all confirmations to empty (invalidation), cancels existing review tasks, creates new todo tasks for each role.
-4. Updates stored roles, version tag, and current page version.
+3. If the **page version changed** (content modified): resets all confirmations to empty (invalidation), cancels existing review tasks, and creates the review task of the **first unconfirmed role** (every unconfirmed role with `parallel=true`). A `manual_release` page that is not released gets no task.
+4. Updates stored roles, role order, options and current page version. Dropping `manual_release` from the directive clears the release.
 
 ### 5.2 Confirmation
 
 When a user confirms a role:
 
-1. Validates that the role exists and is assigned to the requesting user.
+1. Validates that the role exists and is assigned to the requesting user, and that the page is not awaiting release.
 2. Checks for duplicate confirmation (idempotent — re-confirming is a no-op).
 3. Records the confirmation with timestamp.
-4. If **all roles are now confirmed**:
+4. In serial mode, creates the review task of the next unconfirmed role in written order.
+5. If **all roles are now confirmed**:
    - Appends a `VersionRecord` to version history.
    - Sets `validated_page_version` to the current version.
    - Writes `AtticMeta` to the archived version's `PluginMeta["reviewflow"]`.
@@ -188,7 +199,7 @@ Any content change (page save with a new version number) automatically:
 
 - Clears all confirmations for the current cycle.
 - Resets `missing_roles` to all roles.
-- Creates fresh todo tasks (if todo plugin is active).
+- Creates the first signer's todo task again (if todo plugin is active). A released `manual_release` page stays released, so the new cycle starts straight away.
 
 The version tag is preserved — the user must explicitly update it if they want a new tag.
 
@@ -209,6 +220,16 @@ Pages saved before the reviewflow plugin was deployed have no `.reviewflow.json`
 2. Parses the `{reviewflow}` directive from the markdown.
 3. Creates and persists an initial state with all roles pending.
 
+### 5.6 Manual Release
+
+A page with `manual_release=yes` starts as a draft that nobody is asked to sign. Typical use: documents that stay open for a long time before anyone signs, such as annual employee interviews.
+
+- While unreleased: no review task exists, so no signer is notified; `next_roles` is empty; deadlines do not run; `POST /confirm` is refused with 409.
+- **Ready for signature** is a checkbox in the reviewflow panel. Ticking it records `released_by` and `released_at` and creates the first signer's task (every signer's with `parallel=true`), which sends the usual assignment notification. Deadlines count from `released_at`.
+- Who may tick or untick it: the user holding the first role, or anyone with edit rights on the page.
+- Unticking is allowed only while no signature exists on the current version. It cancels the open review tasks.
+- The tick lives in the reviewflow state, not in the Markdown, so ticking creates no page version and invalidates no signature. A content edit keeps the page released.
+
 ---
 
 ## 6. Backend API
@@ -219,6 +240,7 @@ Base path: `/api/plugin/reviewflow/v1`
 |---|---|---|---|
 | `GET` | `/status/*` | Optional | Returns computed `Status` for a page |
 | `POST` | `/confirm/*` | Required | Confirm a role. Body: `{"role": "reviewer"}` |
+| `POST` | `/release/*` | Required | Tick or untick **Ready for signature**. Body: `{"released": true}` |
 
 ### 6.1 GET /status/{pagePath}?v=N
 
@@ -240,7 +262,19 @@ The username is extracted from the session cookie. Returns the updated `Status` 
 |---|---|
 | 400 | Role not defined, role assigned to a different user, missing role field |
 | 401 | Not authenticated |
+| 409 | `manual_release` page not yet released for signature |
 | 500 | Internal error |
+
+### 6.3 POST /release/{pagePath}
+
+Request body: `{"released": true}` to release, `{"released": false}` to withdraw. Returns the updated `Status` (including `manual_release`, `released`, `released_by`, `released_at`). Errors:
+
+| Status | Condition |
+|---|---|
+| 400 | The page's directive has no `manual_release=yes` |
+| 401 | Not authenticated |
+| 403 | Caller neither holds the first role nor has edit rights on the page |
+| 409 | Withdrawing after a signature was recorded on the current version |
 
 ---
 
@@ -298,9 +332,11 @@ When the todo plugin is active (database connected, todo not disabled), reviewfl
 
 ### Lifecycle
 
-1. **Page invalidated** (new version saved) → cancel existing review tasks, create one new task per role.
-2. **All roles confirmed** → cancel all review tasks.
-3. **Directive removed** → cancel all review tasks.
+1. **Page invalidated** (new version saved) → cancel existing review tasks, create the first unconfirmed role's task (every unconfirmed role's with `parallel=true`). Nothing is created for an unreleased `manual_release` page.
+2. **Role confirmed** (serial mode) → create the next unconfirmed role's task.
+3. **Page released** (`manual_release`) → create the first signer's task. **Release withdrawn** → cancel the open review tasks.
+4. **All roles confirmed** → cancel all review tasks.
+5. **Directive removed** → cancel all review tasks.
 
 ### Task Properties
 
@@ -332,7 +368,9 @@ reviewflow: {
   atom: true,
   attrs: {
     version: { default: "" },
-    roles: { default: "{}" },  // JSON string of { roleName: username }
+    roles: { default: "{}" },  // JSON string of { roleName: username }, in signing order
+    parallel: { default: "" },        // "true" or ""
+    manual_release: { default: "" },  // "yes" or ""
   },
 }
 ```
@@ -346,15 +384,17 @@ Uses `collectExtra: true` on the self-contained directive spec, which passes thr
 | Property | Type | Notes |
 |---|---|---|
 | `version` | Text input | Version tag |
-| `roles` | Multiline text | One `rolename=username` per line |
+| `roles` | Multiline text | One `rolename=username` per line, in signing order |
+| `parallel` | Choice | "One signer at a time, in the order listed" / "All signers at once" |
+| `manual_release` | Choice | "As soon as the page is saved" / "When someone ticks Ready for signature" |
 
 ### 9.3 Serialization (PM → Markdown)
 
 ```
-{reviewflow version=X role1=user1 role2=user2}
+{reviewflow version=X role1=user1 role2=user2 parallel=true manual_release=yes}
 ```
 
-`version` always first, roles alphabetically sorted for deterministic round-trip.
+`version` first, roles in their written (signing) order, then the options. The same canonical form is produced by the backend when a template's `{template-reviewflow}` becomes a document's `{reviewflow}`.
 
 ### 9.4 NodeView (ReviewflowNodeView)
 

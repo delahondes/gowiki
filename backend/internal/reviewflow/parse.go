@@ -15,11 +15,14 @@ var directiveRe = regexp.MustCompile(`(?m)^\{reviewflow\s+(.*?)\}\s*$`)
 // to know who to email FIRST when the page is saved and who is NEXT
 // after each confirmation. Parallel reverts to the historical
 // all-at-once behaviour when the author opts in via `parallel=true`.
+// ManualRelease (`manual_release=yes`) holds every review task back
+// until someone ticks "Ready for signature" on the page.
 type Directive struct {
-	Roles      map[string]string
-	RoleOrder  []string
-	VersionTag string
-	Parallel   bool
+	Roles         map[string]string
+	RoleOrder     []string
+	VersionTag    string
+	Parallel      bool
+	ManualRelease bool
 }
 
 // ParseDirective extracts the reviewflow directive from markdown content.
@@ -39,8 +42,9 @@ func ParseDirective(markdown string) (*Directive, bool) {
 		case "parallel":
 			// Any truthy string enables parallel (true/1/yes). Anything
 			// else — including "false" — leaves the default sequential.
-			v := strings.ToLower(kv.Value)
-			d.Parallel = v == "true" || v == "1" || v == "yes"
+			d.Parallel = isTruthy(kv.Value)
+		case "manual_release":
+			d.ManualRelease = isTruthy(kv.Value)
 		default:
 			d.Roles[kv.Key] = kv.Value
 			d.RoleOrder = append(d.RoleOrder, kv.Key)
@@ -50,6 +54,13 @@ func ParseDirective(markdown string) (*Directive, bool) {
 		return nil, false
 	}
 	return d, true
+}
+
+// isTruthy accepts true/1/yes (any case). Anything else, including
+// "false", "no" and the empty string, reads as false.
+func isTruthy(v string) bool {
+	v = strings.ToLower(v)
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // KV preserves the source order of directive attributes — needed so the

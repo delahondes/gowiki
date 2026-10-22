@@ -43,6 +43,22 @@ If you need every role to be notified at once instead — for example a peer-rev
 
 In parallel mode every assignee gets their task the moment the page is saved and can confirm in any order.
 
+Both settings are also available in the reviewflow properties panel (**Signing order** and **Signing starts**), and the panel keeps the roles in the order you list them.
+
+## 1. Starting signing later — Ready for signature
+
+Some documents are written over weeks before anyone is asked to sign them, such as annual employee interviews. Add `manual_release=yes` to hold the signers back until the document is ready:
+
+```markdown
+{reviewflow version=1.0 responsable=zoe employee=adam manual_release=yes}
+```
+
+- Until it is released, the page is a draft that nobody is asked to sign: no task, no email, no deadline, and the **Confirm** buttons are hidden.
+- The reviewflow panel shows a **Ready for signature** checkbox. Ticking it notifies the first signer (every signer with `parallel=true`), and the panel then shows who released it and when.
+- The first signer, or anyone who can edit the page, can tick or untick it.
+- You can untick it as long as nobody has signed the current version yet. Once a signature exists, the release stays.
+- Ticking the box is not an edit: it creates no new page version and invalidates no signature. Editing the content later keeps the page released, so the new round of signing starts right away.
+
 ## 1. Version lifecycle
 
 1. Author writes content and sets the version tag (e.g. "1.0")

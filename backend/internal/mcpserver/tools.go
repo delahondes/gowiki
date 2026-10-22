@@ -801,7 +801,8 @@ func registerListReviewflowsTool(srv *mcpsrv.MCPServer, deps Deps) {
 				"  missing_roles (role→user still owed), next_roles (actionable now; sequential\n"+
 				"  reviews only populate the head of queue, parallel ones populate every missing\n"+
 				"  role), signed_roles (roles with cryptographic signatures, not just click-\n"+
-				"  through), overdue_roles.\n"+
+				"  through), overdue_roles, awaiting_release (manual_release=yes page that\n"+
+				"  nobody has ticked \"Ready for signature\" on yet — no signer is alerted).\n"+
 				"Skips pages the caller can't view. Use for corpus-wide compliance passes — the "+
 				"single-page get_reviewflow_status would require one MCP call per page and burn "+
 				"through the rate limit. The signatory fields answer \"who should sign, who did, "+
@@ -886,6 +887,7 @@ type reviewflowRow struct {
 	NextRoles        []string          `json:"next_roles,omitempty"`
 	SignedRoles      []string          `json:"signed_roles,omitempty"`
 	OverdueRoles     []string          `json:"overdue_roles,omitempty"`
+	AwaitingRelease  bool              `json:"awaiting_release,omitempty"`
 	HasReviewflow    bool              `json:"has_reviewflow"`
 }
 
@@ -962,6 +964,7 @@ func buildReviewflowList(a reviewflowScanArgs) (rows []reviewflowRow, scanned in
 			NextRoles:        st.NextRoles,
 			SignedRoles:      st.SignedRoles,
 			OverdueRoles:     st.OverdueRoles,
+			AwaitingRelease:  st.ManualRelease && !st.Released,
 			HasReviewflow:    configured,
 		})
 	}

@@ -143,8 +143,13 @@ func (s *Server) resolveTemplateDoc(
 	// the template may be one that doesn't want to require review.
 	tplRF, tplRFPresent := markdown.ParseTemplateReviewflowArgs(payload)
 	var mergedRF map[string]string
+	var rfOrder []string
 	if tplRFPresent || len(overrides) > 0 {
 		mergedRF = markdown.MergeReviewflowArgs(overrides, tplRF, templateOwnRF)
+		rfOrder = markdown.MergeReviewflowOrder(
+			markdown.TemplateReviewflowKeyOrder(payload),
+			markdown.ReviewflowKeyOrder(tplMarkdown),
+		)
 	}
 
 	// 6. Compose the stamp.
@@ -157,9 +162,10 @@ func (s *Server) resolveTemplateDoc(
 
 	// 7. Resolve.
 	resolved := markdown.ResolveTemplatePayload(payload, markdown.TemplateResolveOpts{
-		Stamp:          stamp,
-		Title:          title,
-		ReviewflowArgs: mergedRF,
+		Stamp:           stamp,
+		Title:           title,
+		ReviewflowArgs:  mergedRF,
+		ReviewflowOrder: rfOrder,
 	})
 
 	return &templateResolveResult{

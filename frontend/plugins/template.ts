@@ -285,7 +285,7 @@ class TemplateReviewflowNodeView {
     const summary = document.createElement("div")
     summary.className = "gowiki-template-reviewflow-summary"
     const parts: string[] = [`version=${version}`]
-    for (const key of Object.keys(roles).sort()) {
+    for (const key of Object.keys(roles)) {
       parts.push(`${key}=${roles[key]}`)
     }
     if (parts.length === 1) {
@@ -1119,6 +1119,7 @@ export const templatePlugin: WikiPlugin = {
     })
     reg.registerPMNode("template_reviewflow", {
       print(node) {
+        // Declared order is the signing order of the created document.
         const parts: string[] = []
         if (node.attrs.version) parts.push(`version=${node.attrs.version}`)
         let roles: Record<string, string> = {}
@@ -1127,7 +1128,7 @@ export const templatePlugin: WikiPlugin = {
         } catch {
           /* empty */
         }
-        for (const key of Object.keys(roles).sort()) {
+        for (const key of Object.keys(roles)) {
           parts.push(`${key}=${roles[key]}`)
         }
         return parts.length ? `{template-reviewflow ${parts.join(" ")}}\n\n` : `{template-reviewflow}\n\n`

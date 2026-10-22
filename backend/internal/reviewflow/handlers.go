@@ -2,6 +2,7 @@ package reviewflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -32,6 +33,52 @@ type PermissionChecker func(username string, groups []string, pagePath string, a
 // RegisterAuditRoutes registers the audit export endpoint with ACL enforcement.
 func RegisterAuditRoutes(r chi.Router, svc *Service, extractUsername func(*http.Request) string, checkPerm PermissionChecker, resolveGroups func(string) []string) {
 	r.Get("/audit/*", handleAuditExport(svc, extractUsername, checkPerm, resolveGroups))
+}
+
+// RegisterReleaseRoutes registers the "Ready for signature" toggle for
+// manual_release pages. Needs the ACL checker because edit rights on
+// the page are one of the two ways to be allowed to toggle it.
+func RegisterReleaseRoutes(r chi.Router, svc *Service, extractUsername func(*http.Request) string, checkPerm PermissionChecker, resolveGroups func(string) []string) {
+	r.Post("/release/*", handleSetReleased(svc, extractUsername, checkPerm, resolveGroups))
+}
+
+type releaseRequest struct {
+	Released bool `json:"released"`
+}
+
+func handleSetReleased(svc *Service, extractUsername func(*http.Request) string, checkPerm PermissionChecker, resolveGroups func(string) []string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pagePath := "/" + strings.TrimLeft(chi.URLParam(r, "*"), "/")
+		username := extractUsername(r)
+		if username == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			return
+		}
+		var req releaseRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json body"})
+			return
+		}
+		var groups []string
+		if resolveGroups != nil {
+			groups = resolveGroups(username)
+		}
+		canEdit := checkPerm != nil && checkPerm(username, groups, pagePath, "edit")
+
+		status, err := svc.SetReleased(pagePath, username, req.Released, canEdit)
+		switch {
+		case err == nil:
+			writeJSON(w, http.StatusOK, status)
+		case errors.Is(err, ErrReleaseForbidden):
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrReleaseLocked):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrReleaseNotEnabled):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+	}
 }
 
 func handleGetUserCert(svc *Service) http.HandlerFunc {
@@ -124,6 +171,13 @@ func handleConfirm(svc *Service, extractUsername func(*http.Request) string) htt
 		username := extractUsername(r)
 		if username == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			return
+		}
+
+		// Refuse before any signature verification or timestamp
+		// request: the page is not open for signing yet.
+		if st, err := svc.EnsureState(pagePath); err == nil && st.AwaitingRelease() {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": ErrNotReleased.Error()})
 			return
 		}
 

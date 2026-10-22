@@ -274,6 +274,58 @@ func ParseReviewflowArgs(content string) map[string]string {
 	return nil
 }
 
+// TemplateReviewflowKeyOrder returns the arg keys of the first
+// {template-reviewflow} directive in content, in source order.
+func TemplateReviewflowKeyOrder(content string) []string {
+	for _, line := range strings.Split(content, "\n") {
+		if m := templateReviewflowRe.FindStringSubmatch(line); m != nil {
+			return parseDirectiveKeyOrder(m[1])
+		}
+	}
+	return nil
+}
+
+// ReviewflowKeyOrder returns the arg keys of the first {reviewflow}
+// directive in content, in source order.
+func ReviewflowKeyOrder(content string) []string {
+	for _, line := range strings.Split(content, "\n") {
+		if m := reviewflowRe.FindStringSubmatch(line); m != nil {
+			return parseDirectiveKeyOrder(m[1])
+		}
+	}
+	return nil
+}
+
+// MergeReviewflowOrder combines declared key orders: every key of the
+// first list in its order, then keys of the following lists that were
+// not seen yet. The {template-reviewflow} order goes first because it
+// is the template author's explicit statement of the signing order.
+func MergeReviewflowOrder(orders ...[]string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, order := range orders {
+		for _, k := range order {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+func parseDirectiveKeyOrder(args string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, m := range directiveKVRe.FindAllStringSubmatch(args, -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, m[1])
+		}
+	}
+	return out
+}
+
 func parseDirectiveKVs(args string) map[string]string {
 	out := make(map[string]string)
 	if args == "" {
@@ -349,6 +401,10 @@ type TemplateResolveOpts struct {
 	// {template-reviewflow} line is dropped without emitting a {reviewflow}
 	// (row-bound-page path).
 	ReviewflowArgs map[string]string
+	// ReviewflowOrder is the declared role order (= signing order) for
+	// rendering ReviewflowArgs. Roles missing from it follow
+	// alphabetically.
+	ReviewflowOrder []string
 	// Now is the reference time for resolving relative dates inside
 	// {template-todo} args (e.g. `due=+365`, `due=+6m`, `due=+1y`).
 	// Zero value falls back to time.Now() — set explicitly in tests
@@ -405,7 +461,7 @@ func ResolveTemplatePayload(payload string, opts TemplateResolveOpts) string {
 		// {template-reviewflow …}
 		if templateReviewflowRe.MatchString(line) {
 			if opts.ReviewflowArgs != nil {
-				out = append(out, renderReviewflowDirective(opts.ReviewflowArgs))
+				out = append(out, renderReviewflowDirective(opts.ReviewflowArgs, opts.ReviewflowOrder))
 			}
 			// else: drop it silently — row-bound-page path.
 			i++
@@ -485,33 +541,57 @@ func resolveRelativeDateArgs(args string, now time.Time) string {
 	})
 }
 
-// renderReviewflowDirective writes a {reviewflow …} directive from an arg
-// map. Version comes first, then roles alphabetically — mirrors the
-// frontend's serializer order so a page authored by hand and a page
-// produced from a template look identical.
-func renderReviewflowDirective(args map[string]string) string {
+// renderReviewflowDirective writes a {reviewflow …} directive from an
+// arg map in the same canonical form as the frontend serializer:
+// version, then roles in declared order (order lists them; roles absent
+// from order — e.g. added only by a create-action override — follow
+// alphabetically), then parallel=true and manual_release=yes when set.
+// Role order is the signing order, so it must not be re-sorted.
+func renderReviewflowDirective(args map[string]string, order []string) string {
 	var parts []string
 	if v, ok := args["version"]; ok && v != "" {
 		parts = append(parts, "version="+v)
 	}
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		if k == "version" {
+	isOption := func(k string) bool {
+		return k == "version" || k == "parallel" || k == "manual_release"
+	}
+	listed := make(map[string]bool)
+	for _, k := range order {
+		if isOption(k) || listed[k] {
 			continue
 		}
-		keys = append(keys, k)
-	}
-	// Alphabetical, stable.
-	sortStrings(keys)
-	for _, k := range keys {
+		listed[k] = true
 		if v := args[k]; v != "" {
 			parts = append(parts, k+"="+v)
 		}
+	}
+	var rest []string
+	for k := range args {
+		if !isOption(k) && !listed[k] {
+			rest = append(rest, k)
+		}
+	}
+	sortStrings(rest)
+	for _, k := range rest {
+		if v := args[k]; v != "" {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	if isTruthyArg(args["parallel"]) {
+		parts = append(parts, "parallel=true")
+	}
+	if isTruthyArg(args["manual_release"]) {
+		parts = append(parts, "manual_release=yes")
 	}
 	if len(parts) == 0 {
 		return "{reviewflow}"
 	}
 	return "{reviewflow " + strings.Join(parts, " ") + "}"
+}
+
+func isTruthyArg(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // MergeReviewflowArgs computes the final {reviewflow} args for a created

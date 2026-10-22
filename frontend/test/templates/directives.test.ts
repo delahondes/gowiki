@@ -123,18 +123,13 @@ describe("{template-reviewflow …} directive", () => {
     expect(roles.validation).toBe("cathy")
   })
 
-  it("roles are serialised in a stable order (alphabetical)", () => {
+  it("roles keep their declared (signing) order", () => {
     const rt = roundTrip("{template}\n\n{template-reviewflow validation=cathy author=alice reviewer=bob}\n\nBody\n")
     expect(rt.isStable).toBe(true)
-    // The stable serialisation must sort role keys — otherwise round-trip
-    // would drift on any input whose order differs from the printer's.
+    // Declared order is the signing order of every created document,
+    // so the serializer keeps it rather than sorting.
     const line = rt.first.split("\n").find((l) => l.startsWith("{template-reviewflow"))
-    expect(line).toBeDefined()
-    const authorIdx = line!.indexOf("author=")
-    const reviewerIdx = line!.indexOf("reviewer=")
-    const validationIdx = line!.indexOf("validation=")
-    expect(authorIdx).toBeLessThan(reviewerIdx)
-    expect(reviewerIdx).toBeLessThan(validationIdx)
+    expect(line).toBe("{template-reviewflow validation=cathy author=alice reviewer=bob}")
   })
 })
 

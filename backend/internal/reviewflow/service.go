@@ -315,7 +315,10 @@ func (svc *Service) ReconcileOrphanTasks(exists func(pagePath string) bool) (int
 		// notification fires — a graceful restart stops burning
 		// through inboxes.
 		want := make(map[string]string)
-		if st.Parallel {
+		if st.AwaitingRelease() {
+			// Leave want empty: EnsureReviewTasks cancels any open
+			// task and creates none until the page is released.
+		} else if st.Parallel {
 			for role, user := range missing {
 				want[role] = user
 			}
@@ -500,6 +503,7 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 			st.RoleOrder = nil
 			st.VersionTag = ""
 			st.Parallel = false
+			st.clearRelease()
 			st.Confirmations = nil
 			st.CurrentPageVersion = pageVersion
 			if svc.todo != nil {
@@ -607,6 +611,7 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 			directiveChanged := !rolesEqual(st.Roles, dir.Roles) ||
 				st.VersionTag != dir.VersionTag ||
 				st.Parallel != dir.Parallel ||
+				st.ManualRelease != dir.ManualRelease ||
 				!stringSliceEqual(st.RoleOrder, dir.RoleOrder)
 			if directiveChanged || len(st.Confirmations) == 0 {
 				_ = svc.todo.CancelReviewTasks(pagePath)
@@ -624,7 +629,11 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 						missing[role] = user
 					}
 				}
-				if len(missing) > 0 {
+				// A manual_release page that nobody has released yet
+				// gets no task: the signers are not alerted until
+				// someone ticks "Ready for signature".
+				awaiting := dir.ManualRelease && !st.Released
+				if len(missing) > 0 && !awaiting {
 					dueDate := svc.computeDueDate(dir.Roles)
 					if dir.Parallel {
 						_ = svc.todo.CreateReviewTasks(pagePath, missing, dir.VersionTag, dueDate)
@@ -645,6 +654,10 @@ func (svc *Service) SyncFromMarkdown(pagePath string, pageVersion int64, markdow
 	st.RoleOrder = dir.RoleOrder
 	st.VersionTag = dir.VersionTag
 	st.Parallel = dir.Parallel
+	st.ManualRelease = dir.ManualRelease
+	if !dir.ManualRelease {
+		st.clearRelease()
+	}
 	st.CurrentPageVersion = pageVersion
 
 	// A same-digest restore may have re-attached confirmations covering
@@ -716,6 +729,7 @@ func (svc *Service) EnsureState(pagePath string) (*State, error) {
 	st.RoleOrder = dir.RoleOrder
 	st.VersionTag = dir.VersionTag
 	st.Parallel = dir.Parallel
+	st.ManualRelease = dir.ManualRelease
 	st.CurrentPageVersion = page.Meta.Version
 	if err := svc.store.Save(pagePath, st); err != nil {
 		return nil, err
@@ -737,6 +751,9 @@ func (svc *Service) Confirm(pagePath, role, user string, opts *ConfirmOpts) (*St
 	}
 	if assignedUser != user {
 		return nil, fmt.Errorf("role %q is assigned to %q, not %q", role, assignedUser, user)
+	}
+	if st.AwaitingRelease() {
+		return nil, ErrNotReleased
 	}
 
 	// Check not already confirmed for this version.
@@ -998,7 +1015,7 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 	// NextRoles: what's actionable NOW — parallel → all missing;
 	// sequential → head of queue only. Empty when nothing's missing.
 	var nextRoles []string
-	if len(missing) > 0 {
+	if len(missing) > 0 && !st.AwaitingRelease() {
 		if st.Parallel {
 			for role := range missing {
 				nextRoles = append(nextRoles, role)
@@ -1020,11 +1037,15 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 		RoleOrder:        st.RoleOrder,
 		IsFullyValidated: len(missing) == 0,
 		VersionHistory:   st.VersionHistory,
+		ManualRelease:    st.ManualRelease,
+		Released:         st.Released,
+		ReleasedBy:       st.ReleasedBy,
+		ReleasedAt:       st.ReleasedAt,
 	}
 
 	// Compute deadlines and overdue roles.
 	cfg := svc.configStore.Get()
-	if cfg.Reviewflow.Enabled && len(cfg.Reviewflow.Deadlines) > 0 && len(missing) > 0 {
+	if cfg.Reviewflow.Enabled && len(cfg.Reviewflow.Deadlines) > 0 && len(missing) > 0 && !st.AwaitingRelease() {
 		deadlines := make(map[string]string)
 		var overdue []string
 		now := time.Now().UTC()
@@ -1046,6 +1067,11 @@ func (svc *Service) computeStatus(pagePath string, st *State) (*Status, error) {
 					baseline = t
 				}
 			}
+		}
+		// On a manual_release page the clock starts when the page was
+		// released, not when its current version was saved.
+		if st.ManualRelease && st.ReleasedAt != nil && st.ReleasedAt.After(baseline) {
+			baseline = *st.ReleasedAt
 		}
 
 		if !baseline.IsZero() {
