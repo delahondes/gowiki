@@ -150,6 +150,9 @@ func TestReconcileOrphanTasks_FullyValidatedPage(t *testing.T) {
 	}
 	_ = svc.store.Save("/done", st)
 	spy.cancels = nil
+	spy.ensures = nil
+	// One stray open task on the validated page gets cancelled.
+	spy.ensureResult = &ensureResult{cancelled: 1}
 
 	exists := func(p string) bool { return true }
 	n, err := svc.ReconcileOrphanTasks(exists)
@@ -159,8 +162,14 @@ func TestReconcileOrphanTasks_FullyValidatedPage(t *testing.T) {
 	if n != 1 {
 		t.Errorf("touched = %d, want 1", n)
 	}
-	if len(spy.cancels) != 1 || spy.cancels[0] != "/done" {
-		t.Errorf("expected Cancel for /done; got %+v", spy.cancels)
+	if len(spy.ensures) != 1 || spy.ensures[0].pagePath != "/done" || len(spy.ensures[0].want) != 0 {
+		t.Errorf("expected Ensure(/done, no tasks wanted); got %+v", spy.ensures)
+	}
+
+	// Nothing left open: the page is not counted again.
+	spy.ensureResult = &ensureResult{}
+	if n2, _ := svc.ReconcileOrphanTasks(exists); n2 != 0 {
+		t.Errorf("second run touched = %d, want 0 (no stray task left)", n2)
 	}
 	// State file stays (the page is still alive) — only tasks go.
 	if st2, _ := svc.store.Load("/done"); st2 == nil {

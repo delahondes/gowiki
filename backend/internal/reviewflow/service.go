@@ -285,8 +285,15 @@ func (svc *Service) ReconcileOrphanTasks(exists func(pagePath string) bool) (int
 		}
 		// 2. Fully validated — no open task should remain.
 		if st.CurrentPageVersion > 0 && st.ValidatedVersion == st.CurrentPageVersion {
-			_ = svc.todo.CancelReviewTasks(pagePath)
-			touched++
+			// Ensure with an empty want cancels whatever is still open
+			// and reports how many, so touched counts only pages that
+			// actually had a stray task.
+			if _, c, _, err := svc.todo.EnsureReviewTasks(pagePath, nil, st.VersionTag, ""); err != nil {
+				_ = svc.todo.CancelReviewTasks(pagePath)
+				touched++
+			} else if c > 0 {
+				touched++
+			}
 			return nil
 		}
 		// 3. Live state: cancel everything, recreate only missing-role
